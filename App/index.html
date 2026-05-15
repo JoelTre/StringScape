@@ -1,0 +1,3414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StringScape - Network Visualiser</title>
+    <!-- Below are third party scripts that are imported into StringScape. The import uses a SHA-384 hash to ensure the scripts have not been tampered with, for security purposes -->
+    <!-- D3.js -->
+    <script src="https://d3js.org/d3.v7.min.js" integrity="sha384-CjloA8y00+1SDAUkjs099PVfnY2KmDC2BZnws9kh8D/lX1s46w6EPhpXdqMfjK6i" crossorigin="anonymous"></script>
+    <!-- Plotly -->
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" integrity="sha384-cCVCZkAjYNxaYKbM8lsArLznDF/SvMFr1jcZrvOpSTCa0W40ZAdLzHCEulnUa5i7" crossorigin="anonymous"></script>
+    <!-- html2canvas -->
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" integrity="sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H" crossorigin="anonymous"></script>
+    <!-- KaTeX CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+" crossorigin="anonymous">
+    <!-- KaTeX JS -->
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" integrity="sha384-7zkQWkzuo3B5mTepMUcHkMB5jZaolc2xDwL6VFqjFALcbeS9Ggm/Yr2r3Dy4lfFg" crossorigin="anonymous"></script>
+    <!-- KaTeX Auto-render -->
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" crossorigin="anonymous"></script>
+    <!-- Pyodide -->
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js" integrity="sha384-b4IZetZNE8bVncsQqlcH4ZZFC58BslGU2LVj47xUtIMOw72axMESbPe8spBylXnd" crossorigin="anonymous"></script>
+    <!-- expr-eval -->
+    <script src="https://cdn.jsdelivr.net/npm/expr-eval@2.0.2/dist/bundle.min.js" integrity="sha384-/4W8jQ+DhKy3zhz8s0HRh/l4kEliBAJQmAWqrrtJr7BAuODvB2MKsjR8h5MGefjl" crossorigin="anonymous"></script>
+    <style>
+        :root {
+            --link-base-opacity: 0.5;
+            --bg-color: #1a1a1a;
+            --ai-panel-width: 450px;
+            --ai-panel-gap: 10px;
+            --ai-panel-offset: 0px;
+            --center-shift: 0px;
+        }
+        body.ai-panel-open {
+            --ai-panel-offset: calc(var(--ai-panel-width) + var(--ai-panel-gap));
+        }
+        body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; background: var(--bg-color); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: white; }
+        
+        #ui-layer { 
+            position: absolute; left: 0; top: 0; bottom: 0; z-index: 20; 
+            background: rgba(35, 35, 35, 0.95); width: 320px; padding: 20px; 
+            border-right: 1px solid #444; box-shadow: 4px 0 15px rgba(0,0,0,0.5);
+            transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1); 
+            box-sizing: border-box; display: flex; flex-direction: column;
+        }
+        #ui-content { flex: 1; overflow-y: auto; padding-right: 5px; }
+        #ui-layer.minimized { transform: translateX(-310px); border-right: none; }
+        
+        .toggle-tab {
+            position: absolute; left: 100%; top: 10px; 
+            background: #444; width: 35px; height: 45px; display: flex; 
+            align-items: center; justify-content: center; cursor: pointer;
+            border-radius: 0 5px 5px 0; font-weight: bold; border: 1px solid #555;
+            border-left: none; z-index: 21;
+        }
+        .toggle-tab span { transition: transform 0.4s; display: inline-block; font-size: 18px; }
+        #ui-layer.minimized .toggle-tab span { transform: rotate(180deg); }
+
+        #right-panel {
+            position: absolute; top: 10px; right: calc(10px + var(--ai-panel-offset)); width: 280px;
+            z-index: 20; overflow: visible;
+            background: rgba(35, 35, 35, 0.9); padding: 15px; border-radius: 8px;
+            border: 1px solid #444; display: flex; flex-direction: column; 
+            transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), right 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            margin-bottom: 500px;
+        }
+        #right-panel-content {
+            overflow-y: auto;
+            max-height: calc(100vh - 330px);
+        }
+        
+        #legend-content.hidden { display: none; }
+
+        #right-panel.minimized { transform: translateX(310px); border-left: none; }
+        
+        #right-panel .toggle-tab {
+            position: absolute;
+            left: unset;
+            right: 100%;
+            top: 10px;
+            border-radius: 5px 0 0 5px;
+            border: 1px solid #555;
+            border-right: none;
+        }
+        #right-panel.minimized .toggle-tab span { transform: rotate(180deg); }
+        #right-lower-stack {
+            position: absolute;
+            bottom: 25px;
+            right: calc(10px + var(--ai-panel-offset));
+            width: 280px;
+            z-index: 20;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            transition: right 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            align-items: flex-end;
+        }
+        #pill-blue-btn {
+            width: auto;
+            padding: 8px 18px;
+            /* Change border color to transparent to reveal the gradient underneath */
+            border: 1px solid transparent; 
+            border-radius: 999px;
+            /* Layer 1: Solid background (clipped to padding) */
+            /* Layer 2: Gradient background (clipped to border) */
+            background-image: linear-gradient(#3498db, #3498db), 
+                            linear-gradient(175deg, #6dc5ff 0%, #3498db 50%, #6dc5ff 100%);
+            background-origin: border-box;
+            background-clip: padding-box, border-box;
+            color: #ffffff; 
+            font-weight: bold;
+            letter-spacing: 0.3px;
+            font-size: 14px !important;
+            line-height: 1.2 !important;
+            cursor: pointer;
+            transition: filter 0.2s ease, transform 0.2s ease;
+        }
+        #pill-blue-btn:hover {
+            filter: brightness(1.12);
+            transform: translateY(-2px); /* Subtle lift on hover for better interactivity feedback */
+        }
+        /* This green button style should be used for the main "Start Build" button, but for some reason it is not working */
+        #startBtn {
+            width: 100%;
+            padding: 8px 18px;
+            /* Change border color to transparent to reveal the gradient underneath */
+            border: 1px solid transparent; 
+            border-radius: 999px;
+            /* Layer 1: Solid background (clipped to padding) */
+            /* Layer 2: Gradient background (clipped to border) */
+            background-image: linear-gradient(#28a745, #28a745), 
+                            linear-gradient(175deg, #4fdd70 0%, #28a745 50%, #4fdd70 100%);
+            background-origin: border-box;
+            background-clip: padding-box, border-box;
+            color: #ffffff; 
+            font-weight: bold;
+            letter-spacing: 0.3px;
+            font-size: 14px !important;
+            line-height: 1.2 !important;
+            cursor: pointer;
+            transition: filter 0.2s ease, transform 0.2s ease;
+        }
+        #startBtn:hover:not(:disabled) {
+            filter: brightness(1.12);
+            transform: translateY(-2px); /* Subtle lift on hover for better interactivity feedback */
+        }
+        #startBtn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        #ask-ai-btn {
+            width: auto;
+            padding: 8px 18px;
+            /* Change border color to transparent to reveal the gradient underneath */
+            border: 1px solid transparent; 
+            border-radius: 999px;
+            
+            /* Layer 1: Solid background (clipped to padding) */
+            /* Layer 2: Gradient background (clipped to border) */
+            background-image: linear-gradient(#161b22, #161b22), 
+                            linear-gradient(155deg, #3498db 0%, #1c3e68 50%, #3498db 100%);
+            background-origin: border-box;
+            background-clip: padding-box, border-box;
+
+            color: #3498db;
+            font-weight: bold;
+            letter-spacing: 0.3px;
+            cursor: pointer;
+            transition: filter 0.2s ease, transform 0.2s ease;
+        }
+        #ask-ai-btn:hover {
+            filter: brightness(1.12);
+            transform: translateY(-2px);
+        }
+        #info-box {
+            position: relative;
+            bottom: auto;
+            right: auto;
+            z-index: 20;
+            border-radius: 14px;
+            border: 1px solid #444;
+            width: 310px;
+            display: block;
+            background: rgba(35, 35, 35, 0.9);
+            padding: 15px;
+            box-sizing: border-box;
+        }
+        #info-content { font-size: 13px !important; line-height: 1.45; }
+
+        #ai-side-panel {
+            position: fixed;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            width: var(--ai-panel-width);
+            z-index: 25;
+            background-color: #161b22;
+            border-left: 1px solid #30363d;
+            display: flex;
+            flex-direction: column;
+            transform: translateX(calc(100% + 24px));
+            opacity: 0;
+            pointer-events: none;
+            transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.28s ease;
+            box-shadow: 4px 0 15px rgba(0,0,0,0.5);
+        }
+        body.ai-panel-open #ai-side-panel {
+            transform: translateX(0);
+            opacity: 1;
+            pointer-events: auto;
+        }
+        #ai-side-panel,
+        #ai-side-panel * {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        #ai-panel-header {
+            padding: 16px;
+            border-bottom: 1px solid #30363d;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #161b22;
+        }
+        #ai-header-title {
+            font-weight: bold;
+            font-size: 18px;
+            color: #3498db;
+        }
+        #ai-header-center {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            min-width: 0;
+        }
+        #ai-header-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 0 0 auto;
+        }
+        #ai-new-chat-btn {
+            border-radius: 9999px;
+            transition: all 0.2s;
+            font-weight: 600;
+            font-size: 0.8rem;
+            padding: 6px 10px;
+            width: auto;
+            min-width: 0;
+            flex: 0 0 auto;
+            margin: 0;
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: white;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        #ai-new-chat-btn:hover {
+            background: #30363d;
+        }
+        #ai-menu-btn {
+            border-radius: 9999px;
+            transition: all 0.2s;
+            font-weight: 600;
+            font-size: 1rem;
+            padding: 6px 8px;
+            width: auto;
+            min-width: 0;
+            flex: 0 0 auto;
+            margin: 0;
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: white;
+            cursor: pointer;
+            white-space: nowrap;
+            position: relative;
+        }
+        #ai-menu-btn:hover {
+            background: #30363d;
+        }
+        #ai-menu-dropdown {
+            display: none;
+            position: absolute;
+            top: 100%;
+            right: 0;
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            margin-top: 4px;
+            z-index: 100;
+            min-width: 150px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
+        #ai-menu-dropdown.open {
+            display: block;
+        }
+        #ai-menu-dropdown button {
+            display: block;
+            width: 100%;
+            padding: 10px 14px;
+            background: none;
+            border: none;
+            color: white;
+            text-align: left;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: background 0.2s;
+        }
+        #ai-menu-dropdown button:hover {
+            background: #30363d;
+        }
+        #ai-menu-dropdown button:first-child {
+            border-radius: 8px 8px 0 0;
+        }
+        #ai-menu-dropdown button:last-child {
+            border-radius: 0 0 8px 8px;
+        }
+        #ai-close-panel-btn {
+            width: 34px;
+            height: 34px;
+            border-radius: 9999px;
+            transition: all 0.2s;
+            font-weight: 700;
+            font-size: 1rem;
+            padding: 0;
+            flex: 0 0 auto;
+            margin: 0;
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: white;
+            cursor: pointer;
+            line-height: 1;
+        }
+        #ai-close-panel-btn:hover {
+            background: #30363d;
+        }
+        #ai-top-tools {
+            background: #0d1117;
+            padding: 10px 15px;
+            border-bottom: 1px solid #30363d;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        #ai-top-tool-buttons {
+            display: flex;
+            gap: 8px;
+        }
+        .ai-top-toggle-btn {
+            border-radius: 9999px;
+            transition: all 0.2s;
+            font-weight: 600;
+            font-size: 0.8rem;
+            padding: 6px 12px;
+            width: auto;
+            min-width: 0;
+            flex: 1 1 0;
+            margin: 0;
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: white;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .ai-top-toggle-btn.active {
+            background: #3498db;
+            border-color: #3498db;
+        }
+        .ai-top-toggle-btn:hover {
+            background: #3498db;
+            border-color: #3498db;
+        }
+        .ai-top-panel {
+            display: none;
+            background: #111822;
+            border: 1px solid #30363d;
+            border-radius: 10px;
+            padding: 10px;
+            color: #dce8f6;
+            font-size: 0.8rem;
+            line-height: 1.45;
+        }
+        .ai-top-panel ol {
+            margin: 6px 0 0 18px;
+            padding: 0;
+        }
+        .ai-top-panel li {
+            margin: 0 0 6px 0;
+        }
+        .ai-setup-subtitle {
+            color: #9ad0ff;
+            font-weight: 700;
+            font-size: 1.1rem;
+            margin-bottom: 6px;
+        }
+        .ai-url-row {
+            margin-top: 6px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: nowrap;
+        }
+        .ai-url-row-label {
+            color: #dce8f6;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .ai-example-item {
+            display: block;
+            width: 100%;
+            text-align: left;
+            background: #1a2533;
+            color: #dce8f6;
+            border: 1px solid #2b3e57;
+            border-radius: 10px;
+            padding: 8px 10px;
+            margin: 0 0 8px 0;
+            cursor: pointer;
+            font-size: 0.8rem;
+            line-height: 1.35;
+        }
+        .ai-example-item:hover {
+            background: #203249;
+        }
+        #ai-server-url {
+            flex: 1 1 auto;
+            min-width: 0;
+            background: #0b0e11;
+            border: 1px solid #30363d;
+            border-radius: 9999px;
+            padding: 6px 12px;
+            outline: none; 
+            border-color: 1px solid #3498db; 
+            font-size: 0.75rem;
+            color: #f4fbff;
+            border-radius: 9999px;
+            margin: 0;
+        }
+        #ai-server-url::placeholder {
+            color: #d6e6f5;
+            opacity: 1;
+        }
+        #ai-connect-btn {
+            border-radius: 9999px;
+            transition: all 0.2s;
+            font-weight: 600;
+            font-size: 0.8rem;
+            padding: 6px 9px;
+            width: auto;
+            min-width: 0;
+            flex: 0 0 auto;
+            margin: 0;
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: white;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        #ai-connect-btn.btn-green {
+            background-color: #4caf50 !important;
+        }
+        #ai-send-btn.ai-processing {
+            background: #f39c12 !important;
+        }
+        #ai-status-overlay {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            display: flex;
+            justify-content: center;
+            padding-bottom: 8px;
+            pointer-events: none;
+        }
+        #ai-status-pill {
+            padding: 3px 12px;
+            border-radius: 9999px;
+            font-size: 0.65rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            background: #1c2128;
+            border: 1px solid #30363d;
+        }
+        #ai-status-pill.status-disconnected {
+            color: #ff9999;
+        }
+        #ai-status-pill.status-connected {
+            color: #99ffb7;
+        }
+        #ai-chat-scroll {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px 20px;
+            display: flex;
+            flex-direction: column;
+        }
+        #ai-chatbox {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+        }
+        .ai-chat-disclaimer {
+            width: 100%;
+            text-align: center;
+            font-size: 0.9rem;
+            line-height: 1.35;
+            color: #3498db;
+            margin: 2px 0 12px 0;
+        }
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #30363d;
+            border-radius: 10px;
+        }
+        .ai-bubble {
+            display: inline-block;
+            width: auto;
+            max-width: 82%;
+            border-radius: 20px;
+            padding: 10px 14px;
+            margin-bottom: 10px;
+            line-height: 1.4;
+            font-size: 0.9rem;
+            word-wrap: break-word;
+            word-break: break-word;
+        }
+        .ai-user-bubble {
+            background-color: #3498db;
+            color: white;
+            align-self: flex-end;
+            margin-left: auto;
+            border-bottom-right-radius: 4px;
+        }
+        .ai-agent-bubble {
+            background-color: #21262d;
+            align-self: flex-start;
+            margin-right: auto;
+            border-bottom-left-radius: 4px;
+            border: 1px solid #30363d;
+        }
+        .ai-agent-bubble strong {
+            font-weight: bold;
+            color: #fff;
+        }
+        .pill-btn { border-radius: 9999px; transition: all 0.2s; font-weight: 600; font-size: 0.8rem; padding: 6px 16px; }
+
+        .ai-file-attachment-tag {
+            display: inline-block;
+            background: rgba(52, 152, 219, 0.2);
+            border: 1px solid #3498db;
+            border-radius: 10px;
+            padding: 4px 8px;
+            font-size: 0.75rem;
+            margin-top: 5px;
+            margin-right: 5px;
+            color: #fff;
+            font-weight: 500;
+        }
+        .log-item {
+            color: #3498db;
+            font-size: 1rem;
+            font-weight: 500;
+            margin: 2px 0;
+            display: flex;
+            align-items: center;
+        }
+        .log-item::before {
+            content: "•";
+            margin-right: 8px;
+            font-size: 1.2rem;
+        }
+        .log-item.animate-pulse {
+            animation: ai-log-pulse 3s ease-in-out infinite;
+        }
+        .ai-thought-log {
+            cursor: pointer;
+            user-select: none;
+        }
+        .ai-thought-bubble {
+            margin: 6px 0 8px 20px;
+            color: #aaaaaa;
+        }
+        @keyframes ai-log-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.45; }
+        }
+        #ai-glow-container {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 60px;
+            overflow: hidden;
+            pointer-events: none;
+            display: none;
+            z-index: 5;
+        }
+        .ai-processing-glow {
+            position: absolute;
+            bottom: -20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 120%;
+            height: 60px;
+            background: radial-gradient(circle, rgba(0, 174, 255, 0.4) 0%, rgba(0, 255, 255, 0) 70%); /* Make the cyan more like this blue: #3498db */
+            filter: blur(15px);
+            animation: ai-pulse-glow 3s infinite ease-in-out;
+        }
+        @keyframes ai-pulse-glow {
+            0%, 100% { opacity: 0.4; transform: translateX(-50%) scaleX(1); }
+            50% { opacity: 0.8; transform: translateX(-50%) scaleX(1.1); }
+        }
+        #ai-input-area {
+            padding: 15px;
+            background: #161b22;
+            border-top: 1px solid #30363d;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            position: relative;
+        }
+        #ai-preview-area {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        #ai-input-controls {
+            display: flex;
+            align-items: flex-end;
+            gap: 8px;
+            flex: 1;
+            width: 100%;
+        }
+        #ai-file-input {
+            display: none;
+        }
+        #ai-file-btn {
+            color: #888;
+            cursor: pointer;
+            font-size: 24px;
+            font-weight: 300;
+            padding: 4px 4px;
+            padding-bottom: 8px;
+            width: auto;
+            min-width: 0;
+            flex: 0 0 auto;
+            margin: 0;
+            background: none;
+            border: none;
+            transition: color 0.2s;
+        }
+        #ai-file-btn:hover {
+            color: #3498db;
+        }
+        #ai-user-input {
+            min-height: 40px;
+            max-height: 200px;
+            box-sizing: border-box;
+            overflow-y: auto;
+            border-radius: 20px;
+            line-height: 1.4;
+            flex: 1 1 auto;
+            min-width: 0;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            padding: 8px 12px 8px 12px;
+            outline: none;
+            border-color: 1px solid #3498db;
+            resize: none;
+            font-size: 0.9rem;
+            color: white;
+            display: flex;
+            align-items: center;
+        }
+        #ai-user-input::placeholder {
+            color: #666;
+        }
+        #ai-send-btn {
+            border-radius: 9999px;
+            transition: all 0.2s;
+            font-weight: 600;
+            font-size: 0.8rem;
+            padding: 0 12px;
+            width: 70px;
+            flex: 0 0 auto;
+            margin: 0;
+            background: #3498db;
+            border: none;
+            color: white;
+            cursor: pointer;
+            white-space: nowrap;
+            height: 40px;
+        }
+        #ai-send-btn:hover:not(:disabled) {
+            filter: brightness(1.1);
+        }
+        #ai-send-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+        .ai-btn-disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        @media (max-width: 980px) {
+            :root {
+                --ai-panel-width: min(92vw, 420px);
+            }
+
+            body.ai-panel-open {
+                --ai-panel-offset: 0px;
+            }
+
+            #right-panel,
+            #right-lower-stack {
+                opacity: 0.18;
+                pointer-events: none;
+            }
+        }
+
+        #view-selector-container {
+            position: absolute;
+            bottom: 20px;
+            left: calc(50% + var(--center-shift));
+            transform: translateX(-50%);
+            z-index: 10; /* behind modal overlay and modal content */
+            transition: left 0.3s ease-in-out;
+        }
+
+        #view-selector-stack {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            width: min(1100px, calc(100vw - 40px));
+        }
+
+        #view-selector-row {
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            gap: 10px;
+            width: 100%;
+        }
+
+        #protein-info-toggle-btn {
+            flex: 0 0 auto;
+            width: auto;
+            min-width: 0;
+            padding: 12px 36px;
+            border: 1px solid #575757;
+            border-radius: 999px;
+            background: #444;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: filter 0.2s ease, transform 0.2s ease;
+            transform: translateY(5px);
+        }
+
+        #protein-info-toggle-btn:hover {
+            filter: brightness(1.2);
+        }
+
+        #protein-info-toggle-btn.hidden {
+            display: none;
+        }
+
+        #protein-info-box {
+            position: relative;
+            isolation: isolate;
+            width: calc(100vw - 680px);
+            box-sizing: border-box;
+            display: none;
+            border: 1px solid transparent;
+            background-image: linear-gradient(155deg, rgba(15, 15, 15, 0.9) 0%, rgba(28, 30, 34, 0.9) 50%, rgba(15, 15, 15, 0.9) 100%), 
+                            linear-gradient(155deg, #6d7a88 0%, #4d565f 50%, #6d7a88 100%);
+            background-origin: border-box;
+            background-clip: padding-box, border-box; 
+            border-radius: 22px;
+            padding: 16px 64px 16px 64px;
+            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.42);
+            color: #fff;
+        }
+
+        #protein-info-box.open {
+            display: block;
+        }
+
+        #protein-info-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: flex-start;
+            gap: 8px;
+            flex-wrap: nowrap;
+            overflow: hidden;
+            position: relative;
+            z-index: 2;
+        }
+
+        #protein-info-heading-wrap {
+            display: contents;
+        }
+
+        #protein-info-heading {
+            margin: 0;
+            font-size: 0.95rem;
+            line-height: 1.1;
+            font-weight: 700;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex: 0 0 auto;
+        }
+
+        #protein-info-toggle-group {
+            display: flex;
+            flex-wrap: wrap; /* Allows buttons to move to the next line */
+            flex: 1;
+            gap: 8px; /* Adds space between the buttons horizontally and vertically */
+            /* Remove overflow-x: auto; and white-space: nowrap; */
+        }
+
+        /* Used for the options Annotation, Description, etc.*/
+        .protein-info-mode-btn {
+            border-radius: 9999px;
+            transition: all 0.2s;
+            font-weight: 600;
+            font-size: 0.8rem;
+            padding: 6px 12px;
+            width: auto;
+            min-width: 0;
+            margin: 0;
+            border: 1px solid transparent;
+            color: white;
+            white-space: nowrap;
+            background-image: linear-gradient(#30363d, #30363d), 
+                            linear-gradient(155deg, #6d7a88 0%, #424a53 50%, #6d7a88 100%);
+            background-origin: border-box;
+            background-clip: padding-box, border-box; 
+        }
+
+        .protein-info-mode-btn.active {
+            color: #fff;
+            background-image: linear-gradient(#3498db, #3498db), 
+                            linear-gradient(175deg, #6dc5ff 0%, #3498db 50%, #6dc5ff 100%);
+            background-origin: border-box;
+            background-clip: padding-box, border-box;
+        }
+
+        .protein-info-mode-btn:hover {
+            background-color: transparent;
+            border-color: transparent;
+            background-image: linear-gradient(#6d7a88, #6d7a88), 
+                      linear-gradient(175deg, #8d9eaf 0%, #6d7a88 50%, #8d9eaf 100%);
+        }
+
+        .protein-info-mode-btn.active:hover {
+            color: #fff;
+            background-image: linear-gradient(#3498db, #3498db), 
+                            linear-gradient(175deg, #6dc5ff 0%, #3498db 50%, #6dc5ff 100%);
+            background-origin: border-box;
+            background-clip: padding-box, border-box;
+        }
+
+        #protein-info-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 0 0 auto;
+            margin-left: auto;
+        }
+
+        .protein-info-action-btn {
+            border-radius: 9999px;
+            transition: all 0.2s;
+            font-weight: 600;
+            font-size: 0.8rem;
+            padding: 6px 12px;
+            width: auto;
+            min-width: 0;
+            margin: 0;
+            border: 1px solid transparent;
+            color: white;
+            white-space: nowrap;
+            background-image: linear-gradient(#30363d, #30363d), 
+                            linear-gradient(155deg, #6d7a88 0%, #424a53 50%, #6d7a88 100%);
+            background-origin: border-box;
+            background-clip: padding-box, border-box; 
+        }
+
+        .protein-info-action-btn:hover {
+            background: #30363d;
+        }
+
+        #protein-info-close-btn {
+            width: 31px;
+            height: 31px;
+            padding: 0;
+            border-radius: 9999px;
+            font-size: 1rem;
+            font-weight: 700;
+            line-height: 1;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 auto;
+            margin-left: auto;
+            order: 10;
+        }
+
+        #protein-info-body {
+            margin-top: 14px;
+            min-height: 110px;
+            max-height: 34vh;
+            overflow: auto;
+            padding-right: 6px;
+            font-size: 14px;
+            line-height: 1.45;
+            white-space: pre-wrap;
+            word-break: break-word;
+            position: relative;
+            z-index: 1;
+        }
+
+        #protein-info-links-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
+            gap: 8px;
+        }
+
+        #protein-info-links-grid .btn-secondary {
+            width: 100%;
+            justify-content: center;
+        }
+
+        .protein-structure-status {
+            color: #9ad0ff;
+            font-size: 13px;
+            margin-bottom: 8px;
+        }
+
+        #protein-structure-viewer-host {
+            width: 100%;
+            min-height: 220px;
+            height: clamp(220px, 30vh, 380px);
+            max-height: 380px;
+            border: 1px solid #3a4654;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #0f1115;
+            position: relative;
+            z-index: 0;
+        }
+
+        #protein-structure-viewer-host canvas {
+            background-color: inherit !important;
+        }
+
+        #protein-structure-viewer-host .msp-layout,
+        #protein-structure-viewer-host .msp-plugin,
+        #protein-structure-viewer-host .msp-plugin > div {
+            background-color: inherit !important;
+        }
+
+        /* Navigation buttons on the sides of the protein info box for switching between proteins in a list */
+        #protein-info-box .protein-nav-btn {
+            position: absolute !important;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 34px;
+            height: 92px;
+            border-radius: 999px;
+            border: 1px solid #4b5665;
+            background: linear-gradient(180deg, rgba(52, 152, 219, 0.92), rgba(38, 103, 155, 0.95));
+            color: #fff;
+            font-size: 24px;
+            font-weight: 700;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.28);
+        }
+
+        #protein-info-box #protein-info-prev-btn {
+            transform: translateY(-50%) translateX(7px) !important;
+            left: 0 !important;
+        }
+
+        #protein-info-box #protein-info-next-btn {
+            transform: translateY(-50%) translateX(-7px) !important;
+             right: 0 !important;
+        }
+
+        #protein-info-box.nav-disabled .protein-nav-btn {
+            background: linear-gradient(180deg, rgba(112, 112, 112, 0.92), rgba(100, 100, 100, 0.95));
+            color: #c5c5c5;
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        #view-selector-box {
+            position: relative;
+            background: rgba(40, 40, 40, 0.9);
+            border: 1px solid #444;
+            border-radius: 20px;
+            color: white;
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+            min-width: 100px;
+            width: auto;
+            font-size: 16px;
+            display: inline-flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            height: 40px;
+            line-height: 40px;
+            padding: 0 42px;
+        }
+
+        #view-selector-box.locked-open { height: auto !important; }
+
+        #view-selector-box:hover {
+            border-radius: 20px;
+            min-width: 260px;
+            height: auto;
+            width: auto;
+            padding: 5px 10px 10px 10px; 
+            background: rgba(35, 35, 35, 0.95);
+        }
+
+        #view-selector-box:hover #current-view-label {
+            display: none;
+        }
+
+        #view-selector-box:hover #current-view-label {
+            display: none;
+        }
+
+        #view-options {
+            display: none;
+            gap: 8px; /* Increased slightly for better spacing */
+            grid-template-columns: 1fr 1fr;
+            grid-auto-flow: row;
+            width: 100%;
+            background: transparent;
+            border: none;
+            padding: 0;
+            position: static;
+            margin: 0;
+            z-index: 12;
+            max-height: 660px;
+            overflow-y: auto;
+        }
+
+        #view-options.three-col-grid {
+            grid-template-columns: 1fr 1fr 1fr !important;
+            min-width: 400px; /* Expand the box to fit the extra column */
+        }
+
+        #chart-collection-menu {
+            position: absolute;
+            display: none;
+            z-index: 220;
+            border-radius: 20px;
+            min-width: 260px;
+            height: auto;
+            width: auto;
+            padding: 10px;
+            background: rgba(35, 35, 35, 0.95);
+            border: 1px solid rgba(255,255,255,0.2);
+            box-shadow: 0 0 15px rgba(0,0,0,0.5);
+            opacity: 0;
+            transform: translateY(-8px) scale(0.96);
+            transform-origin: top center;
+            transition: opacity 0.18s ease, transform 0.18s ease;
+            pointer-events: none;
+        }
+
+        #chart-collection-menu.open {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+            pointer-events: auto;
+        }
+
+        #chart-collection-menu-grid {
+            display: grid;
+            gap: 8px;
+            grid-template-columns: 1fr;
+            grid-auto-flow: row;
+            width: 100%;
+            max-height: 360px;
+            overflow-y: auto;
+            padding: 0;
+            margin-top: 8px;
+        }
+
+        #venn-controls {
+            position: absolute;
+            left: calc(50% + var(--center-shift));
+            top: 0;
+            transform: translateX(-50%);
+            z-index: 8;
+            display: none;
+            width: min(390px, 78vw); 
+            background: rgba(28, 28, 28, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 16px;
+            padding: 20px 14px;
+            box-shadow: 0 8px 18px rgba(0, 0, 0, 0.38);
+            pointer-events: auto;
+            cursor: pointer;
+        }
+
+        #venn-controls-grid {
+            display: grid;
+            grid-template-columns: minmax(140px, 1fr) minmax(140px, 1fr) auto;
+            column-gap: 14px;
+            align-items: start;
+        }
+
+        #venn-controls-grid > div {
+            display: grid;
+            grid-template-rows: 12px 33px;
+            row-gap: 13px;
+            align-items: start;
+        }
+
+        #venn-download-wrap {
+            margin-left: 0;
+        }
+
+        #venn-download-png {
+            border: 1px solid #666;
+            background: rgba(26, 26, 26, 0.95);
+            color: #fff;
+            border-radius: 14px;
+            height: 33px;
+            padding: 0 12px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            box-sizing: border-box;
+            margin: 4.5px 0;
+        }
+
+        #venn-controls label {
+            display: block;
+            font-size: 12px;
+            color: #d0d0d0;
+            margin-bottom: 0;
+            text-align: center;
+            line-height: 1;
+            min-height: 12px;
+        }
+
+        #venn-controls select {
+            width: 100%;
+            height: 33px;
+            background: #1b1b1b;
+            color: #fff;
+            border: 1px solid #555;
+            border-radius: 14px;
+            padding: 0 8px;
+            font-size: 12px;
+            outline: none;
+            cursor: pointer;
+            box-sizing: border-box;
+        }
+
+        #vennCollectionA {
+            background: #37d7c7;
+            border-color: #1aa58f;
+            color: #022824;
+        }
+
+        #vennCollectionB {
+            background: #37a8ff;
+            border-color: #2f7fd1;
+            color: #042544;
+        }
+
+        #venn-controls select:focus {
+            border-color: #53bd57;
+        }
+
+        #venn-recenter-btn {
+            position: absolute;
+            display: none;
+            transform: translateX(-50%);
+            width: auto;
+            min-width: 0;
+            padding: 5px 8px;
+            border-radius: 999px;
+            border: 1px solid #555;
+            background: rgba(30, 30, 30, 0.92);
+            color: #fff;
+            font-size: 12px;
+            cursor: pointer;
+            pointer-events: auto;
+        }
+
+        #scatter-controls {
+            position: absolute;
+            left: calc(50% + var(--center-shift));
+            top: 0;
+            transform: translateX(-50%);
+            z-index: 8;
+            display: none;
+            width: min(460px, 84vw);
+            background: rgba(28, 28, 28, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 14px;
+            padding: 10px 12px;
+            box-shadow: 0 8px 18px rgba(0, 0, 0, 0.38);
+        }
+
+        #scatter-recenter-btn {
+            position: absolute;
+            display: none;
+            transform: translateX(-50%);
+            width: auto;
+            min-width: 0;
+            padding: 5px 8px;
+            border-radius: 999px;
+            border: 1px solid #555;
+            background: rgba(30, 30, 30, 0.92);
+            color: #fff;
+            font-size: 12px;
+            cursor: pointer;
+            pointer-events: auto;
+        }
+
+        #scatter-controls-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        #scatter-controls label {
+            display: block;
+            font-size: 12px;
+            color: #d0d0d0;
+            margin-bottom: 4px;
+            text-align: center;
+        }
+
+        #scatter-controls select {
+            width: 100%;
+            height: 33px;
+            background: #1b1b1b;
+            color: #fff;
+            border: 1px solid #555;
+            border-radius: 12px;
+            padding: 0 8px;
+            font-size: 12px;
+            outline: none;
+            cursor: pointer;
+            box-sizing: border-box;
+        }
+
+        #mind-map-controls {
+            position: absolute;
+            left: calc(50% + var(--center-shift));
+            top: auto;
+            bottom: 72px;
+            transform: translateX(-50%);
+            z-index: 8;
+            display: none;
+            width: min(760px, 92vw);
+            background: rgba(28, 28, 28, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 14px;
+            padding: 10px 12px;
+            box-shadow: 0 8px 18px rgba(0, 0, 0, 0.38);
+        }
+
+        #mind-map-controls-grid {
+            display: grid;
+            grid-template-columns: 1.25fr 1.15fr 1fr auto;
+            gap: 10px;
+            align-items: end;
+        }
+
+        #mind-map-controls label {
+            display: block;
+            font-size: 12px;
+            color: #d0d0d0;
+            margin-bottom: 4px;
+            text-align: center;
+        }
+
+        #mind-map-controls select,
+        #mind-map-controls button {
+            width: 100%;
+            height: 33px;
+            background: #1b1b1b;
+            color: #fff;
+            border: 1px solid #555;
+            border-radius: 12px;
+            padding: 0 8px;
+            font-size: 12px;
+            outline: none;
+            cursor: pointer;
+            box-sizing: border-box;
+        }
+
+        #mind-map-controls button {
+            background: #444;
+            font-weight: 600;
+        }
+
+        #embeddings-view {
+            position: absolute;
+            inset: 0;
+            z-index: 6;
+            display: none;
+            pointer-events: none;
+            background: var(--bg-color);
+        }
+
+        #embeddings-plot {
+            position: absolute;
+            inset: 28px 28px 112px 28px;
+            pointer-events: auto;
+            border-radius: 14px;
+            overflow: hidden;
+        }
+
+        #embeddings-empty {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(24, 24, 24, 0.92);
+            border: 1px solid #555;
+            border-radius: 14px;
+            padding: 14px 16px;
+            font-size: 13px;
+            color: #ddd;
+            pointer-events: none;
+            text-align: center;
+            max-width: min(580px, 88vw);
+            line-height: 1.4;
+            display: none;
+        }
+
+        #embeddings-controls {
+            position: absolute;
+            left: calc(50% + var(--center-shift));
+            bottom: 72px;
+            transform: translateX(-50%);
+            z-index: 9;
+            display: none;
+            width: min(560px, 92vw);
+            background: rgba(28, 28, 28, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 14px;
+            padding: 10px 12px;
+            box-shadow: 0 8px 18px rgba(0, 0, 0, 0.38);
+        }
+
+        #embeddings-controls-grid {
+            display: grid;
+            grid-template-columns: 1.15fr 0.85fr auto;
+            gap: 10px;
+            align-items: end;
+        }
+
+        #embeddings-controls label {
+            display: block;
+            font-size: 12px;
+            color: #d0d0d0;
+            margin-bottom: 4px;
+            text-align: center;
+        }
+
+        #embeddingTypeToggle,
+        #embeddingDimensionToggle {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4px;
+            margin-top: 0;
+        }
+
+        #embeddingTypeToggle .link-direction-option,
+        #embeddingDimensionToggle .link-direction-option {
+            padding: 7px 8px;
+        }
+
+        #embeddings-download-png {
+            width: 100%;
+            height: 33px;
+            border: 1px solid #666;
+            background: rgba(92, 92, 92, 0.95);
+            color: #fff;
+            border-radius: 999px;
+            padding: 0 12px;
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            box-sizing: border-box;
+            margin-top: 8px;
+        }
+
+        #embeddings-download-png:disabled {
+            cursor: not-allowed;
+            opacity: 0.45;
+        }
+
+        @media (max-width: 1200px) {
+            #venn-controls {
+                width: min(420px, 82vw);
+            }
+
+            #venn-controls-grid {
+                grid-template-columns: 1fr;
+                row-gap: 8px;
+            }
+
+            #venn-download-wrap {
+                margin-left: 0;
+            }
+
+            #mind-map-controls-grid {
+                grid-template-columns: 1fr;
+            }
+
+            #embeddings-controls-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        #view-selector-box:hover #view-options,
+        #view-selector-box.locked-open #view-options {
+            display: grid !important;
+            margin-top: 8px;
+        }
+
+        #view-selector-box.form-mode {
+            min-width: 230px !important;
+            width: 230px !important;
+            padding: 15px !important;
+        }
+
+        #view-selector-box.form-mode #view-options {
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: center !important;
+            width: 100% !important;
+        }
+
+        #view-selector-box.form-mode input {
+            width: 100% !important;
+            margin-bottom: 10px !important;
+            box-sizing: border-box !important;
+        }
+
+        #view-selector-box.form-mode .inline-btn-group {
+            display: flex !important;
+            justify-content: space-between !important;
+            width: 100% !important;
+            gap: 10px !important;
+        }
+        /* Section Headers */
+        .view-menu-header {
+            grid-column: 1 / -1; /* Spans both columns */
+            text-align: center;
+            font-size: 11px;
+            font-weight: bold;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin: 0 0 4px 0;
+            padding-bottom: 4px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        /* Centered "+ New Collection" Button */
+        .new-coll-btn-full {
+            grid-column: 1 / -1; /* Spans both columns */
+            justify-content: center !important; 
+            margin-top: 5px;
+            background: rgba(255,255,255,0.1) !important;
+        }
+
+        .view-option-item {
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .view-option-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 15px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 20px;
+            font-size: 16px;
+            margin-bottom: 4px;
+            width: 100%;
+            box-sizing: border-box;
+            cursor: pointer;
+            border: 1px solid rgba(255,255,255,0.2);
+            height: 40px;
+            line-height: 40px;
+        }
+
+        .view-option-item:hover {
+            background: rgba(255,255,255,0.17);
+        }
+
+        .view-option-item:hover {
+            background: rgba(255,255,255,0.15);
+        }
+
+        .view-option-item.active-view {
+            background: #4caf50 !important;
+            color: white;
+        }
+
+        .view-option-item.item-disabled {
+            opacity: 0.4;
+            cursor: not-allowed; /* Changes cursor to a 'prohibited' circle */
+            filter: grayscale(1);
+        }
+
+        .view-option-item.item-disabled:hover {
+            background: transparent !important; /* Prevents highlight on hover */
+            color: inherit !important;
+        }
+
+        .rename-coll-btn {
+            color: #3498db;
+            padding: 0 0;
+            font-size: 13px;
+            cursor: pointer;
+            margin-left: auto;
+            opacity: 0;
+            transition: opacity 0.15s;
+        }
+        
+        .view-option-item:hover .rename-coll-btn {
+            opacity: 1;
+        }
+
+        .delete-coll-btn {
+            color: #ff9800;
+            padding: 0 5px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-left: 5px;
+        }
+
+        /* Updated Delete UI Layout */
+        .delete-confirm-row {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 0;
+            width: 100%;
+            background: transparent; /* remove red box */
+            border-radius: 0;
+        }
+
+        .delete-btn-group {
+            display: flex;
+            gap: 8px;
+            width: 100%;
+            align-items: stretch;
+        }
+
+        .delete-btn-group button {
+            margin: 0 !important;
+            width: auto !important;
+            box-sizing: border-box;
+            align-self: stretch;
+            justify-content: center;
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .btn-cancel-delete,
+        .btn-delete-final {
+            background: #aaa !important;
+            color: white;
+            border: none;
+            padding: 0 10px;
+            border-radius: 15px;
+            cursor: pointer;
+            flex: 1;
+            text-align: center;
+            min-width: 0;
+            height: 30px;
+            line-height: 30px;
+        }
+
+        .btn-cancel-delete {
+            background: #888 !important;
+        }
+
+        .btn-cancel-delete:hover {
+            background: #aaa !important;
+        }
+
+        .btn-delete-final {
+            background: #ff9800 !important;
+        }
+
+        .btn-delete-final:hover {
+            filter: brightness(1.1);
+        }
+
+        .delete-text-label {
+            font-size: 14px;
+            font-weight: bold;
+            color: #fff;
+            transition: filter 0.2s;
+        }
+        .delete-text-label:hover { filter: brightness(1.3); }
+
+        .btn-delete-final {
+            background: #ff9800 !important;
+            color: white;
+            border: none;
+            padding: 4px 12px;
+            border-radius: 15px;
+        }
+
+        .action-btn {
+            width: auto;
+            min-width: fit-content;
+            display: inline-flex;
+            align-items: center;
+            padding: 8px 36px;     /* First number is top/bottom, second is left/right */
+            border-radius: 20px;   /* Higher number = rounder corners (Pill shape) */
+            
+            /* Look & Feel */
+            cursor: pointer;
+            background: #2d2d2d !important;
+            color: #fff;
+            border: 1px solid #555;
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+
+        .action-btn:hover {
+            background: #4caf50 !important;
+            border-color: #53bd57;
+        }
+
+        #shortest-path-control {
+            position: relative;
+            margin-top: 6px;
+        }
+
+        #shortest-path-toggle-btn {
+            display: inline-flex;
+            margin-top: 6px;
+            width: 100%;
+            justify-content: center;
+            background: #444 !important;
+            border: none;
+        }
+
+        #shortest-path-menu {
+            position: absolute;
+            right: 0;
+            z-index: 35;
+            display: none;
+            width: min(250px, 84vw);
+            padding: 12px;
+            border: 1px solid #555;
+            border-radius: 14px;
+            background: rgba(28, 28, 28, 0.98);
+            box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45);
+        }
+
+        #shortest-path-menu.open {
+            display: block;
+        }
+
+        #shortest-path-menu.open-above {
+            bottom: calc(100% + 8px);
+            top: auto;
+        }
+
+        #shortest-path-menu.open-below {
+            top: calc(100% + 8px);
+            bottom: auto;
+        }
+
+        #shortest-path-menu .shortest-path-menu-title {
+            font-size: 12px;
+            color: #bbb;
+            margin: 0 0 10px 0;
+        }
+
+        #shortest-path-menu .shortest-path-menu-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        #shortest-path-menu .shortest-path-menu-actions button {
+            width: 100%;
+            justify-content: flex-start;
+            text-align: left;
+            margin: 0;
+            white-space: normal;
+            padding: 8px 10px;
+        }
+
+        .variable-file-btn {
+            color: white;
+            border-radius: 20px;
+            padding: 6px 10px;
+            cursor: pointer;
+            font-size: 12px;
+            white-space: nowrap;
+            border: 1px solid #2478c7;
+        }
+
+        .variable-file-btn:hover {
+            filter: brightness(1.08);
+        }
+
+        .variable-type-select,
+        .variable-type-select-child {
+            border-radius: 999px !important;
+            color: white;
+            border: 1px solid #555;
+            padding: 6px;
+            background: #333;
+        }
+
+        #variables-table-container table th {
+            position: sticky;
+            top: 0;
+            background: #222;
+            z-index: 10;
+        }
+
+        #file-viewer-controls { display: flex !important; gap: 8px; margin-bottom: 8px; flex-wrap: nowrap !important; overflow-x: auto; align-items: center; }
+        #file-viewer-controls button { display: inline-flex; align-items: center; justify-content: center; border: 1px solid #888; border-radius: 999px; padding: 4px 10px; background: #222; color: white; cursor: pointer; white-space: nowrap; width: auto; min-width: 0; flex: 0 0 auto; }
+        #file-viewer-controls button.active { background: #3498db; border-color: #2170a8; }
+
+        #file-viewer-loading { display: none; margin-bottom: 8px; }
+        #file-viewer-loading-bar-wrapper { width: 100%; height: 8px; background: #333; border-radius: 4px; overflow: hidden; }
+        #file-viewer-loading-bar { width: 0%; height: 100%; background: #4caf50; transition: width 0.2s; }
+
+        .close-modal {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 32px;
+            height: 32px;
+            line-height: 32px;
+            border-radius: 50%;
+            border: 1px solid #555;
+            background: #333;
+            color: #aaa;
+            font-size: 20px;
+            text-align: center;
+            cursor: pointer;
+            z-index: 30;
+            transition: all 0.15s ease;
+        }
+
+        .close-modal:hover {
+            background: #3498db;
+            border-color: #3498db;
+            color: white;
+        }
+
+        .btn-delete-final:hover { filter: brightness(1.3); }
+
+        .inline-create-row {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding: 5px 0;
+        }
+        .inline-create-row input {
+            font-size: 16px;
+            border-radius: 20px;
+            padding: 10px 15px;
+            background: #222;
+            border: 1px solid #555;
+            color: white;
+        }
+        .inline-btn-group {
+            display: flex;
+            gap: 5px;
+        }
+        .inline-btn-group button {
+            margin: 0;
+            font-size: 14px;
+            border-radius: 20px;
+            padding: 8px;
+            flex: 1;
+            transition: filter 0.2s;
+        }
+        .inline-btn-group button:hover {
+            filter: brightness(1.3);
+        }
+
+        .centrality-toggle-row {
+            display: flex;
+            gap: 5px;
+            margin-top: 10px;
+        }
+        .centrality-toggle-row button {
+            font-size: 14px;
+            padding: 10px;
+            background: #444;
+            margin-top: 0;
+            flex: 1;
+            cursor: pointer;
+            border: none;
+            color: white;
+            border-radius: 4px;
+        }
+        .centrality-toggle-row button.active {
+            background: #4caf50;
+        }
+
+        .link-direction-toggle {
+            display: flex;
+            gap: 4px;
+            background: #2c2c2c;
+            border-radius: 16px;
+            border: 1px solid #555;
+            padding: 2px;
+            margin-top: 6px;
+        }
+        .link-direction-option {
+            flex: 1;
+            margin: 0;
+            border: none;
+            border-radius: 13px;
+            background: transparent;
+            color: #fff;
+            font-size: 12px;
+            font-weight: bold;
+            padding: 6px 0;
+            cursor: pointer;
+        }
+        .link-direction-option:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+        .link-direction-option.active {
+            background: #4caf50;
+        }
+
+        /* Modal Styles */
+        .modal { display: none; position: fixed; z-index: 200; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); }
+        .modal-content { 
+            background: #2d2d2d; margin: 5% auto; padding: 25px; border: 1px solid #555; 
+            width: 85%; max-width: 500px; max-height: 75vh; overflow-y: auto; 
+            border-radius: 10px; line-height: 1.6; position: relative; z-index: 210;
+        }
+        .modal a { color: #4caf50; text-decoration: none; }
+        
+        .btn-row { display: flex; gap: 10px; margin-top: 15px; }
+        .btn-primary { background: #4caf50; color: white; border: none; padding: 8px 15px; border-radius: 999px; cursor: pointer; font-weight: bold; flex: 1; }
+        .btn-secondary { background: #444; color: white; border: none; padding: 8px 15px; border-radius: 999px; cursor: pointer; flex: 1; }
+        .btn-secondary:hover { background: #4caf50; }
+
+        .info-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .info-controls { display: flex; gap: 3px; }
+        .info-controls button { width: 31px; height: 31px; padding: 0; margin: 0; font-size: 14px; line-height: 24px; background: #555; }
+
+        label { display: block; font-size: 13px; margin-top: 10px; color: #bbb; }
+        .slider-val { float: right; color: #4caf50; font-weight: bold; }
+        input, select, button { width: 100%; padding: 8px; margin: 5px 0; border-radius: 4px; border: 1px solid #555; background: #2d2d2d; color: white; box-sizing: border-box; }
+        input[type="range"] { padding: 0; cursor: pointer; }
+        input[type="color"] { height: 30px; border: none; background: none; cursor: pointer; padding: 0; border-radius: 8px; overflow: hidden; }
+        
+        input[type="range"]::-webkit-slider-runnable-track {
+            background: #555;
+            height: 4px;
+            border-radius: 999px;
+            border: 1px solid rgba(35, 35, 35, 0.95);
+            box-shadow: 0 0 0 1px rgba(35, 35, 35, 0.95);
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #4caf50;
+            margin-top: -5px;
+            cursor: pointer;
+        }
+        input[type="range"]::-moz-range-track {
+            background: #555;
+            height: 4px;
+            border-radius: 999px;
+            border: 1px solid #181717;
+        }
+        input[type="range"]::-moz-range-thumb {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #4caf50;
+            border: none;
+            cursor: pointer;
+        }
+
+        button { background: #4caf50; cursor: pointer; font-weight: bold; border: none; margin-top: 10px; border-radius: 14px;}
+        button:hover { background: #45a049; }
+        button:disabled { background: #555 !important; color: #888; cursor: not-allowed; }
+        .drawFrame-btn { 
+            width: 100%;
+            padding: 8px 18px;
+            /* Change border color to transparent to reveal the gradient underneath */
+            border: 1px solid transparent; 
+            border-radius: 999px;
+            /* Layer 1: Solid background (clipped to padding) */
+            /* Layer 2: Gradient background (clipped to border) */
+            background-image: linear-gradient(#3498db, #3498db), 
+                            linear-gradient(175deg, #6dc5ff 0%, #3498db 50%, #6dc5ff 100%);
+            background-origin: border-box;
+            background-clip: padding-box, border-box;
+            color: #ffffff; 
+            font-weight: bold;
+            letter-spacing: 0.3px;
+            cursor: pointer;
+            transition: filter 0.2s ease, transform 0.2s ease;
+         }
+
+        .search-container { display: flex; gap: 5px; margin-bottom: 5px; height: 36px; align-items: stretch; }
+        .search-container input, .search-container button { margin: 0; height: 100%; vertical-align: middle; }
+        #searchInput { flex: 1; }
+        #searchBtn { width: 80px; padding: 0 5px; }
+
+        .Selection-tools-btn { 
+            font-size: 17px; /* Increased from 11px */
+            font-weight: bold;
+            padding: 8px 0; 
+            margin: 0; 
+            cursor: pointer; 
+            color: white; /* Changed from #4caf50 */
+            border: none; 
+            background: transparent; 
+            width: 100%; 
+            display: flex; 
+            justify-content: flex-start; /* Changed from center */
+            align-items: center;
+        }
+        .search-more-content { display: none; background: rgba(50,50,50,0.5); padding: 10px; border-radius: 4px; border: 1px solid #444; margin-top: 5px; margin-bottom: 5px; }
+        .search-mode-row { display: flex; gap: 5px; margin-bottom: 5px; }
+        .search-mode-row button, .select-tool-row button { margin-top: 0; font-size: 11px; height: 28px; background: #555; flex: 1; }
+
+        #additiveBtn.active, #subtractBtn.active, #intersectBtn.active { background: #4caf50; }
+        .mode-venn-btn {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 30px;
+            padding: 4px 0;
+        }
+        .mode-venn-btn .venn-mini {
+            position: relative;
+            width: 28px;
+            height: 18px;
+            display: inline-block;
+        }
+        /* Base Circles - Unchanged */
+        .mode-venn-btn .venn-mini::before,
+        .mode-venn-btn .venn-mini::after {
+            content: '';
+            position: absolute;
+            top: 1px;
+            width: 14px;
+            height: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.8);
+            border-radius: 50%;
+            background: transparent;
+            box-sizing: border-box;
+        }
+
+        .mode-venn-btn .venn-mini::before { left: 3px; }
+        .mode-venn-btn .venn-mini::after { left: 11px; }
+
+        /* The Fill Layer (.region) - Absolute alignment */
+        .mode-venn-btn .venn-mini .region {
+            position: absolute;
+            inset: 0; /* Ensures it fills the 28x18 container exactly */
+            pointer-events: none;
+        }
+
+        .mode-venn-btn .venn-mini .region::before,
+        .mode-venn-btn .venn-mini .region::after {
+            content: '';
+            position: absolute;
+            top: 1px; /* Must match the border's top value */
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background-color: rgba(255, 255, 255, 0.7);
+        }
+
+        /* Ensure these left values match the ::before/::after of .venn-mini exactly */
+        .mode-venn-btn .venn-mini .region::before { left: 3px; }
+        .mode-venn-btn .venn-mini .region::after { left: 11px; }
+
+        /* Brighten on active */
+        .mode-venn-btn.active .venn-mini .region::before,
+        .mode-venn-btn.active .venn-mini .region::after {
+            background-color: rgba(255, 255, 255, 0.7);
+        }
+
+        /* --- LOGIC PER MODE --- */
+
+        /* SUBTRACT: Mask center is exactly where the second circle's center is */
+        .venn-remove .region::after { display: none; }
+        .venn-remove .region::before {
+            -webkit-mask-image: radial-gradient(circle at 15px center, transparent 7px, black 7.1px);
+            mask-image: radial-gradient(circle at 15px center, transparent 7px, black 7.1px);
+        }
+
+        /* INTERSECT: Mask center is exactly where the first circle's center is */
+        .venn-and .region::before { display: none; }
+        .venn-and .region::after {
+            /* Positioned at -5px relative to the 11px start of the second circle */
+            -webkit-mask-image: radial-gradient(circle at -1px center, black 7px, transparent 7.1px);
+            mask-image: radial-gradient(circle at -1px center, black 7px, transparent 7.1px);
+        }
+
+        #lassoBtn.active, #brushBtn.active { background: #ff9800; color: #fff; }
+        #dragNodesBtn.active { background: #ff9800 !important; }
+        .select-tool-row { display: flex; gap: 5px; }
+
+        .dropdown-content { display: none; margin-top: 10px; padding-bottom: 10px; border-bottom: 1px solid #444; }
+        .dropdown-toggle { font-size: 18px; font-weight: bold; color: #5aa9f0; cursor: pointer; display: block; margin-top: 20px; padding: 8px 0; border-bottom: 1px solid #333; }
+        #progress-wrapper { margin-top: 15px; }
+        #progress-container { width: 100%; height: 8px; background: #333; border-radius: 4px; overflow: hidden; }
+        #progress-bar { width: 0%; height: 100%; background: #4caf50; transition: width 0.2s; }
+        #stats-display { font-size: 10px; margin-top: 8px; color: #aaa; display: flex; flex-direction: column; gap: 5px; }
+        #time-display { font-size: 11px; margin-top: 8px; color: #4caf50; display: flex; justify-content: space-between; font-weight: bold; }
+
+        .legend-item { display: flex; align-items: center; font-size: 11px; margin-bottom: 4px; cursor: pointer; padding: 2px; border-radius: 3px; }
+        .legend-item:hover { background: rgba(255,255,255,0.1); }
+        .color-box { width: 12px; height: 12px; border-radius: 2px; margin-right: 8px; }
+        
+        .gradient-container { position: relative; width: 100%; padding-top: 10px; margin-bottom: 5px; cursor: pointer; overflow: visible; }
+        .gradient-container-var { position: relative; width: 100%; padding-top: 8px; margin-bottom: 8px; cursor: pointer; overflow: visible; }
+        .gradient-bar { width: 100%; height: 15px; border-radius: 2px; position: relative; z-index: 1; }
+        .grad-labels { display: flex; justify-content: space-between; font-size: 10px; color: #ccc; margin-top: 4px; }
+        .range-handle { position: absolute; top: 10px; width: 6px; height: 15px; background: rgba(35, 35, 35, 0.9); border: 1px solid #555; cursor: ew-resize; z-index: 5; }
+        .range-inputs { display: flex; gap: 10px; margin-top: 10px; }
+        .range-inputs div { flex: 1; }
+        .range-inputs label { margin-top: 0; margin-bottom: 2px; }
+        .select-range-toggle { font-size: 11px; color: #4caf50; cursor: pointer; margin-bottom: 10px; display: block; text-align: center; }
+        .select-range-toggle:hover { text-decoration: underline; }
+        .range-overlay { position: absolute; top: 10px; height: 15px; background: rgba(30,30,30,0.8); z-index: 2; pointer-events: none; }
+
+        .upload-progress { display: none; margin-top: 6px; }
+        .upload-progress-track { width: 100%; height: 8px; background: #333; border-radius: 4px; overflow: hidden; }
+        .upload-progress-bar { width: 0; height: 100%; background: #4caf50; transition: width 0.2s; }
+        .upload-progress-text { margin-top: 6px; font-size: 11px; color: #4caf50; font-weight: bold; }
+        .uploaded-file-list {
+            margin-top: 6px;
+            min-height: 30px;
+            border: 1px solid #444;
+            border-radius: 16px;
+            background: #1f1f1f;
+            padding: 0;
+            display: block;
+            overflow: visible;
+            position: relative 
+        }
+        .open-upload-btn {
+            background: #3498db !important;
+        }
+        .open-upload-btn:hover {
+            background: #4da3de !important;
+        }
+        .upload-inline-open-btn {
+            width: 100% !important;
+            min-width: 0 !important;
+            margin: 0 !important;
+            padding: 6px !important;
+            border-radius: 14px !important;
+            cursor: pointer;
+            white-space: nowrap;
+            box-sizing: border-box;
+            display: block;
+            color: #fff !important;
+            font-size: 14px !important;
+            line-height: 1.2 !important;
+
+            /* 1. Set border to transparent so the background gradient shows through */
+            border: 1px solid transparent !important;
+
+            /* 2. Apply the two-layer background */
+            /* Layer 1: Solid blue center | Layer 2: Diagonal gradient for the border */
+            background-image: linear-gradient(#3498db, #3498db), 
+                            linear-gradient(135deg,#6dc5ff 0%, #2e87c4 50%, #6dc5ff 100%) !important;
+            
+            /* 3. Tell the browser where to cut each layer */
+            background-origin: border-box !important;
+            background-clip: padding-box, border-box !important;
+            position: relative; /* Required for z-index to work */
+            z-index: 10;        /* Pulls the button "closer" to the user */
+            transition: filter 0.2s ease, transform 0.2s ease;
+        }
+
+        .upload-inline-open-btn:hover {
+            background-image: linear-gradient(#4da3de, #4da3de), 
+                            linear-gradient(135deg, #6dc5ff 0%, #3498db 50%, #6dc5ff 100%) !important;
+            transform: translateY(-2px);
+            z-index: 11;
+        }
+        .uploaded-file-items {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: center;
+            align-content: flex-start;
+            padding: 6px;
+        }
+        .uploaded-file-list-empty {
+            color: #999;
+            font-size: 11px;
+        }
+        .uploaded-file-chip {
+            width: auto !important;
+            min-width: 0 !important;
+            margin: 0 !important;
+            padding: 3px 8px !important;
+            border-radius: 999px !important;
+            border: 1px solid #666 !important;
+            background: #555 !important;
+            color: #fff !important;
+            font-size: 11px !important;
+            line-height: 1.2 !important;
+            cursor: pointer;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .uploaded-file-chip-label {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 220px;
+        }
+        .uploaded-file-chip-remove {
+            opacity: 0;
+            color: #ddd;
+            font-weight: bold;
+            line-height: 1;
+            transition: opacity 0.12s ease;
+            flex: 0 0 auto;
+        }
+        .uploaded-file-chip:hover {
+            background: #666 !important;
+            border-color: #777 !important;
+        }
+        .uploaded-file-chip:hover .uploaded-file-chip-remove {
+            opacity: 1;
+        }
+        #more-toggle {
+            display: block;
+            text-align: center;
+            font-size: 11px;
+            margin-top: 6px;
+        }
+
+        .modal-content { border-radius: 20px !important; }
+        #variablesModal .modal-content {
+            position: absolute;
+            top: 20px;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: min(1000px, 95vw);
+            max-height: none;
+            overflow: hidden;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+        }
+        #variablesModal #variables-table-container {
+            flex: 1;
+            min-height: 0;
+            max-height: calc(100% - 120px);
+            overflow: auto;
+        }
+
+        #nodeInfoTableModal .modal-content {
+            min-width: 95vw;
+            max-width: 1800px;
+            max-height: calc(100vh - 100px);
+            margin: 20px auto 120px auto;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        #node-info-table-toolbar {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+        #node-info-table-search {
+            flex: 1 1 280px;
+            min-width: 220px;
+            padding: 8px 10px;
+            border-radius: 8px;
+            border: 1px solid #555;
+            background: #111;
+            color: #fff;
+            font-size: 13px;
+            box-sizing: border-box;
+        }
+        #node-info-table-search::placeholder {
+            color: #8a8a8a;
+        }
+        .node-info-link-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: center;
+            justify-content: flex-start;
+        }
+        .node-info-link-group .btn-secondary,
+        .node-info-pdb-links .btn-secondary {
+            padding: 4px 8px;
+            font-size: 11px;
+            min-height: 28px;
+            white-space: nowrap;
+        }
+        #node-info-pdb-overlay {
+            position: fixed;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.55);
+            z-index: 20000;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        #node-info-pdb-overlay .node-info-pdb-panel {
+            position: relative;
+            width: min(680px, 95vw);
+            max-height: min(80vh, 720px);
+            overflow: auto;
+            background: #1d1d1d;
+            border: 1px solid #555;
+            border-radius: 14px;
+            padding: 16px;
+            box-shadow: 0 16px 50px rgba(0, 0, 0, 0.45);
+        }
+        #node-info-pdb-overlay .node-info-pdb-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+        #node-info-pdb-overlay .node-info-pdb-title {
+            font-size: 16px;
+            font-weight: 700;
+            margin: 0;
+        }
+        #node-info-pdb-overlay .node-info-pdb-subtitle {
+            margin: 4px 0 0 0;
+            color: #bbb;
+            font-size: 12px;
+        }
+        #node-info-pdb-overlay .node-info-pdb-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        #node-info-pdb-overlay .node-info-pdb-empty {
+            color: #bbb;
+            font-size: 13px;
+            padding: 8px 0 4px;
+        }
+        #node-info-table-wrap {
+            flex: 1;
+            min-height: 220px;
+            overflow: auto;
+            background: #111;
+            border-radius: 10px;
+            border: 1px solid #444;
+            margin-top: 8px;
+        }
+        #node-info-table-wrap table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+            table-layout: fixed;
+        }
+        #node-info-table-wrap th,
+        #node-info-table-wrap td {
+            border: 1px solid #333;
+            padding: 6px 8px;
+            text-align: left;
+            vertical-align: top;
+            white-space: normal;
+            overflow: visible;
+            text-overflow: clip;
+            word-break: break-word;
+        }
+        #node-info-table-wrap th {
+            position: sticky;
+            top: 0;
+            background: #222;
+            color: #4db8ff;
+            z-index: 2;
+            overflow: visible;
+            position: sticky;
+            white-space: nowrap;
+        }
+        #node-info-table-wrap th .col-resizer {
+            position: absolute;
+            top: 0;
+            right: -3px;
+            width: 7px;
+            height: 100%;
+            cursor: col-resize;
+            user-select: none;
+            z-index: 4;
+        }
+        #node-info-table-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+        #node-info-table-actions button {
+            flex: 1 1 160px;
+            margin-top: 0;
+        }
+        .external-link-icon {
+            display: inline-flex;
+            width: 12px;
+            height: 12px;
+            border: 1px solid currentColor;
+            border-radius: 2px;
+            align-items: center;
+            justify-content: center;
+            font-size: 9px;
+            line-height: 1;
+            margin-left: 6px;
+            transform: translateY(-1px);
+        }
+
+        #inline-add-ui select, #inline-add-ui input { font-size: 12px; margin: 4px 0; }
+
+        /* Centered & Larger Offscreen Indicator */
+        #offscreen-indicator {
+            position: absolute;
+            pointer-events: none;
+            display: none;
+            color: #ff9800;
+            font-weight: bold;
+            font-size: 24px; /* Larger text */
+            z-index: 1000;
+            text-shadow: 2px 2px 4px black;
+            white-space: nowrap;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%); /* Centered on screen */
+        }
+
+        canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; background: var(--bg-color); }
+        #network-gpu { z-index: 1; pointer-events: none; background: var(--bg-color); }
+        #network { z-index: 2; background: transparent; }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #555;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #777;
+        }
+
+        .ratio-grid, .res-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 4px;
+            margin-bottom: 10px;
+        }
+        .ratio-btn, .res-btn {
+            font-size: 10px;
+            padding: 4px;
+            background: #444;
+            margin: 0;
+        }
+        .ratio-btn.active, .res-btn.active, #drawFrameBtn.active {
+            background: #ff9800 !important;
+        }
+        .ratio-btn:hover, .res-btn:hover {
+            background: #ff9800 !important;
+        }
+        /* Frame cursor state */
+        body.drawing-frame canvas {
+            cursor: crosshair !important;
+        }
+        /* When this class is on the body, the canvas cursor is forced to + */
+        body.drawing-frame-active canvas {
+            cursor: crosshair !important;
+        }
+        
+        /* Welcome Overlay Styles */
+        .welcome-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 5;
+            background: rgba(26, 26, 26, 0.85);
+            backdrop-filter: blur(2px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 1;
+            transition: opacity 0.4s ease;
+            pointer-events: auto;
+        }
+        
+        .welcome-overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        
+        .welcome-center {
+            text-align: center;
+            z-index: 16;
+        }
+        
+        .welcome-heading {
+            font-size: 2.8em;
+            font-weight: 300;
+            color: #e0e0e0;
+            margin-bottom: 15px;
+            letter-spacing: 1px;
+        }
+        
+        .welcome-logo-container {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+        
+        .welcome-logo {
+            position: relative;
+            width: 80px;
+            height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .welcome-app-name {
+            font-size: 3.5em;
+            font-weight: 750;
+            background: linear-gradient(135deg, #3498db 0%, #2eccbf 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            letter-spacing: 0px;
+            margin-right: 30px;
+        }
+        
+        /* Left Panel Annotations */
+        .welcome-left-annotations {
+            position: absolute;
+            left: 580px;
+            top: 9%;
+            transform: translateY(-50%);
+            z-index: 16;
+        }
+        
+        /* Right Panel Top Annotations */
+        .welcome-right-top-annotations {
+            position: absolute;
+            right: 580px;
+            top: 1px;
+            z-index: 16;
+        }
+
+        /* Right Panel Bottom Annotations */
+        .welcome-right-bottom-annotations {
+            position: absolute;
+            right: 580px;
+            bottom: 920px;
+            z-index: 16;
+        }
+        
+        /* Bottom Annotation */
+        .welcome-bottom-annotation {
+            position: absolute;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 6;
+            display: flex;
+            flex-direction: column-reverse;
+            align-items: center;
+        }
+        
+        .welcome-annotation {
+            position: absolute;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            white-space: nowrap;
+        }
+        
+        .welcome-left-annotations .welcome-annotation {
+            flex-direction: row;
+            right: 0;
+        }
+        
+        .welcome-right-top-annotations .welcome-annotation {
+            flex-direction: row-reverse;
+            left: 0;
+        }
+
+        .welcome-label {
+            font-size: 1.1em;
+            font-weight: 500;
+            color: #e0e0e0;
+            padding: 6px 12px;
+            background: rgba(52, 152, 219, 0.15);
+            border-radius: 4px;
+            letter-spacing: 0.5px;
+            min-width: max-content;
+            text-align: center;
+
+            opacity: 0; /* Start hidden */
+            animation: fadeInLabel 1s ease-in-out forwards;
+        }
+        
+        .welcome-right-top-annotations .welcome-annotation,
+        .welcome-right-bottom-annotations .welcome-annotation {
+            flex-direction: row-reverse;
+            left: 0;
+        }
+        
+        .welcome-bottom-annotation .welcome-label {
+            background: rgba(52, 152, 219, 0.15);
+            border-left: none;
+            border-top: none;
+        }
+        
+        .welcome-arrow {
+            width: 150px;
+            height: 50px;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.3));
+        }
+        
+        .welcome-bottom-annotation .welcome-arrow {
+            width: 40px;
+            height: 80px;
+        }
+        
+        .hand-drawn {
+            stroke-dasharray: 3, 2;
+            animation: drawArrow 1.5s ease-in-out forwards;
+            opacity: 0.9;
+        }
+        
+        @keyframes fadeInLabel {
+            from {
+                opacity: 0;
+                transform: translateX(5px); /* Optional: slight upward slide */
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+        
+        @keyframes drawArrow {
+            from {
+                stroke-dashoffset: 100;
+                opacity: 0;
+            }
+            to {
+                stroke-dashoffset: 0;
+                opacity: 1;
+            }
+        }
+        
+    </style>
+</head>
+<body>
+
+<div id="ui-layer">
+    <div class="toggle-tab" onclick="document.getElementById('ui-layer').classList.toggle('minimized')"><span>◂</span></div>
+    
+    <div id="ui-content">
+        <div style="display: flex; align-items: center; gap: 10px; margin-left: 5px; margin-bottom: 0;">
+            <!-- Logo Container -->
+            <div style="position: relative; width: 28px; height: 28px; flex-shrink: 0; margin-left: 10px;">
+                <div style="position: absolute; width: 14px; height: 2.5px; background: #888; transform: rotate(-30deg); top: 10px; left: 6px;"></div>
+                <div style="position: absolute; width: 14px; height: 2.5px; background: #888; transform: rotate(90deg); right: -0.5px; top: 13px;"></div>
+                <div style="position: absolute; width: 10px; height: 10px; background: #3498db; border: 1.5px solid #6dc5ff; border-radius: 50%; left: 2px; top: 7px; z-index: 2;"></div>
+                <div style="position: absolute; width: 10px; height: 10px; background: #3498db; border: 1.5px solid #6dc5ff; border-radius: 50%; right: 0; top: 0; z-index: 2;"></div>
+                <div style="position: absolute; width: 10px; height: 10px; background: #3498db; border: 1.5px solid #6dc5ff; border-radius: 50%; right: 0; bottom: 0; z-index: 2;"></div>
+            </div>
+            <h2 style="margin:0; font-size:2.1em;">StringScape</h2>
+        </div>
+
+        <div style="font-size:0.9em; color:#ccc; margin-bottom:10px;"></div>
+        
+        <button id="pill-blue-btn" type="button" onclick="openModal('guideModal')" style="width: 100%; margin-bottom:15px;">Open Start Guide</button>
+        <button id="pill-blue-btn" style="width: 100%; margin-bottom:15px;" onclick="closeWelcomeOverlay(); document.getElementById('sessionFolderInput').click()">Open Previous Session</button>
+        <input type="file" id="sessionFolderInput" webkitdirectory directory multiple style="display:none;">
+
+        <label style="font-size:14px;">1. Load Interaction Data (Links/Edges)</label>
+        <input type="file" id="fileInput" accept=".txt,.csv,.tsv" style="display:none;" onchange="window.handleInteractionUploadChange && window.handleInteractionUploadChange(event)">
+        <div id="fileInputList" class="uploaded-file-list">
+            <button type="button" 
+                    class="upload-inline-open-btn" 
+                    onclick="">
+                Open File
+            </button>
+            <div class="uploaded-file-items"><span class="uploaded-file-list-empty">No files uploaded</span></div>
+        </div>
+        <div class="upload-progress" id="fileInputProgress"><div class="upload-progress-track"><div class="upload-progress-bar" id="fileInputProgressBar"></div></div><div class="upload-progress-text">Loading...</div></div>
+
+        <label style="font-size:14px;">2. Load Accessory Data (Node Info Files)</label>
+        <input type="file" id="infoInput" accept=".txt,.csv,.tsv,.fa,.fasta,.faa,.fna,.h5" multiple style="display:none;" onchange="window.handleAccessoryUploadChange && window.handleAccessoryUploadChange(event)">
+        <div id="infoInputList" class="uploaded-file-list">
+            <button type="button" 
+                    class="upload-inline-open-btn" 
+                    onclick="">
+                Open Files
+            </button>
+            <div class="uploaded-file-items"><span class="uploaded-file-list-empty">No files uploaded</span></div>
+        </div>
+        <div class="upload-progress" id="infoInputProgress"><div class="upload-progress-track"><div class="upload-progress-bar" id="infoInputProgressBar"></div></div><div class="upload-progress-text">Loading...</div></div>
+
+        <span id="more-toggle" class="dropdown-toggle" onclick="toggleDropdown('more-drop')">More ▾</span>
+        <div id="more-drop" class="dropdown-content">
+            <!-- <button id="genomeInputBtn" type="button" style="background:#3498db; margin-bottom:10px;">Load Genome (fasta) (optional)</button> -->
+            <!-- <input type="file" id="genomeInput" accept=".fa,.fasta,.fna" multiple style="display:none;"> -->
+
+            <label style="font-size:14px;">Build Score Threshold (optional)</label>
+            <input type="number" id="thresholdInput" value="0">
+
+            <label style="font-size:14px;">Seed ID (optional)</label>
+            <input type="text" id="seedInput" placeholder="e.g. W2P887">
+        </div>
+
+        <button id="startBtn" class="startBtn" disabled>Build Network</button>
+        <button id="pauseBtn" style="display:none; background:#3498db">Pause Build</button>
+
+        <div id="progress-wrapper" style="display:none">
+            <div id="progress-container"><div id="progress-bar"></div></div>
+            <div id="time-display">
+                <span id="elapsed-display">Elapsed: 0s</span>
+                <span id="etc-display">Remaining: --s</span>
+            </div>
+            <div id="stats-display">
+                <span id="stat-nodes-text">Proteins: <b>0 / 0</b></span>
+                <span id="stat-links-text">Links: <b>0 / 0</b></span>
+                <span id="stat-speed-text">Speed: <b>0</b> links/s</span>
+            </div>
+        </div>
+
+        <span class="dropdown-toggle" onclick="toggleDropdown('nodes-drop')">Nodes ▾</span>
+        <div id="nodes-drop" class="dropdown-content">
+            <label>Colour Nodes By</label>
+            <select id="colorMode">
+                <option value="layer">Degrees of separation</option>
+                <option value="centrality">Centrality</option>
+                <option value="eigen">Eigenvector centrality</option>
+                <option value="embeddings">Embeddings</option>
+                <option value="collection">Collection</option>
+                <option value="annotation">Annotation length</option>
+                <option value="localization">Protein localisation</option>
+                <option value="size">Protein size</option>
+                <option value="pdb_structure_count">PDB structure count</option>
+                <option value="random">Random</option>
+                <option value="mono">Mono</option>
+            </select>
+            <label>Mono Node Colour</label>
+            <input type="color" id="nodeMonoColor" value="#4caf50">
+            
+            <label>Node Size <span id="val-nsiz" class="slider-val">1</span></label>
+            <input type="range" id="nodeSizeSlider" min="0.1" max="5" step="0.1" value="1">
+
+            <label>Size by Centrality <span id="val-siz" class="slider-val">0</span></label>
+            <input type="range" id="sizeSlider" min="0" max="1" step="0.01" value="0">
+
+            <label>Size by Eigenvector Centrality<span id="val-esiz" class="slider-val">0</span></label>
+            <input type="range" id="eigenSlider" min="0" max="1" step="0.1" value="0">
+
+            <label>Size by Protein Size <span id="val-psiz" class="slider-val">0</span></label>
+            <input type="range" id="proteinSizeSlider" min="0" max="1" step="0.1" value="0">
+
+            <label>Node Glow <span id="val-glw" class="slider-val">0</span></label>
+            <input type="range" id="glowSlider" min="0" max="500" step="1" value="0">
+
+            <label>Nodes</label>
+            <div id="nodeVisibilityToggle" class="link-direction-toggle" role="group" aria-label="Node Visibility Toggle" style="margin-bottom:8px;">
+                <button type="button" id="nodeHide" class="link-direction-option">Hide</button>
+                <button type="button" id="nodeShow" class="link-direction-option active">Show</button>
+            </div>
+
+            <label>Node Labels</label>
+            <div id="nodeLabelToggle" class="link-direction-toggle" role="group" aria-label="Node Label Toggle" style="margin-bottom:8px;">
+                <button type="button" id="nodeLabelHide" class="link-direction-option active">Hide</button>
+                <button type="button" id="nodeLabelShow" class="link-direction-option">Show</button>
+            </div>
+            <div id="nodeLabelFieldContainer" style="display:none; margin-top:8px;">
+                <label>Node Labels</label>
+                <select id="nodeLabelField"></select>
+            </div>
+        </div>
+
+        <span class="dropdown-toggle" onclick="toggleDropdown('links-drop')">Links ▾</span>
+        <div id="links-drop" class="dropdown-content">
+            <label>Colour Links By</label>
+            <select id="linkMode">
+                <option value="score" selected>Combined Score</option>
+                <option value="mono">Mono</option>
+            </select>
+            <label>Mono Link Colour</label>
+            <input type="color" id="linkColor" value="#999999">
+            
+            <label>When Nodes are Selected Display</label>
+            <select id="linkVisibilityMode">
+                <option value="all">All links</option>
+                <option value="from_selected" selected>Links from selected nodes</option>
+                <option value="between_selected">Links between selected nodes</option>
+            </select>
+
+            <label>Link Labels</label>
+            <div id="linkLabelToggle" class="link-direction-toggle" role="group" aria-label="Link Label Toggle" style="margin-bottom:8px;">
+                <button type="button" id="linkLabelHide" class="link-direction-option active">Hide</button>
+                <button type="button" id="linkLabelShow" class="link-direction-option">Show</button>
+            </div>
+            <div id="linkLabelFieldContainer" style="display:none; margin-top:8px;">
+                <label>Link Label Column</label>
+                <select id="linkLabelField"></select>
+            </div>
+
+            <label>Link Direction Arrows</label>
+            <div id="linkDirectionToggle" class="link-direction-toggle" role="group" aria-label="Link Direction Toggle">
+                <button type="button" id="linkDirectionOff" class="link-direction-option active">Off</button>
+                <button type="button" id="linkDirectionOn" class="link-direction-option">On</button>
+            </div>
+
+            <label>Link Width <span id="val-linkw" class="slider-val">1</span></label>
+            <input type="range" id="linkWidthSlider" min="0.2" max="5" step="0.1" value="1">
+
+            <label>Link Opacity <span id="val-bri" class="slider-val">0.6</span></label>
+            <input type="range" id="brightnessSlider" min="0" max="1" step="0.01" value="0.6">
+
+            <label>Gene Link Opacity <span id="val-gene-bri" class="slider-val">0.9</span></label>
+            <input type="range" id="geneBrightnessSlider" min="0" max="1" step="0.01" value="0.9">
+        </div>
+
+        <span class="dropdown-toggle" onclick="toggleDropdown('bg-drop')">Background ▾</span>
+        <div id="bg-drop" class="dropdown-content">
+            <label>Colour Background By</label>
+            <select id="bgMode">
+                <option value="mono" selected>Mono</option>
+                <option value="voronoi">Voronoi</option>
+            </select>
+
+            <label>Background Colour</label>
+            <input type="color" id="bgColor" value="#1a1a1a">
+
+            <div id="bgVoronoiControls" style="display:none; margin-top:8px;">
+                <label>Voronoi Opacity <span id="val-bg-voronoi-opacity" class="slider-val">0.35</span></label>
+                <input type="range" id="bgVoronoiOpacitySlider" min="0" max="1" step="0.01" value="0.35">
+
+                <label>Voronoi Blur <span id="val-bg-voronoi-blur" class="slider-val">2</span></label>
+                <input type="range" id="bgVoronoiBlurSlider" min="0" max="12" step="0.5" value="2">
+            </div>
+        </div>
+
+        <span class="dropdown-toggle" onclick="toggleDropdown('variables-drop')">Variables ▾</span>
+        <div id="variables-drop" class="dropdown-content">
+            <button id="pill-blue-btn" style="width:100%;" onclick="openVariableSettings()">Variable Settings</button>
+        </div>
+
+        <span class="dropdown-toggle" onclick="toggleDropdown('physics-drop')">Physics ▾</span>
+        <div id="physics-drop" class="dropdown-content">
+            <button id="physBtn" style="width:100%; margin-bottom:10px; background:#3498db; color:#fff; border:none; padding:8px 10px; border-radius:12px;">Pause Physics (spacebar)</button>
+            <button id="stopPhysBtn" style="width:100%; margin-bottom:10px; background:#3498db; color:#fff; border:none; padding:8px 10px; border-radius:12px;">Stop Physics</button>
+            <div id="physics-runtime-label" style="font-size:11px; color:#9ad0ff; margin-top:4px; line-height:1.35;">Physics run on local CPU</div>
+            <label>Energy (alpha) <span id="val-alp" class="slider-val">1</span></label>
+            <input type="range" id="alphaSlider" min="0.001" max="1" step="0.001" value="1.0">
+
+            <label>Repulsion (Push) <span id="val-rep" class="slider-val">150</span></label>
+            <input type="range" id="repulsionSlider" min="50" max="800" value="150">
+            
+            <label>Attraction (Distance) <span id="val-att" class="slider-val">70</span></label>
+            <input type="range" id="attractionSlider" min="20" max="400" value="70">
+
+            <label>Max Canvas Drift Distance <span id="val-drift" class="slider-val">7000</span></label>
+            <input type="range" id="driftSlider" min="100" max="10000" step="100" value="7000">
+
+            <label>Cluster by Variable <span id="val-cluster-var" class="slider-val">0</span></label>
+            <input type="range" id="clusterVariableSlider" min="0" max="1" step="0.01" value="0">
+
+            <button id="dragNodesBtn" style="margin-top:15px; background:#666">Drag nodes</button>
+        </div>
+
+        <span class="dropdown-toggle" onclick="toggleDropdown('download-drop')">Download ▾</span>
+        <div id="download-drop" class="dropdown-content">
+            <button id="pill-blue-btn" style="width:100%;" onclick="openDownloadSessionModal()">Download Session</button>
+            <button id="pill-blue-btn" style="width:100%;" onclick="exportCanvas('svg')">Full Canvas (SVG)</button>
+            <button id="pill-blue-btn" style="width:100%;" onclick="exportCanvas('png')">Full Canvas (PNG 8k)</button>
+            <div style="display:flex; align-items:center; gap:8px; margin:10px 0 8px 0; color:#ddd; font-size:0.92em;">
+                <input type="checkbox" id="includeStringScapeLogo" checked style="width:auto; margin:0;">
+                <label for="includeStringScapeLogo" style="margin:0; cursor:pointer;">Include StringScape Logo</label>
+            </div>
+            <button id="drawFrameBtn" class="drawFrame-btn">Draw Frame</button>
+
+            <div id="frame-controls" style="display:none; margin-top:10px; border-top: 1px solid #444; padding-top: 10px;">
+                <label>Aspect Ratio</label>
+                <div class="ratio-grid">
+                    <button class="ratio-btn active" data-ratio="custom">Custom</button>
+                    <button class="ratio-btn" data-ratio="1/1">1:1</button>
+                    <button class="ratio-btn" data-ratio="1.2">6:5</button>
+                    <button class="ratio-btn" data-ratio="1.25">5:4</button>
+                    <button class="ratio-btn" data-ratio="1.33">4:3</button>
+                    <button class="ratio-btn" data-ratio="1.5">3:2</button>
+                    <button class="ratio-btn" data-ratio="2">2:1</button>
+                    <button class="ratio-btn" data-ratio="0.83">5:6</button>
+                    <button class="ratio-btn" data-ratio="0.8">4:5</button>
+                    <button class="ratio-btn" data-ratio="0.75">3:4</button>
+                    <button class="ratio-btn" data-ratio="0.66">2:3</button>
+                    <button class="ratio-btn" data-ratio="0.5">1:2</button>
+                </div>
+
+                <label>Resolution (Longest Edge)</label>
+                <div class="res-grid">
+                    <button class="res-btn" data-res="2048">2k</button>
+                    <button class="res-btn" data-res="4096">4k</button>
+                    <button class="res-btn active" data-res="7680">8k</button>
+                </div>
+
+                <div class="btn-row">
+                    <button id="copyFrameBtn" class="btn-secondary">Copy</button>
+                    <button id="downloadFrameBtn" class="btn-primary">Download</button>
+                </div>
+            </div>
+            <label>If using StringScape for a research paper, a mention of StringScape is not required, but is appreciated. A paper is in preparation. For now, cite:</label>
+            <p style="font-size:0.9em; color:#bbb; font-style: italic; margin-top:5px;">
+                Tregurtha, J., (2026). StringScape: A high-performance open-source web app for visualising STRING data, <a href="https://stringscape.github.io/" target="_blank">https://stringscape.github.io/</a>
+            </p>
+        </div>
+
+        <button onclick="openModal('aboutModal')" style="margin-bottom: auto; background: #444;">About StringScape</button>
+
+    </div>
+</div>
+
+<div id="guideModal" class="modal">
+    <div class="modal-content">
+        <span class="close-modal" onclick="closeModal('guideModal')">&times;</span>
+        <h3>Start Guide</h3>
+        <p>1. Go to <a href="https://string-db.org/" target="_blank">https://string-db.org/</a> → Organisms → Search for your organism or add an organism if not available</p>
+        <p>2. Click ‘Go to download page’ → Download one of the Interaction Data files (I recommend ...protein.physical.links.full...) and one or more of the Accessory Data files (I recommend downloading all except the last three). Unzip and move these files to your desired location</p>
+        <p>3. Open Interaction Data files and one or more of the Accessory Data files in this app</p>
+        <p>4. Click ‘Build Network’</p>
+        <hr style="border:0; border-top:1px solid #555;">
+        <p style="font-size:0.9em; color:#bbb;">
+        <b>App basics:</b><br>
+            The app displays network graphs of nodes (representing proteins) and links/edges (representing connections between proteins, such as physical interactions). The nodes and links have data associated with them in the form of variables. You can change the size or colour of the nodes and links based on these variables. You can also visualise the variables in as graphs (hover over “Full Network” at the bottom to see the view menu). 
+        </p>
+
+        <p style="font-size:0.9em; color:#bbb;">
+            <b>Shortcuts and Hotkeys:</b><br>
+            • Spacebar → Toggle physics<br>
+            • F → Toggle between Full Network and previous view<br>
+            • S → Toggle Selected Nodes view<br>
+            • A or Ctrl+A → Select all<br>
+            • I → Invert selection<br>
+            • + → increases selection to include nodes connected to the currently selected nodes<br>
+            • - → decreases selection (undoing the selection increase)<br>
+            • B → Toggle Brush Select<br>
+            • L → Toggle Lasso Select<br>
+            • Right click → Cancel operation (e.g., turns off brush select if brush select is active)<br>
+            • M → Add (“move”) selection to a collection<br>
+            • G → Toggles grab nodes mode (allows you to click and drag nodes to move them)<br>
+            • Backspace → With your mouse hovered over a slider, value input box, or colour selector, backspace resets it to the default value. <br>
+            • Backspace → With your mouse hovered over the main part of the screen (the canvas), backspace goes back to the previous view (e.g., from a graph view back to the Full Network view)
+        </p>
+
+        <p style="font-size:0.9em; color:#bbb;">
+            <b>Using custom files</b><br>
+            Custom files can be used in this app. For custom link files, the first two columns should list pairs of nodes that are linked/connected. The other columns can contain data on any variables associated with the links.<br><br>
+            For custom node info files, the first column should have the node ID (matching the node IDs in the links file), and the other columns can contain data on any variables associated with the nodes. Files with a hierarchical nature should have one column heading containing the word “parent” and another column heading containing the word “child” with the rows of the columns containing the variable category names. Upload a separate file assigning each network node to a category. <br><br>
+            The app accepts CSV, TSV, Pipe-separated, semicolon-separated, Space-separated, and .h5 files.
+        </p>
+        <button onclick="openModal('aboutModal')" style="margin-bottom: auto; background: #444;">About StringScape</button>
+    </div>
+</div>
+
+<div id="feedbackModal" class="modal">
+    <div class="modal-content">
+        <span class="close-modal" onclick="closeModal('feedbackModal')">&times;</span>
+        <h3>Feedback & Support</h3>
+        <p>Send feedback, suggested additional features or bugs found to <a href="mailto:joel.tregurtha@pg.canterbury.ac.nz">joel.tregurtha@pg.canterbury.ac.nz</a></p>
+    </div>
+</div>
+
+<div id="aboutModal" class="modal">
+    <div class="modal-content">
+        <span class="close-modal" onclick="closeModal('aboutModal')">&times;</span>
+        <h3>About StringScape</h3>
+        <p>Beta version 1.0</p>
+        <p>The StringScape network visualiser app was developed for viewing network data from the <a href="https://string-db.org/" target="_blank">STRING database</a>, but can be used to view any type of network data.</p>
+        <p>This app was developed by Joel Tregurtha as part of a PhD program at the University of Canterbury, New Zealand. PhD funded by The MacDiarmid Institute.</p>
+        <p>The code was generated using AI models, including Gemini, Raptor mini, and Claude.</p>
+        <hr style="border:0; border-top:1px solid #555;">
+        <p>More information on this app can be found here: <a href="#" target="_blank">[blank]</a></p>
+        <p>Video tutorial on how to use this app: <a href="#" target="_blank">[blank]</a></p>
+        <p>This is an open-source project. The source code is available here: <a href="#" target="_blank">[blank]</a></p>
+        <hr style="border:0; border-top:1px solid #555;">
+        <p>I'd love to hear from you! Send feedback, suggested additional features or bugs found to <a href="mailto:joel.tregurtha@pg.canterbury.ac.nz">joel.tregurtha@pg.canterbury.ac.nz</a></p>
+        <p>If using StringScape for a research paper, a mention of StringScape is not required, but is appreciated. A paper is in preparation. For now, cite:</p>
+            <p style="font-size:0.9em; color:#bbb; font-style: italic; font-size:0.9em; margin-top:5px;">
+                Tregurtha, J., (2026). StringScape: A high-performance open-source web app for visualising STRING data, <a href="https://stringscape.github.io/" target="_blank">https://stringscape.github.io/</a>
+            </p>
+    </div>
+</div>
+
+<div id="variablesModal" class="modal">
+    <div class="modal-content" style="max-width: 95vw; width: 1000px; height: calc(100vh - 80px); min-height: 200px;">
+        <span class="close-modal" onclick="closeModal('variablesModal')">&times;</span>
+        <h3>Variable Settings</h3>
+        <p style="font-size:12px; color:#ccc; margin-bottom: 10px;">Set variable labels, type, and split behavior for accessory data.</p>
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
+            <label for="variable-filter" style="color:#ccc; margin:0; white-space:nowrap;">Filter:</label>
+            <input id="variable-filter" type="text" placeholder="Search file, variable, label..." style="flex:1; padding:6px 8px; background:#111; border:1px solid #555; color:#fff; border-radius:6px;">
+        </div>
+        <div id="variables-table-container" style="max-height:460px; overflow:auto; background:#222; padding:0;"></div>
+    </div>
+</div>
+
+<div id="fileViewerModal" class="modal">
+    <div class="modal-content" style="max-width: 95vw; width: 1000px; min-height: 550px;">
+        <span class="close-modal" onclick="closeModal('fileViewerModal')">&times;</span>
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+            <h3 id="file-viewer-title" style="margin:0;">File Viewer</h3>
+            <div id="file-viewer-debug-count" style="font-size:12px; color:#9ad0ff;"></div>
+        </div>
+        <div id="file-viewer-loading">
+            <div id="file-viewer-loading-bar-wrapper"><div id="file-viewer-loading-bar"></div></div>
+        </div>
+        <div id="file-viewer-controls" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;"></div>
+        <div id="file-viewer-content" style="max-height:430px; overflow:auto; background:#111; color:#ddd; padding:10px; border-radius:8px;"></div>
+    </div>
+</div>
+
+<div id="right-panel">
+    <div class="toggle-tab" onclick="document.getElementById('right-panel').classList.toggle('minimized')"><span>▸</span></div>
+    <div id="right-panel-content">
+        <label>Search Protein IDs or Terms</label>
+        <div class="search-container">
+            <input type="text" id="searchInput" placeholder="Search...">
+            <button id="searchBtn">Search</button>
+        </div>
+        <div id="moreToggle" class="Selection-tools-btn" onclick="toggleSearchMore()">Selection Tools ▾</div>
+        <div id="search-more-drop" class="search-more-content">
+            <div class="search-mode-row">
+                <button id="additiveBtn" class="mode-venn-btn" title="Selection Mode: Add" aria-label="Selection mode add">
+                    <span class="venn-mini venn-add"><span class="region"></span></span>
+                </button>
+                <button id="subtractBtn" class="mode-venn-btn" title="Selection Mode: Remove" aria-label="Selection mode remove">
+                    <span class="venn-mini venn-remove"><span class="region"></span></span>
+                </button>
+                <button id="intersectBtn" class="mode-venn-btn" title="Selection Mode: Intersect" aria-label="Selection mode intersect">
+                    <span class="venn-mini venn-and"><span class="region"></span></span>
+                </button>
+            </div>
+            <div class="venn-mini venn-add">
+                <div class="venn-fill"></div>
+            </div>
+            <div class="select-tool-row">
+                <button id="lassoBtn">Lasso Select</button>
+                <button id="brushBtn">Brush Select</button>
+            </div>
+            <label>Restrict search to</label>
+            <select id="searchScope">
+                <option value="all">All</option>
+                <option value="layer">Degrees of Separation</option>
+                <option value="centrality">Centrality</option>
+                <option value="annotation">Annotation length</option>
+                <option value="localization">Protein localisation</option>
+                <option value="size">Protein size</option>
+            </select>
+        </div>
+        <h4 onclick="const lc=document.getElementById('legend-content'); lc.classList.toggle('hidden'); this.textContent = lc.classList.contains('hidden') ? 'Key ▾' : 'Key ▾';" style="cursor:pointer; margin:15px 0 5px 0">Key ▾</h4>
+        <div id="legend-content"></div>
+    </div>
+</div>
+
+<div id="ai-side-panel" aria-label="AI Panel">
+    <div id="ai-panel-header">
+        <button id="ai-new-chat-btn" onclick="aiNewChat()">+ New Chat</button>
+        <div id="ai-header-center"><h1 id="ai-header-title">AI Agent</h1></div>
+        <div id="ai-header-actions">
+            <div style="position: relative;">
+                <button id="ai-menu-btn" type="button" onclick="toggleAiMenu()" title="Menu">⋮</button>
+                <div id="ai-menu-dropdown">
+                    <button onclick="downloadAiChat(); toggleAiMenu();">Download Chat</button>
+                </div>
+            </div>
+            <button id="ai-close-panel-btn" type="button" onclick="toggleAiPanel(false)" aria-label="Close AI panel">&times;</button>
+        </div>
+    </div>
+
+    <div id="ai-top-tools">
+        <div id="ai-top-tool-buttons">
+            <button id="ai-setup-toggle-btn" class="ai-top-toggle-btn" type="button" onclick="toggleAiTopPanel('setup')">Set up Instructions</button>
+            <button id="ai-prompts-toggle-btn" class="ai-top-toggle-btn" type="button" onclick="toggleAiTopPanel('prompts')">Example Prompts</button>
+        </div>
+        <div id="ai-setup-panel" class="ai-top-panel">
+            <div class="ai-setup-subtitle">Connect a local LLM<br>It's easy and free!</div>
+            <ol>
+                <li>Install <a href="https://lmstudio.ai/" target="_blank" rel="noopener noreferrer" style="color:#9ad0ff;">LM Studio ↗</a></li>
+                <li>In LM Studio, download a model that can run locally on your hardware (such as Gemma-4-e2b)</li>
+                <li>In LM Studio, Load the model, then go to the developer tab in the left panel and under Server setting turn on CORS.</li>
+                <li>In LM Studio, toggle on the server (where it says "Status stopped" at the top). Then copy the server URL (where it says "reachable at:") and paste that here:
+                    <div class="ai-url-row">
+                        <span class="ai-url-row-label">Server URL:</span>
+                        <input id="ai-server-url" type="text" placeholder="http://127.0.0.1:1234" oninput="aiToggleConnectColor(this)"
+                               class="flex-1 bg-[#0b0e11] border border-[#30363d] rounded-full px-4 py-1 focus:outline-none focus:border-[#3498db] text-xs">
+                        <button id="ai-connect-btn" onclick="checkAiConnection()" class="pill-btn bg-[#21262d] border border-[#30363d] text-white">CONNECT</button>
+                    </div>
+                </li>
+                <li>All Done! Now chat with the model below about your proteins :)</li>
+            </ol>
+        </div>
+        <div id="ai-prompts-panel" class="ai-top-panel">
+            <button class="ai-example-item" type="button" onclick="loadExamplePrompt(this.textContent)">Explain what these selected proteins do, where they are located in the cell, and how they work together to perform their function.</button>
+            <button class="ai-example-item" type="button" onclick="loadExamplePrompt(this.textContent)">Explain this graph I'm seeing and what I can learn from it.</button>
+            <button class="ai-example-item" type="button" onclick="loadExamplePrompt(this.textContent)">Colour nodes by collection. Then, make collections that contain proteins that match each of these search terms: calcium, magnesium, potassium, iron, zinc, copper, cobalt, nickel, sodium, manganese, molybdenum, electron, and proton.</button>
+            <button class="ai-example-item" type="button" onclick="loadExamplePrompt(this.textContent)">Create a guide on lipid synthesis.</button>
+            <button class="ai-example-item" type="button" onclick="loadExamplePrompt(this.textContent)">When I click "Send" in the AI chat interface, what actually happens in the code?</button>
+        </div>
+    </div>
+
+    <div id="ai-chat-scroll">
+        <div id="ai-status-overlay"><div id="ai-status-pill" class="status-pill status-disconnected">Disconnected</div></div>
+        <div id="ai-chatbox" style="flex: 1;">
+            <div class="ai-chat-disclaimer">As you well know, AI can make mistakes. Please verify its claims for anything important, especially if writing a research paper.</div>
+        </div>
+    </div>
+
+    <div id="ai-input-area" class="relative">
+        <div id="ai-glow-container"><div class="ai-processing-glow"></div></div>
+        <div id="ai-preview-area"></div>
+        <div id="ai-input-controls">
+            <input type="file" id="ai-file-input" accept=".txt,.csv,.tsv,image/*" onchange="aiHandleFile(this)">
+            <button id="ai-file-btn" title="Upload files" onclick="document.getElementById('ai-file-input').click()">+</button>
+            <textarea id="ai-user-input" rows="1" placeholder="Ask AI anything..." oninput="aiAutoExpand(this)"
+                      class="flex-1 bg-[#0d1117] border border-[#30363d] px-4 focus:outline-none focus:border-[#3498db] resize-none text-sm"></textarea>
+            <button id="ai-send-btn" onclick="sendAiMessage()" class="pill-btn bg-[#3498db] text-white h-10 ai-btn-disabled">SEND</button>
+        </div>
+    </div>
+</div>
+
+<div id="view-selector-container">
+    <div id="view-selector-stack">
+        <div id="view-selector-row">
+            <div id="view-selector-box">
+                <span id="current-view-label">Full Network</span>
+                <div id="view-options"></div>
+            </div>
+            <button id="protein-info-toggle-btn" type="button" class="hidden" onclick="openProteinInfoBox()">View Protein Info</button>
+        </div>
+        <div id="protein-info-box" aria-label="Protein information panel">
+            <button id="protein-info-prev-btn" class="protein-nav-btn" type="button" aria-label="Previous protein" onclick="navigateProteinInfo('left')">&lt;</button>
+            <button id="protein-info-next-btn" class="protein-nav-btn" type="button" aria-label="Next protein" onclick="navigateProteinInfo('right')">&gt;</button>
+            <div id="protein-info-header">
+                <div id="protein-info-heading-wrap">
+                    <h4 id="protein-info-heading"></h4>
+                </div>
+                <div id="protein-info-toggle-group">
+                    <button type="button" class="protein-info-mode-btn active" data-protein-mode="annotation" onclick="setProteinInfoMode('annotation')">Annotation</button>
+                    <button type="button" class="protein-info-mode-btn" data-protein-mode="description" onclick="setProteinInfoMode('description')">Description</button>
+                    <button type="button" class="protein-info-mode-btn" data-protein-mode="sequence" onclick="setProteinInfoMode('sequence')">Sequence</button>
+                    <button type="button" class="protein-info-mode-btn" data-protein-mode="structure" onclick="setProteinInfoMode('structure')">Structure</button>
+                    <button type="button" class="protein-info-mode-btn" data-protein-mode="links" onclick="setProteinInfoMode('links')">Links</button>
+                    <button type="button" class="protein-info-mode-btn" data-protein-mode="guide" onclick="setProteinInfoMode('guide')">Guide</button>
+                </div>
+                <div id="protein-info-actions">
+                    <button id="protein-info-explain-btn" type="button" class="protein-info-mode-btn" onclick="explainProteinInSimpleEnglish()">Explain in Simple English</button>
+                    <button id="protein-info-close-btn" type="button" class="protein-info-mode-btn" onclick="closeProteinInfoBox()" aria-label="Close protein info panel">&times;</button>
+                </div>
+            </div>
+            <div id="protein-info-body"></div>
+        </div>
+    </div>
+</div>
+
+<div id="custom-context-menu" style="display:none; position:fixed; z-index:10000; background:#2c2c2c; border:1px solid #555; border-radius:4px; box-shadow: 0 2px 10px rgba(0,0,0,0.5); min-width: 100px;">
+    <div id="rename-option" style="padding: 10px 15px; color:white; font-size:14px; cursor:pointer; transition: background 0.2s;">Rename</div>
+</div>
+
+<div id="right-lower-stack">
+    <button id="ask-ai-btn" type="button" onclick="toggleAiPanel()">Ask AI</button>
+    <div id="info-box">
+        <div class="info-header">
+            <h4 id="info-id" style="margin:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:160px;">No Nodes Selected</h4>
+            <div class="info-controls" id="info-controls">
+                <button id="mind-map-parent-btn" class="action-btn" style="display:none; padding:0 9px; height:31px; align-items:center; justify-content:center;" title="Select Parents of Selected Nodes" onclick="selectMindMapParents(event)">Parent</button>
+                <button id="mind-map-child-btn" class="action-btn" style="display:none; padding:0 9px; height:31px; align-items:center; justify-content:center;" title="Select Children of Selected Nodes" onclick="selectMindMapChildren(event)">Child</button>
+                <button id="mind-map-grow-btn" class="action-btn" style="padding: 0 9px;" title="Expand Selection" onclick="modifySelection(1)">Grow</button>
+                <button id="mind-map-shrink-btn" class="action-btn" style="padding: 0 9px;" title="Undo Selection / Step Back" onclick="modifySelection(-1)">Shrink</button>
+            </div>
+        </div>
+        <div id="info-content" style="font-size:11px; margin-bottom: 5px;">Select Nodes to View Information</div>
+        <button id="node-info-table-btn" class="action-btn" style="margin-top:6px; width:100%; justify-content:center; background:#444 !important; border:none;" onclick="openNodeInfoTable()">Node Info Table</button>
+        <div id="shortest-path-control" style="display:none;">
+            <button id="shortest-path-toggle-btn" class="action-btn" onclick="toggleShortestPathMenu(event)">Shortest Path Tools</button>
+            <div id="shortest-path-menu" aria-label="Shortest path options">
+                <div class="shortest-path-menu-title" style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
+                    <span>Path options</span>
+                    <span id="shortest-path-length-display" style="color:#4caf50; font-size:11px; white-space:nowrap;">Shortest path length: -</span>
+                </div>
+                <div class="shortest-path-menu-actions">
+                    <button id="shortest-path-overlay-btn" class="btn-secondary" onclick="toggleShortestPathOverlay(event)">Show shortest path overlay</button>
+                    <button id="all-shortest-paths-btn" class="btn-secondary" onclick="toggleAllShortestPaths(event)">Show all shortest paths</button>
+                    <button class="btn-secondary" onclick="selectNodesAlongShortestPaths(event)">Select nodes along path(s)</button>
+                </div>
+            </div>
+        </div>
+        <div id="coll-add-btn-container"></div>
+    </div>
+</div>
+
+<div id="node-hover-tooltip" style="visibility:hidden; opacity:0; position:absolute; z-index:9999; pointer-events:auto; background:rgba(30,30,30,0.82); border:none; border-radius:8px; color:#fff; font-size:12px; padding:6px 8px; max-width:min(70vw, 300px); max-height:50vh; overflow:auto; white-space:pre-line; line-height:1.2; box-shadow:0 0 10px rgba(0,0,0,0.45); transition: opacity 0.12s ease-in-out;"> </div>
+
+<div id="nodeInfoTableModal" class="modal">
+    <div class="modal-content">
+        <span class="close-modal" onclick="closeModal('nodeInfoTableModal')">&times;</span>
+        <h3 style="margin-bottom:4px;">Node Info Table</h3>
+        <div id="node-info-table-summary" style="font-size:12px; color:#ccc;">Select Nodes to View Information.</div>
+        <div id="node-info-table-toolbar">
+            <input id="node-info-table-search" type="search" placeholder="Search rows" oninput="handleNodeInfoTableSearch(this.value)">
+            <button class="btn-secondary" onclick="clearNodeInfoTableSearch()">Clear</button>
+        </div>
+        <div id="node-info-table-wrap"></div>
+        <div id="node-info-table-actions">
+            <button class="btn-secondary" onclick="downloadNodeInfoTableCSV()">Download Table</button>
+            <button class="btn-secondary" onclick="copyNodeInfoTableTSV()">Copy Table</button>
+            <button class="btn-secondary" onclick="downloadSelectedFasta()">Download FASTA</button>
+            <button class="btn-secondary" onclick="downloadSelectedNodesJSON()">Download JSON</button>
+        </div>
+    </div>
+</div>
+
+<div id="downloadSessionModal" class="modal" onclick="if (event.target.id === 'downloadSessionModal') closeDownloadSessionModal()">
+    <div class="modal-content" style="max-width:560px;">
+        <span class="close-modal" onclick="closeDownloadSessionModal()">&times;</span>
+        <h3 style="margin-bottom:8px;">Select which session files to download</h3>
+        <div style="display:flex; flex-direction:column; gap:10px; max-height:60vh; overflow:auto; padding-right:4px;">
+            <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="downloadSessionSelectAll"> Select All</label>
+            <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" class="download-session-option" id="downloadSessionUploadedFiles"> Uploaded files</label>
+            <!-- <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" class="download-session-option" id="downloadSessionNodePositions"> Current node positions <span style="color:#bbb;">[a JSON file of the node positions in the Full Network]</span></label> -->
+            <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" class="download-session-option" id="downloadSessionCollections"> Collections <span style="color:#bbb;">[a collections.txt text file listing the name of each collection and listing the nodes in each collection]</span></label>
+            <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" class="download-session-option" id="downloadSessionSelectedNodes"> Currently selected nodes <span style="color:#bbb;">[a currently_selected_nodes.txt text file with a list of the currently selected nodes]</span></label>
+            <!-- <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" class="download-session-option" id="downloadSessionChangedSettings"> Changed settings <span style="color:#bbb;">[a changed_settings.txt file listing any changes made to the default settings]</span></label> -->
+        </div>
+        <div style="margin-top:14px; display:flex; flex-direction:column; gap:8px;">
+            <label style="display:flex; flex-direction:column; gap:6px; color:#ddd; font-size:13px;">
+                Folder name
+                <input type="text" id="downloadSessionFolderName" style="padding:8px 10px; border-radius:8px; border:1px solid #666; background:#222; color:#fff;" />
+            </label>
+            <button class="btn-secondary" style="width:100%;" onclick="downloadSessionFiles()">Download</button>
+        </div>
+    </div>
+</div>
+
+<div id="node-info-pdb-overlay" onclick="if (event.target.id === 'node-info-pdb-overlay') closeNodeInfoPdbOverlay()">
+    <div class="node-info-pdb-panel">
+        <div class="node-info-pdb-head">
+            <div>
+                <h4 class="node-info-pdb-title" id="node-info-pdb-title">Protein Data Bank links</h4>
+                <div class="node-info-pdb-subtitle" id="node-info-pdb-subtitle"></div>
+            </div>
+            <button class="btn-secondary" onclick="closeNodeInfoPdbOverlay()">Close</button>
+        </div>
+        <div class="node-info-pdb-links" id="node-info-pdb-links"></div>
+        <div class="node-info-pdb-empty" id="node-info-pdb-empty" style="display:none;">No PDB links are available for this protein.</div>
+    </div>
+</div>
+
+<div id="offscreen-indicator">Node this way ➔</div>
+
+<div id="venn-controls">
+    <button id="venn-recenter-btn" type="button">Recentre</button>
+    <div id="venn-controls-grid">
+        <div>
+            <label for="vennCollectionA">Collection A</label>
+            <select id="vennCollectionA"></select>
+        </div>
+        <div>
+            <label for="vennCollectionB">Collection B</label>
+            <select id="vennCollectionB"></select>
+        </div>
+        <div id="venn-download-wrap">
+            <label for="venn-download-png">Download</label>
+            <button id="venn-download-png" type="button">↓ PNG</button>
+        </div>
+    </div>
+</div>
+
+<div id="scatter-controls">
+    <button id="scatter-recenter-btn" type="button">Recentre</button>
+    <div id="scatter-controls-grid">
+        <div>
+            <label for="scatterXVariable">X Variable</label>
+            <select id="scatterXVariable"></select>
+        </div>
+        <div>
+            <label for="scatterYVariable">Y Variable</label>
+            <select id="scatterYVariable"></select>
+        </div>
+    </div>
+</div>
+
+<div id="mind-map-controls">
+    <div id="mind-map-controls-grid">
+        <div>
+            <label for="mindMapSourceFile">Parent-Child File</label>
+            <select id="mindMapSourceFile"></select>
+        </div>
+        <div>
+            <label for="mindMapInfoFile">Node Info File</label>
+            <select id="mindMapInfoFile"></select>
+        </div>
+        <div>
+            <label for="mindMapLabelField">Node ID / Label</label>
+            <select id="mindMapLabelField"></select>
+        </div>
+        <div>
+            <label for="mindMapClusterSizeToggle">Colour by cluster size</label>
+            <button id="mindMapClusterSizeToggle" type="button">Off</button>
+        </div>
+    </div>
+</div>
+
+<div id="embeddings-view">
+    <div id="embeddings-plot"></div>
+    <div id="embeddings-empty"></div>
+</div>
+
+<div id="embeddings-controls">
+    <div id="embeddings-controls-grid">
+        <div>
+            <label>Embedding Type</label>
+            <div id="embeddingTypeToggle" class="link-direction-toggle">
+                <button id="embeddingTypeSequence" type="button" class="link-direction-option">Sequence</button>
+                <button id="embeddingTypeNetwork" type="button" class="link-direction-option">Network</button>
+            </div>
+        </div>
+        <div>
+            <label>UMAP</label>
+            <div id="embeddingDimensionToggle" class="link-direction-toggle">
+                <button id="embeddingDim2d" type="button" class="link-direction-option">2D</button>
+                <button id="embeddingDim3d" type="button" class="link-direction-option">3D</button>
+            </div>
+        </div>
+        <div>
+            <button id="embeddings-download-png" type="button">Download PNG</button>
+        </div>
+    </div>
+</div>
+
+<canvas id="network"></canvas>
+
+<!-- Welcome Overlay -->
+<div id="welcome-overlay" class="welcome-overlay">
+    <div class="welcome-center">
+        <div class="welcome-heading">Welcome to</div>
+        
+        <!-- StringScape Logo (Enlarged) -->
+        <div class="welcome-logo-container">
+            <div class="welcome-logo">
+                <div style="position: absolute; width: 28px; height: 4.5px; background: #888; transform: rotate(-30deg); top: 35px; left: 36px;"></div>
+                <div style="position: absolute; width: 28px; height: 4.5px; background: #888; transform: rotate(90deg); right: -4px; top: 38px;"></div>
+                <div style="position: absolute; width: 21px; height: 21px; background: #3498db; border: 2px solid #6dc5ff; border-radius: 50%; left: 27px; top: 30px; z-index: 2;"></div>
+                <div style="position: absolute; width: 21px; height: 21px; background: #3498db; border: 2px solid #6dc5ff; border-radius: 50%; right: -2px; top: 15px; z-index: 2;"></div>
+                <div style="position: absolute; width: 21px; height: 21px; background: #3498db; border: 2px solid #6dc5ff; border-radius: 50%; right: -2px; bottom: 5px; z-index: 2;"></div>
+            </div>
+            <div class="welcome-app-name">StringScape</div>
+        </div>
+    </div>
+    
+    <!-- Left Panel Annotations -->
+    <div class="welcome-left-annotations">
+        <div class="welcome-annotation" style="top: 1px;">
+            <svg class="welcome-arrow hand-drawn" viewBox="0 0 150 80" preserveAspectRatio="none">
+                <path d="M 150 30 Q 100 15 50 25" stroke="#3498db" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="3,2"/>
+                <polygon points="40,25 50,20 50,30" fill="#3498db"/>
+            </svg>
+            <div class="welcome-label">Start Guide</div>
+        </div>
+        
+        <div class="welcome-annotation" style="top: 180px;">
+            <svg class="welcome-arrow hand-drawn" viewBox="0 0 150 80" preserveAspectRatio="none">
+                <path d="M 150 40 Q 100 38 55 42" stroke="#3498db" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="3,2"/>
+                <polygon points="48,42 58,37 58,47" fill="#3498db"/>
+            </svg>
+            <div class="welcome-label">Upload Files</div>
+        </div>
+        
+        <div class="welcome-annotation" style="top: 430px;">
+            <svg class="welcome-arrow hand-drawn" viewBox="0 0 150 80" preserveAspectRatio="none">
+                <path d="M 150 40 Q 100 42 50 73" stroke="#3498db" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="3,2"/>
+                <polygon points="40,78 48,68 50,78" fill="#3498db"/>
+            </svg>
+            <div class="welcome-label">Settings</div>
+        </div>
+    </div>
+    
+    <!-- Right Panel Annotations -->
+    <div class="welcome-right-top-annotations">
+        <div class="welcome-annotation" style="top: 50px;">
+            <svg class="welcome-arrow hand-drawn" viewBox="0 0 150 80" preserveAspectRatio="none">
+                <path d="M 0 40 Q 50 38 100 35" stroke="#3498db" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="3,2"/>
+                <polygon points="110,35 100,30 100,40" fill="#3498db"/>
+            </svg>
+            <div class="welcome-label">Search</div>
+        </div>
+        
+        <div class="welcome-annotation" style="top: 100px;">
+            <svg class="welcome-arrow hand-drawn" viewBox="0 0 150 80" preserveAspectRatio="none">
+                <path d="M 0 40 Q 50 38 70 42" stroke="#3498db" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="3,2"/>
+                <polygon points="80,42 70,37 70,47" fill="#3498db"/>
+            </svg>
+            <div class="welcome-label">Selection Tools</div>
+        </div>
+        
+        <div class="welcome-annotation" style="top: 150px;">
+            <svg class="welcome-arrow hand-drawn" viewBox="0 0 150 80" preserveAspectRatio="none">
+                <path d="M 0 43 Q 50 45 100 41" stroke="#3498db" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="3,2"/>
+                <polygon points="110,41 100,36 100,46" fill="#3498db"/>
+            </svg>
+            <div class="welcome-label">Key</div>
+        </div>
+    </div>
+
+    <div class="welcome-right-bottom-annotations">
+        <div class="welcome-annotation" style="top: 740px">
+            <svg class="welcome-arrow hand-drawn" viewBox="0 0 150 80" preserveAspectRatio="none">
+                <path d="M 0 40 Q 50 38 130 43" stroke="#3498db" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="3,2"/>
+                <polygon points="140,44 130,38 130,48" fill="#3498db"/>
+            </svg>
+            <div class="welcome-label">AI</div>
+        </div>
+        
+        <div class="welcome-annotation" style="top: 820px;">
+            <svg class="welcome-arrow hand-drawn" viewBox="0 0 150 80" preserveAspectRatio="none">
+                <path d="M 0 40 Q 50 38 100 42" stroke="#3498db" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="3,2"/>
+                <polygon points="110,42 100,37 100,47" fill="#3498db"/>
+            </svg>
+            <div class="welcome-label">Node Info</div>
+        </div>
+    </div>
+    
+    <!-- Bottom View Menu Annotation -->
+    <div class="welcome-bottom-annotation">
+        <svg class="welcome-arrow hand-drawn" viewBox="0 0 150 80" preserveAspectRatio="none">
+            <path d="M 75 10 Q 72 40 75 80" stroke="#3498db" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="3,2"/>
+            <polygon points="75,80 63,70 85,70" fill="#3498db"/>
+        </svg>
+        <div class="welcome-label" style="margin-top: 8px;">View Menu</div>
+    </div>
+</div>
+
+<script src="script.js"></script>
+
+</body>
+</html>
