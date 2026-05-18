@@ -261,6 +261,7 @@
     let proteinInfoMolstarLoadPromise = null;
     let proteinInfoMolstarViewer = null;
     let proteinInfoMolstarBackgroundObserver = null;
+    let proteinInfoZoomHotkeyState = null;
     
     // Guide-related variables
     let currentGuide = null; // { title, pages: [{ pageNumber, selectNodes, circleNodes, setText, text }] }
@@ -3448,8 +3449,8 @@ self.onmessage = async (event) => {
         const active = embeddingDataByType[embeddingViewType] || null;
         if (!active) {
             emptyEl.textContent = embeddingViewType === 'network'
-                ? 'Upload [taxonID].protein.network.embeddings.[version_number].h5 in Accessory Data to view a UMAP plot.'
-                : 'Upload [taxonID].protein.sequence.embeddings.[version_number].h5 in Accessory Data to view a UMAP plot.';
+                ? 'Upload [taxonID].protein.network.embeddings.[version_number].h5 in Accessory Data to view a UMAP plot. Note that the STRING database does not store .h5 files for prokaryotes.'
+                : 'Upload [taxonID].protein.sequence.embeddings.[version_number].h5 in Accessory Data to view a UMAP plot. Note that the STRING database does not store .h5 files for prokaryotes.';
             emptyEl.style.display = 'block';
             await Plotly.purge(plotEl);
             embeddingPlotReady = false;
@@ -4852,6 +4853,9 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
                 mindMapTransform = e.transform;
             } else {
                 transform = e.transform;
+                if (proteinInfoZoomHotkeyState && e.sourceEvent) {
+                    proteinInfoZoomHotkeyState.invalidated = true;
+                }
                 if (physicsEnabled && transform.k >= 1.0) {
                     togglePhysics(false, 'auto-zoom');
                 }
@@ -8832,6 +8836,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     function zoomToProteinNode(nodeId) {
+        if (proteinInfoZoomHotkeyState) {
+            proteinInfoZoomHotkeyState.invalidated = true;
+        }
         const node = getProteinInfoZoomNode(nodeId);
         if (!node) return;
         const width = window.innerWidth;
@@ -8845,6 +8852,48 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             .scale(targetScale)
             .translate(-node.x, -node.y);
         d3.select(canvas).transition().duration(800).call(zoomBehavior.transform, focusTransform);
+        return focusTransform;
+    }
+
+    function toggleProteinZoomHotkey() {
+        const selectedIds = Array.from(getEffectiveSelectedNodesSet() || new Set());
+        if (!selectedIds.length) return;
+
+        if (proteinInfoZoomHotkeyState && !proteinInfoZoomHotkeyState.invalidated) {
+            const previousTransform = proteinInfoZoomHotkeyState.previousTransform;
+            proteinInfoZoomHotkeyState = null;
+            if (previousTransform) {
+                d3.select(canvas).interrupt().transition().duration(500).call(zoomBehavior.transform, previousTransform);
+            }
+            return;
+        }
+
+        const previousTransform = d3.zoomIdentity
+            .translate(transform?.x || 0, transform?.y || 0)
+            .scale(transform?.k || 1);
+
+        const nodesToZoom = selectedIds.map(id => {
+            // Prefer the global nodeMap entry (full-network coordinates)
+            if (nodeMap.has(id)) return nodeMap.get(id);
+            // Fallback to nodes array
+            const globalNode = nodes.find(n => n.id === id);
+            if (globalNode) return globalNode;
+            // Last resort: use activeSubData nodes (subnetwork coordinates)
+            if (activeSubData?.nodes) return activeSubData.nodes.find(n => n.id === id);
+            return null;
+        }).filter(Boolean);
+        if (!nodesToZoom.length) return;
+
+        const targetTransform = fitNodesInView(nodesToZoom, 50);
+        if (!targetTransform) return;
+
+        d3.select(canvas).transition().duration(600).call(zoomBehavior.transform, targetTransform);
+
+        proteinInfoZoomHotkeyState = {
+            previousTransform,
+            targetTransform,
+            invalidated: false
+        };
     }
 
     function selectProteinInfoNode(nodeId, clickedSide = null, preservePreviousSide = false) {
@@ -11043,6 +11092,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         if (e.code === 'Space' || key === ' ') {
             e.preventDefault();
             togglePhysics(!physicsEnabled, 'spacebar');
+            return;
+        }
+        if (key === 'z') {
+            e.preventDefault();
+            toggleProteinZoomHotkey();
             return;
         }
         if (key === 'b') { toggleBrush(); return; }
@@ -14549,14 +14603,14 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 range,
                 mode
             );
-                const displayParts = String(displayMode).split('::');
-                const file = displayParts[1], variable = displayParts[2];
-                const childMode = displayParts[3] === 'child' ? displayParts[4] : null;
+
+            const container = legend.append("div").attr("class", "gradient-container");
+            const bar = container.append("div")
+                .attr("class", "gradient-bar")
+                .style("background", `linear-gradient(to right, ${d3.range(0, 1.1, 0.1).map(t => interp(clamp01(t))).join(', ')})`);
             
             container.append("div").attr("class", "range-overlay").style("left", "0").style("width", "0%");
             container.append("div").attr("class", "range-overlay").style("right", "0").style("width", "0%");
-                const valueField = childMode && cfg.splitBase ? cfg.splitBase : variable;
-                const allValues = activeNodes.map(d => accessoryVariableValues[file]?.[valueField]?.get(d.id)).filter(v => v !== undefined && v !== null && String(v).trim() !== '');
             const labels = legend.append("div").attr("class", "grad-labels");
             // FIX 1: Use formatVal for the text labels
             labels.append("span").text(formatVal(range[0] || 0)); 
@@ -14698,8 +14752,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             const childMode = modeParts[3] === 'child' ? modeParts[4] : null;
             const cfg = variableConfigs.find(c => c.fileName === file && c.variable === variable);
             if (!cfg) return;
+            const valueField = childMode && cfg.splitBase ? cfg.splitBase : variable;
 
-            const allValues = activeNodes.map(d => accessoryVariableValues[file]?.[variable]?.get(d.id)).filter(v => v !== undefined && v !== null && String(v).trim() !== '');
+            const allValues = activeNodes.map(d => accessoryVariableValues[file]?.[valueField]?.get(d.id)).filter(v => v !== undefined && v !== null && String(v).trim() !== '');
             const numericValues = allValues.map(v => +v).filter(v => !isNaN(v));
             const uniqueValues = Array.from(new Set(allValues));
             const sortedValues = [...uniqueValues].sort((a,b) => {
@@ -15648,6 +15703,63 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         updateSizesAndColors();
     }
 
+    function isGzipName(fileName) {
+        return /\.gz$/i.test(String(fileName || ''));
+    }
+
+    function stripGzipSuffix(fileName) {
+        return String(fileName || '').replace(/\.gz$/i, '');
+    }
+
+    async function decompressGzipBuffer(arrayBuffer) {
+        if (typeof DecompressionStream !== 'function') {
+            throw new Error('This browser does not support gzip decompression (DecompressionStream unavailable).');
+        }
+        const sourceStream = new Blob([arrayBuffer]).stream();
+        const decompressedStream = sourceStream.pipeThrough(new DecompressionStream('gzip'));
+        return await new Response(decompressedStream).arrayBuffer();
+    }
+
+    async function normalizeUploadedFile(file) {
+        if (!file || !file.name) return file;
+        if (!isGzipName(file.name)) return file;
+
+        const rawBuffer = await file.arrayBuffer();
+        const decompressedBuffer = await decompressGzipBuffer(rawBuffer);
+        const normalizedName = stripGzipSuffix(file.name);
+
+        return new File([decompressedBuffer], normalizedName, {
+            type: file.type || 'application/octet-stream',
+            lastModified: Date.now()
+        });
+    }
+
+    async function fetchExampleDatasetFiles() {
+        const apiUrl = 'https://api.github.com/repos/JoelTre/StringScape/contents/examples/E.%20coli%20K-12';
+        const response = await fetch(apiUrl, {
+            headers: { Accept: 'application/vnd.github+json' }
+        });
+        if (!response.ok) {
+            throw new Error(`Failed to list example dataset files (${response.status})`);
+        }
+
+        const entries = await response.json();
+        if (!Array.isArray(entries)) return [];
+
+        const fileEntries = entries.filter(entry => entry && entry.type === 'file' && entry.download_url);
+        const downloadedFiles = [];
+        for (const entry of fileEntries) {
+            const fileResponse = await fetch(entry.download_url);
+            if (!fileResponse.ok) {
+                throw new Error(`Failed to download example file: ${entry.name}`);
+            }
+            const fileBuffer = await fileResponse.arrayBuffer();
+            downloadedFiles.push(new File([fileBuffer], entry.name, { type: 'application/octet-stream' }));
+        }
+
+        return downloadedFiles;
+    }
+
     async function processInteractionFiles(files) {
         const targetFiles = Array.from(files || []);
         if (!targetFiles.length) return;
@@ -15658,7 +15770,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
         for (let i = 0; i < targetFiles.length; i++) {
-            const file = targetFiles[i];
+            const file = await normalizeUploadedFile(targetFiles[i]);
             const text = await file.text();
             uploadedFileViewerData[file.name] = { text };
             uploadedInteractionFiles[file.name] = text;
@@ -15680,6 +15792,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
         let processed = 0;
         for (let file of targetFiles) {
+            file = await normalizeUploadedFile(file);
             const embeddingKind = getEmbeddingKindFromFileName(file.name);
             if (embeddingKind) {
                 const payload = await parseEmbeddingFileInWorker(file, embeddingKind);
@@ -15744,6 +15857,37 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         }
     };
 
+    // Load example files (add code below)
+    const loadExampleBtnEl = document.getElementById('loadExampleBtn');
+    if (loadExampleBtnEl) {
+        loadExampleBtnEl.onclick = async () => {
+            closeModal('guideModal');
+            const originalLabel = loadExampleBtnEl.textContent;
+            loadExampleBtnEl.disabled = true;
+            loadExampleBtnEl.textContent = 'Loading example...';
+            try {
+                const exampleFiles = await fetchExampleDatasetFiles();
+                const linkFiles = exampleFiles.filter(file => file.name.toLowerCase().includes('link'));
+                const accessoryFiles = exampleFiles.filter(file => !file.name.toLowerCase().includes('link'));
+
+                if (linkFiles.length > 0) {
+                    await processInteractionFiles(linkFiles);
+                }
+                if (accessoryFiles.length > 0) {
+                    await processAccessoryFiles(accessoryFiles);
+                }
+
+                await applyUploadedSessionFiles();
+            } catch (error) {
+                console.error('Failed to load example dataset', error);
+                alert('Failed to load the example dataset. Please try again.');
+            } finally {
+                loadExampleBtnEl.textContent = originalLabel;
+                loadExampleBtnEl.disabled = false;
+            }
+        };
+    }
+
     const interactionInputEl = document.getElementById('fileInput');
     const accessoryInputEl = document.getElementById('infoInput');
     if (interactionInputEl) interactionInputEl.onchange = window.handleInteractionUploadChange;
@@ -15785,6 +15929,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     document.getElementById('startBtn').onclick = async () => {
         try {
+            closeWelcomeOverlay();
             clearFullNetworkPostBuildCooldown();
             if (currentViewId !== 'base') {
                 switchView('base');
