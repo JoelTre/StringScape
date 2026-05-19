@@ -393,6 +393,25 @@
     let aiStopMessagePending = false;
     let aiSetupPanelOpen = true;
     let aiPromptsPanelOpen = false;
+    const AI_CHAT_HISTORY_STORAGE_KEY = 'stringscape_ai_chat_history_v1';
+    const AI_SCRIPT_HISTORY_STORAGE_KEY = 'stringscape_ai_script_history_v1';
+    const AI_PYTHON_CONSOLE_SYSTEM_PROMPT = 'You are a Python script generator for StringScape. Return only Python code that can run in Pyodide. Do not include markdown code fences. Use app_data directly (already injected). If the user wants app actions, include tool_call("ToolName", {"arg":"value"}) lines in the script. Keep scripts concise and safe. If you have any questions write them as comments in the code (e.g. # Question: ...).';
+    const AI_PYTHON_SCRIPT_INSTRUCTIONS_TEXT = `You can write Python scripts that run inside StringScape using Pyodide.\n\nAvailable data:\n- app_data["nodes"]: list of node objects\n- app_data["links"]: list of links\n- app_data["python_variables"]: ready-to-use variable arrays\n- app_data["colour_nodes_by_variables"] and app_data["current_colour_mode"]\n\nImportant:\n- Do not import app_data. It is already available.\n- For variable stats, use values from app_data["python_variables"] rather than scanning app_data["nodes"].\n- Use print(...) to show output.\n\nTool calls inside scripts:\n- You can perform app actions with lines such as:\n  tool_call("Change_node_colouring", {"variable_name": "size"})\n  tool_call("Change_view", {"view_name": "selected"})\n- These tool_call lines are executed by StringScape before Python execution.\n- Available tools match the AI tools (for example Search_and_select, Change_node_colouring, Change_view, Save_to_collection, etc.).`;
+    const AI_EXAMPLE_SCRIPTS = [
+        `# Summary of selected nodes by centrality\nvals = app_data["python_variables"].get("centrality", [])\nclean = [float(v) for v in vals if v is not None and str(v).strip() != ""]\nprint("Selected centrality values:", len(clean))\nif clean:\n    print("Mean:", sum(clean) / len(clean))`,
+        `# Change the app state with tool calls\ntool_call("Change_view", {"view_name": "selected"})\ntool_call("Change_node_colouring", {"variable_name": "centrality"})\nprint("Switched to selected view and colored by centrality.")`,
+        `# Top values from protein size\nvals = app_data["python_variables"].get("size", [])\nclean = [float(v) for v in vals if v is not None and str(v).strip() != ""]\nclean.sort(reverse=True)\nprint("Top 10 sizes:")\nfor v in clean[:10]:\n    print(v)`
+    ];
+    let aiChatHistoryRecords = [];
+    let aiScriptHistoryRecords = [];
+    let aiActiveChatId = null;
+    let aiActiveScriptId = null;
+    let aiHistoryPanelOpen = false;
+    let aiEditingChatId = null;
+    let aiPanelMode = 'agent';
+    let aiPythonPromptHistory = [];
+    let aiExamplePanelAgentHtml = '';
+    const aiChatManualTitleIds = new Set();
 
     // This function toggles the visibility of the AI panel and updates the UI accordingly. It also triggers a redraw of the canvas and updates controls based on the current view to ensure everything is positioned correctly with the new panel state.
     function toggleAiPanel(forceState) {
@@ -427,6 +446,7 @@
             const askBtn = document.getElementById('ask-ai-btn');
             if (askBtn) askBtn.textContent = nextOpen ? 'Close AI' : 'Ask AI';
         } catch (e) { /* ignore */ }
+        aiRefreshFloatingConsoleButton();
     }
 
     // This function updates the state of the AI send button based on whether the AI is currently processing a request and whether it is connected. It changes the button text, styling, and disabled state accordingly to provide feedback to the user about the AI's status.
@@ -482,12 +502,799 @@
         if (promptsBtn) promptsBtn.classList.toggle('active', aiPromptsPanelOpen);
     }
 
+    function aiRenderExamplePanel() {
+        const container = document.getElementById('ai-example-panel-content');
+        if (!container) return;
+        if (aiPanelMode !== 'python') {
+            container.innerHTML = aiExamplePanelAgentHtml || container.innerHTML;
+            return;
+        }
+        container.innerHTML = '';
+        AI_EXAMPLE_SCRIPTS.forEach(script => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'ai-example-item';
+            btn.textContent = script;
+            btn.addEventListener('click', () => loadExamplePrompt(script));
+            container.appendChild(btn);
+        });
+    }
+
+    function closeAiModeDropdown() {
+        const dropdown = document.getElementById('ai-mode-dropdown');
+        if (dropdown) dropdown.classList.remove('open');
+    }
+
+    function toggleAiModeDropdown() {
+        const dropdown = document.getElementById('ai-mode-dropdown');
+        if (!dropdown) return;
+        dropdown.classList.toggle('open');
+    }
+
+    function aiRefreshPanelModeUi() {
+        const title = document.getElementById('ai-header-title');
+        const newBtn = document.getElementById('ai-new-chat-btn');
+        const downloadBtn = document.getElementById('ai-download-menu-btn');
+        const historyBtn = document.getElementById('ai-history-toggle-btn');
+        const promptsBtn = document.getElementById('ai-prompts-toggle-btn');
+        const fileBtn = document.getElementById('ai-file-btn');
+        const preview = document.getElementById('ai-preview-area');
+        const chatScroll = document.getElementById('ai-chat-scroll');
+        const pythonConsole = document.getElementById('ai-python-console');
+        const input = document.getElementById('ai-user-input');
+        const statusOverlay = document.getElementById('ai-status-overlay');
+        const agentModeOption = document.getElementById('ai-mode-agent-option');
+        const pythonModeOption = document.getElementById('ai-mode-python-option');
+
+        const isPython = aiPanelMode === 'python';
+
+        if (title) title.textContent = isPython ? 'Python Console ▾' : 'AI Agent ▾';
+        if (newBtn) newBtn.textContent = isPython ? '+ New Script' : '+ New Chat';
+        if (downloadBtn) downloadBtn.textContent = isPython ? 'Download Script' : 'Download Chat';
+        if (historyBtn) historyBtn.textContent = isPython ? 'Script History' : 'Chat History';
+        if (promptsBtn) promptsBtn.textContent = isPython ? 'Example Scripts' : 'Example Prompts';
+        if (chatScroll) chatScroll.style.display = isPython ? 'none' : 'flex';
+        if (pythonConsole) pythonConsole.style.display = isPython ? 'block' : 'none';
+        if (preview) preview.style.display = isPython ? 'none' : 'flex';
+        if (fileBtn) fileBtn.style.display = isPython ? 'none' : 'inline-block';
+        if (statusOverlay) statusOverlay.style.display = isPython ? 'none' : 'block';
+        if (input) input.placeholder = isPython ? 'Describe what you want the script to do...' : 'Ask AI anything...';
+        if (agentModeOption) agentModeOption.classList.toggle('active', !isPython);
+        if (pythonModeOption) pythonModeOption.classList.toggle('active', isPython);
+
+        const instructionsBody = document.getElementById('ai-python-instructions-body');
+        if (instructionsBody) instructionsBody.textContent = aiBuildPythonInstructionsText();
+        aiRenderExamplePanel();
+
+        aiRefreshFloatingConsoleButton();
+        aiRefreshAskAiButton();
+    }
+
+    function setAiPanelMode(mode) {
+        if (mode !== 'agent' && mode !== 'python') return;
+        if (aiPanelMode === mode) {
+            closeAiModeDropdown();
+            return;
+        }
+        if (aiPanelMode === 'agent') {
+            aiArchiveCurrentChat(false);
+        } else {
+            aiArchiveCurrentScript(false);
+        }
+        aiPanelMode = mode;
+        aiHistoryPanelOpen = false;
+        aiEditingChatId = null;
+        aiPromptsPanelOpen = false;
+        aiSetupPanelOpen = (mode === 'agent') ? aiSetupPanelOpen : false;
+        refreshAiTopPanels(false);
+        aiRefreshPanelModeUi();
+        aiRenderChatHistory();
+        closeAiModeDropdown();
+    }
+
+    function openPythonInstructionsBox() {
+        const box = document.getElementById('ai-python-instructions-box');
+        const body = document.getElementById('ai-python-instructions-body');
+        if (body) body.textContent = aiBuildPythonInstructionsText();
+        if (box) box.classList.add('open');
+    }
+
+    function closePythonInstructionsBox() {
+        const box = document.getElementById('ai-python-instructions-box');
+        if (box) box.classList.remove('open');
+    }
+
+    async function copyPythonInstructions() {
+        try {
+            await navigator.clipboard.writeText(aiBuildPythonInstructionsText());
+        } catch (error) {
+            console.warn('Could not copy Python instructions', error);
+        }
+    }
+
+    function aiFormatToolParameters(toolDefinition) {
+        const parameters = toolDefinition?.function?.parameters;
+        if (!parameters || !parameters.properties) return 'none';
+        const required = new Set(parameters.required || []);
+        return Object.entries(parameters.properties).map(([name, schema]) => {
+            const parts = [];
+            parts.push(name + (required.has(name) ? ' (required)' : ''));
+            if (schema?.type) parts.push(schema.type);
+            if (schema?.description) parts.push(schema.description);
+            return parts.join(': ');
+        }).join('; ');
+    }
+
+    function aiBuildPythonInstructionsText() {
+        const lines = [];
+        lines.push('You can write Python scripts that run inside StringScape using Pyodide.');
+        lines.push('');
+        lines.push('These instructions can be given to any AI along with a description of what you want the script to do.');
+        lines.push('');
+        lines.push('Available data:');
+        lines.push('- app_data["nodes"]: list of node objects');
+        lines.push('- app_data["links"]: list of links');
+        lines.push('- app_data["python_variables"]: ready-to-use variable arrays');
+        lines.push('- app_data["colour_nodes_by_variables"] and app_data["current_colour_mode"]');
+        lines.push('');
+        lines.push('Important:');
+        lines.push('- Do not import app_data. It is already available.');
+        lines.push('- For variable stats, use values from app_data["python_variables"] rather than scanning app_data["nodes"].');
+        lines.push('- Use print(...) to show output.');
+        lines.push('');
+        lines.push('Tool calls inside scripts:');
+        lines.push('- Write tool calls as lines such as tool_call("Change_node_colouring", {"variable_name": "size"}).');
+        lines.push('- These tool_call lines are executed by StringScape before Python execution.');
+        lines.push('- Available tools:');
+        aiTools.forEach(toolEntry => {
+            const tool = toolEntry?.function || {};
+            lines.push(`  - ${tool.name}: ${tool.description || 'No description provided.'}`);
+            const params = aiFormatToolParameters(toolEntry);
+            if (params && params !== 'none') lines.push(`    Parameters: ${params}`);
+        });
+        return lines.join('\n');
+    }
+
+    function aiRefreshFloatingConsoleButton() {
+        const button = document.getElementById('ai-python-console-btn');
+        if (!button) return;
+        if (document.body.classList.contains('ai-panel-open') && aiPanelMode === 'python') {
+            button.textContent = 'Close Console';
+        } else {
+            button.textContent = 'Python Console';
+        }
+    }
+
+    function aiRefreshAskAiButton() {
+        const button = document.getElementById('ask-ai-btn');
+        if (!button) return;
+        if (!document.body.classList.contains('ai-panel-open')) {
+            button.textContent = 'Ask AI';
+            button.onclick = () => {
+                toggleAiPanel(true);
+                setAiPanelMode('agent');
+                aiRefreshAskAiButton();
+            };
+            return;
+        }
+        if (aiPanelMode === 'python') {
+            button.textContent = 'Ask AI';
+            button.onclick = () => {
+                setAiPanelMode('agent');
+                aiRefreshAskAiButton();
+            };
+            return;
+        }
+        button.textContent = 'Close AI';
+        button.onclick = () => {
+            toggleAiPanel(false);
+            aiRefreshAskAiButton();
+        };
+    }
+
+    function togglePythonConsoleMode() {
+        if (document.body.classList.contains('ai-panel-open') && aiPanelMode === 'python') {
+            toggleAiPanel(false);
+            aiRefreshFloatingConsoleButton();
+            aiRefreshAskAiButton();
+            return;
+        }
+        if (!document.body.classList.contains('ai-panel-open')) {
+            toggleAiPanel(true);
+        }
+        setAiPanelMode('python');
+        aiRefreshFloatingConsoleButton();
+        aiRefreshAskAiButton();
+    }
+
+    function aiCloseHistoryPanel() {
+        aiHistoryPanelOpen = false;
+        aiEditingChatId = null;
+        aiRenderChatHistory();
+    }
+
+    function aiCloseSetupAndPromptsPanels() {
+        aiSetupPanelOpen = false;
+        aiPromptsPanelOpen = false;
+        refreshAiTopPanels(false);
+    }
+
+    function aiSafeClone(value) {
+        if (value === null || value === undefined) return value;
+        if (typeof structuredClone === 'function') {
+            try {
+                return structuredClone(value);
+            } catch (error) {
+            }
+        }
+        return JSON.parse(JSON.stringify(value));
+    }
+
+    function aiGetMessageText(content) {
+        if (Array.isArray(content)) {
+            return content.map(part => {
+                if (part?.type === 'text') return part.text || '';
+                if (part?.type === 'image_url') return '[Image attachment]';
+                return '';
+            }).filter(Boolean).join(' ').trim();
+        }
+        return String(content || '').trim();
+    }
+
+    function aiBuildChatSummaryText(record) {
+        const lines = [];
+        (record?.messages || []).forEach(message => {
+            if (message?.role !== 'user' && message?.role !== 'assistant') return;
+            const text = aiGetMessageText(message.content);
+            if (!text) return;
+            lines.push(`${message.role === 'user' ? 'User' : 'Assistant'}: ${text}`);
+        });
+        return lines.join('\n\n').slice(0, 6000);
+    }
+
+    function aiCleanChatTitle(title) {
+        return String(title || '')
+            .replace(/^[-"'`\s]+|[-"'`\s]+$/g, '')
+            .replace(/\s+/g, ' ')
+            .replace(/[\r\n]+/g, ' ')
+            .trim();
+    }
+
+    function aiFallbackChatTitle(record) {
+        const firstUser = (record?.messages || []).find(message => message?.role === 'user');
+        const firstUserText = aiCleanChatTitle(aiGetMessageText(firstUser?.content));
+        if (firstUserText) return firstUserText.slice(0, 48);
+        const titleSource = aiCleanChatTitle(aiBuildChatSummaryText(record));
+        if (titleSource) return titleSource.slice(0, 48);
+        return `Chat ${new Date(record?.updatedAt || Date.now()).toLocaleDateString()}`;
+    }
+
+    function aiLoadSavedChats() {
+        const hydrateRecords = (rawRecords) => (Array.isArray(rawRecords) ? rawRecords : [])
+            .filter(record => record && typeof record === 'object')
+            .map(record => ({
+                id: record.id || `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                title: aiCleanChatTitle(record.title) || 'Untitled Chat',
+                createdAt: Number(record.createdAt) || Date.now(),
+                updatedAt: Number(record.updatedAt) || Number(record.createdAt) || Date.now(),
+                messages: Array.isArray(record.messages) ? record.messages.map(message => aiSafeClone(message)) : [],
+                transcript: Array.isArray(record.transcript) ? record.transcript.map(entry => aiSafeClone(entry)) : [],
+                script: typeof record.script === 'string' ? record.script : '',
+                manualTitle: Boolean(record.manualTitle)
+            }))
+            .sort((left, right) => (right.updatedAt || 0) - (left.updatedAt || 0));
+
+        try {
+            const raw = localStorage.getItem(AI_CHAT_HISTORY_STORAGE_KEY);
+            const parsed = raw ? JSON.parse(raw) : [];
+            aiChatHistoryRecords = hydrateRecords(parsed);
+        } catch (error) {
+            aiChatHistoryRecords = [];
+        }
+
+        try {
+            const raw = localStorage.getItem(AI_SCRIPT_HISTORY_STORAGE_KEY);
+            const parsed = raw ? JSON.parse(raw) : [];
+            aiScriptHistoryRecords = hydrateRecords(parsed);
+        } catch (error) {
+            aiScriptHistoryRecords = [];
+        }
+    }
+
+    function aiPersistSavedChats(mode = aiPanelMode) {
+        const storageKey = mode === 'python' ? AI_SCRIPT_HISTORY_STORAGE_KEY : AI_CHAT_HISTORY_STORAGE_KEY;
+        const records = mode === 'python' ? aiScriptHistoryRecords : aiChatHistoryRecords;
+        try {
+            localStorage.setItem(storageKey, JSON.stringify(records));
+        } catch (error) {
+            console.warn('Could not save AI chat history', error);
+        }
+    }
+
+    function aiUpsertSavedChat(record, mode = aiPanelMode) {
+        if (!record) return null;
+        const records = mode === 'python' ? aiScriptHistoryRecords : aiChatHistoryRecords;
+        const safeRecord = {
+            id: record.id || `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            title: aiCleanChatTitle(record.title) || 'Untitled Chat',
+            createdAt: Number(record.createdAt) || Date.now(),
+            updatedAt: Number(record.updatedAt) || Date.now(),
+            messages: Array.isArray(record.messages) ? record.messages.map(message => aiSafeClone(message)) : [],
+            transcript: Array.isArray(record.transcript) ? record.transcript.map(entry => aiSafeClone(entry)) : [],
+            script: typeof record.script === 'string' ? record.script : '',
+            manualTitle: Boolean(record.manualTitle)
+        };
+        const index = records.findIndex(existing => existing.id === safeRecord.id);
+        if (index >= 0) {
+            records[index] = safeRecord;
+        } else {
+            records.unshift(safeRecord);
+        }
+        records.sort((left, right) => (right.updatedAt || 0) - (left.updatedAt || 0));
+        aiPersistSavedChats(mode);
+        return safeRecord;
+    }
+
+    function aiUpdateSavedChatTitle(chatId, title) {
+        if (!chatId) return;
+        const records = aiPanelMode === 'python' ? aiScriptHistoryRecords : aiChatHistoryRecords;
+        const record = records.find(entry => entry.id === chatId);
+        if (!record) return;
+        record.title = aiCleanChatTitle(title) || record.title || 'Untitled Chat';
+        if (aiPanelMode !== 'python') {
+            aiChatManualTitleIds.add(chatId);
+            record.manualTitle = true;
+        }
+        record.updatedAt = Date.now();
+        records.sort((left, right) => (right.updatedAt || 0) - (left.updatedAt || 0));
+        aiPersistSavedChats(aiPanelMode);
+        aiRenderChatHistory();
+        aiRefreshCurrentScriptTitle();
+    }
+
+    function aiRenderChatHistory() {
+        const panel = document.getElementById('ai-history-panel');
+        const button = document.getElementById('ai-history-toggle-btn');
+        const records = aiPanelMode === 'python' ? aiScriptHistoryRecords : aiChatHistoryRecords;
+        const activeId = aiPanelMode === 'python' ? aiActiveScriptId : aiActiveChatId;
+        if (button) button.classList.toggle('active', aiHistoryPanelOpen);
+        if (!panel) return;
+        panel.style.display = aiHistoryPanelOpen ? 'block' : 'none';
+        panel.innerHTML = '';
+
+        if (!aiHistoryPanelOpen) return;
+
+        if (!records.length) {
+            const empty = document.createElement('div');
+            empty.className = 'ai-history-empty';
+            empty.textContent = aiPanelMode === 'python' ? 'No previous scripts yet.' : 'No previous chats yet.';
+            panel.appendChild(empty);
+            return;
+        }
+
+        const list = document.createElement('div');
+        list.className = 'ai-history-list';
+
+        records.forEach(record => {
+            const item = document.createElement('div');
+            item.className = 'ai-history-item';
+            item.dataset.chatId = record.id;
+            if (record.id === activeId) item.classList.add('active');
+            if (record.id === aiEditingChatId) item.classList.add('editing');
+
+            const main = document.createElement('button');
+            main.type = 'button';
+            main.className = 'ai-history-item-main';
+            main.addEventListener('click', () => {
+                if (aiPanelMode === 'python') aiLoadScriptFromHistory(record.id);
+                else aiLoadChatFromHistory(record.id);
+            });
+
+            const titleRow = document.createElement('div');
+            titleRow.className = 'ai-history-title-row';
+
+            const content = document.createElement('div');
+            content.className = 'ai-history-item-content';
+
+            const title = document.createElement('div');
+            title.className = 'ai-history-item-title';
+            title.textContent = record.title || 'Untitled Chat';
+
+            const titleInput = document.createElement('input');
+            titleInput.type = 'text';
+            titleInput.className = 'ai-history-title-input';
+            titleInput.value = record.title || 'Untitled Chat';
+            titleInput.addEventListener('click', event => event.stopPropagation());
+            titleInput.addEventListener('keydown', event => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    aiCommitChatTitleEdit(record.id, titleInput.value);
+                } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    aiCancelChatTitleEdit();
+                }
+            });
+            titleInput.addEventListener('blur', () => aiCommitChatTitleEdit(record.id, titleInput.value));
+
+            const editBtn = document.createElement('button');
+            editBtn.type = 'button';
+            editBtn.className = 'ai-history-edit-btn';
+            editBtn.textContent = '✎';
+            editBtn.title = 'Edit chat title';
+            editBtn.addEventListener('click', (event) => {
+                event.stopPropagation();
+                aiBeginChatTitleEdit(record.id);
+            });
+
+            const deleteBtn = document.createElement('button');
+            deleteBtn.type = 'button';
+            deleteBtn.className = 'ai-history-delete-btn';
+            deleteBtn.textContent = 'X';
+            deleteBtn.title = aiPanelMode === 'python' ? 'Delete script' : 'Delete chat';
+            deleteBtn.addEventListener('click', (event) => {
+                event.stopPropagation();
+                if (aiPanelMode === 'python') aiDeleteScriptFromHistory(record.id);
+                else aiDeleteChatFromHistory(record.id);
+            });
+
+            titleRow.appendChild(title);
+            titleRow.appendChild(titleInput);
+
+            const meta = document.createElement('div');
+            meta.className = 'ai-history-item-meta';
+            meta.textContent = new Date(record.updatedAt || record.createdAt || Date.now()).toLocaleString();
+
+            content.appendChild(titleRow);
+            content.appendChild(meta);
+
+            const actions = document.createElement('div');
+            actions.className = 'ai-history-item-actions';
+            actions.appendChild(editBtn);
+            actions.appendChild(deleteBtn);
+
+            main.appendChild(content);
+            main.appendChild(actions);
+
+            item.appendChild(main);
+            list.appendChild(item);
+        });
+
+        panel.appendChild(list);
+    }
+
+    function aiToggleHistoryPanel() {
+        if (!aiHistoryPanelOpen) {
+            aiCloseSetupAndPromptsPanels();
+        }
+        aiHistoryPanelOpen = !aiHistoryPanelOpen;
+        if (!aiHistoryPanelOpen) aiEditingChatId = null;
+        aiRenderChatHistory();
+    }
+
+    function aiBeginChatTitleEdit(chatId) {
+        aiCloseSetupAndPromptsPanels();
+        aiHistoryPanelOpen = true;
+        aiEditingChatId = chatId;
+        aiRenderChatHistory();
+        const input = document.querySelector(`.ai-history-item[data-chat-id="${CSS.escape(chatId)}"] .ai-history-title-input`);
+        if (input) {
+            input.focus();
+            input.select();
+        }
+    }
+
+    function aiCancelChatTitleEdit() {
+        aiEditingChatId = null;
+        aiRenderChatHistory();
+    }
+
+    function aiCommitChatTitleEdit(chatId, nextTitle) {
+        const cleaned = aiCleanChatTitle(nextTitle) || 'Untitled Chat';
+        aiUpdateSavedChatTitle(chatId, cleaned);
+        aiEditingChatId = null;
+        aiRenderChatHistory();
+    }
+
+    function aiSetChatboxEmptyState() {
+        const chatbox = document.getElementById('ai-chatbox');
+        if (!chatbox) return;
+        chatbox.innerHTML = '';
+        const disclaimer = document.createElement('div');
+        disclaimer.className = 'ai-chat-disclaimer';
+        disclaimer.textContent = 'As you well know, AI can make mistakes. Please verify its claims for anything important, especially if writing a research paper.';
+        chatbox.appendChild(disclaimer);
+    }
+
+    function aiBuildCurrentChatRecord() {
+        const hasContent = aiChatHistory.length > 0 || aiChatTranscript.length > 0;
+        if (!hasContent) return null;
+        const now = Date.now();
+        const existing = aiChatHistoryRecords.find(record => record.id === aiActiveChatId);
+        const chatId = aiActiveChatId || `chat-${now}-${Math.random().toString(36).slice(2, 8)}`;
+        if (!aiActiveChatId) aiActiveChatId = chatId;
+        return {
+            id: chatId,
+            title: existing?.title || '',
+            createdAt: existing?.createdAt || now,
+            updatedAt: now,
+            messages: aiSafeClone(aiChatHistory) || [],
+            transcript: aiSafeClone(aiChatTranscript) || []
+        };
+    }
+
+    function aiArchiveCurrentChat(generateTitle = false) {
+        const record = aiBuildCurrentChatRecord();
+        if (!record) return null;
+        const existingRecord = aiChatHistoryRecords.find(entry => entry.id === record.id);
+        const wasManuallyTitled = aiChatManualTitleIds.has(record.id) || Boolean(existingRecord?.manualTitle);
+        const storedRecord = aiUpsertSavedChat({
+            ...record,
+            title: wasManuallyTitled ? (existingRecord?.title || record.title || 'Untitled Chat') : aiFallbackChatTitle(record),
+            manualTitle: wasManuallyTitled || aiChatManualTitleIds.has(record.id)
+        }, 'agent');
+        if (storedRecord && generateTitle && !wasManuallyTitled) {
+            void aiGenerateChatTitle(storedRecord, 'agent');
+        }
+        return storedRecord;
+    }
+
+    function aiBuildCurrentScriptRecord() {
+        const scriptEditor = document.getElementById('ai-python-script-editor');
+        const scriptText = scriptEditor ? String(scriptEditor.value || '').trim() : '';
+        const hasContent = aiPythonPromptHistory.length > 0 || scriptText.length > 0;
+        if (!hasContent) return null;
+        const now = Date.now();
+        const existing = aiScriptHistoryRecords.find(record => record.id === aiActiveScriptId);
+        const scriptId = aiActiveScriptId || `script-${now}-${Math.random().toString(36).slice(2, 8)}`;
+        if (!aiActiveScriptId) aiActiveScriptId = scriptId;
+        const messages = aiSafeClone(aiPythonPromptHistory) || [];
+        if (scriptText) messages.push({ role: 'user', content: `Current script:\n${scriptText}` });
+        return {
+            id: scriptId,
+            title: existing?.title || '',
+            createdAt: existing?.createdAt || now,
+            updatedAt: now,
+            messages,
+            transcript: [],
+            script: scriptText
+        };
+    }
+
+    function aiArchiveCurrentScript(generateTitle = false) {
+        const record = aiBuildCurrentScriptRecord();
+        if (!record) return null;
+        const storedRecord = aiUpsertSavedChat({
+            ...record,
+            title: aiFallbackChatTitle(record)
+        }, 'python');
+        if (storedRecord && generateTitle) {
+            void aiGenerateChatTitle(storedRecord, 'python');
+        }
+        return storedRecord;
+    }
+
+    async function aiGenerateChatTitle(record, mode = 'agent') {
+        if (!record) return;
+        const summary = aiBuildChatSummaryText(record);
+        if (!summary) return;
+        const urlInput = document.getElementById('ai-server-url');
+        const resolvedUrl = urlInput ? (urlInput.value.trim() || urlInput.placeholder.trim()) : '';
+        if (!resolvedUrl) return;
+        try {
+            const response = await fetch(resolvedUrl.replace(/\/$/, '') + '/v1/chat/completions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    messages: [
+                        {
+                            role: 'system',
+                            content: 'Create a short title of 2 to 6 words for this chat. Return only the title, with no quotes, punctuation, or extra commentary.'
+                        },
+                        {
+                            role: 'user',
+                            content: summary
+                        }
+                    ],
+                    temperature: 0.2,
+                    max_tokens: 20
+                })
+            });
+            if (!response.ok) return;
+            const data = await response.json();
+            const rawTitle = (() => {
+                const choice = data?.choices?.[0];
+                if (!choice) return '';
+                if (typeof choice?.message?.content === 'string') return choice.message.content;
+                if (Array.isArray(choice?.message?.content)) {
+                    return choice.message.content
+                        .map(part => typeof part?.text === 'string' ? part.text : '')
+                        .join(' ')
+                        .trim();
+                }
+                if (typeof choice?.text === 'string') return choice.text;
+                return '';
+            })();
+            const title = aiCleanChatTitle(rawTitle);
+            if (!title) return;
+            const records = mode === 'python' ? aiScriptHistoryRecords : aiChatHistoryRecords;
+            const stored = records.find(entry => entry.id === record.id);
+            if (!stored) return;
+            stored.title = title;
+            stored.updatedAt = Date.now();
+            records.sort((left, right) => (right.updatedAt || 0) - (left.updatedAt || 0));
+            aiPersistSavedChats(mode);
+            aiRenderChatHistory();
+        } catch (error) {
+            console.warn('Could not generate AI chat title', error);
+        }
+    }
+
+    function aiRestoreChatFromRecord(record) {
+        const chatbox = document.getElementById('ai-chatbox');
+        if (!chatbox) return;
+        chatbox.innerHTML = '';
+        if (!record || (!Array.isArray(record.transcript) && !Array.isArray(record.messages))) {
+            aiSetChatboxEmptyState();
+            return;
+        }
+
+        const transcript = Array.isArray(record.transcript) ? record.transcript : [];
+        let pendingAttachments = [];
+        let hasRenderedContent = false;
+
+        if (transcript.length > 0) {
+            transcript.forEach(entry => {
+                if (!entry) return;
+                if (entry.kind === 'stringscape') {
+                    return;
+                }
+                if (entry.kind === 'attached_files') {
+                    pendingAttachments = (entry.items || []).map(item => aiCloneAttachment(item));
+                    return;
+                }
+                if (entry.kind === 'user') {
+                    aiAppendMessage(entry.content || '', 'user', pendingAttachments);
+                    pendingAttachments = [];
+                    hasRenderedContent = true;
+                    return;
+                }
+                if (entry.kind === 'ai_thoughts') {
+                    aiAddThoughtLog(entry.seconds || 0, entry.content || '');
+                    hasRenderedContent = true;
+                    return;
+                }
+                if (entry.kind === 'ai') {
+                    aiAppendMessage(entry.content || '', 'ai');
+                    hasRenderedContent = true;
+                    return;
+                }
+                if (entry.kind === 'tool_call') {
+                    const toolName = entry.name ? String(entry.name).replace(/_/g, ' ') : 'tool';
+                    aiAddLog(`Used ${toolName}`);
+                    hasRenderedContent = true;
+                    return;
+                }
+                if (entry.kind === 'tool') {
+                    const toolName = entry.name ? String(entry.name).replace(/_/g, ' ') : 'tool';
+                    aiAddLog(`Tool response from ${toolName}`);
+                    hasRenderedContent = true;
+                }
+            });
+        }
+
+        if (!hasRenderedContent) {
+            aiSetChatboxEmptyState();
+        }
+        document.getElementById('ai-chat-scroll').scrollTop = document.getElementById('ai-chat-scroll').scrollHeight;
+    }
+
+    function aiLoadChatFromHistory(chatId) {
+        const record = aiChatHistoryRecords.find(entry => entry.id === chatId);
+        if (!record) return;
+        if (aiActiveChatId !== record.id) {
+            aiArchiveCurrentChat(false);
+        }
+        cancelAiProcessing(false);
+        aiActiveChatId = record.id;
+        aiChatHistory.length = 0;
+        (Array.isArray(record.messages) ? record.messages : []).forEach(message => aiChatHistory.push(aiSafeClone(message)));
+        aiChatTranscript.length = 0;
+        (Array.isArray(record.transcript) ? record.transcript : []).forEach(entry => aiChatTranscript.push(aiSafeClone(entry)));
+        aiAttachedItems = [];
+        aiLastSentSelectedNodes = new Set();
+        aiSelectedNodesAttachmentSuppressed = false;
+        aiCloseHistoryPanel();
+        const input = document.getElementById('ai-user-input');
+        if (input) {
+            input.value = '';
+            input.style.height = 'auto';
+            aiAutoExpand(input);
+        }
+        document.getElementById('ai-preview-area').innerHTML = '';
+        aiRestoreChatFromRecord(record);
+        aiRenderChatHistory();
+    }
+
+    function aiDeleteChatFromHistory(chatId) {
+        const index = aiChatHistoryRecords.findIndex(entry => entry.id === chatId);
+        if (index < 0) return;
+        const wasActive = aiActiveChatId === chatId;
+        aiChatHistoryRecords.splice(index, 1);
+        aiPersistSavedChats();
+        if (wasActive) {
+            aiActiveChatId = null;
+            aiChatHistory.length = 0;
+            aiChatTranscript.length = 0;
+            aiAttachedItems = [];
+            aiLastSentSelectedNodes = new Set();
+            aiSelectedNodesAttachmentSuppressed = false;
+            const input = document.getElementById('ai-user-input');
+            if (input) {
+                input.value = '';
+                input.style.height = 'auto';
+                aiAutoExpand(input);
+            }
+            document.getElementById('ai-preview-area').innerHTML = '';
+            aiSetChatboxEmptyState();
+        }
+        if (aiEditingChatId === chatId) aiEditingChatId = null;
+        aiRenderChatHistory();
+    }
+
+    function aiLoadScriptFromHistory(scriptId) {
+        const record = aiScriptHistoryRecords.find(entry => entry.id === scriptId);
+        if (!record) return;
+        if (aiActiveScriptId !== record.id) {
+            aiArchiveCurrentScript(false);
+        }
+        cancelAiProcessing(false);
+        aiActiveScriptId = record.id;
+        aiPythonPromptHistory = Array.isArray(record.messages) ? record.messages.map(message => aiSafeClone(message)).filter(msg => msg?.role === 'user' || msg?.role === 'assistant') : [];
+        const scriptEditor = document.getElementById('ai-python-script-editor');
+        if (scriptEditor) scriptEditor.value = String(record.script || '');
+        aiActiveScriptId = record.id;
+        const runOut = document.getElementById('ai-python-run-output');
+        if (runOut) runOut.textContent = '';
+        aiCloseHistoryPanel();
+        aiRefreshCurrentScriptTitle();
+        aiRenderChatHistory();
+    }
+
+    function aiDeleteScriptFromHistory(scriptId) {
+        const index = aiScriptHistoryRecords.findIndex(entry => entry.id === scriptId);
+        if (index < 0) return;
+        const wasActive = aiActiveScriptId === scriptId;
+        aiScriptHistoryRecords.splice(index, 1);
+        aiPersistSavedChats('python');
+        if (wasActive) {
+            aiActiveScriptId = null;
+            aiPythonPromptHistory = [];
+            const scriptEditor = document.getElementById('ai-python-script-editor');
+            if (scriptEditor) scriptEditor.value = '';
+            const runOut = document.getElementById('ai-python-run-output');
+            if (runOut) runOut.textContent = '';
+        }
+        if (aiEditingChatId === scriptId) aiEditingChatId = null;
+        aiRefreshCurrentScriptTitle();
+        aiRenderChatHistory();
+    }
+
+    function aiRefreshCurrentScriptTitle() {
+        const titleEl = document.getElementById('ai-current-script-title');
+        if (!titleEl) return;
+        const record = aiScriptHistoryRecords.find(entry => entry.id === aiActiveScriptId);
+        const title = record?.title || 'Untitled Script';
+        titleEl.textContent = `Current Script: ${title}`;
+    }
+
     // This function toggles the visibility of the AI top panels (setup and prompts) based on user interaction. It ensures that only one panel is open at a time and updates the UI accordingly by calling refreshAiTopPanels.
     function toggleAiTopPanel(panel) {
         if (panel === 'setup') {
+            aiCloseHistoryPanel();
             aiSetupPanelOpen = !aiSetupPanelOpen;
             if (aiSetupPanelOpen) aiPromptsPanelOpen = false;
         } else if (panel === 'prompts') {
+            aiCloseHistoryPanel();
             aiPromptsPanelOpen = !aiPromptsPanelOpen;
             if (aiPromptsPanelOpen) aiSetupPanelOpen = false;
         }
@@ -496,6 +1303,19 @@
 
     // This function loads an example prompt into the AI user input field.
     function loadExamplePrompt(promptText) {
+        if (aiPanelMode === 'python') {
+            const scriptEditor = document.getElementById('ai-python-script-editor');
+            const currentScript = String(scriptEditor?.value || '').trim();
+            if (currentScript) {
+                aiNewChat();
+            }
+            if (scriptEditor) scriptEditor.value = String(promptText || '').trim();
+            aiPromptsPanelOpen = false;
+            refreshAiTopPanels(false);
+            aiRefreshPanelModeUi();
+            aiRefreshCurrentScriptTitle();
+            return;
+        }
         const input = document.getElementById('ai-user-input');
         if (!input) return;
         input.value = String(promptText || '').trim();
@@ -539,8 +1359,28 @@
 
     // This function starts a new AI chat session by clearing the chat history, resetting attached items, and clearing the user input field. It also automatically attaches the currently selected nodes as a file to the new chat session, providing context for the AI to work with.
     function aiNewChat() {
+        if (aiPanelMode === 'python') {
+            cancelAiProcessing(false);
+            aiArchiveCurrentScript(true);
+            aiActiveScriptId = null;
+            aiPythonPromptHistory = [];
+            const scriptEditor = document.getElementById('ai-python-script-editor');
+            if (scriptEditor) scriptEditor.value = '';
+            const runOut = document.getElementById('ai-python-run-output');
+            if (runOut) runOut.textContent = '';
+            const input = document.getElementById('ai-user-input');
+            if (input) {
+                input.value = '';
+                input.style.height = 'auto';
+                aiAutoExpand(input);
+            }
+            aiRenderChatHistory();
+            aiRefreshCurrentScriptTitle();
+            return;
+        }
         cancelAiProcessing(false);
-        document.getElementById('ai-chatbox').innerHTML = '';
+        aiArchiveCurrentChat(true);
+        aiActiveChatId = null;
         aiChatHistory.length = 0;
         aiChatTranscript.length = 0;
         aiAttachedItems = [];
@@ -558,6 +1398,8 @@
             aiSyncSelectedNodesAttachment();
             aiLastSentSelectedNodes = new Set(Array.from(getEffectiveSelectedNodesSet() || new Set()));
         } catch (e) { console.warn('Could not attach selected nodes on new chat', e); }
+        aiSetChatboxEmptyState();
+        aiRenderChatHistory();
     }
 
     // This function toggles the AI three dots menu dropdown menu in the chat panel
@@ -590,6 +1432,32 @@
 
     // This function downloads the AI chat history as a text file. It formats the chat messages, including handling different content types (text and image URLs), and creates a downloadable file with a timestamped name. 
     function downloadAiChat() {
+        if (aiPanelMode === 'python') {
+            const scriptEditor = document.getElementById('ai-python-script-editor');
+            const scriptText = scriptEditor ? String(scriptEditor.value || '') : '';
+            const lines = [];
+            lines.push('### Python Script');
+            lines.push(scriptText || '(No script)');
+            lines.push('');
+            if (aiPythonPromptHistory.length > 0) {
+                lines.push('### Script Request History');
+                aiPythonPromptHistory.forEach(msg => {
+                    const role = msg.role === 'assistant' ? 'AI' : 'User';
+                    lines.push(`${role}: ${String(msg.content || '')}`);
+                    lines.push('');
+                });
+            }
+            const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `StringScape_Python_Script_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.txt`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            return;
+        }
         const lines = [];
         const pushBlock = (heading, bodyLines) => {
             lines.push(`### ${heading}:`);
@@ -1630,8 +2498,161 @@ def clean_numeric(values):
         isImg ? reader.readAsDataURL(file) : reader.readAsText(file);
     }
 
+    function aiStripCodeFence(text) {
+        const raw = String(text || '').trim();
+        const fenced = raw.match(/^```(?:python)?\s*([\s\S]*?)\s*```$/i);
+        return fenced ? fenced[1].trim() : raw;
+    }
+
+    function aiParseScriptToolCalls(scriptText) {
+        const toolCalls = [];
+        const pythonLines = [];
+        const lines = String(scriptText || '').split('\n');
+        const parseLine = (line) => {
+            const trimmed = line.trim();
+            const match = trimmed.match(/^tool_call\(\s*['\"]([^'\"]+)['\"]\s*,\s*(\{[\s\S]*\})\s*\)\s*$/);
+            if (!match) return false;
+            const toolName = String(match[1] || '').trim();
+            if (!toolName) return false;
+            let args = {};
+            try {
+                args = JSON.parse(match[2]);
+            } catch (error) {
+                throw new Error(`Invalid JSON args in tool_call: ${line}`);
+            }
+            toolCalls.push({ toolName, args });
+            return true;
+        };
+
+        lines.forEach(line => {
+            if (!parseLine(line)) pythonLines.push(line);
+        });
+
+        return {
+            toolCalls,
+            pythonCode: pythonLines.join('\n').trim()
+        };
+    }
+
+    async function runPythonConsoleScript() {
+        const editor = document.getElementById('ai-python-script-editor');
+        const output = document.getElementById('ai-python-run-output');
+        if (!editor) return;
+        const scriptText = String(editor.value || '').trim();
+        if (!scriptText) {
+            if (output) output.textContent = 'No script to run.';
+            return;
+        }
+        try {
+            if (output) output.textContent = 'Running script...';
+            const parsed = aiParseScriptToolCalls(scriptText);
+            const responses = [];
+            for (const call of parsed.toolCalls) {
+                const res = await aiExecuteToolCall(call.toolName, call.args || {});
+                responses.push(`tool_call(${call.toolName}): ${typeof res === 'string' ? res : JSON.stringify(res)}`);
+            }
+
+            let pythonResult = '';
+            if (parsed.pythonCode) {
+                pythonResult = await aiExecuteToolCall('Run_python_logic', { code: parsed.pythonCode });
+            }
+
+            const blocks = [];
+            if (responses.length > 0) blocks.push(responses.join('\n'));
+            if (String(pythonResult || '').trim()) blocks.push(String(pythonResult));
+            const finalResult = blocks.length ? blocks.join('\n\n') : 'Script completed.';
+            if (output) output.textContent = finalResult;
+
+            if (/Python Error:\s*Traceback/i.test(finalResult)) {
+                const input = document.getElementById('ai-user-input');
+                if (input) {
+                    input.value = `${finalResult}\nThe script returns this error. Edit the script to fix.`;
+                    aiAutoExpand(input);
+                }
+            }
+
+            aiArchiveCurrentScript(false);
+            aiRenderChatHistory();
+        } catch (error) {
+            const errorText = `Python Error: ${error?.message || error}`;
+            if (output) output.textContent = errorText;
+            const input = document.getElementById('ai-user-input');
+            if (input) {
+                input.value = `${errorText}\nThe script returns this error. Edit the script to fix.`;
+                aiAutoExpand(input);
+            }
+        }
+    }
+
+    async function sendPythonScriptAssistMessage() {
+        const input = document.getElementById('ai-user-input');
+        const text = String(input?.value || '').trim();
+        let url = document.getElementById('ai-server-url').value.trim() || document.getElementById('ai-server-url').placeholder.trim();
+        const output = document.getElementById('ai-python-run-output');
+        if (!text || !url) return;
+
+        if (input) {
+            input.value = '';
+            input.style.height = 'auto';
+            aiAutoExpand(input);
+        }
+
+        aiIsProcessing = true;
+        aiProcessingAbortController = new AbortController();
+        updateAiSendButton();
+        if (output) output.textContent = 'Generating script...';
+
+        try {
+            aiPythonPromptHistory.push({ role: 'user', content: text });
+            const endpoint = url.replace(/\/$/, '') + '/v1/chat/completions';
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                signal: aiProcessingAbortController.signal,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    messages: [
+                        { role: 'system', content: AI_PYTHON_CONSOLE_SYSTEM_PROMPT },
+                        { role: 'system', content: AI_PYTHON_SCRIPT_INSTRUCTIONS_TEXT },
+                        ...aiPythonPromptHistory
+                    ],
+                    temperature: 0.2
+                })
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            const content = aiStripCodeFence(data?.choices?.[0]?.message?.content || '');
+            aiPythonPromptHistory.push({ role: 'assistant', content });
+
+            const editor = document.getElementById('ai-python-script-editor');
+            if (editor && content) editor.value = content;
+            if (output) output.textContent = content ? 'Script generated and pasted into editor.' : 'No script text was returned.';
+            if (input) {
+                input.value = '';
+                input.style.height = 'auto';
+                aiAutoExpand(input);
+            }
+
+            aiArchiveCurrentScript(false);
+            aiRenderChatHistory();
+        } catch (error) {
+            if (output) output.textContent = `Error generating script: ${error?.message || error}`;
+        } finally {
+            aiIsProcessing = false;
+            aiProcessingAbortController = null;
+            updateAiSendButton();
+        }
+    }
+
     // This function is called when the user clicks the "Send" button in the AI chat interface. It checks if the AI is currently processing a message, and if so, it cancels the processing. Otherwise, it gathers the user's input text and any attached items, prepares a message for sending to the AI, and handles special cases like auto-attaching selected nodes or guide instructions based on the user's message content.
     async function sendAiMessage() {
+        if (aiPanelMode === 'python') {
+            if (aiIsProcessing) {
+                cancelAiProcessing(true);
+                return;
+            }
+            await sendPythonScriptAssistMessage();
+            return;
+        }
         if (aiIsProcessing) {
             cancelAiProcessing(true);
             return;
@@ -1993,6 +3014,7 @@ def clean_numeric(values):
             aiIsProcessing = false;
             aiProcessingAbortController = null;
             aiStopMessagePending = false;
+            aiArchiveCurrentChat(false);
             updateAiSendButton();
         }
     }
@@ -2002,9 +3024,14 @@ def clean_numeric(values):
         const input = document.getElementById('ai-user-input');
         const serverInput = document.getElementById('ai-server-url');
         const connectBtn = document.getElementById('ai-connect-btn');
+        const examplePanel = document.getElementById('ai-example-panel-content');
+        if (examplePanel && !aiExamplePanelAgentHtml) aiExamplePanelAgentHtml = examplePanel.innerHTML;
         
         if (input) {
             input.addEventListener('input', () => aiAutoExpand(input));
+            input.addEventListener('focus', () => {
+                if (aiHistoryPanelOpen) aiCloseHistoryPanel();
+            });
             input.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
@@ -2025,6 +3052,13 @@ def clean_numeric(values):
                 toggleAiPanel(false);
             }
         });
+        document.addEventListener('click', (e) => {
+            const title = document.getElementById('ai-header-title');
+            const dropdown = document.getElementById('ai-mode-dropdown');
+            if (!dropdown || !title) return;
+            if (title.contains(e.target) || dropdown.contains(e.target)) return;
+            dropdown.classList.remove('open');
+        });
         // Initialize status
         const pill = document.getElementById('ai-status-pill');
         if (pill) {
@@ -2032,7 +3066,13 @@ def clean_numeric(values):
             pill.className = "status-pill status-disconnected";
         }
         refreshAiTopPanels(true);
+        aiLoadSavedChats();
+        aiRefreshPanelModeUi();
+        aiRefreshCurrentScriptTitle();
+        aiRenderChatHistory();
+        aiRefreshAskAiButton();
         updateAiSendButton();
+        aiRefreshFloatingConsoleButton();
     }
 
     // End of AI tool and chat interface functions
@@ -2408,7 +3448,7 @@ self.onmessage = async (event) => {
         const aliasList = aliasData?.get?.(nodeId) || [];
         let count = 0;
         for (const aliasEntry of aliasList) {
-            if (aliasEntry?.source === 'UniProt_DR_PDB') {
+            if (aliasEntry?.source === 'UniProt_DR_PDB' || aliasEntry?.source === 'Ensembl_PDB') {
                 count++;
             }
         }
@@ -8198,7 +9238,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 if (!existing.pubmedGeneId) existing.pubmedGeneId = alias;
                 if (!existing.geneId) existing.geneId = alias;
             }
-            if (source === 'UniProt_DR_PDB') appendUniqueValue(existing.pdbIds, alias);
+            if (source === 'UniProt_DR_PDB' || source === 'Ensembl_PDB') appendUniqueValue(existing.pdbIds, alias);
             
             // Also populate aliasData for cross-reference queries
             if (!aliasData.has(id)) {
