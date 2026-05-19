@@ -171,6 +171,31 @@
             filter: brightness(1.12);
             transform: translateY(-2px);
         }
+        #ai-launch-buttons {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            justify-content: flex-end;
+            width: 100%;
+        }
+        #ai-python-console-btn {
+            width: auto;
+            padding: 8px 18px;
+            border: 1px solid transparent;
+            border-radius: 999px;
+            background-image: linear-gradient(#0b1117, #0b1117), linear-gradient(155deg, #2fe3e8 0%, #0f6d82 50%, #2fe3e8 100%);
+            background-origin: border-box;
+            background-clip: padding-box, border-box;
+            color: #2fe3e8;
+            font-weight: bold;
+            letter-spacing: 0.3px;
+            cursor: pointer;
+            transition: filter 0.2s ease, transform 0.2s ease;
+        }
+        #ai-python-console-btn:hover {
+            filter: brightness(1.12);
+            transform: translateY(-2px);
+        }
         #info-box {
             position: relative;
             bottom: auto;
@@ -223,13 +248,55 @@
         #ai-header-title {
             font-weight: bold;
             font-size: 18px;
-            color: #3498db;
+            color: #9ad0ff;
+            cursor: pointer;
+            user-select: none;
+            padding: 4px 8px;
+            border-radius: 8px;
+        }
+        #ai-header-title:hover {
+            background: #1e2733;
         }
         #ai-header-center {
             flex: 1;
             display: flex;
             justify-content: center;
             min-width: 0;
+            position: relative;
+        }
+        #ai-mode-dropdown {
+            display: none;
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            min-width: 180px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            z-index: 130;
+        }
+        #ai-mode-dropdown.open {
+            display: block;
+        }
+        #ai-mode-dropdown button {
+            display: block;
+            width: 100%;
+            padding: 10px 12px;
+            background: none;
+            border: none;
+            color: #dce8f6;
+            text-align: left;
+            cursor: pointer;
+            font-size: 0.85rem;
+        }
+        #ai-mode-dropdown button:hover {
+            background: #30363d;
+        }
+        #ai-mode-dropdown button.active {
+            color: #9ad0ff;
+            font-weight: 700;
         }
         #ai-header-actions {
             display: flex;
@@ -254,7 +321,8 @@
             white-space: nowrap;
         }
         #ai-new-chat-btn:hover {
-            background: #30363d;
+            background: #3498db;
+            border-color: #3498db;
         }
         #ai-menu-btn {
             border-radius: 9999px;
@@ -262,7 +330,8 @@
             font-weight: 600;
             font-size: 1rem;
             padding: 6px 8px;
-            width: auto;
+            width: 35px;
+            height: 35px;
             min-width: 0;
             flex: 0 0 auto;
             margin: 0;
@@ -274,7 +343,8 @@
             position: relative;
         }
         #ai-menu-btn:hover {
-            background: #30363d;
+            background: #3498db;
+            border-color: #3498db;
         }
         #ai-menu-dropdown {
             display: none;
@@ -330,7 +400,8 @@
             line-height: 1;
         }
         #ai-close-panel-btn:hover {
-            background: #30363d;
+            background: #3498db;
+            border-color: #3498db;
         }
         #ai-top-tools {
             background: #0d1117;
@@ -384,6 +455,130 @@
         }
         .ai-top-panel li {
             margin: 0 0 6px 0;
+        }
+        #ai-history-panel {
+            display: none;
+            margin-top: 8px;
+            max-height: min(38vh, 320px);
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding-right: 2px;
+        }
+        .ai-history-list {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .ai-history-item {
+            display: flex;
+            align-items: stretch;
+            gap: 8px;
+        }
+        .ai-history-title-row {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            min-width: 0;
+        }
+        .ai-history-item-content {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+        }
+        .ai-history-item-actions {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            margin-left: auto;
+            flex: 0 0 auto;
+        }
+        .ai-history-title-input {
+            flex: 1;
+            min-width: 0;
+            display: none;
+            border: 1px solid #3498db;
+            border-radius: 8px;
+            background: #0d1117;
+            color: #ffffff;
+            padding: 4px 8px;
+            font-size: 0.85rem;
+            line-height: 1.2;
+            outline: none;
+        }
+        .ai-history-item.editing .ai-history-item-title {
+            display: none;
+        }
+        .ai-history-item.editing .ai-history-title-input {
+            display: block;
+        }
+        .ai-history-edit-btn {
+            width: 30px;
+            flex: 0 0 30px;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 0, 0, 0);
+            background: rgba(0, 0, 0, 0);
+            color: #9ad0ff;
+            cursor: pointer;
+            font-weight: 700;
+            line-height: 1;
+        }
+        .ai-history-edit-btn:hover {
+            background: #203041;
+            border-color: #2874a7;
+        }
+        .ai-history-item.active .ai-history-item-main {
+            border-color: #3498db;
+            box-shadow: inset 0 0 0 1px rgba(52, 152, 219, 0.2);
+        }
+        .ai-history-item-main {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            text-align: left;
+            background: #1a2533;
+            border: 1px solid #30363d;
+            border-radius: 10px;
+            padding: 6px 8px;
+            color: #dce8f6;
+            cursor: pointer;
+        }
+        .ai-history-item-main:hover {
+            background: #203041;
+            border-color: #3498db;
+        }
+        .ai-history-item-title {
+            font-weight: 700;
+            font-size: 0.85rem;
+            line-height: 1.15;
+            color: #ffffff;
+        }
+        .ai-history-item-meta {
+            font-size: 0.72rem;
+            line-height: 1.15;
+            color: #9cb5cf;
+        }
+        .ai-history-delete-btn {
+            width: 30px;
+            flex: 0 0 30px;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 0, 0, 0);
+            background: rgba(0, 0, 0, 0);
+            color: #ffb3b3;
+            cursor: pointer;
+            font-weight: 700;
+            line-height: 1;
+        }
+        .ai-history-delete-btn:hover {
+            background: #3a2323;
+            border-color: #6b2f2f;
+        }
+        .ai-history-empty {
+            padding: 8px 10px;
+            color: #9cb5cf;
+            font-size: 0.8rem;
         }
         .ai-setup-subtitle {
             color: #9ad0ff;
@@ -461,15 +656,17 @@
             background: #f39c12 !important;
         }
         #ai-status-overlay {
-            position: sticky;
-            top: 0;
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
             z-index: 10;
             display: flex;
             justify-content: center;
-            padding-bottom: 8px;
             pointer-events: none;
         }
         #ai-status-pill {
+            width: fit-content;
             padding: 3px 12px;
             border-radius: 9999px;
             font-size: 0.65rem;
@@ -490,6 +687,171 @@
             padding: 10px 20px;
             display: flex;
             flex-direction: column;
+            position: relative;
+        }
+        #ai-python-console {
+            display: none;
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px 15px;
+            background: #0f141b;
+        }
+        .ai-python-intro {
+            font-size: 1rem;
+            line-height: 1.35;
+            margin-bottom: 8px;
+            margin-left: 4px;
+            margin-right: 4px;
+            align-content: center;
+        }
+        #ai-python-instructions-btn {
+            margin-bottom: 10px;
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: white;
+            border-radius: 999px;
+            padding: 6px 12px;
+            font-size: 0.78rem;
+            cursor: pointer;
+        }
+        #ai-python-instructions-btn:hover {
+            background: #3498db;
+            border-color: #3498db;
+        }
+        #ai-python-script-editor {
+            width: 100%;
+            min-height: 220px;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 10px;
+            color: #e6edf3;
+            padding: 10px;
+            box-sizing: border-box;
+            font-family: Consolas, 'Courier New', monospace;
+            font-size: 0.82rem;
+            resize: vertical;
+        }
+        #ai-run-script-btn {
+            margin-top: 8px;
+            background: #3498db;
+            border: none;
+            color: #fff;
+            border-radius: 999px;
+            padding: 7px 14px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        #ai-python-run-output {
+            margin-top: 8px;
+            margin-bottom: 10px;
+            min-height: 56px;
+            max-height: calc(100vh - 630px);
+            overflow: auto;
+            background: #101722;
+            border: 1px solid #30363d;
+            border-radius: 10px;
+            padding: 8px;
+            white-space: pre-wrap;
+            color: #dce8f6;
+            font-size: 0.78rem;
+            line-height: 1.3;
+        }
+        .ai-python-request-label {
+            color: #9ad0ff;
+            font-size: 0.8rem;
+            margin-top: 2px;
+        }
+        #ai-python-instructions-box {
+            display: none;
+            position: absolute;
+            top: 76px;
+            right: calc(100% + 12px);
+            left: auto;
+            width: min(830px, calc(100vw - var(--ai-panel-width) - 40px));
+            max-height: calc(100% - 104px);
+            overflow: hidden;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            z-index: 140;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.45);
+            flex-direction: column;
+        }
+        #ai-python-instructions-box.open {
+            display: flex;
+        }
+        #ai-python-instructions-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 10px;
+            border-bottom: 1px solid #243244;
+            padding: 10px 12px;
+        }
+        #ai-python-instructions-title {
+            margin: 5px 0 5px 0;
+            color: #9ad0ff;
+            font-size: 1rem;
+        }
+        #ai-python-instructions-subtitle {
+            margin: 4px 0 0 0;
+            color: #dce8f6;
+            font-size: 0.76rem;
+            line-height: 1.3;
+        }
+        #ai-python-instructions-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        #ai-copy-python-instructions,
+        #ai-close-python-instructions {
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: white;
+            transition: all 0.2s;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        #ai-copy-python-instructions:hover,
+        #ai-close-python-instructions:hover {
+            background: #30363d;
+        }
+        #ai-copy-python-instructions {
+            border-radius: 9999px;
+            padding: 5px 10px;
+            font-size: 0.75rem;
+        }
+        #ai-close-python-instructions {
+            width: 34px;
+            height: 34px;
+            padding: 0;
+            border-radius: 9999px;
+            font-size: 1rem;
+            font-weight: 700;
+            line-height: 1;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0;
+        }
+        #ai-python-instructions-body {
+            margin: 0;
+            padding: 10px 12px 12px;
+            color: #dce8f6;
+            white-space: pre-wrap;
+            font-size: 0.84rem;
+            line-height: 1.35;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            overflow-y: auto;
+            flex: 1 1 auto;
+        }
+        #ai-current-script-title {
+            margin: 0 0 8px 2px;
+            color: #9ad0ff;
+            font-size: 0.8rem;
+            font-weight: 600;
         }
         #ai-chatbox {
             display: flex;
@@ -2570,6 +2932,11 @@
             flex-direction: row-reverse;
             left: 0;
         }
+
+        .welcome-right-bottom-annotations .welcome-label {
+            min-width: 170px;
+            text-align: left;
+        }
         
         .welcome-bottom-annotation .welcome-label {
             background: rgba(52, 152, 219, 0.15);
@@ -2645,7 +3012,7 @@
         <input type="file" id="sessionFolderInput" webkitdirectory directory multiple style="display:none;">
 
         <label style="font-size:14px;">1. Load Interaction Data (Links/Edges)</label>
-        <input type="file" id="fileInput" accept=".txt,.csv,.tsv" style="display:none;" onchange="window.handleInteractionUploadChange && window.handleInteractionUploadChange(event)">
+        <input type="file" id="fileInput" accept=".gz,.txt,.csv,.tsv" style="display:none;" onchange="window.handleInteractionUploadChange && window.handleInteractionUploadChange(event)">
         <div id="fileInputList" class="uploaded-file-list">
             <button type="button" 
                     class="upload-inline-open-btn" 
@@ -2657,7 +3024,7 @@
         <div class="upload-progress" id="fileInputProgress"><div class="upload-progress-track"><div class="upload-progress-bar" id="fileInputProgressBar"></div></div><div class="upload-progress-text">Loading...</div></div>
 
         <label style="font-size:14px;">2. Load Accessory Data (Node Info Files)</label>
-        <input type="file" id="infoInput" accept=".txt,.csv,.tsv,.fa,.fasta,.faa,.fna,.h5" multiple style="display:none;" onchange="window.handleAccessoryUploadChange && window.handleAccessoryUploadChange(event)">
+        <input type="file" id="infoInput" accept=".gz,.txt,.csv,.tsv,.fa,.fasta,.faa,.fna,.h5" multiple style="display:none;" onchange="window.handleAccessoryUploadChange && window.handleAccessoryUploadChange(event)">
         <div id="infoInputList" class="uploaded-file-list">
             <button type="button" 
                     class="upload-inline-open-btn" 
@@ -2829,8 +3196,8 @@
             <label>Attraction (Distance) <span id="val-att" class="slider-val">70</span></label>
             <input type="range" id="attractionSlider" min="20" max="400" value="70">
 
-            <label>Max Canvas Drift Distance <span id="val-drift" class="slider-val">7000</span></label>
-            <input type="range" id="driftSlider" min="100" max="10000" step="100" value="7000">
+            <label>Max Canvas Drift Distance <span id="val-drift" class="slider-val">8000</span></label>
+            <input type="range" id="driftSlider" min="100" max="10000" step="100" value="8000">
 
             <label>Cluster by Variable <span id="val-cluster-var" class="slider-val">0</span></label>
             <input type="range" id="clusterVariableSlider" min="0" max="1" step="0.01" value="0">
@@ -2879,8 +3246,8 @@
                 </div>
             </div>
             <label>If using StringScape for a research paper, a mention of StringScape is not required, but is appreciated. A paper is in preparation. For now, cite:</label>
-            <p style="font-size:0.9em; color:#bbb; font-style: italic; margin-top:5px;">
-                Tregurtha, J., (2026). StringScape: A high-performance open-source web app for visualising STRING data, <a href="https://github.com/JoelTre/StringScape/tree/main" target="_blank">https://github.com/JoelTre/StringScape/tree/main</a>
+            <p style="font-size:0.7em; color:#bbb; font-style: italic; margin-top:5px;">
+                Tregurtha, J., (2026). StringScape: A high-performance, open-source web app for visualizing data from the STRING database, <a href="https://github.com/JoelTre/StringScape/tree/main" style="color: #3498db; text-decoration: none;">https://github.com/JoelTre/StringScape/tree/main</a>
             </p>
         </div>
 
@@ -2893,13 +3260,13 @@
     <div class="modal-content">
         <span class="close-modal" onclick="closeModal('guideModal')">&times;</span>
         <h3>Start Guide</h3>
-        <div style="margin-top: 15px;">
-            <button id="loadExampleBtn" class="pill-blue-btn" style="cursor: pointer;">
-                Load Example Dataset
+        <div style="margin-top: 10px;">
+            <button id="loadExampleBtn" class="pill-blue-btn" style="background-color: #3498db; cursor: pointer;">
+                Load Example Dataset (<i>E. coli</i> K-12)
             </button>
         </div>
-        <p>1. Go to <a href="https://string-db.org/" target="_blank">https://string-db.org/</a> → Organisms → Search for your organism or add an organism if not available</p>
-        <p>2. Click ‘Go to download page’ → Download one of the Interaction Data files (I recommend ...protein.physical.links.full...) and one or more of the Accessory Data files (I recommend downloading all except the last three). Unzip and move these files to your desired location</p>
+        <p>1. Go to <a href="https://string-db.org/" target="_blank" style="color: #3498db; text-decoration: none;">https://string-db.org/</a> → Search → Organisms → Search for your organism or add an organism if not available</p>
+        <p>2. Click ‘Go to download page’ → Download one of the Interaction Data files (I recommend ...protein.physical.links.detailed...) and one or more of the Accessory Data files (I recommend downloading all except the last three). Move these files to your desired location</p>
         <p>3. Open Interaction Data files and one or more of the Accessory Data files in this app</p>
         <p>4. Click ‘Build Network’</p>
         <hr style="border:0; border-top:1px solid #555;">
@@ -2950,18 +3317,18 @@
         <span class="close-modal" onclick="closeModal('aboutModal')">&times;</span>
         <h3>About StringScape</h3>
         <p>Beta version 1.0</p>
-        <p>The StringScape network visualiser app was developed for viewing network data from the <a href="https://string-db.org/" target="_blank">STRING database</a>, but can be used to view any type of network data.</p>
+        <p>The StringScape network visualiser app was developed for viewing network data from the <a href="https://string-db.org/" target="_blank" style="color: #3498db; text-decoration: none;">STRING database</a>, but can be used to view any type of network data.</p>
         <p>This app was developed by Joel Tregurtha as part of a PhD program at the University of Canterbury, New Zealand. PhD funded by The MacDiarmid Institute.</p>
         <p>The code was generated using AI models, including Gemini, Raptor mini, and Claude.</p>
         <hr style="border:0; border-top:1px solid #555;">
-        <p>More information on this app can be found here: <a href="https://joeltre.github.io/StringScape/" target="_blank">StringScape Home</a></p>
-        <p>Video tutorial on how to use this app: <a href="#" target="_blank">[coming soon...]</a></p>
-        <p>This is an open-source project. The source code is available here: <a href="https://github.com/JoelTre/StringScape/tree/main" target="_blank">https://github.com/JoelTre/StringScape/tree/main</a></p>
+        <p>More information on this app can be found here: <a href="https://joeltre.github.io/StringScape/" target="_blank" style="color: #3498db; text-decoration: none;">StringScape Home</a></p>
+        <p>Video tutorial on how to use this app: <a href="#" target="_blank" style="color: #3498db; text-decoration: none;">[coming soon...]</a></p>
+        <p>This is an open-source project. The source code is available here: <a href="https://github.com/JoelTre/StringScape/tree/main" style="color: #3498db; text-decoration: none;">https://github.com/JoelTre/StringScape/tree/main</a></p>
         <hr style="border:0; border-top:1px solid #555;">
-        <p>I'd love to hear from you! Send feedback, suggested additional features or bugs found to <a href="mailto:joel.tregurtha@pg.canterbury.ac.nz">joel.tregurtha@pg.canterbury.ac.nz</a></p>
+        <p>I'd love to hear from you! Send feedback, suggested additional features or bugs found to <a href="mailto:joel.tregurtha@pg.canterbury.ac.nz" style="color: #3498db; text-decoration: none;">joel.tregurtha@pg.canterbury.ac.nz</a></p>
         <p>If using StringScape for a research paper, a mention of StringScape is not required, but is appreciated. A paper is in preparation. For now, cite:</p>
             <p style="font-size:0.9em; color:#bbb; font-style: italic; font-size:0.9em; margin-top:5px;">
-                Tregurtha, J., (2026). StringScape: A high-performance open-source web app for visualising STRING data, <a href="https://github.com/JoelTre/StringScape/tree/main" target="_blank">https://github.com/JoelTre/StringScape/tree/main</a>
+                Tregurtha, J., (2026). StringScape: A high-performance, open-source web app for visualizing data from the STRING database, <a href="https://github.com/JoelTre/StringScape/tree/main" style="color: #3498db; text-decoration: none;">https://github.com/JoelTre/StringScape/tree/main</a>
             </p>
     </div>
 </div>
@@ -3040,12 +3407,18 @@
 <div id="ai-side-panel" aria-label="AI Panel">
     <div id="ai-panel-header">
         <button id="ai-new-chat-btn" onclick="aiNewChat()">+ New Chat</button>
-        <div id="ai-header-center"><h1 id="ai-header-title">AI Agent</h1></div>
+        <div id="ai-header-center">
+            <h1 id="ai-header-title" onclick="toggleAiModeDropdown()">AI Agent ▾</h1>
+            <div id="ai-mode-dropdown">
+                <button id="ai-mode-agent-option" class="active" type="button" onclick="setAiPanelMode('agent')">AI Agent</button>
+                <button id="ai-mode-python-option" type="button" onclick="setAiPanelMode('python')">Python Console</button>
+            </div>
+        </div>
         <div id="ai-header-actions">
             <div style="position: relative;">
                 <button id="ai-menu-btn" type="button" onclick="toggleAiMenu()" title="Menu">⋮</button>
                 <div id="ai-menu-dropdown">
-                    <button onclick="downloadAiChat(); toggleAiMenu();">Download Chat</button>
+                    <button id="ai-download-menu-btn" onclick="downloadAiChat(); toggleAiMenu();">Download Chat</button>
                 </div>
             </div>
             <button id="ai-close-panel-btn" type="button" onclick="toggleAiPanel(false)" aria-label="Close AI panel">&times;</button>
@@ -3054,9 +3427,11 @@
 
     <div id="ai-top-tools">
         <div id="ai-top-tool-buttons">
+            <button id="ai-history-toggle-btn" class="ai-top-toggle-btn" type="button" onclick="aiToggleHistoryPanel()">Chat History</button>
             <button id="ai-setup-toggle-btn" class="ai-top-toggle-btn" type="button" onclick="toggleAiTopPanel('setup')">Set up Instructions</button>
             <button id="ai-prompts-toggle-btn" class="ai-top-toggle-btn" type="button" onclick="toggleAiTopPanel('prompts')">Example Prompts</button>
         </div>
+        <div id="ai-history-panel"></div>
         <div id="ai-setup-panel" class="ai-top-panel">
             <div class="ai-setup-subtitle">Connect a local LLM<br>It's easy and free!</div>
             <ol>
@@ -3075,12 +3450,38 @@
             </ol>
         </div>
         <div id="ai-prompts-panel" class="ai-top-panel">
-            <button class="ai-example-item" type="button" onclick="loadExamplePrompt(this.textContent)">Explain what these selected proteins do, where they are located in the cell, and how they work together to perform their function.</button>
-            <button class="ai-example-item" type="button" onclick="loadExamplePrompt(this.textContent)">Explain this graph I'm seeing and what I can learn from it.</button>
-            <button class="ai-example-item" type="button" onclick="loadExamplePrompt(this.textContent)">Colour nodes by collection. Then, make collections that contain proteins that match each of these search terms: calcium, magnesium, potassium, iron, zinc, copper, cobalt, nickel, sodium, manganese, molybdenum, electron, and proton.</button>
-            <button class="ai-example-item" type="button" onclick="loadExamplePrompt(this.textContent)">Create a guide on lipid synthesis.</button>
-            <button class="ai-example-item" type="button" onclick="loadExamplePrompt(this.textContent)">When I click "Send" in the AI chat interface, what actually happens in the code?</button>
+            <div id="ai-example-panel-content">
+                <button class="ai-example-item" type="button" onclick="loadExamplePrompt(this.textContent)">Explain what these selected proteins do, where they are located in the cell, and how they work together to perform their function.</button>
+                <button class="ai-example-item" type="button" onclick="loadExamplePrompt(this.textContent)">Explain this graph I'm seeing and what I can learn from it.</button>
+                <button class="ai-example-item" type="button" onclick="loadExamplePrompt(this.textContent)">Colour nodes by collection. Then, make collections that contain proteins that match each of these search terms: calcium, magnesium, potassium, iron, zinc, copper, cobalt, nickel, sodium, manganese, molybdenum, electron, and proton.</button>
+                <button class="ai-example-item" type="button" onclick="loadExamplePrompt(this.textContent)">Create a guide on lipid synthesis.</button>
+                <button class="ai-example-item" type="button" onclick="loadExamplePrompt(this.textContent)">When I click "Send" in the AI chat interface, what actually happens in the code?</button>
+            </div>
         </div>
+    </div>
+
+    <div id="ai-python-console">
+        <div class="ai-python-intro">Write and run python scripts to analyse your data or perform actions in the app.</div>
+        <button id="ai-python-instructions-btn" type="button" onclick="openPythonInstructionsBox()">Instructions for writing python scripts.</button>
+        <div id="ai-current-script-title">Current Script: Untitled Script</div>
+        <textarea id="ai-python-script-editor" spellcheck="false" placeholder="# Write Python here, use one of the example scripts above, or generate a script using the AI below."></textarea>
+        <button id="ai-run-script-btn" type="button" onclick="runPythonConsoleScript()">Run Script</button>
+        <div id="ai-python-script-output-header">Output:</div>
+        <pre id="ai-python-run-output"></pre>
+    </div>
+
+    <div id="ai-python-instructions-box">
+        <div id="ai-python-instructions-header">
+            <div>
+                <h3 id="ai-python-instructions-title">Instructions for writing python scripts.</h3>
+                <p id="ai-python-instructions-subtitle">These instructions can be given to any AI along with a description of what you want the script to do.</p>
+            </div>
+            <div id="ai-python-instructions-actions">
+                <button id="ai-copy-python-instructions" type="button" onclick="copyPythonInstructions()">Copy Instructions</button>
+                <button id="ai-close-python-instructions" type="button" onclick="closePythonInstructionsBox()">X</button>
+            </div>
+        </div>
+        <pre id="ai-python-instructions-body"></pre>
     </div>
 
     <div id="ai-chat-scroll">
@@ -3142,7 +3543,10 @@
 </div>
 
 <div id="right-lower-stack">
-    <button id="ask-ai-btn" type="button" onclick="toggleAiPanel()">Ask AI</button>
+    <div id="ai-launch-buttons">
+        <button id="ask-ai-btn" type="button" onclick="toggleAiPanel()">Ask AI</button>
+        <button id="ai-python-console-btn" type="button" onclick="togglePythonConsoleMode()">Python Console</button>
+    </div>
     <div id="info-box">
         <div class="info-header">
             <h4 id="info-id" style="margin:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:160px;">No Nodes Selected</h4>
@@ -3392,7 +3796,7 @@
                 <path d="M 0 40 Q 50 38 130 43" stroke="#3498db" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="3,2"/>
                 <polygon points="140,44 130,38 130,48" fill="#3498db"/>
             </svg>
-            <div class="welcome-label">AI</div>
+            <div class="welcome-label">AI and Python Console</div>
         </div>
         
         <div class="welcome-annotation" style="top: 820px;">
