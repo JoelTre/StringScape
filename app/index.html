@@ -2,6 +2,34 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self';
+        script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' 
+            https://joeltre.github.io
+            https://d3js.org 
+            https://cdn.plot.ly 
+            https://cdn.jsdelivr.net 
+            https://cdn.pyodide.org 
+            https://unpkg.com;
+        style-src 'self' 'unsafe-inline' 
+            https://cdn.jsdelivr.net 
+            https://unpkg.com;
+        font-src 'self' 
+            https://cdn.jsdelivr.net;
+        connect-src 'self' data:
+            http://127.0.0.1:1234
+            https://joeltre.github.io
+            https://api.github.com 
+            https://raw.githubusercontent.com 
+            https://alphafold.ebi.ac.uk 
+            https://cdn.pyodide.org 
+            https://*.jsdelivr.net 
+            https://*.pypi.org 
+            https://*.unpkg.com 
+            https://unpkg.com;
+        img-src 'self' data: blob:;
+        worker-src 'self' blob: https://unpkg.com;
+    ">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>StringScape - Network Visualiser</title>
     <!-- Below are third party scripts that are imported into StringScape. The import uses a SHA-384 hash to ensure the scripts have not been tampered with, for security purposes -->
@@ -183,10 +211,10 @@
             padding: 8px 18px;
             border: 1px solid transparent;
             border-radius: 999px;
-            background-image: linear-gradient(#0b1117, #0b1117), linear-gradient(155deg, #2fe3e8 0%, #0f6d82 50%, #2fe3e8 100%);
+            background-image: linear-gradient(#0f1f22, #0f1f22), linear-gradient(155deg, #28bec4 0%, #0f6d82 50%, #28bec4 100%);
             background-origin: border-box;
             background-clip: padding-box, border-box;
-            color: #2fe3e8;
+            color: #28bec4;
             font-weight: bold;
             letter-spacing: 0.3px;
             cursor: pointer;
@@ -1149,7 +1177,40 @@
         }
 
         #protein-info-box.open {
-            display: block;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #protein-info-resize-handle {
+            position: absolute;
+            top: -8px;
+            left: 0;
+            right: 0;
+            height: 16px;
+            cursor: ns-resize;
+            background: transparent;
+            z-index: 10;
+        }
+
+        #protein-info-resize-handle::after {
+            content: '';
+            position: absolute;
+            top: 6px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 72px;
+            height: 4px;
+            border-radius: 999px;
+            background: rgba(109, 122, 136, 0.6);
+            transition: background 0.2s;
+        }
+
+        #protein-info-resize-handle:hover::after {
+            background: rgba(109, 122, 136, 1);
+        }
+
+        #protein-info-box.resizing #protein-info-resize-handle::after {
+            background: rgba(52, 152, 219, 1);
         }
 
         #protein-info-header {
@@ -1275,8 +1336,8 @@
 
         #protein-info-body {
             margin-top: 14px;
-            min-height: 110px;
-            max-height: 34vh;
+            flex: 1 1 auto;
+            min-height: 0;
             overflow: auto;
             padding-right: 6px;
             font-size: 14px;
@@ -2934,7 +2995,7 @@
         }
 
         .welcome-right-bottom-annotations .welcome-label {
-            min-width: 170px;
+            min-width: 10px;
             text-align: left;
         }
         
@@ -2990,7 +3051,7 @@
 <body>
 
 <div id="ui-layer">
-    <div class="toggle-tab" onclick="document.getElementById('ui-layer').classList.toggle('minimized')"><span>◂</span></div>
+    <div id="ui-layer-toggle-tab" class="toggle-tab"><span>◂</span></div>
     
     <div id="ui-content">
         <div style="display: flex; align-items: center; gap: 10px; margin-left: 5px; margin-bottom: 0;">
@@ -3007,16 +3068,15 @@
 
         <div style="font-size:0.9em; color:#ccc; margin-bottom:10px;"></div>
         
-        <button id="pill-blue-btn" type="button" onclick="openModal('guideModal')" style="width: 100%; margin-bottom:15px;">Open Start Guide</button>
-        <button id="pill-blue-btn" style="width: 100%; margin-bottom:15px;" onclick="closeWelcomeOverlay(); document.getElementById('sessionFolderInput').click()">Open Previous Session</button>
+        <button id="pill-blue-btn" type="button" style="width: 100%; margin-bottom:15px;">Open Start Guide</button>
+        <button id="pill-blue-btn" style="width: 100%; margin-bottom:15px;">Open Previous Session</button>
         <input type="file" id="sessionFolderInput" webkitdirectory directory multiple style="display:none;">
 
         <label style="font-size:14px;">1. Load Interaction Data (Links/Edges)</label>
-        <input type="file" id="fileInput" accept=".gz,.txt,.csv,.tsv" style="display:none;" onchange="window.handleInteractionUploadChange && window.handleInteractionUploadChange(event)">
+        <input type="file" id="fileInput" accept=".gz,.txt,.csv,.tsv" style="display:none;">
         <div id="fileInputList" class="uploaded-file-list">
             <button type="button" 
                     class="upload-inline-open-btn" 
-                    onclick="">
                 Open File
             </button>
             <div class="uploaded-file-items"><span class="uploaded-file-list-empty">No files uploaded</span></div>
@@ -3024,18 +3084,17 @@
         <div class="upload-progress" id="fileInputProgress"><div class="upload-progress-track"><div class="upload-progress-bar" id="fileInputProgressBar"></div></div><div class="upload-progress-text">Loading...</div></div>
 
         <label style="font-size:14px;">2. Load Accessory Data (Node Info Files)</label>
-        <input type="file" id="infoInput" accept=".gz,.txt,.csv,.tsv,.fa,.fasta,.faa,.fna,.h5" multiple style="display:none;" onchange="window.handleAccessoryUploadChange && window.handleAccessoryUploadChange(event)">
+        <input type="file" id="infoInput" accept=".gz,.txt,.csv,.tsv,.fa,.fasta,.faa,.fna,.h5" multiple style="display:none;">
         <div id="infoInputList" class="uploaded-file-list">
             <button type="button" 
                     class="upload-inline-open-btn" 
-                    onclick="">
                 Open Files
             </button>
             <div class="uploaded-file-items"><span class="uploaded-file-list-empty">No files uploaded</span></div>
         </div>
         <div class="upload-progress" id="infoInputProgress"><div class="upload-progress-track"><div class="upload-progress-bar" id="infoInputProgressBar"></div></div><div class="upload-progress-text">Loading...</div></div>
 
-        <span id="more-toggle" class="dropdown-toggle" onclick="toggleDropdown('more-drop')">More ▾</span>
+        <span id="more-toggle" class="dropdown-toggle">More ▾</span>
         <div id="more-drop" class="dropdown-content">
             <!-- <button id="genomeInputBtn" type="button" style="background:#3498db; margin-bottom:10px;">Load Genome (fasta) (optional)</button> -->
             <!-- <input type="file" id="genomeInput" accept=".fa,.fasta,.fna" multiple style="display:none;"> -->
@@ -3063,7 +3122,7 @@
             </div>
         </div>
 
-        <span class="dropdown-toggle" onclick="toggleDropdown('nodes-drop')">Nodes ▾</span>
+        <span class="dropdown-toggle">Nodes ▾</span>
         <div id="nodes-drop" class="dropdown-content">
             <label>Colour Nodes By</label>
             <select id="colorMode">
@@ -3114,7 +3173,7 @@
             </div>
         </div>
 
-        <span class="dropdown-toggle" onclick="toggleDropdown('links-drop')">Links ▾</span>
+        <span class="dropdown-toggle">Links ▾</span>
         <div id="links-drop" class="dropdown-content">
             <label>Colour Links By</label>
             <select id="linkMode">
@@ -3157,7 +3216,7 @@
             <input type="range" id="geneBrightnessSlider" min="0" max="1" step="0.01" value="0.9">
         </div>
 
-        <span class="dropdown-toggle" onclick="toggleDropdown('bg-drop')">Background ▾</span>
+        <span class="dropdown-toggle">Background ▾</span>
         <div id="bg-drop" class="dropdown-content">
             <label>Colour Background By</label>
             <select id="bgMode">
@@ -3177,12 +3236,12 @@
             </div>
         </div>
 
-        <span class="dropdown-toggle" onclick="toggleDropdown('variables-drop')">Variables ▾</span>
+        <span class="dropdown-toggle">Variables ▾</span>
         <div id="variables-drop" class="dropdown-content">
-            <button id="pill-blue-btn" style="width:100%;" onclick="openVariableSettings()">Variable Settings</button>
+            <button id="pill-blue-btn" style="width:100%;">Variable Settings</button>
         </div>
 
-        <span class="dropdown-toggle" onclick="toggleDropdown('physics-drop')">Physics ▾</span>
+        <span class="dropdown-toggle">Physics ▾</span>
         <div id="physics-drop" class="dropdown-content">
             <button id="physBtn" style="width:100%; margin-bottom:10px; background:#3498db; color:#fff; border:none; padding:8px 10px; border-radius:12px;">Pause Physics (spacebar)</button>
             <button id="stopPhysBtn" style="width:100%; margin-bottom:10px; background:#3498db; color:#fff; border:none; padding:8px 10px; border-radius:12px;">Stop Physics</button>
@@ -3205,11 +3264,11 @@
             <button id="dragNodesBtn" style="margin-top:15px; background:#666">Drag nodes</button>
         </div>
 
-        <span class="dropdown-toggle" onclick="toggleDropdown('download-drop')">Download ▾</span>
+        <span class="dropdown-toggle">Download ▾</span>
         <div id="download-drop" class="dropdown-content">
-            <button id="pill-blue-btn" style="width:100%;" onclick="openDownloadSessionModal()">Download Session</button>
-            <button id="pill-blue-btn" style="width:100%;" onclick="exportCanvas('svg')">Full Canvas (SVG)</button>
-            <button id="pill-blue-btn" style="width:100%;" onclick="exportCanvas('png')">Full Canvas (PNG 8k)</button>
+            <button id="pill-blue-btn" data-download-action="session" style="width:100%;">Download Session</button>
+            <button id="pill-blue-btn" data-download-action="svg" style="width:100%;">Full Canvas (SVG)</button>
+            <button id="pill-blue-btn" data-download-action="png-8k" style="width:100%;">Full Canvas (PNG 8k)</button>
             <div style="display:flex; align-items:center; gap:8px; margin:10px 0 8px 0; color:#ddd; font-size:0.92em;">
                 <input type="checkbox" id="includeStringScapeLogo" checked style="width:auto; margin:0;">
                 <label for="includeStringScapeLogo" style="margin:0; cursor:pointer;">Include StringScape Logo</label>
@@ -3251,14 +3310,14 @@
             </p>
         </div>
 
-        <button onclick="openModal('aboutModal')" style="margin-bottom: auto; background: #444;">About StringScape</button>
+        <button style="margin-bottom: auto; background: #444;">About StringScape</button>
 
     </div>
 </div>
 
 <div id="guideModal" class="modal">
     <div class="modal-content">
-        <span class="close-modal" onclick="closeModal('guideModal')">&times;</span>
+        <span class="close-modal">&times;</span>
         <h3>Start Guide</h3>
         <div style="margin-top: 10px;">
             <button id="loadExampleBtn" class="pill-blue-btn" style="background-color: #3498db; cursor: pointer;">
@@ -3300,13 +3359,13 @@
             For custom node info files, the first column should have the node ID (matching the node IDs in the links file), and the other columns can contain data on any variables associated with the nodes. Files for variables with a hierarchical nature should have one column heading containing the word “parent” and another column heading containing the word “child” with the rows of the columns containing the variable category names. Upload a separate file assigning each network node to a category (i.e., assigning each network node to a mind map node). <br><br>
             The app accepts CSV, TSV, Pipe-separated, semicolon-separated, Space-separated, and .h5 files.
         </p>
-        <button onclick="openModal('aboutModal')" style="margin-bottom: auto; background: #444;">About StringScape</button>
+        <button style="margin-bottom: auto; background: #444;">About StringScape</button>
     </div>
 </div>
 
 <div id="feedbackModal" class="modal">
     <div class="modal-content">
-        <span class="close-modal" onclick="closeModal('feedbackModal')">&times;</span>
+        <span class="close-modal">&times;</span>
         <h3>Feedback & Support</h3>
         <p>Send feedback, suggested additional features or bugs found to <a href="mailto:joel.tregurtha@pg.canterbury.ac.nz">joel.tregurtha@pg.canterbury.ac.nz</a></p>
     </div>
@@ -3314,7 +3373,7 @@
 
 <div id="aboutModal" class="modal">
     <div class="modal-content">
-        <span class="close-modal" onclick="closeModal('aboutModal')">&times;</span>
+        <span class="close-modal">&times;</span>
         <h3>About StringScape</h3>
         <p>Beta version 1.0</p>
         <p>The StringScape network visualiser app was developed for viewing network data from the <a href="https://string-db.org/" target="_blank" style="color: #3498db; text-decoration: none;">STRING database</a>, but can be used to view any type of network data.</p>
@@ -3335,7 +3394,7 @@
 
 <div id="variablesModal" class="modal">
     <div class="modal-content" style="max-width: 95vw; width: 1000px; height: calc(100vh - 80px); min-height: 200px;">
-        <span class="close-modal" onclick="closeModal('variablesModal')">&times;</span>
+        <span class="close-modal">&times;</span>
         <h3>Variable Settings</h3>
         <p style="font-size:12px; color:#ccc; margin-bottom: 10px;">Set variable labels, type, and split behavior for accessory data.</p>
         <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
@@ -3348,7 +3407,7 @@
 
 <div id="fileViewerModal" class="modal">
     <div class="modal-content" style="max-width: 95vw; width: 1000px; min-height: 550px;">
-        <span class="close-modal" onclick="closeModal('fileViewerModal')">&times;</span>
+        <span class="close-modal">&times;</span>
         <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
             <h3 id="file-viewer-title" style="margin:0;">File Viewer</h3>
             <div id="file-viewer-debug-count" style="font-size:12px; color:#9ad0ff;"></div>
@@ -3362,14 +3421,14 @@
 </div>
 
 <div id="right-panel">
-    <div class="toggle-tab" onclick="document.getElementById('right-panel').classList.toggle('minimized')"><span>▸</span></div>
+    <div id="right-panel-toggle-tab" class="toggle-tab"><span>▸</span></div>
     <div id="right-panel-content">
         <label>Search Protein IDs or Terms</label>
         <div class="search-container">
             <input type="text" id="searchInput" placeholder="Search...">
             <button id="searchBtn">Search</button>
         </div>
-        <div id="moreToggle" class="Selection-tools-btn" onclick="toggleSearchMore()">Selection Tools ▾</div>
+        <div id="moreToggle" class="Selection-tools-btn">Selection Tools ▾</div>
         <div id="search-more-drop" class="search-more-content">
             <div class="search-mode-row">
                 <button id="additiveBtn" class="mode-venn-btn" title="Selection Mode: Add" aria-label="Selection mode add">
@@ -3399,37 +3458,37 @@
                 <option value="size">Protein size</option>
             </select>
         </div>
-        <h4 onclick="const lc=document.getElementById('legend-content'); lc.classList.toggle('hidden'); this.textContent = lc.classList.contains('hidden') ? 'Key ▾' : 'Key ▾';" style="cursor:pointer; margin:15px 0 5px 0">Key ▾</h4>
+        <h4 id="right-panel-key-toggle" style="cursor:pointer; margin:15px 0 5px 0">Key ▾</h4>
         <div id="legend-content"></div>
     </div>
 </div>
 
 <div id="ai-side-panel" aria-label="AI Panel">
     <div id="ai-panel-header">
-        <button id="ai-new-chat-btn" onclick="aiNewChat()">+ New Chat</button>
+        <button id="ai-new-chat-btn">+ New Chat</button>
         <div id="ai-header-center">
-            <h1 id="ai-header-title" onclick="toggleAiModeDropdown()">AI Agent ▾</h1>
+            <h1 id="ai-header-title">AI Agent ▾</h1>
             <div id="ai-mode-dropdown">
-                <button id="ai-mode-agent-option" class="active" type="button" onclick="setAiPanelMode('agent')">AI Agent</button>
-                <button id="ai-mode-python-option" type="button" onclick="setAiPanelMode('python')">Python Console</button>
+                <button id="ai-mode-agent-option" class="active" type="button">AI Agent</button>
+                <button id="ai-mode-python-option" type="button">Python Console</button>
             </div>
         </div>
         <div id="ai-header-actions">
             <div style="position: relative;">
-                <button id="ai-menu-btn" type="button" onclick="toggleAiMenu()" title="Menu">⋮</button>
+                <button id="ai-menu-btn" type="button" title="Menu">⋮</button>
                 <div id="ai-menu-dropdown">
-                    <button id="ai-download-menu-btn" onclick="downloadAiChat(); toggleAiMenu();">Download Chat</button>
+                    <button id="ai-download-menu-btn">Download Chat</button>
                 </div>
             </div>
-            <button id="ai-close-panel-btn" type="button" onclick="toggleAiPanel(false)" aria-label="Close AI panel">&times;</button>
+            <button id="ai-close-panel-btn" type="button" aria-label="Close AI panel">&times;</button>
         </div>
     </div>
 
     <div id="ai-top-tools">
         <div id="ai-top-tool-buttons">
-            <button id="ai-history-toggle-btn" class="ai-top-toggle-btn" type="button" onclick="aiToggleHistoryPanel()">Chat History</button>
-            <button id="ai-setup-toggle-btn" class="ai-top-toggle-btn" type="button" onclick="toggleAiTopPanel('setup')">Set up Instructions</button>
-            <button id="ai-prompts-toggle-btn" class="ai-top-toggle-btn" type="button" onclick="toggleAiTopPanel('prompts')">Example Prompts</button>
+            <button id="ai-history-toggle-btn" class="ai-top-toggle-btn" type="button">Chat History</button>
+            <button id="ai-setup-toggle-btn" class="ai-top-toggle-btn" type="button">Set up Instructions</button>
+            <button id="ai-prompts-toggle-btn" class="ai-top-toggle-btn" type="button">Example Prompts</button>
         </div>
         <div id="ai-history-panel"></div>
         <div id="ai-setup-panel" class="ai-top-panel">
@@ -3441,9 +3500,9 @@
                 <li>In LM Studio, toggle on the server (where it says "Status stopped" at the top). Then copy the server URL (where it says "reachable at:") and paste that here:
                     <div class="ai-url-row">
                         <span class="ai-url-row-label">Server URL:</span>
-                        <input id="ai-server-url" type="text" placeholder="http://127.0.0.1:1234" oninput="aiToggleConnectColor(this)"
+                        <input id="ai-server-url" type="text" placeholder="http://127.0.0.1:1234"
                                class="flex-1 bg-[#0b0e11] border border-[#30363d] rounded-full px-4 py-1 focus:outline-none focus:border-[#3498db] text-xs">
-                        <button id="ai-connect-btn" onclick="checkAiConnection()" class="pill-btn bg-[#21262d] border border-[#30363d] text-white">CONNECT</button>
+                        <button id="ai-connect-btn" class="pill-btn bg-[#21262d] border border-[#30363d] text-white">CONNECT</button>
                     </div>
                 </li>
                 <li>All Done! Now chat with the model below about your proteins :)</li>
@@ -3451,21 +3510,21 @@
         </div>
         <div id="ai-prompts-panel" class="ai-top-panel">
             <div id="ai-example-panel-content">
-                <button class="ai-example-item" type="button" onclick="loadExamplePrompt(this.textContent)">Explain what these selected proteins do, where they are located in the cell, and how they work together to perform their function.</button>
-                <button class="ai-example-item" type="button" onclick="loadExamplePrompt(this.textContent)">Explain this graph I'm seeing and what I can learn from it.</button>
-                <button class="ai-example-item" type="button" onclick="loadExamplePrompt(this.textContent)">Colour nodes by collection. Then, make collections that contain proteins that match each of these search terms: calcium, magnesium, potassium, iron, zinc, copper, cobalt, nickel, sodium, manganese, molybdenum, electron, and proton.</button>
-                <button class="ai-example-item" type="button" onclick="loadExamplePrompt(this.textContent)">Create a guide on lipid synthesis.</button>
-                <button class="ai-example-item" type="button" onclick="loadExamplePrompt(this.textContent)">When I click "Send" in the AI chat interface, what actually happens in the code?</button>
+                <button class="ai-example-item" type="button">Explain what these selected proteins do, where they are located in the cell, and how they work together to perform their function.</button>
+                <button class="ai-example-item" type="button">Explain this graph I'm seeing and what I can learn from it.</button>
+                <button class="ai-example-item" type="button">Colour nodes by collection. Then, make collections that contain proteins that match each of these search terms: calcium, magnesium, potassium, iron, zinc, copper, cobalt, nickel, sodium, manganese, molybdenum, electron, and proton.</button>
+                <button class="ai-example-item" type="button">Create a guide on lipid synthesis.</button>
+                <button class="ai-example-item" type="button">When I click "Send" in the AI chat interface, what actually happens in the code?</button>
             </div>
         </div>
     </div>
 
     <div id="ai-python-console">
         <div class="ai-python-intro">Write and run python scripts to analyse your data or perform actions in the app.</div>
-        <button id="ai-python-instructions-btn" type="button" onclick="openPythonInstructionsBox()">Instructions for writing python scripts.</button>
+        <button id="ai-python-instructions-btn" type="button">Instructions for writing python scripts.</button>
         <div id="ai-current-script-title">Current Script: Untitled Script</div>
         <textarea id="ai-python-script-editor" spellcheck="false" placeholder="# Write Python here, use one of the example scripts above, or generate a script using the AI below."></textarea>
-        <button id="ai-run-script-btn" type="button" onclick="runPythonConsoleScript()">Run Script</button>
+        <button id="ai-run-script-btn" type="button">Run Script</button>
         <div id="ai-python-script-output-header">Output:</div>
         <pre id="ai-python-run-output"></pre>
     </div>
@@ -3477,8 +3536,8 @@
                 <p id="ai-python-instructions-subtitle">These instructions can be given to any AI along with a description of what you want the script to do.</p>
             </div>
             <div id="ai-python-instructions-actions">
-                <button id="ai-copy-python-instructions" type="button" onclick="copyPythonInstructions()">Copy Instructions</button>
-                <button id="ai-close-python-instructions" type="button" onclick="closePythonInstructionsBox()">X</button>
+                <button id="ai-copy-python-instructions" type="button">Copy Instructions</button>
+                <button id="ai-close-python-instructions" type="button">X</button>
             </div>
         </div>
         <pre id="ai-python-instructions-body"></pre>
@@ -3495,11 +3554,11 @@
         <div id="ai-glow-container"><div class="ai-processing-glow"></div></div>
         <div id="ai-preview-area"></div>
         <div id="ai-input-controls">
-            <input type="file" id="ai-file-input" accept=".txt,.csv,.tsv,image/*" onchange="aiHandleFile(this)">
-            <button id="ai-file-btn" title="Upload files" onclick="document.getElementById('ai-file-input').click()">+</button>
-            <textarea id="ai-user-input" rows="1" placeholder="Ask AI anything..." oninput="aiAutoExpand(this)"
+            <input type="file" id="ai-file-input" accept=".txt,.csv,.tsv,image/*">
+            <button id="ai-file-btn" title="Upload files">+</button>
+            <textarea id="ai-user-input" rows="1" placeholder="Ask AI anything..."
                       class="flex-1 bg-[#0d1117] border border-[#30363d] px-4 focus:outline-none focus:border-[#3498db] resize-none text-sm"></textarea>
-            <button id="ai-send-btn" onclick="sendAiMessage()" class="pill-btn bg-[#3498db] text-white h-10 ai-btn-disabled">SEND</button>
+            <button id="ai-send-btn" class="pill-btn bg-[#3498db] text-white h-10 ai-btn-disabled">SEND</button>
         </div>
     </div>
 </div>
@@ -3511,26 +3570,27 @@
                 <span id="current-view-label">Full Network</span>
                 <div id="view-options"></div>
             </div>
-            <button id="protein-info-toggle-btn" type="button" class="hidden" onclick="openProteinInfoBox()">View Protein Info</button>
+            <button id="protein-info-toggle-btn" type="button" class="hidden">View Protein Info</button>
         </div>
         <div id="protein-info-box" aria-label="Protein information panel">
-            <button id="protein-info-prev-btn" class="protein-nav-btn" type="button" aria-label="Previous protein" onclick="navigateProteinInfo('left')">&lt;</button>
-            <button id="protein-info-next-btn" class="protein-nav-btn" type="button" aria-label="Next protein" onclick="navigateProteinInfo('right')">&gt;</button>
+            <div id="protein-info-resize-handle"></div>
+            <button id="protein-info-prev-btn" class="protein-nav-btn" type="button" aria-label="Previous protein">&lt;</button>
+            <button id="protein-info-next-btn" class="protein-nav-btn" type="button" aria-label="Next protein">&gt;</button>
             <div id="protein-info-header">
                 <div id="protein-info-heading-wrap">
                     <h4 id="protein-info-heading"></h4>
                 </div>
                 <div id="protein-info-toggle-group">
-                    <button type="button" class="protein-info-mode-btn active" data-protein-mode="annotation" onclick="setProteinInfoMode('annotation')">Annotation</button>
-                    <button type="button" class="protein-info-mode-btn" data-protein-mode="description" onclick="setProteinInfoMode('description')">Description</button>
-                    <button type="button" class="protein-info-mode-btn" data-protein-mode="sequence" onclick="setProteinInfoMode('sequence')">Sequence</button>
-                    <button type="button" class="protein-info-mode-btn" data-protein-mode="structure" onclick="setProteinInfoMode('structure')">Structure</button>
-                    <button type="button" class="protein-info-mode-btn" data-protein-mode="links" onclick="setProteinInfoMode('links')">Links</button>
-                    <button type="button" class="protein-info-mode-btn" data-protein-mode="guide" onclick="setProteinInfoMode('guide')">Guide</button>
+                    <button type="button" class="protein-info-mode-btn active" data-protein-mode="annotation">Annotation</button>
+                    <button type="button" class="protein-info-mode-btn" data-protein-mode="description">Description</button>
+                    <button type="button" class="protein-info-mode-btn" data-protein-mode="sequence">Sequence</button>
+                    <button type="button" class="protein-info-mode-btn" data-protein-mode="structure">Structure</button>
+                    <button type="button" class="protein-info-mode-btn" data-protein-mode="links">Links</button>
+                    <button type="button" class="protein-info-mode-btn" data-protein-mode="guide">Guide</button>
                 </div>
                 <div id="protein-info-actions">
-                    <button id="protein-info-explain-btn" type="button" class="protein-info-mode-btn" onclick="explainProteinInSimpleEnglish()">Explain in Simple English</button>
-                    <button id="protein-info-close-btn" type="button" class="protein-info-mode-btn" onclick="closeProteinInfoBox()" aria-label="Close protein info panel">&times;</button>
+                    <button id="protein-info-explain-btn" type="button" class="protein-info-mode-btn">Explain in Simple English</button>
+                    <button id="protein-info-close-btn" type="button" class="protein-info-mode-btn" aria-label="Close protein info panel">&times;</button>
                 </div>
             </div>
             <div id="protein-info-body"></div>
@@ -3544,32 +3604,32 @@
 
 <div id="right-lower-stack">
     <div id="ai-launch-buttons">
-        <button id="ask-ai-btn" type="button" onclick="toggleAiPanel()">Ask AI</button>
-        <button id="ai-python-console-btn" type="button" onclick="togglePythonConsoleMode()">Python Console</button>
+        <button id="ask-ai-btn" type="button">Ask AI</button>
+        <button id="ai-python-console-btn" type="button">Python Console</button>
     </div>
     <div id="info-box">
         <div class="info-header">
             <h4 id="info-id" style="margin:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:160px;">No Nodes Selected</h4>
             <div class="info-controls" id="info-controls">
-                <button id="mind-map-parent-btn" class="action-btn" style="display:none; padding:0 9px; height:31px; align-items:center; justify-content:center;" title="Select Parents of Selected Nodes" onclick="selectMindMapParents(event)">Parent</button>
-                <button id="mind-map-child-btn" class="action-btn" style="display:none; padding:0 9px; height:31px; align-items:center; justify-content:center;" title="Select Children of Selected Nodes" onclick="selectMindMapChildren(event)">Child</button>
-                <button id="mind-map-grow-btn" class="action-btn" style="padding: 0 9px;" title="Expand Selection" onclick="modifySelection(1)">Grow</button>
-                <button id="mind-map-shrink-btn" class="action-btn" style="padding: 0 9px;" title="Undo Selection / Step Back" onclick="modifySelection(-1)">Shrink</button>
+                <button id="mind-map-parent-btn" class="action-btn" style="display:none; padding:0 9px; height:31px; align-items:center; justify-content:center;" title="Select Parents of Selected Nodes">Parent</button>
+                <button id="mind-map-child-btn" class="action-btn" style="display:none; padding:0 9px; height:31px; align-items:center; justify-content:center;" title="Select Children of Selected Nodes">Child</button>
+                <button id="mind-map-grow-btn" class="action-btn" style="padding: 0 9px;" title="Expand Selection">Grow</button>
+                <button id="mind-map-shrink-btn" class="action-btn" style="padding: 0 9px;" title="Undo Selection / Step Back">Shrink</button>
             </div>
         </div>
         <div id="info-content" style="font-size:11px; margin-bottom: 5px;">Select Nodes to View Information</div>
-        <button id="node-info-table-btn" class="action-btn" style="margin-top:6px; width:100%; justify-content:center; background:#444 !important; border:none;" onclick="openNodeInfoTable()">Node Info Table</button>
+        <button id="node-info-table-btn" class="action-btn" style="margin-top:6px; width:100%; justify-content:center; background:#444 !important; border:none;">Node Info Table</button>
         <div id="shortest-path-control" style="display:none;">
-            <button id="shortest-path-toggle-btn" class="action-btn" onclick="toggleShortestPathMenu(event)">Shortest Path Tools</button>
+            <button id="shortest-path-toggle-btn" class="action-btn">Shortest Path Tools</button>
             <div id="shortest-path-menu" aria-label="Shortest path options">
                 <div class="shortest-path-menu-title" style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
                     <span>Path options</span>
                     <span id="shortest-path-length-display" style="color:#4caf50; font-size:11px; white-space:nowrap;">Shortest path length: -</span>
                 </div>
                 <div class="shortest-path-menu-actions">
-                    <button id="shortest-path-overlay-btn" class="btn-secondary" onclick="toggleShortestPathOverlay(event)">Show shortest path overlay</button>
-                    <button id="all-shortest-paths-btn" class="btn-secondary" onclick="toggleAllShortestPaths(event)">Show all shortest paths</button>
-                    <button class="btn-secondary" onclick="selectNodesAlongShortestPaths(event)">Select nodes along path(s)</button>
+                    <button id="shortest-path-overlay-btn" class="btn-secondary">Show shortest path overlay</button>
+                    <button id="all-shortest-paths-btn" class="btn-secondary">Show all shortest paths</button>
+                    <button class="btn-secondary">Select nodes along path(s)</button>
                 </div>
             </div>
         </div>
@@ -3581,26 +3641,26 @@
 
 <div id="nodeInfoTableModal" class="modal">
     <div class="modal-content">
-        <span class="close-modal" onclick="closeModal('nodeInfoTableModal')">&times;</span>
+        <span class="close-modal">&times;</span>
         <h3 style="margin-bottom:4px;">Node Info Table</h3>
         <div id="node-info-table-summary" style="font-size:12px; color:#ccc;">Select Nodes to View Information.</div>
         <div id="node-info-table-toolbar">
-            <input id="node-info-table-search" type="search" placeholder="Search rows" oninput="handleNodeInfoTableSearch(this.value)">
-            <button class="btn-secondary" onclick="clearNodeInfoTableSearch()">Clear</button>
+            <input id="node-info-table-search" type="search" placeholder="Search rows">
+            <button id="node-info-table-clear-btn" class="btn-secondary">Clear</button>
         </div>
         <div id="node-info-table-wrap"></div>
         <div id="node-info-table-actions">
-            <button class="btn-secondary" onclick="downloadNodeInfoTableCSV()">Download Table</button>
-            <button class="btn-secondary" onclick="copyNodeInfoTableTSV()">Copy Table</button>
-            <button class="btn-secondary" onclick="downloadSelectedFasta()">Download FASTA</button>
-            <button class="btn-secondary" onclick="downloadSelectedNodesJSON()">Download JSON</button>
+            <button id="node-info-table-download-csv-btn" class="btn-secondary">Download Table</button>
+            <button id="node-info-table-copy-tsv-btn" class="btn-secondary">Copy Table</button>
+            <button id="node-info-table-download-fasta-btn" class="btn-secondary">Download FASTA</button>
+            <button id="node-info-table-download-json-btn" class="btn-secondary">Download JSON</button>
         </div>
     </div>
 </div>
 
-<div id="downloadSessionModal" class="modal" onclick="if (event.target.id === 'downloadSessionModal') closeDownloadSessionModal()">
+<div id="downloadSessionModal" class="modal">
     <div class="modal-content" style="max-width:560px;">
-        <span class="close-modal" onclick="closeDownloadSessionModal()">&times;</span>
+        <span class="close-modal">&times;</span>
         <h3 style="margin-bottom:8px;">Select which session files to download</h3>
         <div style="display:flex; flex-direction:column; gap:10px; max-height:60vh; overflow:auto; padding-right:4px;">
             <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="downloadSessionSelectAll"> Select All</label>
@@ -3615,19 +3675,19 @@
                 Folder name
                 <input type="text" id="downloadSessionFolderName" style="padding:8px 10px; border-radius:8px; border:1px solid #666; background:#222; color:#fff;" />
             </label>
-            <button class="btn-secondary" style="width:100%;" onclick="downloadSessionFiles()">Download</button>
+            <button id="downloadSessionDownloadBtn" class="btn-secondary" style="width:100%;">Download</button>
         </div>
     </div>
 </div>
 
-<div id="node-info-pdb-overlay" onclick="if (event.target.id === 'node-info-pdb-overlay') closeNodeInfoPdbOverlay()">
+<div id="node-info-pdb-overlay">
     <div class="node-info-pdb-panel">
         <div class="node-info-pdb-head">
             <div>
                 <h4 class="node-info-pdb-title" id="node-info-pdb-title">Protein Data Bank links</h4>
                 <div class="node-info-pdb-subtitle" id="node-info-pdb-subtitle"></div>
             </div>
-            <button class="btn-secondary" onclick="closeNodeInfoPdbOverlay()">Close</button>
+            <button id="node-info-pdb-close-btn" class="btn-secondary">Close</button>
         </div>
         <div class="node-info-pdb-links" id="node-info-pdb-links"></div>
         <div class="node-info-pdb-empty" id="node-info-pdb-empty" style="display:none;">No PDB links are available for this protein.</div>
@@ -3756,8 +3816,8 @@
         
         <div class="welcome-annotation" style="top: 430px;">
             <svg class="welcome-arrow hand-drawn" viewBox="0 0 150 80" preserveAspectRatio="none">
-                <path d="M 150 40 Q 100 42 50 73" stroke="#3498db" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="3,2"/>
-                <polygon points="40,78 48,68 50,78" fill="#3498db"/>
+                <path d="M 150 40 Q 100 42 40 73" stroke="#3498db" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="3,2"/>
+                <polygon points="30,78 38,68 40,78" fill="#3498db"/>
             </svg>
             <div class="welcome-label">Settings</div>
         </div>
@@ -3793,8 +3853,8 @@
     <div class="welcome-right-bottom-annotations">
         <div class="welcome-annotation" style="top: 740px">
             <svg class="welcome-arrow hand-drawn" viewBox="0 0 150 80" preserveAspectRatio="none">
-                <path d="M 0 40 Q 50 38 130 43" stroke="#3498db" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="3,2"/>
-                <polygon points="140,44 130,38 130,48" fill="#3498db"/>
+                <path d="M 0 40 Q 50 38 80 43" stroke="#3498db" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="3,2"/>
+                <polygon points="90,44 80,38 80,48" fill="#3498db"/>
             </svg>
             <div class="welcome-label">AI and Python Console</div>
         </div>
