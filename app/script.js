@@ -293,6 +293,8 @@
     let proteinInfoMolstarViewer = null;
     let proteinInfoMolstarBackgroundObserver = null;
     let proteinInfoZoomHotkeyState = null;
+    let nodeHoverTooltipTimer = null;
+    let pendingNodeHoverTooltipId = null;
     
     // Guide-related variables
     let currentGuide = null; // { title, pages: [{ pageNumber, selectNodes, circleNodes, setText, text }] }
@@ -12075,6 +12077,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         if (!node) return;
         const tooltip = document.getElementById('node-hover-tooltip');
         if (!tooltip) return;
+        if (nodeHoverTooltipTimer) {
+            clearTimeout(nodeHoverTooltipTimer);
+            nodeHoverTooltipTimer = null;
+        }
+        pendingNodeHoverTooltipId = null;
 
         const m = proteinMetadata.get(node.id) || {};
         const locationSource = resolveBuiltInColorSource('localization', [node]);
@@ -12106,9 +12113,36 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     function hideNodeHoverTooltip() {
         const tooltip = document.getElementById('node-hover-tooltip');
         if (!tooltip) return;
+        if (nodeHoverTooltipTimer) {
+            clearTimeout(nodeHoverTooltipTimer);
+            nodeHoverTooltipTimer = null;
+        }
+        pendingNodeHoverTooltipId = null;
         tooltip.style.opacity = '0';
         tooltip.style.visibility = 'hidden';
         tooltip.style.pointerEvents = 'none';
+    }
+
+    function scheduleNodeHoverTooltip(node, delayMs = 250) {
+        if (!node) return;
+        if (pendingNodeHoverTooltipId === node.id && nodeHoverTooltipTimer) return;
+        if (nodeHoverTooltipTimer) {
+            clearTimeout(nodeHoverTooltipTimer);
+            nodeHoverTooltipTimer = null;
+        }
+        pendingNodeHoverTooltipId = node.id;
+        nodeHoverTooltipTimer = setTimeout(() => {
+            nodeHoverTooltipTimer = null;
+            if (hoveredNode && hoveredNode.id === node.id && !isTooltipHovered) {
+                showNodeHoverTooltip(node);
+            }
+        }, delayMs);
+    }
+
+    function isNodeHoverTooltipVisible() {
+        const tooltip = document.getElementById('node-hover-tooltip');
+        if (!tooltip) return false;
+        return tooltip.style.visibility === 'visible' && tooltip.style.opacity !== '0';
     }
 
     function refreshSelectionModeState() {
@@ -12399,7 +12433,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     function updateCanvasCursor(pt) {
         console.log("function updateCanvasCursor(pt)");
-        const canvasEl = document.querySelector('canvas');
+        const canvasEl = canvas;
+        if (!canvasEl) return;
         
         if (isFrameMode) {
             const hover = getFrameHoverState(pt);
@@ -13115,8 +13150,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         });
 
         if (found) {
-            hoveredNode = found;
-            showNodeHoverTooltip(found);
+            if (!hoveredNode || hoveredNode.id !== found.id) {
+                hoveredNode = found;
+                scheduleNodeHoverTooltip(found);
+            }
         } else if (!isTooltipHovered) {
             hoveredNode = null;
             hideNodeHoverTooltip();
@@ -14548,7 +14585,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         }
 
         if (hoveredNode) {
-            showNodeHoverTooltip(hoveredNode);
+            if (isNodeHoverTooltipVisible()) {
+                showNodeHoverTooltip(hoveredNode);
+            }
         } else if (!isTooltipHovered) {
             hideNodeHoverTooltip();
         }
@@ -17109,7 +17148,6 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     const loadExampleBtnEl = document.getElementById('loadExampleBtn');
     if (loadExampleBtnEl) {
         loadExampleBtnEl.onclick = async () => {
-            closeModal('guideModal');
             const originalLabel = loadExampleBtnEl.textContent;
             loadExampleBtnEl.disabled = true;
             loadExampleBtnEl.textContent = 'Loading example...';
@@ -17117,6 +17155,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 const exampleFiles = await fetchExampleDatasetFiles();
                 const linkFiles = exampleFiles.filter(file => file.name.toLowerCase().includes('link'));
                 const accessoryFiles = exampleFiles.filter(file => !file.name.toLowerCase().includes('link'));
+
+                await new Promise(requestAnimationFrame);
+                closeModal('guideModal');
 
                 if (linkFiles.length > 0) {
                     await processInteractionFiles(linkFiles);
@@ -17468,6 +17509,15 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             if (element) element.addEventListener('click', handler);
         };
 
+        document.querySelectorAll('.close-modal').forEach(button => {
+            if (button.dataset.boundCloseModal === 'true') return;
+            button.dataset.boundCloseModal = 'true';
+            button.addEventListener('click', (event) => {
+                const modal = event.target.closest('.modal');
+                if (modal?.id) closeModal(modal.id);
+            });
+        });
+
         bindClick(document.getElementById('ui-layer-toggle-tab'), () => {
             document.getElementById('ui-layer')?.classList.toggle('minimized');
         });
@@ -17496,6 +17546,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 if (targetId) toggleDropdown(targetId);
             });
         });
+
+        bindClick(document.querySelector('[data-download-action="session"]'), () => openDownloadSessionModal());
+
+        const variableSettingsButton = document.querySelector('#variables-drop button');
+        bindClick(variableSettingsButton, () => openVariableSettings());
 
         bindClick(document.getElementById('moreToggle'), () => toggleSearchMore());
         bindClick(document.getElementById('right-panel-key-toggle'), () => {
