@@ -64,7 +64,37 @@
             })();
 
     console.log("Hello, welcome to the colsole! Below you will see console logs of function calls (except for the functions draw and checkOffscreenNodes). This is useful for debugging and understanding what the code is doing.");
-    const GLOBAL_SCRIPT_OFFSET = 3043; // This is the number of lines in the HTML file BEFORE the first line of the main script, needed to calebrate the AIs script line numbers
+    const GLOBAL_SCRIPT_OFFSET = 0; // The app code now lives in App/script.js.
+    const MAIN_SCRIPT_URL = (() => {
+        return 'https://joeltre.github.io/StringScape/app/script.js';
+    })();
+    let mainScriptSourceCache = null;
+    let mainScriptSourcePromise = null;
+
+    async function getMainScriptSource() {
+        if (typeof mainScriptSourceCache === 'string') return mainScriptSourceCache;
+        const scriptEl = document.getElementById('main-script');
+        if (scriptEl?.textContent && scriptEl.textContent.trim()) {
+            mainScriptSourceCache = scriptEl.textContent;
+            return mainScriptSourceCache;
+        }
+        if (!mainScriptSourcePromise) {
+            mainScriptSourcePromise = fetch(MAIN_SCRIPT_URL, { cache: 'no-store' })
+                .then(response => {
+                    if (!response.ok) throw new Error(`Failed to load script source: ${response.status}`);
+                    return response.text();
+                })
+                .then(text => {
+                    mainScriptSourceCache = text;
+                    return text;
+                })
+                .catch(error => {
+                    mainScriptSourcePromise = null;
+                    throw error;
+                });
+        }
+        return mainScriptSourcePromise;
+    }
     const canvas = document.querySelector("#network");
     const gpuCanvas = document.querySelector("#network-gpu") || (() => {
         const created = document.createElement('canvas');
@@ -255,6 +285,7 @@
     let isPointerOverMainCanvas = false;
     let proteinInfoBoxOpen = false;
     let proteinInfoMode = 'annotation';
+    let proteinInfoCustomHeightPx = null;
     let proteinInfoNavigationHistory = [];
     let proteinInfoPreviousButtonSide = null;
     let proteinInfoStructureRenderToken = 0;
@@ -507,6 +538,10 @@
         if (!container) return;
         if (aiPanelMode !== 'python') {
             container.innerHTML = aiExamplePanelAgentHtml || container.innerHTML;
+            // Re-bind example prompt listeners after HTML restoration
+            container.querySelectorAll('.ai-example-item').forEach(button => {
+                button.addEventListener('click', () => loadExamplePrompt(button.textContent));
+            });
             return;
         }
         container.innerHTML = '';
@@ -621,6 +656,10 @@
             parts.push(name + (required.has(name) ? ' (required)' : ''));
             if (schema?.type) parts.push(schema.type);
             if (schema?.description) parts.push(schema.description);
+            if (schema?.enum) {
+                const exampleValues = schema.enum.slice(0, 3).join(', ');
+                parts.push(`options: [${exampleValues}${schema.enum.length > 3 ? ', ...' : ''}]`);
+            }
             return parts.join(': ');
         }).join('; ');
     }
@@ -1991,11 +2030,9 @@
             const query = args.query.toLowerCase(); // Simple case-insensitive search
             const context = Math.max(1, parseInt(args.context_lines) || 1);
             const results = [];
-            
-            const scriptTag = document.getElementById('main-script');
-            if (!scriptTag) return "Error: Script with ID 'main-script' not found.";
-            
-            const lines = (scriptTag.textContent || "").split('\n'); 
+
+            const content = await getMainScriptSource();
+            const lines = (content || "").split('\n');
 
             lines.forEach((line, index) => {
                 if (line.toLowerCase().includes(query)) {
@@ -2016,10 +2053,7 @@
 
         }
         if (toolName === 'View_code_snippet') {
-            const scriptTag = document.getElementById('main-script');
-            if (!scriptTag) return "Error: Could not find script with ID 'main-script'.";
-            
-            const content = scriptTag.textContent || "";
+            const content = await getMainScriptSource();
             const lines = content.split('\n');
 
             // 1. Handle Function Name Search
@@ -2048,7 +2082,7 @@
 
                     return `--- Function: ${args.function_name} (starts around True Line ${trueLine}) ---\n${finalOutput}`;
                 }
-                return `Function "${args.function_name}" not found in main-script.`;
+                return `Function "${args.function_name}" not found in script.js.`;
             }
 
             // 2. Handle Line Ranges
@@ -2063,10 +2097,7 @@
             return "Please provide a function_name or a line range (start_line and end_line).";
         }
         if (toolName === 'View_all_functions') {
-            const scriptTag = document.getElementById('main-script');
-            if (!scriptTag) return "Error: Could not find script with ID 'main-script'.";
-
-            const content = scriptTag.textContent || "";
+            const content = await getMainScriptSource();
             const lines = content.split('\n');
             
             // This allows for optional indentation (spaces or tabs) before 'function'
@@ -3014,7 +3045,7 @@ def clean_numeric(values):
             aiIsProcessing = false;
             aiProcessingAbortController = null;
             aiStopMessagePending = false;
-            aiArchiveCurrentChat(false);
+            aiArchiveCurrentChat(true);
             updateAiSendButton();
         }
     }
@@ -9174,6 +9205,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 'UniProt': linkData.uniprotUrl || '',
                 'NCBI': [linkData.ncbiProteinUrl, linkData.ncbiGeneUrl].filter(Boolean).join(' '),
                 'Pubmed': linkData.pubmedUrl || '',
+                'IntAct': linkData.intactUrl || '',
+                'STRING': linkData.stringUrl || '',
                 'Protein Data Bank': linkData.pdbLinks.map(link => link.url).join(' '),
                 'Aliases': Array.isArray(meta.aliases) ? meta.aliases.join('; ') : (meta.alias || ''),
                 'Layer': node.layer === 99 ? 'Disconnected' : (node.layer !== undefined ? node.layer : ''),
@@ -9419,14 +9452,14 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 : (!hasUrl && !hasOnclick);
             btn.disabled = disabled;
             btn.style.opacity = disabled ? '0.45' : '1';
-            btn.onclick = () => {
+            btn.addEventListener('click', () => {
                 if (disabled) return;
                 if (hasOnclick) {
                     link.onclick();
                     return;
                 }
                 if (hasUrl) window.open(link.url, '_blank', 'noopener');
-            };
+            });
             wrap.appendChild(btn);
         });
 
@@ -9570,10 +9603,35 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     function renderSearchSummaryText(searchSummary) {
-        if (!Array.isArray(searchSummary?.terms) || searchSummary.terms.length === 0) return '';
-        const lines = searchSummary.terms.map(termInfo => `Search: ${escapeHtml(termInfo.term)} | ${termInfo.count} nodes`);
+        if (!searchSummary) return '';
+        if (searchSummary.mode === 'boolean') {
+            const queryLabel = searchSummary.query ? `Search: ${escapeHtml(searchSummary.query)}` : 'Search';
+            return `${queryLabel}\n${searchSummary.total} total nodes selected`;
+        }
+        if (!Array.isArray(searchSummary.terms) || searchSummary.terms.length === 0) {
+            const queryLabel = searchSummary.query ? `Search: ${escapeHtml(searchSummary.query)}` : '';
+            return queryLabel ? `${queryLabel}\n${searchSummary.total} total nodes selected` : `${searchSummary.total} total nodes selected`;
+        }
+        const lines = searchSummary.terms.map(termInfo => {
+            const termLabel = termInfo.exact ? `"${termInfo.term}"` : termInfo.term;
+            return `Search: ${escapeHtml(termLabel)} | ${termInfo.count} nodes`;
+        });
         lines.push(`${searchSummary.total} total nodes selected`);
         return lines.join('\n');
+    }
+
+    function getProteinInfoDefaultHeightPx() {
+        const viewportHeight = Math.max(480, window.innerHeight || 0);
+        return Math.round(viewportHeight * (proteinInfoMode === 'structure' ? 0.48 : 0.34));
+    }
+
+    function applyProteinInfoPanelHeight(heightPx = null) {
+        const box = document.getElementById('protein-info-box');
+        const body = document.getElementById('protein-info-body');
+        if (!box || !body) return;
+        const targetHeight = Number.isFinite(heightPx) ? Math.max(160, Math.round(heightPx)) : getProteinInfoDefaultHeightPx();
+        box.style.height = `${targetHeight}px`;
+        body.style.maxHeight = 'none';
     }
 
     // Keep info-panel rendering on textContent so search terms and file-derived labels cannot become executable HTML.
@@ -9768,7 +9826,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         if (!box || !heading || !body) return;
 
         box.classList.toggle('open', proteinInfoBoxOpen);
-        box.style.display = proteinInfoBoxOpen ? 'block' : 'none';
+        box.style.display = proteinInfoBoxOpen ? 'flex' : 'none';
+
+        if (proteinInfoBoxOpen) {
+            applyProteinInfoPanelHeight(proteinInfoCustomHeightPx);
+        }
 
         modeButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.proteinMode === proteinInfoMode));
 
@@ -9838,6 +9900,16 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     function closeProteinInfoBox() {
         proteinInfoBoxOpen = false;
+        proteinInfoCustomHeightPx = null;
+        // Reset custom height when closing
+        const proteinInfoBox = document.getElementById('protein-info-box');
+        const proteinInfoBody = document.getElementById('protein-info-body');
+        if (proteinInfoBox) {
+            proteinInfoBox.style.height = '';
+        }
+        if (proteinInfoBody) {
+            proteinInfoBody.style.maxHeight = '';
+        }
         refreshProteinInfoPanel();
     }
 
@@ -10028,7 +10100,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
         const selectedIds = Array.from(getEffectiveSelectedNodesSet());
         const hasSelection = selectedIds.length > 0;
-        const hasSearchSummary = Array.isArray(searchSummary?.terms) && searchSummary.terms.length > 0;
+        const hasSearchSummary = !!searchSummary && (searchSummary.mode === 'boolean' || (Array.isArray(searchSummary.terms) && searchSummary.terms.length > 0));
         const shortestPathControl = document.getElementById('shortest-path-control');
         const shortestPathMenu = document.getElementById('shortest-path-menu');
 
@@ -10060,7 +10132,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             }
         }
 
-        if (selectedIds.length === 2) {
+        if (selectedIds.length === 2 && currentViewId !== 'Mind Map') {
             if (shortestPathControl) shortestPathControl.style.display = 'block';
             updateShortestPathOverlayButton();
             updateAllShortestPathsButton();
@@ -10147,7 +10219,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         updateNodeInfoTableModalChrome('Node Info Table', false);
         calculateEigenvectorCentrality();
         const { rows, extraColumns } = getSelectedNodeInfoRows();
-        const baseColumns = ['Protein ID', 'Preferred Name', 'Gene ID', 'Description', 'Annotation', 'Localisation', 'Protein Size', 'UniProt', 'NCBI', 'Pubmed', 'Protein Data Bank', 'Aliases',  'Layer', 'Centrality', 'Eigen', 'Sequence'];
+        const baseColumns = ['Protein ID', 'Preferred Name', 'Gene ID', 'Description', 'Annotation', 'Localisation', 'Protein Size', 'UniProt', 'NCBI', 'Pubmed', 'IntAct', 'STRING', 'Protein Data Bank', 'Aliases',  'Layer', 'Centrality', 'Eigen', 'Sequence'];
         const columns = [...baseColumns, ...extraColumns.map(c => c.label)];
         nodeInfoTableState = { columns, rows, filteredRows: rows, searchQuery: '', mode: 'protein' };
         renderNodeInfoTable();
@@ -10222,8 +10294,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const heading = document.querySelector('#nodeInfoTableModal h3');
         if (heading) heading.textContent = titleText;
 
-        const fastaBtn = document.querySelector('#node-info-table-actions button[onclick="downloadSelectedFasta()"]');
-        const jsonBtn = document.querySelector('#node-info-table-actions button[onclick="downloadSelectedNodesJSON()"]');
+        const fastaBtn = document.getElementById('node-info-table-download-fasta-btn');
+        const jsonBtn = document.getElementById('node-info-table-download-json-btn');
         const displayStyle = hideFastaJson ? 'none' : 'inline-flex';
 
         if (fastaBtn) {
@@ -10248,6 +10320,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             if (column === 'UniProt') return row.__linkData?.uniprotAc || value || '';
             if (column === 'NCBI') return [row.__linkData?.ncbiProteinId, row.__linkData?.geneId, value].filter(Boolean).join(' ');
             if (column === 'Pubmed') return row.__linkData?.geneId || value || '';
+            if (column === 'IntAct') return row.__linkData?.intactUrl || value || '';
+            if (column === 'STRING') return row.__linkData?.stringUrl || value || '';
             if (column === 'Protein Data Bank') return [row.__linkData?.pdbLinks?.map(link => link.id).join(' '), value].filter(Boolean).join(' ');
             return value ?? '';
         }).join(' ').toLowerCase();
@@ -10329,10 +10403,18 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             const url = row.__linkData?.pubmedUrl || '';
             return url ? `<div class="node-info-link-group">${renderNodeInfoTableButton('PubMed', url)}</div>` : '<span style="color:#888;">-</span>';
         }
+        if (column === 'IntAct') {
+            const url = row.__linkData?.intactUrl || '';
+            return url ? `<div class="node-info-link-group">${renderNodeInfoTableButton('IntAct', url)}</div>` : '<span style="color:#888;">-</span>';
+        }
+        if (column === 'STRING') {
+            const url = row.__linkData?.stringUrl || '';
+            return url ? `<div class="node-info-link-group">${renderNodeInfoTableButton('STRING', url)}</div>` : '<span style="color:#888;">-</span>';
+        }
         if (column === 'Protein Data Bank') {
             const pdbLinks = Array.isArray(row.__linkData?.pdbLinks) ? row.__linkData.pdbLinks : [];
             return pdbLinks.length
-                ? `<div class="node-info-link-group">${renderNodeInfoTableButton('PDB links', '', `onclick="openNodeInfoPdbOverlay(${rowIndex})"`)}</div>`
+                ? `<div class="node-info-link-group">${renderNodeInfoTableButton('PDB links', '', `class="btn-secondary node-info-pdb-btn" data-node-info-pdb-row="${rowIndex}"`)}</div>`
                 : '<span style="color:#888;">-</span>';
         }
         return escapeHtml(textValue);
@@ -10341,9 +10423,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     function renderNodeInfoTableButton(label, url, extraAttributes = '') {
         if (!url && !extraAttributes) return '';
         if (extraAttributes) {
-            return `<button type="button" class="btn-secondary" ${extraAttributes}>${escapeHtml(label)}</button>`;
+            return `<button type="button" ${extraAttributes}>${escapeHtml(label)}</button>`;
         }
-        return `<button type="button" class="btn-secondary" onclick='openNodeInfoUrl(${JSON.stringify(url)})'>${escapeHtml(label)}</button>`;
+        return `<button type="button" class="btn-secondary node-info-url-btn" data-node-info-url="${escapeHtml(url)}">${escapeHtml(label)}</button>`;
     }
 
     function openNodeInfoUrl(url) {
@@ -10364,7 +10446,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         title.textContent = 'Protein Data Bank links';
         subtitle.textContent = row?.['Protein ID'] ? `Protein ${row['Protein ID']}` : '';
         linksWrap.innerHTML = links.length
-            ? links.map(link => `<button type="button" class="btn-secondary" onclick='openNodeInfoUrl(${JSON.stringify(link.url)})'>${escapeHtml(link.id)}</button>`).join('')
+            ? links.map(link => `<button type="button" class="btn-secondary node-info-url-btn" data-node-info-url="${escapeHtml(link.url)}">${escapeHtml(link.id)}</button>`).join('')
             : '';
         empty.style.display = links.length ? 'none' : 'block';
         overlay.style.display = 'flex';
@@ -10389,6 +10471,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             'UniProt': 100,
             'NCBI': 170,
             'Pubmed': 100,
+            'IntAct': 95,
+            'STRING': 95,
             'Protein Data Bank': 130,
             'Annotation': 420,
             'Aliases': 350,
@@ -10551,6 +10635,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         if (column === 'UniProt') return row.__linkData?.uniprotUrl || '';
         if (column === 'NCBI') return [row.__linkData?.ncbiProteinUrl, row.__linkData?.ncbiGeneUrl].filter(Boolean).join(' ');
         if (column === 'Pubmed') return row.__linkData?.pubmedUrl || '';
+        if (column === 'IntAct') return row.__linkData?.intactUrl || '';
+        if (column === 'STRING') return row.__linkData?.stringUrl || '';
         if (column === 'Protein Data Bank') return Array.isArray(row.__linkData?.pdbLinks) ? row.__linkData.pdbLinks.map(link => link.url).join(' ') : '';
         return row[column] ?? '';
     }
@@ -12004,7 +12090,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
         tooltip.innerHTML = `
             <div style="font-size:14px; font-weight:700; margin-bottom:10px; line-height:1.2;">${escapeHtml(node.id)}</div>
-            <div style="line-height:1.3;">Location: ${locationText}</div>
+            <div style="line-height:1.3;">Localization: ${locationText}</div>
             <div style="line-height:1.3;">Annotation: ${annotationText}</div>
         `;
 
@@ -12159,6 +12245,12 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         }
         if (key === '+' || key === '=') modifySelection(1);
         if (key === '-') modifySelection(-1);
+        if (e.ctrlKey && key === 'd') {
+            e.preventDefault();
+            deselectNodes();
+            draw();
+            return;
+        }
     });
 
     // Handle the Rename option click
@@ -14618,7 +14710,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 if (labelZoomAlpha > 0) {
                     const screenBg = document.getElementById('bgColor')?.value || '#1a1a1a';
                     octx.save();
-                    ctx.font = `700 ${fontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`;
+                    octx.font = 'bold 5px Arial';
                     octx.textAlign = 'center';
                     octx.textBaseline = 'middle';
                     octx.fillStyle = '#ffffff';
@@ -15419,6 +15511,20 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             const simState = embeddingSimilarityState || computeEmbeddingSimilarityState(activeNodes);
             const range = [simState.min, simState.max];
             const hasReference = getActiveEmbeddingReferenceSet().size > 0;
+            const hasUploadedEmbeddingFiles = Object.keys(uploadedEmbeddingFiles || {}).length > 0;
+
+            if (!hasUploadedEmbeddingFiles) {
+                legend.append('div')
+                    .style('font-size', '12px')
+                    .style('font-weight', '700')
+                    .style('color', '#fff')
+                    .style('line-height', '1.35')
+                    .style('margin', '0 0 10px 0')
+                    .style('padding', '8px 10px')
+                    .style('border-radius', '10px')
+                    .style('background', '#b45309')
+                    .text('No embedding (.h5) files uploaded. Note that STRING does not have .h5 files for prokaryotes.');
+            }
             
             // Gradient bar and labels
             const gradient = d3.range(0, 1.01, 0.1).map(t => getEmbeddingSimilarityColor((t * 2) - 1)).join(', ');
@@ -15770,12 +15876,15 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     updateSizesAndColors();
                 });
                 if (mode === 'centrality') {
+                    const centralityScopeText = centralityScope === 'global'
+                        ? 'Global calculates centrality using only the nodes and links in the Full Network.'
+                        : 'Local calculates centrality using the nodes and links in the current view.';
                     legend.append("div")
                         .style("font-size", "11px")
                         .style("color", "#bbb")
                         .style("line-height", "1.35")
                         .style("margin", "6px 0 10px 0")
-                        .text("Local calculates centrality using only the nodes and links in the current view.");
+                        .text(centralityScopeText);
                 }
                 if (mode === 'eigen') {
                     legend.append("div")
@@ -16303,93 +16412,192 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         selectNodes(activeNodes.filter(n => finalSet.has(n.id)), false, queryStr, finalSummary);
     }
 
+    function tokenizeSearchQuery(rawInput) {
+        const tokens = [];
+        let current = '';
+        let inQuotes = false;
+
+        for (let i = 0; i < rawInput.length; i++) {
+            const char = rawInput[i];
+            if (char === '"') {
+                if (inQuotes) {
+                    if (current.trim()) tokens.push({ value: current.trim(), quoted: true });
+                    current = '';
+                    inQuotes = false;
+                } else {
+                    if (current.trim()) tokens.push({ value: current.trim(), quoted: false });
+                    current = '';
+                    inQuotes = true;
+                }
+                continue;
+            }
+            if (!inQuotes && /\s/.test(char)) {
+                if (current.trim()) tokens.push({ value: current.trim(), quoted: false });
+                current = '';
+                continue;
+            }
+            current += char;
+        }
+
+        if (current.trim()) tokens.push({ value: current.trim(), quoted: inQuotes });
+        return tokens.filter(token => token.value);
+    }
+
+    function isBooleanOperatorToken(token) {
+        return !token?.quoted && ['AND', 'OR', 'NOT', 'BUT'].includes(String(token?.value || '').toUpperCase());
+    }
+
+    function parseBooleanSearchQuery(tokens) {
+        let index = 0;
+
+        function parseExpression() {
+            return parseOr();
+        }
+
+        function parseOr() {
+            let left = parseAnd();
+            while (index < tokens.length && !tokens[index].quoted && tokens[index].value.toUpperCase() === 'OR') {
+                index++;
+                const right = parseAnd();
+                if (!right) break;
+                left = { type: 'or', left, right };
+            }
+            return left;
+        }
+
+        function parseAnd() {
+            let left = parseNot();
+            while (index < tokens.length && !tokens[index].quoted && (tokens[index].value.toUpperCase() === 'AND' || tokens[index].value.toUpperCase() === 'BUT')) {
+                index++;
+                const right = parseNot();
+                if (!right) break;
+                left = { type: 'and', left, right };
+            }
+            return left;
+        }
+
+        function parseNot() {
+            if (index < tokens.length && !tokens[index].quoted && tokens[index].value.toUpperCase() === 'NOT') {
+                index++;
+                const term = parseNot();
+                return term ? { type: 'not', term } : null;
+            }
+            return parsePrimary();
+        }
+
+        function parsePrimary() {
+            while (index < tokens.length && isBooleanOperatorToken(tokens[index])) index++;
+            if (index >= tokens.length) return null;
+            const token = tokens[index++];
+            return { type: 'term', value: token.value, exact: !!token.quoted };
+        }
+
+        return parseExpression();
+    }
+
+    function evaluateBooleanExpression(expr, matchesTerm) {
+        if (!expr) return true;
+        if (expr.type === 'term') return matchesTerm(expr.value, !!expr.exact);
+        if (expr.type === 'and') return evaluateBooleanExpression(expr.left, matchesTerm) && evaluateBooleanExpression(expr.right, matchesTerm);
+        if (expr.type === 'or') return evaluateBooleanExpression(expr.left, matchesTerm) || evaluateBooleanExpression(expr.right, matchesTerm);
+        if (expr.type === 'not') return !evaluateBooleanExpression(expr.term, matchesTerm);
+        return true;
+    }
+
+    function getSearchTermMatcher(scope, term) {
+        const lowerQuery = String(term || '').toLowerCase();
+        return (node, metadata, exact = false) => matchesSearchQuery(node, metadata, lowerQuery, scope, exact);
+    }
+
+    function getMindMapNodeMatcher(layout) {
+        const infoData = mindMapInfoFile ? accessoryDataFiles[mindMapInfoFile] : null;
+        const infoIdHeader = infoData ? getMindMapIdHeader(mindMapInfoFile, Array.from(layout.nodes.keys())) : null;
+
+        return (nodeId, mmNode, term) => {
+            const lowerTerm = String(term || '').toLowerCase();
+            if (String(nodeId || '').toLowerCase().includes(lowerTerm)) return true;
+            if (String(mmNode?.label || '').toLowerCase().includes(lowerTerm)) return true;
+            if (infoData && infoIdHeader) {
+                const infoRow = infoData.rows.find(row => row[infoIdHeader] === nodeId);
+                if (infoRow) {
+                    for (const value of Object.values(infoRow)) {
+                        if (String(value).toLowerCase().includes(lowerTerm)) return true;
+                    }
+                }
+            }
+            return false;
+        };
+    }
+
+    function buildSearchSummary(rawInput, summaryTerms, totalMatches, mode) {
+        if (mode === 'boolean') {
+            return { mode: 'boolean', query: rawInput, total: totalMatches };
+        }
+        return {
+            mode: 'terms',
+            query: rawInput,
+            terms: summaryTerms,
+            total: totalMatches
+        };
+    }
+
     function triggerSearch() {
         console.log("function triggerSearch()");
         const rawInput = document.getElementById('searchInput').value.trim();
         if (!rawInput) return;
         const scope = document.getElementById('searchScope').value;
+        const tokens = tokenizeSearchQuery(rawInput);
+        const searchTerms = tokens.filter(token => !isBooleanOperatorToken(token));
+        if (!searchTerms.length) return;
+        const booleanMode = tokens.some(isBooleanOperatorToken);
 
         // Handle Mind Map search separately
         if (currentViewId === 'Mind Map') {
             const layout = buildMindMapLayout();
             if (!layout || !layout.nodes) return;
-            
-            // Parse quoted phrases and individual terms
-            const quotedMatches = rawInput.match(/"([^"]*)"/g) || [];
-            const quotedTerms = quotedMatches.map(m => m.replace(/"/g, '').toLowerCase());
-            const remainingInput = rawInput.replace(/"([^"]*)"/g, '').trim();
-            const unquotedTerms = remainingInput.split(/[,\s]+/).map(q => q.trim().toLowerCase()).filter(q => q.length > 0);
-            const allTerms = [...quotedTerms, ...unquotedTerms];
-            
+            const matchesTerm = getMindMapNodeMatcher(layout);
+            const expression = booleanMode ? parseBooleanSearchQuery(tokens) : null;
             const matchedNodeIds = new Set();
-            const infoData = mindMapInfoFile ? accessoryDataFiles[mindMapInfoFile] : null;
-            const infoIdHeader = infoData ? getMindMapIdHeader(mindMapInfoFile, Array.from(layout.nodes.keys())) : null;
-            
             layout.nodes.forEach((mmNode, nodeId) => {
-                let matchesAllTerms = true;
-                for (const term of allTerms) {
-                    let termMatches = false;
-                    // Check node ID
-                    if (nodeId.toLowerCase().includes(term)) termMatches = true;
-                    // Check node label
-                    else if ((mmNode.label || '').toLowerCase().includes(term)) termMatches = true;
-                    // Check info file data
-                    else if (infoData && infoIdHeader) {
-                        const infoRow = infoData.rows.find(r => r[infoIdHeader] === nodeId);
-                        if (infoRow) {
-                            for (const value of Object.values(infoRow)) {
-                                if (String(value).toLowerCase().includes(term)) {
-                                    termMatches = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    if (!termMatches) {
-                        matchesAllTerms = false;
-                        break;
-                    }
-                }
-                if (matchesAllTerms) matchedNodeIds.add(nodeId);
+                const isMatch = booleanMode
+                    ? evaluateBooleanExpression(expression, (term) => matchesTerm(nodeId, mmNode, term))
+                    : searchTerms.some(term => matchesTerm(nodeId, mmNode, term.value));
+                if (isMatch) matchedNodeIds.add(nodeId);
             });
-            
+
             mindMapSelectedNodes = matchedNodeIds;
-            const searchSummary = {
-                terms: allTerms.map(term => ({ term, count: matchedNodeIds.size })),
-                total: matchedNodeIds.size
-            };
+            const summaryTerms = booleanMode ? [] : searchTerms.map(term => ({
+                term: term.value,
+                exact: !!term.quoted,
+                count: Array.from(layout.nodes.entries()).filter(([nodeId, mmNode]) => matchesTerm(nodeId, mmNode, term.value)).length
+            }));
+            const searchSummary = buildSearchSummary(rawInput, summaryTerms, matchedNodeIds.size, booleanMode ? 'boolean' : 'terms');
             refreshInfoBoxFromSelection(rawInput, searchSummary);
             draw();
             return;
         }
 
-        // Regular network search with quoted phrase support
-        const quotedMatches = rawInput.match(/"([^"]*)"/g) || [];
-        const quotedPhrases = quotedMatches.map(m => m.replace(/"/g, '').trim()).filter(p => p.length > 0);
-        const remainingInput = rawInput.replace(/"([^"]*)"/g, '').trim();
-        const unquotedTerms = remainingInput.split(/[,\s]+/).map(q => q.trim()).filter(q => q.length > 0);
-        const allSearchTerms = [...quotedPhrases, ...unquotedTerms];
-        
-        if (!allSearchTerms.length) return;
-        
         const activeNodes = currentViewId === 'base' ? nodes : (activeSubData?.nodes || []);
-        const matchSets = allSearchTerms.map((query) => {
-            const isExactPhrase = quotedPhrases.includes(query);
-            const lowerQuery = query.toLowerCase();
-            return activeNodes.filter(n => {
-                const m = proteinMetadata.get(n.id) || {};
-                return matchesSearchQuery(n, m, lowerQuery, scope, isExactPhrase);
-            });
+        const boolExpr = booleanMode ? parseBooleanSearchQuery(tokens) : null;
+        const matches = activeNodes.filter(node => {
+            const metadata = proteinMetadata.get(node.id) || {};
+            const matchesTerm = (term, exact = false) => getSearchTermMatcher(scope, term)(node, metadata, exact);
+            return booleanMode
+                ? evaluateBooleanExpression(boolExpr, matchesTerm)
+                : searchTerms.some(term => matchesTerm(term.value, !!term.quoted));
         });
-        const uniqueMatches = new Map();
-        matchSets.forEach(termMatches => {
-            termMatches.forEach(node => uniqueMatches.set(node.id, node));
-        });
-        const searchSummary = {
-            terms: allSearchTerms.map((query, index) => ({ term: query, count: matchSets[index].length })),
-            total: uniqueMatches.size
-        };
-        applySearchLogic(Array.from(uniqueMatches.values()), allSearchTerms.join(', '), searchSummary); draw();
+
+        const summaryTerms = booleanMode ? [] : searchTerms.map(term => ({
+            term: term.value,
+            exact: !!term.quoted,
+            count: activeNodes.filter(node => {
+                const metadata = proteinMetadata.get(node.id) || {};
+                return getSearchTermMatcher(scope, term.value)(node, metadata, !!term.quoted);
+            }).length
+        }));
+        const searchSummary = buildSearchSummary(rawInput, summaryTerms, matches.length, booleanMode ? 'boolean' : 'terms');
+        applySearchLogic(matches, rawInput, searchSummary); 
+        draw();
     }
 
     function matchesSearchAllFields(n, m, query, isExactPhrase = false) {
@@ -17254,6 +17462,171 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     // Action Buttons
     document.getElementById('copyFrameBtn').onclick = () => captureFrame('copy');
     document.getElementById('downloadFrameBtn').onclick = () => captureFrame('download');
+
+    function bindStaticUiEventListeners() {
+        const bindClick = (element, handler) => {
+            if (element) element.addEventListener('click', handler);
+        };
+
+        bindClick(document.getElementById('ui-layer-toggle-tab'), () => {
+            document.getElementById('ui-layer')?.classList.toggle('minimized');
+        });
+
+        bindClick(document.getElementById('right-panel-toggle-tab'), () => {
+            document.getElementById('right-panel')?.classList.toggle('minimized');
+        });
+
+        document.querySelectorAll('#ui-content > button, #guideModal .modal-content > button').forEach(button => {
+            const text = button.textContent.trim();
+            if (text === 'Open Start Guide') {
+                bindClick(button, () => openModal('guideModal'));
+            } else if (text === 'Open Previous Session') {
+                bindClick(button, () => {
+                    closeWelcomeOverlay();
+                    document.getElementById('sessionFolderInput')?.click();
+                });
+            } else if (text === 'About StringScape') {
+                bindClick(button, () => openModal('aboutModal'));
+            }
+        });
+
+        document.querySelectorAll('#ui-content .dropdown-toggle').forEach(toggle => {
+            bindClick(toggle, () => {
+                const targetId = toggle.nextElementSibling?.id;
+                if (targetId) toggleDropdown(targetId);
+            });
+        });
+
+        bindClick(document.getElementById('moreToggle'), () => toggleSearchMore());
+        bindClick(document.getElementById('right-panel-key-toggle'), () => {
+            const legendContent = document.getElementById('legend-content');
+            if (!legendContent) return;
+            legendContent.classList.toggle('hidden');
+            const keyToggle = document.getElementById('right-panel-key-toggle');
+            if (keyToggle) keyToggle.textContent = legendContent.classList.contains('hidden') ? 'Key ▾' : 'Key ▾';
+        });
+
+        bindClick(document.getElementById('ai-new-chat-btn'), () => aiNewChat());
+        bindClick(document.getElementById('ai-header-title'), () => toggleAiModeDropdown());
+        bindClick(document.getElementById('ai-mode-agent-option'), () => setAiPanelMode('agent'));
+        bindClick(document.getElementById('ai-mode-python-option'), () => setAiPanelMode('python'));
+        bindClick(document.getElementById('ai-menu-btn'), () => toggleAiMenu());
+        bindClick(document.getElementById('ai-download-menu-btn'), () => {
+            downloadAiChat();
+            toggleAiMenu();
+        });
+        bindClick(document.getElementById('ai-close-panel-btn'), () => toggleAiPanel(false));
+        bindClick(document.getElementById('ai-history-toggle-btn'), () => aiToggleHistoryPanel());
+        bindClick(document.getElementById('ai-setup-toggle-btn'), () => toggleAiTopPanel('setup'));
+        bindClick(document.getElementById('ai-prompts-toggle-btn'), () => toggleAiTopPanel('prompts'));
+        bindClick(document.getElementById('ai-connect-btn'), () => checkAiConnection());
+        const aiServerUrlInput = document.getElementById('ai-server-url');
+        if (aiServerUrlInput) {
+            aiServerUrlInput.addEventListener('input', () => aiToggleConnectColor(aiServerUrlInput));
+        }
+        bindClick(document.getElementById('ai-python-instructions-btn'), () => openPythonInstructionsBox());
+        bindClick(document.getElementById('ai-run-script-btn'), () => runPythonConsoleScript());
+        bindClick(document.getElementById('ai-copy-python-instructions'), () => copyPythonInstructions());
+        bindClick(document.getElementById('ai-close-python-instructions'), () => closePythonInstructionsBox());
+        bindClick(document.getElementById('ai-file-btn'), () => document.getElementById('ai-file-input')?.click());
+        bindClick(document.getElementById('ai-send-btn'), () => sendAiMessage());
+        const aiFileInput = document.getElementById('ai-file-input');
+        if (aiFileInput) {
+            aiFileInput.addEventListener('change', () => aiHandleFile(aiFileInput));
+        }
+        bindClick(document.getElementById('ask-ai-btn'), () => toggleAiPanel());
+        bindClick(document.getElementById('ai-python-console-btn'), () => togglePythonConsoleMode());
+
+        bindClick(document.getElementById('protein-info-toggle-btn'), () => openProteinInfoBox());
+        bindClick(document.getElementById('protein-info-prev-btn'), () => navigateProteinInfo('left'));
+        bindClick(document.getElementById('protein-info-next-btn'), () => navigateProteinInfo('right'));
+        document.querySelectorAll('[data-protein-mode]').forEach(button => {
+            bindClick(button, () => setProteinInfoMode(button.dataset.proteinMode));
+        });
+        bindClick(document.getElementById('protein-info-explain-btn'), () => explainProteinInSimpleEnglish());
+        bindClick(document.getElementById('protein-info-close-btn'), () => closeProteinInfoBox());
+
+        const proteinInfoBox = document.getElementById('protein-info-box');
+        const resizeHandle = document.getElementById('protein-info-resize-handle');
+        const proteinInfoBody = document.getElementById('protein-info-body');
+        let isResizingProteinInfo = false;
+        let startY = 0;
+
+        if (resizeHandle && proteinInfoBox && proteinInfoBody) {
+            resizeHandle.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                isResizingProteinInfo = true;
+                startY = e.clientY;
+                proteinInfoBox.classList.add('resizing');
+                document.body.style.userSelect = 'none';
+
+                const handleMouseMove = (moveEvent) => {
+                    if (!isResizingProteinInfo) return;
+                    const delta = moveEvent.clientY - startY;
+                    const currentHeight = proteinInfoBox.getBoundingClientRect().height || getProteinInfoDefaultHeightPx();
+                    const nextHeight = Math.max(160, currentHeight + delta);
+                    proteinInfoCustomHeightPx = nextHeight;
+                    applyProteinInfoPanelHeight(nextHeight);
+                    startY = moveEvent.clientY;
+                };
+
+                const handleMouseUp = () => {
+                    isResizingProteinInfo = false;
+                    proteinInfoBox.classList.remove('resizing');
+                    document.body.style.userSelect = '';
+                    document.removeEventListener('mousemove', handleMouseMove);
+                    document.removeEventListener('mouseup', handleMouseUp);
+                };
+
+                document.addEventListener('mousemove', handleMouseMove);
+                document.addEventListener('mouseup', handleMouseUp);
+            });
+        }
+
+        bindClick(document.getElementById('mind-map-parent-btn'), event => selectMindMapParents(event));
+        const nodeInfoTableWrap = document.getElementById('node-info-table-wrap');
+        if (nodeInfoTableWrap && nodeInfoTableWrap.dataset.boundNodeInfoClicks !== 'true') {
+            nodeInfoTableWrap.dataset.boundNodeInfoClicks = 'true';
+            nodeInfoTableWrap.addEventListener('click', (event) => {
+                const urlButton = event.target.closest('[data-node-info-url]');
+                if (urlButton) {
+                    openNodeInfoUrl(urlButton.dataset.nodeInfoUrl);
+                    return;
+                }
+                const pdbButton = event.target.closest('[data-node-info-pdb-row]');
+                if (pdbButton) {
+                    openNodeInfoPdbOverlay(+pdbButton.dataset.nodeInfoPdbRow);
+                }
+            });
+        }
+
+        const nodeInfoPdbLinks = document.getElementById('node-info-pdb-links');
+        if (nodeInfoPdbLinks && nodeInfoPdbLinks.dataset.boundPdbClicks !== 'true') {
+            nodeInfoPdbLinks.dataset.boundPdbClicks = 'true';
+            nodeInfoPdbLinks.addEventListener('click', (event) => {
+                const urlButton = event.target.closest('[data-node-info-url]');
+                if (urlButton) openNodeInfoUrl(urlButton.dataset.nodeInfoUrl);
+            });
+        }
+
+        const downloadSessionModal = document.getElementById('downloadSessionModal');
+        if (downloadSessionModal && downloadSessionModal.dataset.boundBackdrop !== 'true') {
+            downloadSessionModal.dataset.boundBackdrop = 'true';
+            downloadSessionModal.addEventListener('click', (event) => {
+                if (event.target === downloadSessionModal) closeDownloadSessionModal();
+            });
+        }
+
+        const nodeInfoPdbOverlay = document.getElementById('node-info-pdb-overlay');
+        if (nodeInfoPdbOverlay && nodeInfoPdbOverlay.dataset.boundBackdrop !== 'true') {
+            nodeInfoPdbOverlay.dataset.boundBackdrop = 'true';
+            nodeInfoPdbOverlay.addEventListener('click', (event) => {
+                if (event.target === nodeInfoPdbOverlay) closeNodeInfoPdbOverlay();
+            });
+        }
+    }
+
+    bindStaticUiEventListeners();
 
     const hoverTooltip = document.getElementById('node-hover-tooltip');
     if (hoverTooltip) {
