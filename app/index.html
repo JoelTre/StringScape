@@ -10,6 +10,7 @@
             https://cdn.plot.ly 
             https://cdn.jsdelivr.net 
             https://cdn.pyodide.org 
+            https://static.cloudflareinsights.com
             https://unpkg.com;
         style-src 'self' 'unsafe-inline' 
             https://cdn.jsdelivr.net 
@@ -26,6 +27,8 @@
             https://*.jsdelivr.net 
             https://*.pypi.org 
             https://*.unpkg.com 
+            https://cloudflareinsights.com 
+            https://*.cloudflareinsights.com 
             https://unpkg.com;
         img-src 'self' data: blob:;
         worker-src 'self' blob: https://unpkg.com;
@@ -49,6 +52,7 @@
     <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js" integrity="sha384-b4IZetZNE8bVncsQqlcH4ZZFC58BslGU2LVj47xUtIMOw72axMESbPe8spBylXnd" crossorigin="anonymous"></script>
     <!-- expr-eval -->
     <script src="https://cdn.jsdelivr.net/npm/expr-eval@2.0.2/dist/bundle.min.js" integrity="sha384-/4W8jQ+DhKy3zhz8s0HRh/l4kEliBAJQmAWqrrtJr7BAuODvB2MKsjR8h5MGefjl" crossorigin="anonymous"></script>
+    <!-- Cloudflare Web Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "de64078fa2a4407fba94310b9fc51393"}'></script><!-- End Cloudflare Web Analytics -->
     <style>
         :root {
             --link-base-opacity: 0.5;
@@ -2665,7 +2669,8 @@
             justify-content: flex-start;
         }
         .node-info-link-group .btn-secondary,
-        .node-info-pdb-links .btn-secondary {
+        .node-info-pdb-links .btn-secondary,
+        #node-info-pdb-close-btn {
             padding: 4px 8px;
             font-size: 11px;
             min-height: 28px;
@@ -3049,7 +3054,6 @@
     </style>
 </head>
 <body>
-
 <div id="ui-layer">
     <div id="ui-layer-toggle-tab" class="toggle-tab"><span>◂</span></div>
     
@@ -3382,12 +3386,12 @@
         <hr style="border:0; border-top:1px solid #555;">
         <p>More information on this app can be found here: <a href="https://joeltre.github.io/StringScape/" target="_blank" style="color: #3498db; text-decoration: none;">StringScape Home</a></p>
         <p>Video tutorial on how to use this app: <a href="#" target="_blank" style="color: #3498db; text-decoration: none;">[coming soon...]</a></p>
-        <p>This is an open-source project. The source code is available here: <a href="https://github.com/JoelTre/StringScape/tree/main" style="color: #3498db; text-decoration: none;">https://github.com/JoelTre/StringScape/tree/main</a></p>
+        <p>This is an open-source project. The source code is available here: <a href="https://github.com/JoelTre/StringScape/tree/main" target="_blank" rel="noopener noreferrer" style="color: #3498db; text-decoration: none;">https://github.com/JoelTre/StringScape/tree/main</a></p>
         <hr style="border:0; border-top:1px solid #555;">
         <p>I'd love to hear from you! Send feedback, suggested additional features or bugs found to <a href="mailto:joel.tregurtha@pg.canterbury.ac.nz" style="color: #3498db; text-decoration: none;">joel.tregurtha@pg.canterbury.ac.nz</a></p>
         <p>If using StringScape for a research paper, a mention of StringScape is not required, but is appreciated. A paper is in preparation. For now, cite:</p>
             <p style="font-size:0.9em; color:#bbb; font-style: italic; font-size:0.9em; margin-top:5px;">
-                Tregurtha, J., (2026). StringScape: A high-performance, open-source web app for visualizing data from the STRING database, <a href="https://github.com/JoelTre/StringScape/tree/main" style="color: #3498db; text-decoration: none;">https://github.com/JoelTre/StringScape/tree/main</a>
+                Tregurtha, J., (2026). StringScape: A high-performance, open-source web app for visualizing data from the STRING database, <a href="https://github.com/JoelTre/StringScape/tree/main" target="_blank" rel="noopener noreferrer" style="color: #3498db; text-decoration: none;">https://github.com/JoelTre/StringScape/tree/main</a>
             </p>
     </div>
 </div>
@@ -3622,15 +3626,30 @@
         <div id="shortest-path-control" style="display:none;">
             <button id="shortest-path-toggle-btn" class="action-btn">Shortest Path Tools</button>
             <div id="shortest-path-menu" aria-label="Shortest path options">
-                <div class="shortest-path-menu-title" style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
+                <div class="shortest-path-menu-title" style="display:flex; justify-content:space-between; gap:10px; align-items:center">
                     <span>Path options</span>
                     <span id="shortest-path-length-display" style="color:#4caf50; font-size:11px; white-space:nowrap;">Shortest path length: -</span>
                 </div>
                 <div class="shortest-path-menu-actions">
                     <button id="shortest-path-overlay-btn" class="btn-secondary">Show shortest path overlay</button>
                     <button id="all-shortest-paths-btn" class="btn-secondary">Show all shortest paths</button>
-                    <button class="btn-secondary">Select nodes along path(s)</button>
+                    <button id="shortest-path-select-btn" class="btn-secondary">Select nodes along path(s)</button>
+                    <button id="shortest-path-groups-tool-btn" class="btn-secondary">Shortest paths between two groups</button>
                 </div>
+            </div>
+        </div>
+        <div id="shortest-path-groups-box" style="display:none; position:fixed; right:12px; bottom:12px; width:min(420px, calc(100vw - 24px)); padding:10px; border:1px solid #555; border-radius:10px; background:rgba(35, 35, 35, 0.9); box-shadow:0 8px 24px rgba(0,0,0,0.28); z-index:10000;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:8px;">
+                <div style="font-weight:700; color:#fff;">All shortest paths between two groups</div>
+                <button id="shortest-path-groups-close-btn" class="btn-secondary" type="button">Close</button>
+            </div>
+            <div id="shortest-path-groups-overlay-state" style="color:#ddd; font-size:12px; line-height:1.35; margin-bottom:8px;">Select nodes and then click below to set them as a group.</div>
+            <div id="shortest-path-group1-count" style="color:#9ad0ff; font-size:12px; margin-bottom:4px;">Group 1: 0 nodes</div>
+            <div id="shortest-path-group2-count" style="color:#9ad0ff; font-size:12px; margin-bottom:10px;">Group 2: 0 nodes</div>
+            <div style="display:flex; flex-direction:column; gap:8px; align-items:stretch;">
+                <button id="shortest-path-group1-btn" class="btn-secondary" type="button" style="width:100%;">Set as group 1</button>
+                <button id="shortest-path-group2-btn" class="btn-secondary" type="button" style="width:100%;">Set as group 2</button>
+                <button id="shortest-path-groups-select-btn" class="btn-secondary" type="button" style="width:100%;">Select all nodes along paths</button>
             </div>
         </div>
         <div id="coll-add-btn-container"></div>
@@ -3687,7 +3706,7 @@
                 <h4 class="node-info-pdb-title" id="node-info-pdb-title">Protein Data Bank links</h4>
                 <div class="node-info-pdb-subtitle" id="node-info-pdb-subtitle"></div>
             </div>
-            <button id="node-info-pdb-close-btn" class="btn-secondary">Close</button>
+            <button id="node-info-pdb-close-btn" class="btn-secondary node-info-url-btn">Close</button>
         </div>
         <div class="node-info-pdb-links" id="node-info-pdb-links"></div>
         <div class="node-info-pdb-empty" id="node-info-pdb-empty" style="display:none;">No PDB links are available for this protein.</div>
