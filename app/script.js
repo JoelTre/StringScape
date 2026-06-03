@@ -144,6 +144,9 @@
     let isPaused = false, physicsEnabled = true, isPhysicsStopped = false, selectedNodes = new Set(), selectedWedges = new Set(), selectedHistogramBins = new Set(), hoverBin = null;
     let selectionHistory = [], pathNodes = new Set(), pathEdges = new Set();
     let shortestPathDisplayMode = 'none';
+    let shortestPathGroupsToolOpen = false;
+    let shortestPathGroup1Ids = new Set();
+    let shortestPathGroup2Ids = new Set();
     let isAdditiveMode = false, isSubtractMode = false, isIntersectMode = false;
     let additiveKeyHeld = false, subtractKeyHeld = false, intersectKeyHeld = false;
     let additiveModeLocked = false, subtractModeLocked = false, intersectModeLocked = false;
@@ -174,6 +177,8 @@
     let currentColorMode = null;
     let currentColorRange = null;
     let currentColorData = null;
+    let complexPdbColorState = null;
+    let complexPdbColorStateDirty = true;
     let nodeVisibilityToggle = 'show';
     let nodeLabelToggle = 'hide';
     let nodeLabelField = '#string_protein_id'; // Will be updated to preferred_name if available after init
@@ -4836,6 +4841,16 @@ self.onmessage = async (event) => {
         return palette[idx % palette.length];
     }
 
+    function getLocalizationColorScale(activeNodes, builtInColorSource = null) {
+        const values = Array.from(new Set((activeNodes || [])
+            .map(node => getBuiltInColorValueFromSource(node.id, 'localization', builtInColorSource))
+            .map(value => String(value ?? '').trim())
+            .filter(Boolean)))
+            .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+        const domain = values.length ? values : ['Unknown'];
+        return d3.scaleOrdinal().domain(domain).range(d3.quantize(d3.interpolateRainbow, Math.max(domain.length, 1)));
+    }
+
     // This function retrieves the list of collection names that a given node belongs to by checking the collections data structure for memberships. It iterates through all collections and checks if the node ID is part of each collection's node IDs set, accumulating the names of the collections that include the node.
     function getNodeCollectionMemberships(nodeId) {
         console.log("function getNodeCollectionMemberships()");
@@ -4854,6 +4869,56 @@ self.onmessage = async (event) => {
         const slot = Math.floor(timestampMs / 500);
         const activeName = memberships[slot % memberships.length];
         return getCollectionColorByName(activeName);
+    }
+
+    function ensureComplexPdbColorState() {
+        if (!complexPdbColorStateDirty && complexPdbColorState) return complexPdbColorState;
+
+        const pdbToNodeIds = new Map();
+        proteinMetadata.forEach((meta, nodeId) => {
+            const pdbIds = Array.from(new Set((Array.isArray(meta?.pdbIds) ? meta.pdbIds : [])
+                .map(id => String(id ?? '').trim())
+                .filter(Boolean)));
+            pdbIds.forEach(pdbId => {
+                if (!pdbToNodeIds.has(pdbId)) pdbToNodeIds.set(pdbId, new Set());
+                pdbToNodeIds.get(pdbId).add(nodeId);
+            });
+        });
+
+        const complexPdbIds = Array.from(pdbToNodeIds.entries())
+            .filter(([, nodeIds]) => nodeIds.size > 1)
+            .map(([pdbId]) => pdbId)
+            .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+        const nodeToComplexPdbIds = new Map();
+        proteinMetadata.forEach((meta, nodeId) => {
+            const memberships = Array.from(new Set((Array.isArray(meta?.pdbIds) ? meta.pdbIds : [])
+                .map(id => String(id ?? '').trim())
+                .filter(Boolean)))
+                .filter(pdbId => (pdbToNodeIds.get(pdbId)?.size || 0) > 1)
+                .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+            if (memberships.length) nodeToComplexPdbIds.set(nodeId, memberships);
+        });
+
+        complexPdbColorState = {
+            complexPdbIds,
+            nodeToComplexPdbIds,
+            colorScale: d3.scaleOrdinal(d3.schemeTableau10).domain(complexPdbIds)
+        };
+        complexPdbColorStateDirty = false;
+        return complexPdbColorState;
+    }
+
+    function getComplexPdbMemberships(nodeId) {
+        return ensureComplexPdbColorState().nodeToComplexPdbIds.get(nodeId) || [];
+    }
+
+    function getComplexPdbColorForNode(nodeId, timestampMs = Date.now()) {
+        const memberships = getComplexPdbMemberships(nodeId);
+        if (!memberships.length) return '#444';
+        const slot = Math.floor(timestampMs / 500);
+        const activePdbId = memberships[slot % memberships.length];
+        return ensureComplexPdbColorState().colorScale(activePdbId);
     }
 
     // Escape first so any user, AI, or file-derived text becomes inert before it is rendered anywhere in the UI.
@@ -4930,7 +4995,7 @@ self.onmessage = async (event) => {
         console.log("function updateCollectionColorCycleTimer()");
         
         const mode = document.getElementById('colorMode')?.value;
-        if (mode === 'collection') {
+        if (mode === 'collection' || mode === 'complex_pdbs') {
             if (!collectionColorCycleTimer) {
                 collectionColorCycleTimer = setInterval(() => draw(), 500);
             }
@@ -5315,6 +5380,11 @@ self.onmessage = async (event) => {
         const builtInColorSource = (mode === 'annotation' || mode === 'localization')
             ? resolveBuiltInColorSource(mode, targetNodes)
             : null;
+        const localizationScale = mode === 'localization'
+            ? getLocalizationColorScale(targetNodes, builtInColorSource)
+            : null;
+        const complexPdbState = mode === 'complex_pdbs' ? ensureComplexPdbColorState() : null;
+        const complexPdbScale = complexPdbState?.colorScale || d3.scaleOrdinal(d3.schemeTableau10);
         const proteinSizeSource = resolveProteinSizeSource(targetNodes);
         const annotationMinMax = mode === 'annotation'
             ? d3.extent(targetNodes, n => getAnnotationLengthFromSource(n.id, builtInColorSource))
@@ -5388,9 +5458,19 @@ self.onmessage = async (event) => {
                 const normalized = clamp01((pdbCount - pdbMin) / pdbSpan);
                 n.col = d3.interpolateCool(normalized);
                 colorValue = normalized;
+            } else if (mode === 'complex_pdbs') {
+                const memberships = getComplexPdbMemberships(n.id);
+                if (!memberships.length) {
+                    n.col = '#444';
+                    colorValue = 0.5;
+                } else {
+                    const activePdbId = memberships[Math.floor(nowMs / 500) % memberships.length];
+                    n.col = complexPdbScale(activePdbId);
+                    colorValue = hashStringToUnit(activePdbId);
+                }
             } else if (mode === 'localization') {
                 const raw = getBuiltInColorValueFromSource(n.id, mode, builtInColorSource);
-                n.col = catScale(raw);
+                n.col = localizationScale(raw);
                 colorValue = hashStringToUnit(raw);
             } else if (mode === 'biological_process') {
                 const raw = getBiologicalProcessKey(n.id);
@@ -7459,7 +7539,9 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         'taxonomy_level',
         'orthologous_group_or_ortholog',
         'sequence',
-        'protein_size'
+        'protein_size',
+        'description',
+        'annotation',
     ]);
     var accessoryDataFiles = window.accessoryDataFiles || {}; // filename -> {headers:[], rows:[{}], text: ''}
     window.accessoryDataFiles = accessoryDataFiles;
@@ -8100,6 +8182,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             { key: 'centrality', label: 'Centrality', type: 'Numerical - Continuous' },
             { key: 'eigen', label: 'Eigenvector centrality', type: 'Numerical - Continuous' },
             { key: 'pdb_structure_count', label: 'PDB structure count', type: 'Numerical - Continuous' },
+            { key: 'complex_pdbs', label: 'Complex PDBs', type: 'Categorical - Nominal' },
             { key: 'embeddings', label: 'Embeddings', type: 'Numerical - Continuous' },
             { key: 'collection', label: 'Collection', type: 'Categorical - Nominal' },
             { key: 'annotation', label: 'Annotation length', type: 'Numerical - Discrete' },
@@ -8262,6 +8345,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             {value:'centrality', text:'Centrality', color:'#93c5fd'},
             {value:'eigen', text:'Eigenvector centrality', color:'#93c5fd'},
             {value:'pdb_structure_count', text:'PDB structure count', color:'#93c5fd'},
+            {value:'complex_pdbs', text:'Complex PDBs', color:'#ccc'},
             {value:'embeddings', text:'Embeddings', color:'#93c5fd'},
             {value:'collection', text:'Collection', color:'#ccc'},
             {value:'annotation', text:'Annotation length', color:'#93c5fd'},
@@ -8488,6 +8572,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
         addOption('#string_protein_id', 'String Protein ID');
 
+        addOption('#description', 'Description');
+        addOption('#annotation', 'Annotation');
+
         const preferredConfigs = variableConfigs.filter(cfg => cfg.variable.toLowerCase() === 'preferred_name');
         if (preferredConfigs.length) {
             // Add first matching preferred_name variable (hidden or visible)
@@ -8583,14 +8670,13 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             return node.id;
         }
         if (nodeLabelField === '#kegg_product') {
-            // Get KEGG_PRODUCT from alias file
-            const aliasList = aliasData?.get?.(node.id) || [];
-            for (const aliasEntry of aliasList) {
-                if (aliasEntry.source === 'KEGG_PRODUCT') {
-                    return aliasEntry.alias || '';
-                }
-            }
-            return '';
+            return getKeggProductText(node.id);
+        }
+        if (nodeLabelField === '#description') {
+            return getProteinInfoDescription(node.id);
+        }
+        if (nodeLabelField === '#annotation') {
+            return (getProteinInfoAnnotation(node.id) || '').slice(0, 50);
         }
         if (!nodeLabelField.startsWith('var::')) return '';
 
@@ -8605,6 +8691,16 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             return metadata.geneId || metadata.aliases?.[0] || metadata.annotation || '';
         }
         return ''; 
+    }
+
+    function getKeggProductText(nodeId) {
+        const aliasList = aliasData?.get?.(nodeId) || [];
+        for (const aliasEntry of aliasList) {
+            if (aliasEntry.source === 'KEGG_PRODUCT') {
+                return aliasEntry.alias || '';
+            }
+        }
+        return '';
     }
 
     function renderVariableTable() {
@@ -9203,6 +9299,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 'Gene ID': meta.geneId || '',
                 'Description': getProteinInfoDescription(id) || '',
                 'Annotation': getProteinInfoAnnotation(id) || '',
+                'KEGG Product': getKeggProductText(id) || '',
                 'Protein Size': getProteinSizeValue(id, sizeSource) || '',
                 'UniProt': linkData.uniprotUrl || '',
                 'NCBI': [linkData.ncbiProteinUrl, linkData.ncbiGeneUrl].filter(Boolean).join(' '),
@@ -9274,6 +9371,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 if (!existing.geneId) existing.geneId = alias;
             }
             if (source === 'UniProt_DR_PDB' || source === 'Ensembl_PDB') appendUniqueValue(existing.pdbIds, alias);
+            complexPdbColorStateDirty = true;
             
             // Also populate aliasData for cross-reference queries
             if (!aliasData.has(id)) {
@@ -10103,8 +10201,6 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const selectedIds = Array.from(getEffectiveSelectedNodesSet());
         const hasSelection = selectedIds.length > 0;
         const hasSearchSummary = !!searchSummary && (searchSummary.mode === 'boolean' || (Array.isArray(searchSummary.terms) && searchSummary.terms.length > 0));
-        const shortestPathControl = document.getElementById('shortest-path-control');
-        const shortestPathMenu = document.getElementById('shortest-path-menu');
 
         if (infoControls) infoControls.style.display = hasSelection ? 'flex' : 'none';
         
@@ -10134,22 +10230,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             }
         }
 
-        if (selectedIds.length === 2 && currentViewId !== 'Mind Map') {
-            if (shortestPathControl) shortestPathControl.style.display = 'block';
-            updateShortestPathOverlayButton();
-            updateAllShortestPathsButton();
-            updateShortestPathLengthDisplay();
-        } else {
-            if (shortestPathControl) shortestPathControl.style.display = 'none';
-            if (shortestPathMenu) shortestPathMenu.classList.remove('open', 'open-above', 'open-below');
-            document.removeEventListener('click', closeShortestPathMenuOnClickOutside);
-            shortestPathDisplayMode = 'none';
-            pathNodes.clear();
-            pathEdges.clear();
-            updateShortestPathOverlayButton();
-            updateAllShortestPathsButton();
-            updateShortestPathLengthDisplay();
-        }
+        updateShortestPathControlVisibility();
 
         if (!selectedIds.length) {
             d3.select("#coll-add-btn-container").html("");
@@ -10221,7 +10302,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         updateNodeInfoTableModalChrome('Node Info Table', false);
         calculateEigenvectorCentrality();
         const { rows, extraColumns } = getSelectedNodeInfoRows();
-        const baseColumns = ['Protein ID', 'Preferred Name', 'Gene ID', 'Description', 'Annotation', 'Localisation', 'Protein Size', 'UniProt', 'NCBI', 'Pubmed', 'IntAct', 'STRING', 'Protein Data Bank', 'Aliases',  'Layer', 'Centrality', 'Eigen', 'Sequence'];
+        const baseColumns = ['Protein ID', 'Preferred Name', 'Gene ID', 'Description', 'Annotation', 'KEGG Product', 'Localisation', 'Protein Size', 'UniProt', 'NCBI', 'Pubmed', 'IntAct', 'STRING', 'Protein Data Bank', 'Aliases',  'Layer', 'Centrality', 'Eigen', 'Sequence'];
         const columns = [...baseColumns, ...extraColumns.map(c => c.label)];
         nodeInfoTableState = { columns, rows, filteredRows: rows, searchQuery: '', mode: 'protein' };
         renderNodeInfoTable();
@@ -10477,6 +10558,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             'STRING': 95,
             'Protein Data Bank': 130,
             'Annotation': 420,
+            'KEGG Product': 220,
             'Aliases': 350,
             'Gene ID': 100,
             'Layer': 60,
@@ -13201,7 +13283,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         
         // Determine what data to display
         let displayMode = currentColorMode;
-        let isSupportedMode = displayMode === 'layer' || displayMode === 'collection' || ['annotation', 'localization'].includes(displayMode);
+        let isSupportedMode = displayMode === 'layer' || displayMode === 'collection' || displayMode === 'complex_pdbs' || ['annotation', 'localization'].includes(displayMode);
         if (currentColorMode.startsWith('var::')) {
             const parts = currentColorMode.split('::');
             const file = parts[1], variable = parts[2];
@@ -13228,6 +13310,12 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 }
                 memberships.forEach(name => {
                     dataCounts.set(name, (dataCounts.get(name) || 0) + 1);
+                });
+            });
+        } else if (isSupportedMode && displayMode === 'complex_pdbs') {
+            activeNodes.forEach(d => {
+                getComplexPdbMemberships(d.id).forEach(pdbId => {
+                    dataCounts.set(pdbId, (dataCounts.get(pdbId) || 0) + 1);
                 });
             });
         } else if (isSupportedMode && ['annotation', 'localization'].includes(displayMode)) {
@@ -13257,6 +13345,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         // Draw heading and category count
         const modeLabel = displayMode === 'layer' ? 'Layer' 
             : displayMode === 'collection' ? 'Collection'
+            : displayMode === 'complex_pdbs' ? 'Complex PDBs'
             : displayMode === 'annotation' ? 'Annotation'
             : displayMode === 'localization' ? 'Localization'
             : displayMode.startsWith('var::') ? displayMode.split('::')[2] : displayMode;
@@ -13276,6 +13365,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             currentCatScale = (label) => label === 'Disconnected' ? '#888' : d3.interpolateViridis(1 - ((parseInt(label.split(' ')[1]) - 1) / 10));
         } else if (displayMode === 'collection') {
             currentCatScale = (label) => label === 'No Collection' ? '#444' : getCollectionColorByName(label);
+        } else if (displayMode === 'complex_pdbs') {
+            currentCatScale = ensureComplexPdbColorState().colorScale;
         } else {
             currentCatScale = d3.scaleOrdinal(d3.schemeTableau10);
         }
@@ -13923,7 +14014,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
             const nodeColor = currentNodeColorMode === 'collection'
                 ? getCollectionColorForNode(node.id, nowMs)
-                : (node.col || '#4caf50');
+                : (currentNodeColorMode === 'complex_pdbs' ? getComplexPdbColorForNode(node.id, nowMs) : (node.col || '#4caf50'));
 
             ctx.beginPath();
             ctx.arc(screen.x, screen.y, isHover ? radius * 1.06 : radius, 0, Math.PI * 2);
@@ -14251,7 +14342,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
             const nodeColor = currentNodeColorMode === 'collection'
                 ? getCollectionColorForNode(node.id, nowMs)
-                : (node.col || '#4caf50');
+                : (currentNodeColorMode === 'complex_pdbs' ? getComplexPdbColorForNode(node.id, nowMs) : (node.col || '#4caf50'));
 
             const rBase = Math.max(1.5, node.r || 4);
             const r = Math.max(1.25, rBase * tk);
@@ -14504,7 +14595,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             n.gpuIsPath = isPath;
             n.gpuIsHigh = isHigh;
             if (nodeVisibilityToggle !== 'show') return;
-            const nodeColor = currentNodeColorMode === 'collection' ? getCollectionColorForNode(n.id, nowMs) : (n.col || "#4caf50");
+            const nodeColor = currentNodeColorMode === 'collection'
+                ? getCollectionColorForNode(n.id, nowMs)
+                : (currentNodeColorMode === 'complex_pdbs' ? getComplexPdbColorForNode(n.id, nowMs) : (n.col || "#4caf50"));
             ctx.globalAlpha = nodeAlpha;
             ctx.beginPath(); ctx.arc(n.x, n.y, n.r || 5, 0, 2 * Math.PI); ctx.fillStyle = nodeColor;
             if (glowVal > 0 && nodeAlpha > 0.3 && (!isSearching || isHigh || isPath)) { ctx.shadowBlur = glowVal * 0.4; ctx.shadowColor = d3.color(nodeColor).brighter(glowVal / 250); } else ctx.shadowBlur = 0;
@@ -14730,7 +14823,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 const nowMs = Date.now();
                 drawNodes.forEach(n => {
                     const isPath = pathNodes.has(n.id), isHigh = isSearching && selectedNodes.has(n.id);
-                    const nodeColor = currentNodeColorMode === 'collection' ? getCollectionColorForNode(n.id, nowMs) : n.col;
+                    const nodeColor = currentNodeColorMode === 'collection'
+                        ? getCollectionColorForNode(n.id, nowMs)
+                        : (currentNodeColorMode === 'complex_pdbs' ? getComplexPdbColorForNode(n.id, nowMs) : n.col);
                     octx.globalAlpha = (isHigh || isPath) ? 1 : (isSearching ? 0.08 : 1);
                     octx.beginPath(); octx.arc(n.x, n.y, n.r, 0, 2 * Math.PI); octx.fillStyle = nodeColor; octx.fill();
                     octx.strokeStyle = isPath ? "#ff4444" : (d3.color(nodeColor).brighter(1)); octx.lineWidth = isPath ? 4 : 1; octx.stroke();
@@ -14781,7 +14876,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 const currentNodeColorMode = document.getElementById('colorMode')?.value || 'layer';
                 const nowMs = Date.now();
                 drawNodes.forEach(n => {
-                    const nodeColor = currentNodeColorMode === 'collection' ? getCollectionColorForNode(n.id, nowMs) : n.col;
+                    const nodeColor = currentNodeColorMode === 'collection'
+                        ? getCollectionColorForNode(n.id, nowMs)
+                        : (currentNodeColorMode === 'complex_pdbs' ? getComplexPdbColorForNode(n.id, nowMs) : n.col);
                     svg += `<circle cx="${n.x}" cy="${n.y}" r="${n.r}" fill="${nodeColor}" />`;
                     if (isEmbeddingReferenceNode(n.id)) {
                         svg += `<circle cx="${n.x}" cy="${n.y}" r="${(n.r || 5) + 4}" fill="none" stroke="#ff0000" stroke-width="2" />`;
@@ -15001,6 +15098,113 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         return { paths, nodes, edges };
     }
 
+    function buildShortestPathOverlayDataBetweenGroups(group1Ids, group2Ids) {
+        const group1 = Array.from(new Set((group1Ids instanceof Set ? Array.from(group1Ids) : group1Ids || []).filter(Boolean)));
+        const group2 = Array.from(new Set((group2Ids instanceof Set ? Array.from(group2Ids) : group2Ids || []).filter(Boolean)));
+        const nodes = new Set();
+        const edges = new Set();
+        const paths = [];
+
+        group1.forEach(id1 => {
+            group2.forEach(id2 => {
+                const data = buildShortestPathOverlayData(id1, id2);
+                data.paths.forEach(path => paths.push(path));
+                data.nodes.forEach(id => nodes.add(id));
+                data.edges.forEach(edgeKey => edges.add(edgeKey));
+            });
+        });
+
+        return { paths, nodes, edges };
+    }
+
+    function setShortestPathGroup(groupNumber) {
+        const selection = Array.from(getEffectiveSelectedNodesSet());
+        if (!selection.length) return;
+
+        if (groupNumber === 1) {
+            shortestPathGroup1Ids = new Set(selection);
+        } else {
+            shortestPathGroup2Ids = new Set(selection);
+        }
+
+        shortestPathGroupsToolOpen = true;
+        shortestPathDisplayMode = 'groups';
+        syncShortestPathGroupVisualization();
+        updateShortestPathControlVisibility();
+        draw();
+    }
+
+    function updateShortestPathGroupsBox() {
+        const box = document.getElementById('shortest-path-groups-box');
+        if (!box) return;
+
+        const group1Count = shortestPathGroup1Ids.size;
+        const group2Count = shortestPathGroup2Ids.size;
+        const status1 = document.getElementById('shortest-path-group1-count');
+        const status2 = document.getElementById('shortest-path-group2-count');
+        if (status1) status1.textContent = `Group 1: ${group1Count} node${group1Count === 1 ? '' : 's'}`;
+        if (status2) status2.textContent = `Group 2: ${group2Count} node${group2Count === 1 ? '' : 's'}`;
+
+        const hasOverlay = shortestPathDisplayMode === 'groups' && group1Count > 0 && group2Count > 0 && pathEdges.size > 0;
+        const overlayState = document.getElementById('shortest-path-groups-overlay-state');
+        if (overlayState) {
+            overlayState.textContent = hasOverlay
+                ? `Overlay active: ${pathNodes.size} nodes on ${pathEdges.size} path edge${pathEdges.size === 1 ? '' : 's'}.`
+                : 'Select nodes and then click below to set them as a group.';
+        }
+
+        const selectBtn = document.getElementById('shortest-path-groups-select-btn');
+        if (selectBtn) selectBtn.disabled = pathNodes.size === 0;
+    }
+
+    function closeShortestPathGroupsBox() {
+        shortestPathGroupsToolOpen = false;
+        shortestPathGroup1Ids.clear();
+        shortestPathGroup2Ids.clear();
+        shortestPathDisplayMode = 'none';
+        pathNodes.clear();
+        pathEdges.clear();
+        const box = document.getElementById('shortest-path-groups-box');
+        if (box) box.style.display = 'none';
+        updateShortestPathGroupsBox();
+        updateShortestPathControlVisibility();
+        draw();
+    }
+
+    function openShortestPathGroupsBox(event) {
+        if (event) event.stopPropagation();
+        shortestPathGroupsToolOpen = true;
+        shortestPathDisplayMode = 'groups';
+        pathNodes.clear();
+        pathEdges.clear();
+        const menu = document.getElementById('shortest-path-menu');
+        if (menu) menu.classList.remove('open', 'open-above', 'open-below');
+        document.removeEventListener('click', closeShortestPathMenuOnClickOutside);
+        const box = document.getElementById('shortest-path-groups-box');
+        if (box) box.style.display = 'block';
+        updateShortestPathGroupsBox();
+        updateShortestPathControlVisibility();
+    }
+
+    function syncShortestPathGroupVisualization() {
+        if (!shortestPathGroupsToolOpen) return;
+
+        if (shortestPathGroup1Ids.size > 0 && shortestPathGroup2Ids.size > 0) {
+            const data = buildShortestPathOverlayDataBetweenGroups(shortestPathGroup1Ids, shortestPathGroup2Ids);
+            shortestPathDisplayMode = 'groups';
+            pathNodes.clear();
+            pathEdges.clear();
+            data.nodes.forEach(id => pathNodes.add(id));
+            data.edges.forEach(edgeKey => pathEdges.add(edgeKey));
+        } else {
+            shortestPathDisplayMode = 'groups';
+            pathNodes.clear();
+            pathEdges.clear();
+        }
+
+        updateShortestPathGroupsBox();
+    }
+
     function updateShortestPathLengthDisplay() {
         const display = document.getElementById('shortest-path-length-display');
         if (!display) return;
@@ -15015,6 +15219,13 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     function syncShortestPathVisualization() {
+        if (shortestPathGroupsToolOpen) {
+            syncShortestPathGroupVisualization();
+            updateShortestPathOverlayButton();
+            updateAllShortestPathsButton();
+            return;
+        }
+
         const selection = getShortestPathSelectionIds();
         if (selection.length !== 2) {
             pathNodes.clear();
@@ -15148,6 +15359,48 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         selectNodes(activeNodes.filter(n => nodeSet.has(n.id)), false, 'Shortest Path(s)');
     }
 
+    function selectShortestPathGroupsNodes(event) {
+        if (event) event.stopPropagation();
+        if (!shortestPathGroupsToolOpen || pathNodes.size === 0) return;
+
+        const activeNodes = currentViewId === 'base' ? nodes : (activeSubData?.nodes || []);
+        selectNodes(activeNodes.filter(n => pathNodes.has(n.id)), false, 'Shortest Path Groups');
+    }
+
+    function updateShortestPathControlVisibility() {
+        const selectedIds = Array.from(getEffectiveSelectedNodesSet());
+        const shortestPathControl = document.getElementById('shortest-path-control');
+        const shortestPathMenu = document.getElementById('shortest-path-menu');
+        const shouldShow = (selectedIds.length === 2 && currentViewId !== 'Mind Map') || shortestPathGroupsToolOpen;
+
+        if (shortestPathControl) {
+            shortestPathControl.style.display = shouldShow ? 'block' : 'none';
+        }
+
+        if (shouldShow) {
+            updateShortestPathOverlayButton();
+            updateAllShortestPathsButton();
+            updateShortestPathLengthDisplay();
+            const groupsBox = document.getElementById('shortest-path-groups-box');
+            if (groupsBox) groupsBox.style.display = shortestPathGroupsToolOpen ? 'block' : 'none';
+        } else {
+            if (shortestPathMenu) shortestPathMenu.classList.remove('open', 'open-above', 'open-below');
+            document.removeEventListener('click', closeShortestPathMenuOnClickOutside);
+            if (shortestPathDisplayMode !== 'groups') {
+                shortestPathDisplayMode = 'none';
+                pathNodes.clear();
+                pathEdges.clear();
+            }
+            updateShortestPathOverlayButton();
+            updateAllShortestPathsButton();
+            updateShortestPathLengthDisplay();
+            const groupsBox = document.getElementById('shortest-path-groups-box');
+            if (groupsBox && !shortestPathGroupsToolOpen) groupsBox.style.display = 'none';
+        }
+
+        if (shouldShow || shortestPathGroupsToolOpen) updateShortestPathGroupsBox();
+    }
+
     function calculateEigenvectorCentrality() {
         console.log("function calculateEigenvectorCentrality()");
         nodes.forEach(n => n.eigen = 1); const threshold = +document.getElementById('thresholdInput').value;
@@ -15262,6 +15515,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         console.log("function updateSizesAndColors()");
         const mode = document.getElementById('colorMode').value, monoCol = document.getElementById('nodeMonoColor').value, cVal = +document.getElementById('sizeSlider').value, eVal = +document.getElementById('eigenSlider').value;
         const pVal = +document.getElementById('proteinSizeSlider').value, nSizeBase = +document.getElementById('nodeSizeSlider').value, threshold = +document.getElementById('thresholdInput').value;
+        const nowMs = Date.now();
         document.getElementById('val-nsiz').innerText = nSizeBase; document.getElementById('val-siz').innerText = cVal; document.getElementById('val-esiz').innerText = eVal; document.getElementById('val-psiz').innerText = pVal;
         updatePhysicsRuntimeLabel();
 
@@ -15273,7 +15527,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const targetNodes = useGlobalNodesForStyle ? nodes : (activeSubData?.nodes || []);
         const targetLinks = useGlobalNodesForStyle ? links : (activeSubData?.links || []);
         
-        if (mode === 'collection') {
+        if (mode === 'collection' || mode === 'complex_pdbs') {
             updateCollectionColorCycleTimer();
         }
 
@@ -15318,6 +15572,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const builtInColorSource = (mode === 'annotation' || mode === 'localization')
             ? resolveBuiltInColorSource(mode, targetNodes)
             : null;
+        const localizationScale = mode === 'localization'
+            ? getLocalizationColorScale(targetNodes, builtInColorSource)
+            : null;
         const annotationLengthRange = mode === 'annotation'
             ? d3.extent(targetNodes, n => getAnnotationLengthFromSource(n.id, builtInColorSource))
             : null;
@@ -15327,6 +15584,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const minPdb = pdbCounts?.length ? Math.min(...pdbCounts) : 0;
         const maxPdb = pdbCounts?.length ? Math.max(...pdbCounts) : 1;
         const pdbRange = (maxPdb - minPdb) || 1;
+        const complexPdbState = mode === 'complex_pdbs' ? ensureComplexPdbColorState() : null;
+        const complexPdbScale = complexPdbState?.colorScale || d3.scaleOrdinal(d3.schemeTableau10);
         
         // Apply styles to nodes
         const applyStyle = (n) => {
@@ -15384,7 +15643,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             }
             else if (mode === 'localization') {
                 const builtInVal = getBuiltInColorValueFromSource(n.id, mode, builtInColorSource);
-                n.col = catScale(builtInVal);
+                n.col = localizationScale(builtInVal);
             }
             else if (mode && mode.startsWith('var::')) {
                 const modeParts = String(mode).split('::');
@@ -15429,6 +15688,14 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             else if (mode === 'pdb_structure_count') {
                 const pdbCount = getPdbStructureCount(n.id);
                 n.col = d3.interpolateCool((pdbCount - minPdb) / pdbRange);
+            } else if (mode === 'complex_pdbs') {
+                const memberships = getComplexPdbMemberships(n.id);
+                if (!memberships.length) {
+                    n.col = '#444';
+                } else {
+                    const activePdbId = memberships[Math.floor(nowMs / 500) % memberships.length];
+                    n.col = complexPdbScale(activePdbId);
+                }
             }
             else if (mode === 'random') n.col = n.randColor || "#fff";
             else n.col = monoCol;
@@ -15467,6 +15734,12 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             ? nodes
             : (activeSubData?.nodes || []);
         const legendSizeSource = resolveProteinSizeSource(activeNodes);
+        const builtInColorSource = (mode === 'annotation' || mode === 'localization')
+            ? resolveBuiltInColorSource(mode, activeNodes)
+            : null;
+        const localizationScale = mode === 'localization'
+            ? getLocalizationColorScale(activeNodes, builtInColorSource)
+            : null;
 
         // Store current color mode for pie/histogram views
         currentColorMode = mode;
@@ -16086,7 +16359,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 });
             }
 
-        } else if (['localization', 'biological_process', 'layer', 'collection'].includes(mode)) {
+        } else if (['localization', 'biological_process', 'layer', 'collection', 'complex_pdbs'].includes(mode)) {
             const builtInSource = (mode === 'annotation' || mode === 'localization')
                 ? resolveBuiltInColorSource(mode, activeNodes)
                 : null;
@@ -16098,7 +16371,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                         ? getBuiltInColorValueFromSource(d.id, mode, builtInSource)
                         : (mode === 'biological_process'
                             ? getBiologicalProcessKey(d.id)
-                            : (proteinMetadata.get(d.id)?.[mode] || 'Unknown')));
+                            : (mode === 'complex_pdbs'
+                                ? getComplexPdbMemberships(d.id)
+                                : (proteinMetadata.get(d.id)?.[mode] || 'Unknown'))));
                 counts.set(key, (counts.get(key) || 0) + 1);
             });
             if (mode === 'collection') {
@@ -16109,9 +16384,18 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     const count = activeNodes.filter(n => coll?.nodeIds?.has(n.id)).length;
                     if (count > 0) counts.set(name, count);
                 });
+            } else if (mode === 'complex_pdbs') {
+                counts.clear();
+                activeNodes.forEach(node => {
+                    getComplexPdbMemberships(node.id).forEach(pdbId => {
+                        counts.set(pdbId, (counts.get(pdbId) || 0) + 1);
+                    });
+                });
             }
-            createPieChartToggle(counts, mode, mode);
-            Array.from(counts.entries()).sort((a,b) => { if (a[0] === "Disconnected") return 1; if (b[0] === "Disconnected") return -1; if (mode === 'layer') return parseInt(a[0].split(' ')[1]) - parseInt(b[0].split(' ')[1]); return b[1] - a[1]; }).slice(0, 30).forEach(([lbl, cnt]) => {
+            createPieChartToggle(counts, mode, mode === 'complex_pdbs' ? 'Complex PDBs' : mode);
+            const sortedCounts = Array.from(counts.entries()).sort((a,b) => { if (a[0] === "Disconnected") return 1; if (b[0] === "Disconnected") return -1; if (mode === 'layer') return parseInt(a[0].split(' ')[1]) - parseInt(b[0].split(' ')[1]); return b[1] - a[1]; });
+            const visibleCounts = mode === 'complex_pdbs' ? sortedCounts : sortedCounts.slice(0, 30);
+            visibleCounts.forEach(([lbl, cnt]) => {
                 const item = legend.append("div").attr("class", "legend-item").on("click", () => {
                     handleLegendHighlight(mode, lbl);
                     if (currentViewId === 'Embeddings') {
@@ -16121,11 +16405,13 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 const color = mode === 'layer'
                     ? (lbl === "Disconnected" ? "#888" : d3.interpolateViridis(1 - ((parseInt(lbl.split(' ')[1])-1)/10)))
                     //make the grey darker for 'No Collection' to differentiate from the collections 
-                    : (mode === 'collection' ? (lbl === 'No Collection' ? '#444' : getCollectionColorByName(lbl)) : catScale(lbl));
+                    : (mode === 'collection' ? (lbl === 'No Collection' ? '#444' : getCollectionColorByName(lbl)) : (mode === 'complex_pdbs' ? ensureComplexPdbColorState().colorScale(lbl) : (mode === 'localization' ? localizationScale(lbl) : catScale(lbl))));
                 item.append("div").attr("class", "color-box").style("background", color); item.append("span").text(`${lbl} (${cnt})`);
             });
             if (mode === 'collection') {
                 legend.append('div').attr('style', 'color:#aaa; font-size:11px; margin-top:6px;').text('Nodes in multiple collections cycle every 0.5s.');
+            } else if (mode === 'complex_pdbs') {
+                legend.append('div').attr('style', 'color:#aaa; font-size:11px; margin-top:6px;').text('Nodes with multiple complex PDBs cycle every 0.5s.');
             }
         }
         if (mode === 'layer' && selectedNodes.size > 0) {
@@ -16282,6 +16568,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 if (value === 'No Collection') return getNodeCollectionMemberships(n.id).length === 0;
                 return getNodeCollectionMemberships(n.id).includes(value);
             }
+            if (mode === 'complex_pdbs') {
+                return getComplexPdbMemberships(n.id).includes(value);
+            }
             if (mode === 'annotation' || mode === 'localization') {
                 return getBuiltInColorValueFromSource(n.id, mode, builtInSource) === value;
             }
@@ -16332,6 +16621,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             if (mode === 'collection') {
                 if (value === 'No Collection') return getNodeCollectionMemberships(n.id).length === 0;
                 return getNodeCollectionMemberships(n.id).includes(value);
+            }
+            if (mode === 'complex_pdbs') {
+                return getComplexPdbMemberships(n.id).includes(value);
             }
             if (mode === 'biological_process') {
                 return getBiologicalProcessKey(n.id) === value;
@@ -17276,8 +17568,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         } else {
             selectedNodes.clear();
         }
-        pathNodes.clear(); 
-        pathEdges.clear();
+        if (!shortestPathGroupsToolOpen) {
+            pathNodes.clear(); 
+            pathEdges.clear();
+            shortestPathDisplayMode = 'none';
+        }
         selectionHistory = [];
         clearProteinInfoHistory();
         d3.select("#coll-add-btn-container").html("");
@@ -17517,6 +17812,17 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 if (modal?.id) closeModal(modal.id);
             });
         });
+
+        bindClick(document.getElementById('node-info-pdb-close-btn'), closeNodeInfoPdbOverlay);
+        bindClick(document.getElementById('shortest-path-toggle-btn'), toggleShortestPathMenu);
+        bindClick(document.getElementById('shortest-path-overlay-btn'), toggleShortestPathOverlay);
+        bindClick(document.getElementById('all-shortest-paths-btn'), toggleAllShortestPaths);
+        bindClick(document.getElementById('shortest-path-select-btn'), selectNodesAlongShortestPaths);
+        bindClick(document.getElementById('shortest-path-groups-tool-btn'), openShortestPathGroupsBox);
+        bindClick(document.getElementById('shortest-path-group1-btn'), () => setShortestPathGroup(1));
+        bindClick(document.getElementById('shortest-path-group2-btn'), () => setShortestPathGroup(2));
+        bindClick(document.getElementById('shortest-path-groups-select-btn'), selectShortestPathGroupsNodes);
+        bindClick(document.getElementById('shortest-path-groups-close-btn'), closeShortestPathGroupsBox);
 
         bindClick(document.getElementById('ui-layer-toggle-tab'), () => {
             document.getElementById('ui-layer')?.classList.toggle('minimized');
