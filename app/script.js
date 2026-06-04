@@ -298,6 +298,7 @@
     let proteinInfoMolstarViewer = null;
     let proteinInfoMolstarBackgroundObserver = null;
     let proteinInfoZoomHotkeyState = null;
+    let pdbAliasNearMissDebuggedNodes = new Set();
     let proteinComplexStructuresMetadataById = new Map();
     let proteinComplexStructuresLoadPromise = null;
     let proteinComplexStructuresRenderToken = 0;
@@ -3492,10 +3493,23 @@ self.onmessage = async (event) => {
         if (!aliasData) return 0;
         const aliasList = aliasData?.get?.(nodeId) || [];
         let count = 0;
+        const nearMissSources = [];
         for (const aliasEntry of aliasList) {
-            if (aliasEntry?.source === 'UniProt_DR_PDB' || aliasEntry?.source === 'Ensembl_PDB') {
+            const source = String(aliasEntry?.source || '').trim();
+            if (source === 'UniProt_DR_PDB' || source === 'Ensembl_PDB') {
                 count++;
+            } else {
+                const normalizedSource = source.toLowerCase().replace(/[\s-]+/g, '_');
+                if (normalizedSource.includes('pdb')) nearMissSources.push(source || '(empty)');
             }
+        }
+        if (count === 0 && nearMissSources.length && !pdbAliasNearMissDebuggedNodes.has(nodeId)) {
+            pdbAliasNearMissDebuggedNodes.add(nodeId);
+            console.debug('[PDB DEBUG] PDB-like alias sources found but not exact-match for node', {
+                nodeId,
+                nearMissSources: Array.from(new Set(nearMissSources)).slice(0, 8),
+                aliasCount: aliasList.length
+            });
         }
         return count;
     }
@@ -9074,20 +9088,25 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         updateColorModeOptions();
     }
 
-    function parseDelimitedRows(text, forcedDelim = null) {
+    function parseDelimitedRows(text, forcedDelim = null, fileName = '') {
         const trimmed = (text || '').trim();
-        if (!trimmed) return { headers: [], rows: [] };
-        const delim = forcedDelim || detectDefaultSeparator(trimmed);
+        if (!trimmed) return { headers: [], rows: [], delimiter: forcedDelim || '' };
+        const delim = forcedDelim || detectDefaultSeparator(trimmed, fileName);
+        if (delim === 'none') return { headers: [], rows: [], delimiter: delim };
         const lines = trimmed.split(/\r?\n/).filter(l => l.trim());
-        if (!lines.length) return { headers: [], rows: [] };
-        const headers = lines[0].split(delim).map(h => h.trim());
+        if (!lines.length) return { headers: [], rows: [], delimiter: delim };
+        const splitRow = (line) => {
+            if (delim === '__WS__') return line.trim().split(/\s+/);
+            return line.split(delim);
+        };
+        const headers = splitRow(lines[0]).map(h => h.trim());
         const rows = lines.slice(1).map(line => {
-            const cols = line.split(delim);
+            const cols = splitRow(line);
             const row = {};
             headers.forEach((h, i) => row[h] = (cols[i] || '').trim());
             return row;
         });
-        return { headers, rows };
+        return { headers, rows, delimiter: delim };
     }
 
     function parseFastaRecords(text) {
@@ -9231,7 +9250,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     function ingestProteinMetadataFromAccessory(fileName, text) {
-        const { headers, rows } = parseDelimitedRows(text);
+        const { headers, rows } = parseDelimitedRows(text, null, fileName);
         if (!headers.length || !rows.length) return;
 
         const indexByHeader = new Map(headers.map(h => [h.toLowerCase().trim(), h]));
@@ -9354,20 +9373,80 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     function ingestProteinAliasLinksFromAccessory(fileName, text) {
-        const { headers, rows } = parseDelimitedRows(text);
-        if (!headers.length || !rows.length) return;
+        const { headers, rows, delimiter } = parseDelimitedRows(text, null, fileName);
+        if (!headers.length || !rows.length) {
+            console.warn('[PDB DEBUG] Alias ingest skipped: file parsed with no tabular rows', { fileName, delimiter, textLength: String(text || '').length });
+            return;
+        }
 
         const indexByHeader = new Map(headers.map(h => [h.toLowerCase().trim(), h]));
-        const idHeader = indexByHeader.get('#string_protein_id') || indexByHeader.get('string_protein_id') || indexByHeader.get('protein_id') || indexByHeader.get('protein');
-        const aliasHeader = indexByHeader.get('alias');
-        const sourceHeader = indexByHeader.get('source');
-        if (!idHeader || !aliasHeader || !sourceHeader) return;
+        const normalizedHeaders = headers.map(h => ({
+            raw: h,
+            norm: h.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_')
+        }));
+        const findByNorm = (candidates) => {
+            for (const candidate of candidates) {
+                const hit = normalizedHeaders.find(h => h.norm === candidate);
+                if (hit) return hit.raw;
+            }
+            return null;
+        };
+        const findByPattern = (pattern) => {
+            const hit = normalizedHeaders.find(h => pattern.test(h.norm));
+            return hit ? hit.raw : null;
+        };
+
+        const idHeader = findByNorm(['_string_protein_id', 'string_protein_id', 'protein_id', 'protein'])
+            || findByPattern(/(?:^|_)string(?:_|)protein(?:_|)id(?:_|$)|(?:^|_)protein(?:_|)id(?:_|$)/);
+        const aliasHeader = findByNorm(['alias', 'aliases'])
+            || findByPattern(/alias/);
+        const sourceHeader = findByNorm(['source', 'sources', 'database', 'db'])
+            || findByPattern(/source|database|xref|cross_reference|crossref|db/);
+
+        if (!idHeader || !aliasHeader || !sourceHeader) {
+            console.warn('[PDB DEBUG] Alias ingest skipped: required headers missing', {
+                fileName,
+                delimiter,
+                idHeader,
+                aliasHeader,
+                sourceHeader,
+                headers
+            });
+            return;
+        }
+
+        const pdbDebug = {
+            totalRows: rows.length,
+            validRows: 0,
+            exactPdbRows: 0,
+            loosePdbRows: 0,
+            pdbIdsAdded: 0,
+            sampleNearMissRows: [],
+            sampleExactRows: [],
+            sourceHistogram: new Map()
+        };
 
         rows.forEach(row => {
             const id = String(row[idHeader] || '').replace(/^#/, '').trim();
             const alias = String(row[aliasHeader] || '').trim();
             const source = String(row[sourceHeader] || '').trim();
             if (!id || !alias || !source) return;
+            pdbDebug.validRows += 1;
+
+            const normalizedSource = source.toLowerCase().replace(/[\s-]+/g, '_');
+            pdbDebug.sourceHistogram.set(source, (pdbDebug.sourceHistogram.get(source) || 0) + 1);
+            const isExactPdbSource = source === 'UniProt_DR_PDB' || source === 'Ensembl_PDB';
+            const isLoosePdbSource = normalizedSource.includes('pdb');
+            const looksLikePdbId = /^[0-9][a-z0-9]{3}$/i.test(alias);
+            if (isLoosePdbSource) pdbDebug.loosePdbRows += 1;
+            if (isExactPdbSource) {
+                pdbDebug.exactPdbRows += 1;
+                if (pdbDebug.sampleExactRows.length < 5) {
+                    pdbDebug.sampleExactRows.push({ id, source, alias });
+                }
+            } else if (isLoosePdbSource && pdbDebug.sampleNearMissRows.length < 10) {
+                pdbDebug.sampleNearMissRows.push({ id, source, normalizedSource, alias });
+            }
 
             const existing = ensureProteinMetadataRecord(id);
             if (source === 'UniProt_AC' && !existing.uniprotAc) existing.uniprotAc = alias;
@@ -9377,7 +9456,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 if (!existing.pubmedGeneId) existing.pubmedGeneId = alias;
                 if (!existing.geneId) existing.geneId = alias;
             }
-            if (source === 'UniProt_DR_PDB' || source === 'Ensembl_PDB') appendUniqueValue(existing.pdbIds, alias);
+            const beforePdbCount = existing.pdbIds.length;
+            const shouldTreatAsPdb = isExactPdbSource || (isLoosePdbSource && looksLikePdbId);
+            if (shouldTreatAsPdb) appendUniqueValue(existing.pdbIds, alias);
+            if (existing.pdbIds.length > beforePdbCount) pdbDebug.pdbIdsAdded += 1;
             complexPdbColorStateDirty = true;
             
             // Also populate aliasData for cross-reference queries
@@ -9386,6 +9468,26 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             }
             aliasData.get(id).push({ source, alias });
         });
+
+        const topSources = Array.from(pdbDebug.sourceHistogram.entries())
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 12)
+            .map(([source, count]) => ({ source, count }));
+        console.groupCollapsed(`[PDB DEBUG] Alias ingest summary for ${fileName}`);
+        console.log({
+            totalRows: pdbDebug.totalRows,
+            validRows: pdbDebug.validRows,
+            exactPdbRows: pdbDebug.exactPdbRows,
+            loosePdbRows: pdbDebug.loosePdbRows,
+            pdbIdsAdded: pdbDebug.pdbIdsAdded,
+            nearMissCount: pdbDebug.sampleNearMissRows.length
+        });
+        if (topSources.length) console.table(topSources);
+        if (pdbDebug.sampleExactRows.length) console.table(pdbDebug.sampleExactRows);
+        if (pdbDebug.sampleNearMissRows.length) {
+            console.warn('[PDB DEBUG] PDB-like source values that did not exact-match expected keys', pdbDebug.sampleNearMissRows);
+        }
+        console.groupEnd();
 
         return fileName;
     }
@@ -11791,6 +11893,13 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         return card;
     }
 
+    function clearProteinComplexStructuresLoadingState(view) {
+        const loadingOverlay = view?.querySelector('.structures-loading-overlay');
+        if (loadingOverlay) loadingOverlay.remove();
+        view?.querySelectorAll('.protein-complex-card.skeleton').forEach(card => card.remove());
+        proteinComplexStructuresLoading = false;
+    }
+
     function applyProteinComplexStructuresSearchFilter() {
         const view = document.getElementById('protein-complex-structures-view');
         if (!view) return;
@@ -11976,6 +12085,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
         const thisSpeciesCards = [];
         const otherSpeciesCards = [];
+        let firstRealCardRendered = false;
         records.forEach(record => {
             const titleText = String(record.meta?.title || '').trim() || record.pdbId;
             const speciesList = Array.from(new Set(Array.isArray(record.meta?.species) ? record.meta.species : []));
@@ -11988,6 +12098,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             if (query && !searchText.includes(query)) return;
             const card = buildProteinComplexStructureCard({ ...record, title: titleText }, speciesLabel);
             card.dataset.searchText = searchText;
+            if (!firstRealCardRendered) {
+                clearProteinComplexStructuresLoadingState(view);
+                firstRealCardRendered = true;
+            }
             if (isThisSpecies) thisSpeciesCards.push(card);
             else otherSpeciesCards.push(card);
         });
@@ -12015,6 +12129,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const observer = ensureProteinComplexStructuresObserver();
         view.querySelectorAll('img[data-src]').forEach(img => observer.observe(img));
         applyProteinComplexStructuresSearchFilter();
+
+        if (!firstRealCardRendered) {
+            clearProteinComplexStructuresLoadingState(view);
+        }
     }
 
     function refreshProteinComplexStructuresViewIfOpen() {
