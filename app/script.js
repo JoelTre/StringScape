@@ -305,8 +305,8 @@
     let proteinComplexStructuresObserver = null;
     let proteinComplexStructuresSearchQuery = '';
     let proteinComplexStructuresLoading = false;
-    let proteinComplexStructuresPlaceholderSrc = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stop-color="#293546"/><stop offset="100%" stop-color="#111822"/></linearGradient></defs><rect width="800" height="500" rx="32" fill="url(#g)"/><g fill="none" stroke="#6f8ca9" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" opacity="0.55"><circle cx="250" cy="150" r="46"/><circle cx="374" cy="120" r="56"/><circle cx="510" cy="190" r="42"/><circle cx="330" cy="300" r="62"/><path d="M282 146L333 131M427 144L477 178M311 191L348 246M386 163L476 188M356 245L480 208"/></g><text x="50%" y="87%" text-anchor="middle" font-family="Arial, sans-serif" font-size="30" fill="#a9c3da" opacity="0.9">Protein Complex Preview</text></svg>');
-    let nodeHoverTooltipTimer = null;
+    let proteinComplexStructuresPinnedPdbIds = new Set();
+let proteinComplexStructuresPlaceholderSrc = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stop-color="#293546"/><stop offset="100%" stop-color="#111822"/></linearGradient></defs><rect width="800" height="500" rx="32" fill="url(#g)"/><g fill="none" stroke="#6f8ca9" stroke-width="10" stroke-linecap="round" opacity="0.6"><line x1="296" y1="140" x2="318" y2="125"/><line x1="430" y1="135" x2="475" y2="170"/><line x1="360" y1="170" x2="340" y2="240"/><line x1="480" y1="220" x2="380" y2="270"/><line x1="275" y1="190" x2="310" y2="245"/></g><g fill="none" stroke="#6f8ca9" stroke-width="10" opacity="0.8"><circle cx="250" cy="150" r="46"/><circle cx="374" cy="120" r="56"/><circle cx="510" cy="190" r="42"/><circle cx="330" cy="300" r="62"/></g><text x="50%" y="88%" text-anchor="middle" font-family="Arial, sans-serif" font-size="28" fill="#a9c3da">Protein Complex Preview</text></svg>');    let nodeHoverTooltipTimer = null;
     let pendingNodeHoverTooltipId = null;
     
     // Guide-related variables
@@ -457,6 +457,7 @@
     let aiPanelMode = 'agent';
     let aiPythonPromptHistory = [];
     let aiExamplePanelAgentHtml = '';
+    let aiPythonCopyFeedbackTimer = null;
     const aiChatManualTitleIds = new Set();
 
     // This function toggles the visibility of the AI panel and updates the UI accordingly. It also triggers a redraw of the canvas and updates controls based on the current view to ensure everything is positioned correctly with the new panel state.
@@ -655,8 +656,19 @@
     }
 
     async function copyPythonInstructions() {
+        const button = document.getElementById('ai-copy-python-instructions');
         try {
             await navigator.clipboard.writeText(aiBuildPythonInstructionsText());
+            if (button) {
+                const originalLabel = button.dataset.originalLabel || button.textContent;
+                button.dataset.originalLabel = originalLabel;
+                button.textContent = 'Copied!';
+                if (aiPythonCopyFeedbackTimer) clearTimeout(aiPythonCopyFeedbackTimer);
+                aiPythonCopyFeedbackTimer = setTimeout(() => {
+                    button.textContent = originalLabel;
+                    aiPythonCopyFeedbackTimer = null;
+                }, 1200);
+            }
         } catch (error) {
             console.warn('Could not copy Python instructions', error);
         }
@@ -706,7 +718,7 @@
             const params = aiFormatToolParameters(toolEntry);
             if (params && params !== 'none') lines.push(`    Parameters: ${params}`);
         });
-        return lines.join('\n');
+        return lines.join('\n').replace(/&quot;/g, '"');
     }
 
     function aiRefreshFloatingConsoleButton() {
@@ -1392,7 +1404,13 @@
         const resolvedUrl = urlInput.value.trim() || urlInput.placeholder.trim();
         urlInput.value = resolvedUrl;
         try {
-            await fetch(resolvedUrl, { method: 'GET', mode: 'no-cors' });
+            const response = await fetch(resolvedUrl.replace(/\/$/, '') + '/v1/models', {
+                method: 'GET',
+                headers: { 'Accept': 'application/json' }
+            });
+            if (!response.ok) throw new Error(`AI server responded with ${response.status}`);
+            const data = await response.json();
+            if (!Array.isArray(data?.data)) throw new Error('AI server did not return a model list');
             const pill = document.getElementById('ai-status-pill');
             pill.textContent = "Connected";
             pill.className = "status-pill status-connected";
@@ -9814,16 +9832,16 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     function renderSearchSummaryText(searchSummary) {
         if (!searchSummary) return '';
         if (searchSummary.mode === 'boolean') {
-            const queryLabel = searchSummary.query ? `Search: ${escapeHtml(searchSummary.query)}` : 'Search';
+            const queryLabel = searchSummary.query ? `Search: ${escapeHtml(searchSummary.query).replace(/&quot;/g, '"')}` : 'Search';
             return `${queryLabel}\n${searchSummary.total} total nodes selected`;
         }
         if (!Array.isArray(searchSummary.terms) || searchSummary.terms.length === 0) {
-            const queryLabel = searchSummary.query ? `Search: ${escapeHtml(searchSummary.query)}` : '';
+            const queryLabel = searchSummary.query ? `Search: ${escapeHtml(searchSummary.query).replace(/&quot;/g, '"')}` : '';
             return queryLabel ? `${queryLabel}\n${searchSummary.total} total nodes selected` : `${searchSummary.total} total nodes selected`;
         }
         const lines = searchSummary.terms.map(termInfo => {
             const termLabel = termInfo.exact ? `"${termInfo.term}"` : termInfo.term;
-            return `Search: ${escapeHtml(termLabel)} | ${termInfo.count} nodes`;
+            return `Search: ${escapeHtml(termLabel).replace(/&quot;/g, '"')} | ${termInfo.count} nodes`;
         });
         lines.push(`${searchSummary.total} total nodes selected`);
         return lines.join('\n');
@@ -11711,6 +11729,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         // place for applying to color logic later.
     }
 
+    function normalizeProteinComplexSpeciesName(value) {
+        return String(value || '').trim().toLowerCase();
+    }
+
     function getProteinComplexStructureEntries() {
         const pdbToNodeIds = new Map();
         proteinMetadata.forEach((meta, nodeId) => {
@@ -11809,9 +11831,27 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         view.style.display = isVisible ? 'block' : 'none';
     }
 
-    function buildProteinComplexStructureCard(entry, speciesLabel) {
+    function setRightPanelMinimized(isMinimized) {
+        document.getElementById('right-panel')?.classList.toggle('minimized', !!isMinimized);
+    }
+
+    function buildProteinComplexStructureCard(entry, speciesLabel, isPinned, onTogglePin) {
         const card = document.createElement('article');
         card.className = 'protein-complex-card';
+        card.dataset.pdbId = entry.pdbId;
+
+        const pinButton = document.createElement('button');
+        pinButton.type = 'button';
+        pinButton.className = 'protein-complex-pin-btn';
+        pinButton.textContent = '📌';
+        pinButton.title = isPinned ? 'Unpin structure' : 'Pin structure';
+        pinButton.setAttribute('aria-label', isPinned ? 'Unpin structure' : 'Pin structure');
+        pinButton.setAttribute('aria-pressed', isPinned ? 'true' : 'false');
+        pinButton.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            onTogglePin?.(entry.pdbId);
+        });
 
         const preview = document.createElement('img');
         preview.className = 'protein-complex-preview';
@@ -11890,6 +11930,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
         card.appendChild(preview);
         card.appendChild(body);
+        card.appendChild(pinButton);
         return card;
     }
 
@@ -12014,6 +12055,15 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const thisHeading = document.createElement('h2');
         thisHeading.className = 'structures-section-title';
         thisHeading.textContent = 'Protein complex structures from this species';
+        const pinnedSection = document.createElement('section');
+        pinnedSection.className = 'structures-section';
+        const pinnedHeading = document.createElement('h2');
+        pinnedHeading.className = 'structures-section-title';
+        pinnedHeading.textContent = 'Pinned structures';
+        const pinnedGrid = document.createElement('div');
+        pinnedGrid.className = 'protein-complex-card-grid';
+        pinnedSection.appendChild(pinnedHeading);
+        pinnedSection.appendChild(pinnedGrid);
         const thisGrid = document.createElement('div');
         thisGrid.className = 'protein-complex-card-grid';
         thisSection.appendChild(thisHeading);
@@ -12023,13 +12073,14 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         otherSection.className = 'structures-section';
         const otherHeading = document.createElement('h2');
         otherHeading.className = 'structures-section-title';
-        otherHeading.textContent = 'Protein complex structures modelled using homologous structures in other species.';
+        otherHeading.textContent = 'Other Protein Complex Structures';
         const otherGrid = document.createElement('div');
         otherGrid.className = 'protein-complex-card-grid';
         otherSection.appendChild(otherHeading);
         otherSection.appendChild(otherGrid);
 
         shell.appendChild(hero);
+        shell.appendChild(pinnedSection);
         shell.appendChild(thisSection);
         shell.appendChild(otherSection);
         view.appendChild(shell);
@@ -12051,9 +12102,13 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         if (!structureEntries.length) {
             proteinComplexStructuresLoading = false;
             status.textContent = 'No protein complexes are available for the current dataset yet.';
+            const pinnedEmpty = document.createElement('div');
+            pinnedEmpty.className = 'structures-section-empty';
+            pinnedEmpty.textContent = 'Pin structures to keep them here.';
             const empty = document.createElement('div');
             empty.className = 'structures-section-empty';
             empty.textContent = 'Load accessory data with PDB annotations to see protein complex cards here.';
+            pinnedGrid.appendChild(pinnedEmpty);
             thisGrid.appendChild(empty);
             otherGrid.appendChild(empty.cloneNode(true));
             return;
@@ -12079,10 +12134,21 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const speciesCounts = new Map();
         records.forEach(record => {
             const uniqueSpecies = Array.from(new Set(Array.isArray(record.meta?.species) ? record.meta.species : []));
-            uniqueSpecies.forEach(species => speciesCounts.set(species, (speciesCounts.get(species) || 0) + 1));
+            uniqueSpecies.forEach(species => {
+                const speciesKey = normalizeProteinComplexSpeciesName(species);
+                if (!speciesKey) return;
+                const current = speciesCounts.get(speciesKey) || { count: 0, label: String(species).trim() };
+                speciesCounts.set(speciesKey, {
+                    count: current.count + 1,
+                    label: current.label || String(species).trim()
+                });
+            });
         });
-        const dominantSpecies = Array.from(speciesCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+        const dominantSpeciesEntry = Array.from(speciesCounts.entries()).sort((a, b) => b[1].count - a[1].count)[0];
+        const dominantSpeciesKey = dominantSpeciesEntry?.[0] || '';
+        const dominantSpeciesLabel = dominantSpeciesEntry?.[1]?.label || '';
 
+        const pinnedCards = [];
         const thisSpeciesCards = [];
         const otherSpeciesCards = [];
         let firstRealCardRendered = false;
@@ -12090,23 +12156,48 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             const titleText = String(record.meta?.title || '').trim() || record.pdbId;
             const speciesList = Array.from(new Set(Array.isArray(record.meta?.species) ? record.meta.species : []));
             const speciesLabel = speciesList.length ? speciesList.join(', ') : 'Unknown';
-            const isThisSpecies = speciesList.length === 1 && (!dominantSpecies || speciesList[0] === dominantSpecies);
+            let isThisSpecies;
+            if (dominantSpeciesKey) {
+                isThisSpecies = speciesList.some(s => normalizeProteinComplexSpeciesName(s) === dominantSpeciesKey);
+            } else {
+                isThisSpecies = speciesList.length === 1;
+            }
             const searchText = [titleText, speciesLabel, record.pdbId, ...record.nodeIds.map(nodeId => {
                 const meta = proteinMetadata.get(nodeId) || {};
                 return [nodeId, meta.preferred_name, meta.annotation, meta.description].filter(Boolean).join(' ');
             })].join(' ').toLowerCase();
             if (query && !searchText.includes(query)) return;
-            const card = buildProteinComplexStructureCard({ ...record, title: titleText }, speciesLabel);
+            const isPinned = proteinComplexStructuresPinnedPdbIds.has(record.pdbId);
+            const card = buildProteinComplexStructureCard({ ...record, title: titleText }, speciesLabel, isPinned, pdbId => {
+                if (proteinComplexStructuresPinnedPdbIds.has(pdbId)) {
+                    proteinComplexStructuresPinnedPdbIds.delete(pdbId);
+                } else {
+                    proteinComplexStructuresPinnedPdbIds.add(pdbId);
+                }
+                if (currentViewId === 'Protein Complex Structures') {
+                    renderProteinComplexStructuresView();
+                }
+            });
             card.dataset.searchText = searchText;
             if (!firstRealCardRendered) {
                 clearProteinComplexStructuresLoadingState(view);
                 firstRealCardRendered = true;
             }
-            if (isThisSpecies) thisSpeciesCards.push(card);
+            if (isPinned) pinnedCards.push(card);
+            else if (isThisSpecies) thisSpeciesCards.push(card);
             else otherSpeciesCards.push(card);
         });
 
-        status.textContent = `${records.length} protein complex structure${records.length === 1 ? '' : 's'} loaded from RCSB PDB.`;
+        status.textContent = `${records.length} protein complex structure${records.length === 1 ? '' : 's'} loaded from RCSB PDB${dominantSpeciesLabel ? ` for ${dominantSpeciesLabel}` : ''}.`;
+
+        if (!pinnedCards.length) {
+            const empty = document.createElement('div');
+            empty.className = 'structures-section-empty';
+            empty.textContent = 'Pin structures to keep them here.';
+            pinnedGrid.appendChild(empty);
+        } else {
+            pinnedCards.forEach(card => pinnedGrid.appendChild(card));
+        }
 
         if (!thisSpeciesCards.length) {
             const empty = document.createElement('div');
@@ -12120,7 +12211,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         if (!otherSpeciesCards.length) {
             const empty = document.createElement('div');
             empty.className = 'structures-section-empty';
-            empty.textContent = 'No homologous multi-species structures were found for this dataset.';
+            empty.textContent = 'No structures were found for this dataset.';
             otherGrid.appendChild(empty);
         } else {
             otherSpeciesCards.forEach(card => otherGrid.appendChild(card));
@@ -12361,6 +12452,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             selectedHistogramBins.clear();
             hoveredNode = null;
             hideNodeHoverTooltip();
+            setRightPanelMinimized(true);
             setProteinComplexStructuresVisibility(true);
             d3.select("#current-view-label").text('Protein Complex Structures');
             updateViewMenu();
@@ -12368,6 +12460,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             return;
         }
 
+        setRightPanelMinimized(false);
         setProteinComplexStructuresVisibility(false);
 
         if (viewId === 'pie_chart' || viewId === 'histogram' || viewId === 'Venn Diagram' || viewId === 'Scatter Plot' || viewId === 'Mind Map' || viewId === 'Embeddings') {
@@ -18485,7 +18578,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     if (!isResizingProteinInfo) return;
                     const delta = moveEvent.clientY - startY;
                     const currentHeight = proteinInfoBox.getBoundingClientRect().height || getProteinInfoDefaultHeightPx();
-                    const nextHeight = Math.max(160, currentHeight + delta);
+                    const nextHeight = Math.max(160, currentHeight - delta);
                     proteinInfoCustomHeightPx = nextHeight;
                     applyProteinInfoPanelHeight(nextHeight);
                     startY = moveEvent.clientY;
