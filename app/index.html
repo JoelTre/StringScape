@@ -897,7 +897,7 @@
             font-size: 0.9rem;
             line-height: 1.35;
             color: #3498db;
-            margin: 2px 0 12px 0;
+            margin: 27px 0 12px 0; 
         }
         ::-webkit-scrollbar {
             width: 4px;
@@ -2878,20 +2878,25 @@
             margin-left: auto;
         }
         #protein-complex-structures-view .structures-search {
-            width: min(340px, 100%);
+            width: min(760px, 100%);
             display: flex;
-            flex-direction: column;
-            gap: 6px;
+            flex-direction: row;
+            align-items: center;
+            gap: 10px;
         }
-        #protein-complex-structures-view .structures-search label {
+        #protein-complex-structures-view .structures-search span {
             color: #8fb7df;
             text-transform: uppercase;
             letter-spacing: 0.08em;
-            font-size: 10px;
+            font-size: 15px;
             font-weight: 700;
+            white-space: nowrap;
+            flex: 0 0 auto;
         }
         #protein-complex-structures-view .structures-search input {
             width: 100%;
+            flex: 1 1 auto;
+            min-width: 309px;
             box-sizing: border-box;
             border-radius: 999px;
             border: 1px solid rgba(143, 183, 223, 0.28);
@@ -2928,6 +2933,7 @@
             gap: 16px;
         }
         #protein-complex-structures-view .protein-complex-card {
+            position: relative;
             display: flex;
             flex-direction: column;
             overflow: hidden;
@@ -2936,6 +2942,7 @@
             background: linear-gradient(180deg, rgba(24, 31, 44, 0.94), rgba(17, 22, 32, 0.96));
             box-shadow: 0 14px 32px rgba(0, 0, 0, 0.24);
             min-height: 100%;
+            max-width: 400px;
         }
         #protein-complex-structures-view .protein-complex-preview {
             width: 100%;
@@ -2992,6 +2999,34 @@
         #protein-complex-structures-view .protein-complex-pill:hover {
             border-color: rgba(157, 207, 255, 0.55);
             background: rgba(52, 152, 219, 0.16);
+        }
+        #protein-complex-structures-view .protein-complex-pin-btn {
+            position: absolute;
+            top: 0px;
+            right: 10px;
+            width: 32px;
+            height: 32px;
+            border-radius: 999px;
+            border: 1px solid rgba(157, 207, 255, 0.28);
+            background: rgba(157, 207, 255, 0.28);
+            color: #f2f7ff;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 15px;
+            line-height: 1;
+            cursor: pointer;
+            z-index: 2;
+            transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+        }
+        #protein-complex-structures-view .protein-complex-pin-btn:hover {
+            transform: translateY(-1px);
+            border-color: rgba(157, 207, 255, 0.55);
+            background: rgba(157, 207, 255, 0.55);
+        }
+        #protein-complex-structures-view .protein-complex-pin-btn[aria-pressed="true"] {
+            border-color: rgba(52, 152, 219, 0.55);
+            color: #9dd1ff;
         }
         #protein-complex-structures-view .structures-loading-overlay {
             position: absolute;
