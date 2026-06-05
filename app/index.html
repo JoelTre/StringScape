@@ -22,6 +22,7 @@
             https://joeltre.github.io
             https://api.github.com 
             https://data.rcsb.org
+            https://files.rcsb.org
             https://raw.githubusercontent.com 
             https://alphafold.ebi.ac.uk 
             https://cdn.pyodide.org 
@@ -53,6 +54,8 @@
     <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js" integrity="sha384-b4IZetZNE8bVncsQqlcH4ZZFC58BslGU2LVj47xUtIMOw72axMESbPe8spBylXnd" crossorigin="anonymous"></script>
     <!-- expr-eval -->
     <script src="https://cdn.jsdelivr.net/npm/expr-eval@2.0.2/dist/bundle.min.js" integrity="sha384-/4W8jQ+DhKy3zhz8s0HRh/l4kEliBAJQmAWqrrtJr7BAuODvB2MKsjR8h5MGefjl" crossorigin="anonymous"></script>
+    <!-- Ammo.js -->
+    <script src="https://cdn.jsdelivr.net/npm/ammo.js@0.0.10/ammo.js" crossorigin="anonymous"></script>
     <!-- Cloudflare Web Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "de64078fa2a4407fba94310b9fc51393"}'></script><!-- End Cloudflare Web Analytics -->
     <style>
         :root {
@@ -3081,6 +3084,86 @@
         }
         #protein-complex-structures-view .protein-complex-body.skeleton-body {
             gap: 10px;
+        }
+        #protein-complex-structure-detail-view {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            width: 100%;
+        }
+        #protein-complex-structure-detail-view .protein-complex-detail-shell {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            min-height: calc(100vh - 160px);
+        }
+        #protein-complex-structure-detail-view .protein-complex-detail-hero {
+            align-items: center;
+        }
+        #protein-complex-structure-detail-view #protein-complex-detail-topbar {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+        }
+        #protein-complex-structure-detail-view #protein-complex-detail-title {
+            margin: 0;
+            font-size: clamp(22px, 2.4vw, 34px);
+            line-height: 1.05;
+            letter-spacing: -0.02em;
+        }
+        #protein-complex-structure-detail-view #protein-complex-detail-subtitle {
+            margin-top: 6px;
+            color: #b6c6d9;
+            font-size: 13px;
+            line-height: 1.45;
+        }
+        #protein-complex-structure-detail-view #protein-complex-detail-close {
+            flex: 0 0 auto;
+            border: 1px solid rgba(255,255,255,0.14);
+            background: rgba(255,255,255,0.06);
+            color: #fff;
+            border-radius: 999px;
+            padding: 10px 14px;
+            cursor: pointer;
+        }
+        #protein-complex-structure-detail-view #protein-complex-detail-close:hover { background: rgba(255,255,255,0.1); }
+        #protein-complex-structure-detail-view #protein-complex-detail-progress-wrap {
+            border-radius: 999px;
+            background: rgba(255,255,255,0.06);
+            overflow: hidden;
+            height: 10px;
+        }
+        #protein-complex-structure-detail-view #protein-complex-detail-progress-bar {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, #38bdf8, #60a5fa, #34d399);
+            transition: width 0.25s ease;
+        }
+        #protein-complex-structure-detail-view #protein-complex-detail-status {
+            color: #d9e6f5;
+            font-size: 13px;
+            line-height: 1.45;
+            min-height: 2.8em;
+        }
+        #protein-complex-structure-detail-view #protein-complex-detail-viewer {
+            position: relative;
+            min-height: calc(100vh - 340px);
+            border-radius: 22px;
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.08);
+            background: #0f1115;
+        }
+        #protein-complex-structure-detail-view #protein-complex-detail-viewer .protein-complex-detail-viewer-host {
+            position: absolute;
+            inset: 0;
+        }
+        .protein-complex-detail-muted { color: #9fb2c7; font-size: 12px; line-height: 1.45; }
+        @media (max-width: 1180px) {
+            #protein-complex-structure-detail-view #protein-complex-detail-viewer {
+                min-height: 52vh;
+            }
         }
         @keyframes skeletonShimmer {
             0% { background-position: 200% 0; }
