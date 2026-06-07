@@ -297,6 +297,9 @@
     let proteinInfoMolstarLoadPromise = null;
     let proteinInfoMolstarViewer = null;
     let proteinInfoMolstarBackgroundObserver = null;
+    let proteinComplexStructureOverlayRenderToken = 0;
+    let proteinComplexStructureOverlayMolstarViewer = null;
+    let proteinComplexStructureOverlayBackgroundObserver = null;
     let proteinInfoZoomHotkeyState = null;
     let pdbAliasNearMissDebuggedNodes = new Set();
     let proteinComplexStructuresMetadataById = new Map();
@@ -306,11 +309,7 @@
     let proteinComplexStructuresSearchQuery = '';
     let proteinComplexStructuresLoading = false;
     let proteinComplexStructuresPinnedPdbIds = new Set();
-    let proteinComplexStructuresDetailEntry = null;
-    let proteinComplexStructureDetailRenderToken = 0;
-    let proteinComplexStructureDetailViewer = null;
-    let proteinComplexStructureDetailBackgroundObserver = null;
-let proteinComplexStructuresPlaceholderSrc = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stop-color="#293546"/><stop offset="100%" stop-color="#111822"/></linearGradient></defs><rect width="800" height="500" rx="32" fill="url(#g)"/><g fill="none" stroke="#6f8ca9" stroke-width="10" stroke-linecap="round" opacity="0.6"><line x1="296" y1="140" x2="318" y2="125"/><line x1="430" y1="135" x2="475" y2="170"/><line x1="360" y1="170" x2="340" y2="240"/><line x1="480" y1="220" x2="380" y2="270"/><line x1="275" y1="190" x2="310" y2="245"/></g><g fill="none" stroke="#6f8ca9" stroke-width="10" opacity="0.8"><circle cx="250" cy="150" r="46"/><circle cx="374" cy="120" r="56"/><circle cx="510" cy="190" r="42"/><circle cx="330" cy="300" r="62"/></g><text x="50%" y="88%" text-anchor="middle" font-family="Arial, sans-serif" font-size="28" fill="#a9c3da">Protein Complex Preview</text></svg>');    let nodeHoverTooltipTimer = null;
+    let proteinComplexStructuresPlaceholderSrc = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stop-color="#293546"/><stop offset="100%" stop-color="#111822"/></linearGradient></defs><rect width="800" height="500" rx="32" fill="url(#g)"/><g fill="none" stroke="#6f8ca9" stroke-width="10" stroke-linecap="round" opacity="0.6"><line x1="296" y1="140" x2="318" y2="125"/><line x1="430" y1="135" x2="475" y2="170"/><line x1="360" y1="170" x2="340" y2="240"/><line x1="480" y1="220" x2="380" y2="270"/><line x1="275" y1="190" x2="310" y2="245"/></g><g fill="none" stroke="#6f8ca9" stroke-width="10" opacity="0.8"><circle cx="250" cy="150" r="46"/><circle cx="374" cy="120" r="56"/><circle cx="510" cy="190" r="42"/><circle cx="330" cy="300" r="62"/></g><text x="50%" y="88%" text-anchor="middle" font-family="Arial, sans-serif" font-size="28" fill="#a9c3da">Protein Complex Preview</text></svg>');    let nodeHoverTooltipTimer = null;
     let pendingNodeHoverTooltipId = null;
     
     // Guide-related variables
@@ -9637,1041 +9636,12 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
         const payload = await response.json();
         const first = Array.isArray(payload) ? payload[0] : null;
-        const modelUrl = first?.pdbUrl || first?.cifUrl || first?.bcifUrl || '';
+        const modelUrl = first?.cifUrl || first?.bcifUrl || first?.pdbUrl || '';
         if (!modelUrl) return { notAvailable: true, reason: 'no-url' };
 
         const lowerUrl = String(modelUrl).toLowerCase();
         const format = lowerUrl.includes('.pdb') ? 'pdb' : 'mmcif';
         return { notAvailable: false, modelUrl, format };
-    }
-
-    const proteinComplexThreeToOne = {
-        ALA: 'A', ARG: 'R', ASN: 'N', ASP: 'D', CYS: 'C', GLN: 'Q', GLU: 'E', GLY: 'G', HIS: 'H', ILE: 'I',
-        LEU: 'L', LYS: 'K', MET: 'M', PHE: 'F', PRO: 'P', SER: 'S', THR: 'T', TRP: 'W', TYR: 'Y', VAL: 'V',
-        SEC: 'U', PYL: 'O', ASX: 'B', GLX: 'Z', UNK: 'X'
-    };
-    let ammoLoadPromise = null;
-
-    function disposeProteinComplexStructureDetailViewer() {
-        if (proteinComplexStructureDetailBackgroundObserver) {
-            proteinComplexStructureDetailBackgroundObserver.disconnect();
-            proteinComplexStructureDetailBackgroundObserver = null;
-        }
-        if (proteinComplexStructureDetailViewer?.plugin?.dispose) {
-            proteinComplexStructureDetailViewer.plugin.dispose();
-        }
-        proteinComplexStructureDetailViewer = null;
-    }
-
-    function closeProteinComplexStructureDetailOverlay() {
-        openProteinComplexStructuresDashboard();
-    }
-
-    function setProteinComplexStructureDetailProgress(percent, message) {
-        const container = document.getElementById('protein-complex-structure-detail-view');
-        if (!container) return;
-        const bar = container.querySelector('#protein-complex-detail-progress-bar');
-        const status = container.querySelector('#protein-complex-detail-status');
-        if (bar) bar.style.width = `${Math.max(0, Math.min(100, percent))}%`;
-        if (status && typeof message === 'string') status.textContent = message;
-    }
-
-    function tokenizeProteinComplexMmCif(text) {
-        const tokens = [];
-        const source = String(text || '');
-        let index = 0;
-        while (index < source.length) {
-            const char = source[index];
-            if (/\s/.test(char)) {
-                index += 1;
-                continue;
-            }
-            if (char === '#') {
-                while (index < source.length && source[index] !== '\n') index += 1;
-                continue;
-            }
-            if (char === ';' && (index === 0 || source[index - 1] === '\n')) {
-                index += 1;
-                const start = index;
-                while (index < source.length) {
-                    if (source[index] === '\n' && source[index + 1] === ';') {
-                        tokens.push(source.slice(start, index));
-                        index += 2;
-                        break;
-                    }
-                    index += 1;
-                }
-                if (index >= source.length) tokens.push(source.slice(start));
-                continue;
-            }
-            if (char === '"' || char === "'") {
-                const quote = char;
-                index += 1;
-                let value = '';
-                while (index < source.length) {
-                    const current = source[index];
-                    if (current === quote) {
-                        index += 1;
-                        break;
-                    }
-                    if (current === '\\' && index + 1 < source.length) {
-                        value += source[index + 1];
-                        index += 2;
-                        continue;
-                    }
-                    value += current;
-                    index += 1;
-                }
-                tokens.push(value);
-                continue;
-            }
-            let end = index;
-            while (end < source.length && !/\s/.test(source[end])) end += 1;
-            tokens.push(source.slice(index, end));
-            index = end;
-        }
-        return tokens;
-    }
-
-    function parseProteinComplexMmCifChains(cifText) {
-        const tokens = tokenizeProteinComplexMmCif(cifText);
-        const tables = new Map();
-        let index = 0;
-        while (index < tokens.length) {
-            if (tokens[index] !== 'loop_') {
-                index += 1;
-                continue;
-            }
-            index += 1;
-            const columns = [];
-            while (index < tokens.length && tokens[index].startsWith('_')) {
-                columns.push(tokens[index]);
-                index += 1;
-            }
-            if (!columns.length) continue;
-            const tableName = columns[0].split('.')[0];
-            const rows = [];
-            while (index < tokens.length && tokens[index] !== 'loop_' && tokens[index] !== 'stop_' && !tokens[index].startsWith('_')) {
-                const row = {};
-                columns.forEach((column, columnIndex) => {
-                    row[column] = tokens[index + columnIndex] ?? '?';
-                });
-                rows.push(row);
-                index += columns.length;
-            }
-            tables.set(tableName, { columns, rows });
-        }
-
-        const entityPolyRows = tables.get('_entity_poly')?.rows || [];
-        const asymRows = tables.get('_struct_asym')?.rows || [];
-        const chainRows = [];
-
-        const entitySequenceById = new Map();
-        entityPolyRows.forEach(row => {
-            const entityId = String(row['_entity_poly.entity_id'] || '').trim();
-            const sequence = String(row['_entity_poly.pdbx_seq_one_letter_code_can'] || row['_entity_poly.pdbx_seq_one_letter_code'] || '').replace(/\s+/g, '').replace(/\./g, 'X').trim();
-            if (entityId && sequence) entitySequenceById.set(entityId, sequence);
-        });
-
-        asymRows.forEach(row => {
-            const asymId = String(row['_struct_asym.id'] || '').trim();
-            const entityId = String(row['_struct_asym.entity_id'] || '').trim();
-            const sequence = entitySequenceById.get(entityId) || '';
-            if (!asymId || !sequence) return;
-            chainRows.push({ chainId: asymId, sequence });
-        });
-
-        return chainRows.length ? chainRows : Array.from(entitySequenceById.entries()).map(([entityId, sequence]) => ({ chainId: entityId, sequence }));
-    }
-
-    function proteinComplexStructureResidueLabel(residue) {
-        const seq = String(residue?.sequence || '').trim();
-        if (seq) return seq;
-        const name = String(residue?.resName || '').trim().toUpperCase();
-        return proteinComplexThreeToOne[name] || 'X';
-    }
-
-    function parseProteinComplexPdbAtomChains(pdbText) {
-        const chains = new Map();
-        const lines = String(pdbText || '').split(/\r?\n/);
-        lines.forEach(line => {
-            if (!line.startsWith('ATOM') && !line.startsWith('HETATM')) return;
-            const atomName = line.slice(12, 16).trim();
-            if (atomName !== 'CA') return;
-            const chainId = line.slice(21, 22).trim() || 'A';
-            const resSeq = Number.parseInt(line.slice(22, 26).trim(), 10);
-            if (!Number.isFinite(resSeq)) return;
-            const insCode = line.slice(26, 27).trim();
-            const key = `${resSeq}${insCode}`;
-            const resName = line.slice(17, 20).trim().toUpperCase();
-            const x = Number.parseFloat(line.slice(30, 38));
-            const y = Number.parseFloat(line.slice(38, 46));
-            const z = Number.parseFloat(line.slice(46, 54));
-            if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return;
-            if (!chains.has(chainId)) chains.set(chainId, { chainId, residues: [] });
-            const chain = chains.get(chainId);
-            if (chain.residues.some(residue => residue.key === key)) return;
-            chain.residues.push({ key, resSeq, resName, x, y, z, sequence: proteinComplexStructureResidueLabel({ resName }) });
-        });
-        return Array.from(chains.values()).map(chain => ({
-            ...chain,
-            sequence: chain.residues.map(residue => residue.sequence).join('')
-        }));
-    }
-
-    function parseProteinComplexMmCifAtomChains(cifText) {
-        const tokens = tokenizeProteinComplexMmCif(cifText);
-        const tables = new Map();
-        let index = 0;
-        while (index < tokens.length) {
-            if (tokens[index] !== 'loop_') {
-                index += 1;
-                continue;
-            }
-            index += 1;
-            const columns = [];
-            while (index < tokens.length && tokens[index].startsWith('_')) {
-                columns.push(tokens[index]);
-                index += 1;
-            }
-            if (!columns.length) continue;
-            const rows = [];
-            while (index < tokens.length && tokens[index] !== 'loop_' && tokens[index] !== 'stop_' && !tokens[index].startsWith('_')) {
-                const row = {};
-                columns.forEach((column, columnIndex) => {
-                    row[column] = tokens[index + columnIndex] ?? '?';
-                });
-                rows.push(row);
-                index += columns.length;
-            }
-            tables.set(columns[0].split('.')[0], { columns, rows });
-        }
-
-        const atomRows = tables.get('_atom_site')?.rows || [];
-        const chains = new Map();
-        atomRows.forEach(row => {
-            const atomName = String(row['_atom_site.label_atom_id'] || row['_atom_site.auth_atom_id'] || '').trim();
-            if (atomName !== 'CA') return;
-            const chainId = String(row['_atom_site.label_asym_id'] || row['_atom_site.auth_asym_id'] || 'A').trim() || 'A';
-            const resSeq = Number.parseInt(String(row['_atom_site.label_seq_id'] || row['_atom_site.auth_seq_id'] || '').trim(), 10);
-            if (!Number.isFinite(resSeq)) return;
-            const resName = String(row['_atom_site.label_comp_id'] || row['_atom_site.auth_comp_id'] || 'UNK').trim().toUpperCase();
-            const x = Number.parseFloat(String(row['_atom_site.Cartn_x'] || '').trim());
-            const y = Number.parseFloat(String(row['_atom_site.Cartn_y'] || '').trim());
-            const z = Number.parseFloat(String(row['_atom_site.Cartn_z'] || '').trim());
-            if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return;
-            if (!chains.has(chainId)) chains.set(chainId, { chainId, residues: [] });
-            const chain = chains.get(chainId);
-            const key = `${resSeq}`;
-            if (chain.residues.some(residue => residue.key === key)) return;
-            chain.residues.push({ key, resSeq, resName, x, y, z, sequence: proteinComplexStructureResidueLabel({ resName }) });
-        });
-
-        return Array.from(chains.values()).map(chain => ({
-            ...chain,
-            sequence: chain.residues.map(residue => residue.sequence).join('')
-        }));
-    }
-
-    function parseProteinComplexAtomChains(text, format) {
-        const lower = String(format || '').toLowerCase();
-        return lower === 'mmcif' ? parseProteinComplexMmCifAtomChains(text) : parseProteinComplexPdbAtomChains(text);
-    }
-
-    function buildProteinComplexPdbFromChains(chainModels) {
-        const lines = [];
-        let atomSerial = 1;
-        const chainIds = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-        chainModels.forEach((chainModel, chainIndex) => {
-            const chainId = chainIds[chainIndex % chainIds.length];
-            (chainModel.residues || []).forEach(residue => {
-                const x = Number(residue.x || 0).toFixed(3).padStart(8, ' ');
-                const y = Number(residue.y || 0).toFixed(3).padStart(8, ' ');
-                const z = Number(residue.z || 0).toFixed(3).padStart(8, ' ');
-                const resSeq = String(Number(residue.resSeq || 0)).padStart(4, ' ');
-                const resName = String(residue.resName || 'UNK').padEnd(3, ' ');
-                lines.push(`ATOM  ${String(atomSerial).padStart(5, ' ')}  CA  ${resName} ${chainId}${resSeq}    ${x}${y}${z}  1.00 50.00           C`);
-                atomSerial += 1;
-            });
-            lines.push('TER');
-        });
-        lines.push('END');
-        return lines.join('\n');
-    }
-
-    function kabschFit(sourcePoints, targetPoints) {
-        const count = Math.min(Array.isArray(sourcePoints) ? sourcePoints.length : 0, Array.isArray(targetPoints) ? targetPoints.length : 0);
-        if (!count) {
-            return { rotation: [[1,0,0],[0,1,0],[0,0,1]], translation: [0, 0, 0] };
-        }
-        const sourceCentroid = [0, 0, 0];
-        const targetCentroid = [0, 0, 0];
-        for (let index = 0; index < count; index += 1) {
-            sourceCentroid[0] += sourcePoints[index][0];
-            sourceCentroid[1] += sourcePoints[index][1];
-            sourceCentroid[2] += sourcePoints[index][2];
-            targetCentroid[0] += targetPoints[index][0];
-            targetCentroid[1] += targetPoints[index][1];
-            targetCentroid[2] += targetPoints[index][2];
-        }
-        sourceCentroid[0] /= count; sourceCentroid[1] /= count; sourceCentroid[2] /= count;
-        targetCentroid[0] /= count; targetCentroid[1] /= count; targetCentroid[2] /= count;
-
-        const covariance = [
-            [0, 0, 0],
-            [0, 0, 0],
-            [0, 0, 0]
-        ];
-        for (let index = 0; index < count; index += 1) {
-            const source = [
-                sourcePoints[index][0] - sourceCentroid[0],
-                sourcePoints[index][1] - sourceCentroid[1],
-                sourcePoints[index][2] - sourceCentroid[2]
-            ];
-            const target = [
-                targetPoints[index][0] - targetCentroid[0],
-                targetPoints[index][1] - targetCentroid[1],
-                targetPoints[index][2] - targetCentroid[2]
-            ];
-            covariance[0][0] += source[0] * target[0];
-            covariance[0][1] += source[0] * target[1];
-            covariance[0][2] += source[0] * target[2];
-            covariance[1][0] += source[1] * target[0];
-            covariance[1][1] += source[1] * target[1];
-            covariance[1][2] += source[1] * target[2];
-            covariance[2][0] += source[2] * target[0];
-            covariance[2][1] += source[2] * target[1];
-            covariance[2][2] += source[2] * target[2];
-        }
-
-        const sxx = covariance[0][0];
-        const sxy = covariance[0][1];
-        const sxz = covariance[0][2];
-        const syx = covariance[1][0];
-        const syy = covariance[1][1];
-        const syz = covariance[1][2];
-        const szx = covariance[2][0];
-        const szy = covariance[2][1];
-        const szz = covariance[2][2];
-        const trace = sxx + syy + szz;
-        const symmetric4x4 = [
-            [trace, syz - szy, szx - sxz, sxy - syx],
-            [syz - szy, sxx - syy - szz, sxy + syx, szx + sxz],
-            [szx - sxz, sxy + syx, -sxx + syy - szz, syz + szy],
-            [sxy - syx, szx + sxz, syz + szy, -sxx - syy + szz]
-        ];
-
-        let quaternion = [1, 0, 0, 0];
-        for (let iteration = 0; iteration < 32; iteration += 1) {
-            const next = [0, 0, 0, 0];
-            for (let row = 0; row < 4; row += 1) {
-                for (let col = 0; col < 4; col += 1) {
-                    next[row] += symmetric4x4[row][col] * quaternion[col];
-                }
-            }
-            const magnitude = Math.hypot(next[0], next[1], next[2], next[3]) || 1;
-            quaternion = next.map(value => value / magnitude);
-        }
-
-        const [w, x, y, z] = quaternion;
-        const xx = x * x;
-        const yy = y * y;
-        const zz = z * z;
-        const xy = x * y;
-        const xz = x * z;
-        const yz = y * z;
-        const wx = w * x;
-        const wy = w * y;
-        const wz = w * z;
-        const rotation = [
-            [1 - 2 * (yy + zz), 2 * (xy - wz), 2 * (xz + wy)],
-            [2 * (xy + wz), 1 - 2 * (xx + zz), 2 * (yz - wx)],
-            [2 * (xz - wy), 2 * (yz + wx), 1 - 2 * (xx + yy)]
-        ];
-
-        const transformedSourceCentroid = [
-            rotation[0][0] * sourceCentroid[0] + rotation[0][1] * sourceCentroid[1] + rotation[0][2] * sourceCentroid[2],
-            rotation[1][0] * sourceCentroid[0] + rotation[1][1] * sourceCentroid[1] + rotation[1][2] * sourceCentroid[2],
-            rotation[2][0] * sourceCentroid[0] + rotation[2][1] * sourceCentroid[1] + rotation[2][2] * sourceCentroid[2]
-        ];
-        return {
-            rotation,
-            translation: [
-                targetCentroid[0] - transformedSourceCentroid[0],
-                targetCentroid[1] - transformedSourceCentroid[1],
-                targetCentroid[2] - transformedSourceCentroid[2]
-            ]
-        };
-    }
-
-    function applyRigidTransform(point, transform) {
-        const rotation = transform?.rotation || [[1,0,0],[0,1,0],[0,0,1]];
-        const translation = transform?.translation || [0, 0, 0];
-        return [
-            rotation[0][0] * point[0] + rotation[0][1] * point[1] + rotation[0][2] * point[2] + translation[0],
-            rotation[1][0] * point[0] + rotation[1][1] * point[1] + rotation[1][2] * point[2] + translation[1],
-            rotation[2][0] * point[0] + rotation[2][1] * point[1] + rotation[2][2] * point[2] + translation[2]
-        ];
-    }
-
-    async function ensureAmmoLoaded() {
-        if (window.Ammo && typeof window.Ammo !== 'function') return window.Ammo;
-        if (ammoLoadPromise) return ammoLoadPromise;
-        ammoLoadPromise = (async () => {
-            const ammo = window.Ammo;
-            if (typeof ammo === 'function') {
-                const loaded = await ammo();
-                window.Ammo = loaded;
-                return loaded;
-            }
-            if (ammo) return ammo;
-            throw new Error('Ammo.js failed to initialize');
-        })();
-        try {
-            return await ammoLoadPromise;
-        } finally {
-            ammoLoadPromise = null;
-        }
-    }
-
-    async function refineProteinComplexWithAmmo(referenceChains, matchedChains) {
-        const AmmoLib = await ensureAmmoLoaded();
-        const collisionConfiguration = new AmmoLib.btDefaultCollisionConfiguration();
-        const dispatcher = new AmmoLib.btCollisionDispatcher(collisionConfiguration);
-        const broadphase = new AmmoLib.btDbvtBroadphase();
-        const solver = new AmmoLib.btSequentialImpulseConstraintSolver();
-        const world = new AmmoLib.btDiscreteDynamicsWorld(dispatcher, broadphase, solver, collisionConfiguration);
-        world.setGravity(new AmmoLib.btVector3(0, 0, 0));
-
-        const bodies = [];
-        const constraints = [];
-        const anchorBodies = [];
-        const cleanup = () => {
-            constraints.forEach(item => world.removeConstraint(item));
-            bodies.forEach(item => world.removeRigidBody(item.body));
-            anchorBodies.forEach(item => world.removeRigidBody(item.body));
-        };
-
-        try {
-            matchedChains.forEach(chain => {
-                const referenceChain = chain.referenceChain;
-                const modelResidues = chain.modelResidues || [];
-                const matchedPairs = chain.matchedPairs || [];
-                const referenceResidueByModelIndex = new Map(matchedPairs.map(pair => [pair.modelIndex, pair.referenceIndex]));
-                const sourcePoints = matchedPairs.map(pair => {
-                    const residue = modelResidues[pair.modelIndex - 1];
-                    return residue ? [residue.x, residue.y, residue.z] : null;
-                }).filter(Boolean);
-                const targetPoints = matchedPairs.map(pair => {
-                    const residue = referenceChain.residues[pair.referenceIndex - 1];
-                    return residue ? [residue.x, residue.y, residue.z] : null;
-                }).filter(Boolean);
-                const initialTransform = kabschFit(sourcePoints, targetPoints);
-
-                let previousBody = null;
-                const chainBodies = modelResidues.map((residue, residueIndex) => {
-                    const initialResiduePosition = applyRigidTransform([residue.x, residue.y, residue.z], initialTransform);
-                    const transform = new AmmoLib.btTransform();
-                    transform.setIdentity();
-                    transform.setOrigin(new AmmoLib.btVector3(initialResiduePosition[0], initialResiduePosition[1], initialResiduePosition[2]));
-                    const shape = new AmmoLib.btSphereShape(2.0);
-                    const mass = 0.8;
-                    const localInertia = new AmmoLib.btVector3(0, 0, 0);
-                    shape.calculateLocalInertia(mass, localInertia);
-                    const motionState = new AmmoLib.btDefaultMotionState(transform);
-                    const bodyInfo = new AmmoLib.btRigidBodyConstructionInfo(mass, motionState, shape, localInertia);
-                    const body = new AmmoLib.btRigidBody(bodyInfo);
-                    body.setActivationState(4);
-                    world.addRigidBody(body);
-                    const referenceResidueIndex = referenceResidueByModelIndex.get(residueIndex + 1);
-                    const target = (referenceResidueIndex ? referenceChain.residues[referenceResidueIndex - 1] : null)
-                        || referenceChain.residues[residueIndex]
-                        || referenceChain.residues[referenceChain.residues.length - 1]
-                        || residue;
-                    const anchorTransform = new AmmoLib.btTransform();
-                    anchorTransform.setIdentity();
-                    anchorTransform.setOrigin(new AmmoLib.btVector3(target.x, target.y, target.z));
-                    const anchorShape = new AmmoLib.btSphereShape(0.01);
-                    const anchorMotionState = new AmmoLib.btDefaultMotionState(anchorTransform);
-                    const anchorInfo = new AmmoLib.btRigidBodyConstructionInfo(0, anchorMotionState, anchorShape, new AmmoLib.btVector3(0, 0, 0));
-                    const anchorBody = new AmmoLib.btRigidBody(anchorInfo);
-                    world.addRigidBody(anchorBody);
-                    anchorBodies.push({ body: anchorBody });
-
-                    if (previousBody) {
-                        try {
-                            const frameA = new AmmoLib.btTransform();
-                            frameA.setIdentity();
-                            const frameB = new AmmoLib.btTransform();
-                            frameB.setIdentity();
-                            const bond = new AmmoLib.btSliderConstraint(previousBody, body, frameA, frameB, true);
-                            bond.setLowerLinLimit(3.8);
-                            bond.setUpperLinLimit(3.8);
-                            bond.setLowerAngLimit(0);
-                            bond.setUpperAngLimit(0);
-                            world.addConstraint(bond, true);
-                            constraints.push(bond);
-                        } catch {}
-                    }
-                    previousBody = body;
-
-                    bodies.push({
-                        body,
-                        target: [target.x, target.y, target.z],
-                        residue,
-                        chainId: chain.referenceChain.chainId,
-                        initialResiduePosition
-                    });
-                    return { body, target, residue, initialResiduePosition };
-                });
-
-                for (let step = 0; step < 90; step += 1) {
-                    chainBodies.forEach(entry => {
-                        const body = entry.body;
-                        const motionState = body.getMotionState();
-                        if (!motionState) return;
-                        const transform = new AmmoLib.btTransform();
-                        motionState.getWorldTransform(transform);
-                        const origin = transform.getOrigin();
-                        const velocity = body.getLinearVelocity ? body.getLinearVelocity() : null;
-                        const force = new AmmoLib.btVector3(
-                            (entry.target[0] - origin.x()) * 5.5 - (velocity ? velocity.x() * 0.2 : 0),
-                            (entry.target[1] - origin.y()) * 5.5 - (velocity ? velocity.y() * 0.2 : 0),
-                            (entry.target[2] - origin.z()) * 5.5 - (velocity ? velocity.z() * 0.2 : 0)
-                        );
-                        body.applyCentralForce(force);
-                        AmmoLib.destroy?.(force);
-                    });
-                    world.stepSimulation(1 / 30, 6);
-                }
-
-                const refinedResidues = chainBodies.map(entry => {
-                    const motionState = entry.body.getMotionState();
-                    const transform = new AmmoLib.btTransform();
-                    motionState.getWorldTransform(transform);
-                    const origin = transform.getOrigin();
-                    return {
-                        ...entry.residue,
-                        x: origin.x(),
-                        y: origin.y(),
-                        z: origin.z()
-                    };
-                });
-
-                const hasValidSpread = refinedResidues.length > 1 && (() => {
-                    let minX = Infinity;
-                    let minY = Infinity;
-                    let minZ = Infinity;
-                    let maxX = -Infinity;
-                    let maxY = -Infinity;
-                    let maxZ = -Infinity;
-                    for (const residue of refinedResidues) {
-                        if (!Number.isFinite(residue.x) || !Number.isFinite(residue.y) || !Number.isFinite(residue.z)) return false;
-                        minX = Math.min(minX, residue.x);
-                        minY = Math.min(minY, residue.y);
-                        minZ = Math.min(minZ, residue.z);
-                        maxX = Math.max(maxX, residue.x);
-                        maxY = Math.max(maxY, residue.y);
-                        maxZ = Math.max(maxZ, residue.z);
-                    }
-                    const dx = maxX - minX;
-                    const dy = maxY - minY;
-                    const dz = maxZ - minZ;
-                    return Math.sqrt(dx * dx + dy * dy + dz * dz) > 1e-3;
-                })();
-
-                chain.finalResidues = hasValidSpread
-                    ? refinedResidues
-                    : chainBodies.map(entry => ({
-                        ...entry.residue,
-                        x: entry.initialResiduePosition[0],
-                        y: entry.initialResiduePosition[1],
-                        z: entry.initialResiduePosition[2]
-                    }));
-            });
-
-            return matchedChains.map(chain => ({
-                chainId: chain.referenceChain.chainId,
-                residues: chain.finalResidues || []
-            }));
-        } finally {
-            cleanup();
-        }
-    }
-
-    function alignProteinComplexSequences(referenceSequence, modelSequence) {
-        const reference = String(referenceSequence || '').toUpperCase().replace(/[^A-Z]/g, '');
-        const model = String(modelSequence || '').toUpperCase().replace(/[^A-Z]/g, '');
-        const rows = reference.length + 1;
-        const cols = model.length + 1;
-        const scores = Array.from({ length: rows }, () => new Int32Array(cols));
-        const trace = Array.from({ length: rows }, () => new Uint8Array(cols));
-        const gapPenalty = -1;
-        const matchScore = 2;
-        const mismatchScore = -1;
-
-        for (let row = 1; row < rows; row += 1) {
-            scores[row][0] = row * gapPenalty;
-            trace[row][0] = 1;
-        }
-        for (let col = 1; col < cols; col += 1) {
-            scores[0][col] = col * gapPenalty;
-            trace[0][col] = 2;
-        }
-
-        for (let row = 1; row < rows; row += 1) {
-            for (let col = 1; col < cols; col += 1) {
-                const diag = scores[row - 1][col - 1] + (reference[row - 1] === model[col - 1] ? matchScore : mismatchScore);
-                const up = scores[row - 1][col] + gapPenalty;
-                const left = scores[row][col - 1] + gapPenalty;
-                if (diag >= up && diag >= left) {
-                    scores[row][col] = diag;
-                    trace[row][col] = 0;
-                } else if (up >= left) {
-                    scores[row][col] = up;
-                    trace[row][col] = 1;
-                } else {
-                    scores[row][col] = left;
-                    trace[row][col] = 2;
-                }
-            }
-        }
-
-        const alignedReference = [];
-        const alignedModel = [];
-        const matchedPairs = [];
-        let row = reference.length;
-        let col = model.length;
-        while (row > 0 || col > 0) {
-            const direction = trace[row][col];
-            if (row > 0 && col > 0 && direction === 0) {
-                alignedReference.push(reference[row - 1]);
-                alignedModel.push(model[col - 1]);
-                if (reference[row - 1] === model[col - 1]) {
-                    matchedPairs.push({ referenceIndex: row, modelIndex: col, residue: reference[row - 1] });
-                }
-                row -= 1;
-                col -= 1;
-            } else if (row > 0 && (col === 0 || direction === 1)) {
-                alignedReference.push(reference[row - 1]);
-                alignedModel.push('-');
-                row -= 1;
-            } else {
-                alignedReference.push('-');
-                alignedModel.push(model[col - 1]);
-                col -= 1;
-            }
-        }
-
-        alignedReference.reverse();
-        alignedModel.reverse();
-        matchedPairs.reverse();
-        const alignedPairs = matchedPairs.length + alignedReference.filter((residue, index) => residue !== '-' && alignedModel[index] !== '-' && residue !== alignedModel[index]).length;
-        const comparedPairs = alignedReference.reduce((count, residue, index) => count + (residue !== '-' && alignedModel[index] !== '-' ? 1 : 0), 0);
-        const identity = comparedPairs ? matchedPairs.length / comparedPairs : 0;
-
-        return {
-            identity,
-            matchedPairs,
-            alignedReference: alignedReference.join(''),
-            alignedModel: alignedModel.join(''),
-            comparedPairs,
-            alignedPairs
-        };
-    }
-
-    async function openProteinComplexStructureDetail(entry) {
-        proteinComplexStructuresDetailEntry = entry;
-        if (currentViewId === 'Protein Complex Structures') {
-            renderProteinComplexStructuresView();
-        }
-    }
-
-    function openProteinComplexStructuresDashboard() {
-        proteinComplexStructureDetailRenderToken += 1;
-        disposeProteinComplexStructureDetailViewer();
-        proteinComplexStructuresDetailEntry = null;
-        if (currentViewId === 'Protein Complex Structures') {
-            renderProteinComplexStructuresView();
-        }
-    }
-
-    function getProteinComplexSearchCandidates() {
-        return Array.from(proteinMetadata.entries())
-            .map(([nodeId, meta]) => ({
-                nodeId,
-                label: String(meta?.preferred_name || nodeId || '').trim(),
-                sequence: String(meta?.sequence || '').trim(),
-                uniprotAc: String(meta?.uniprotAc || getPreferredUniProtAliasForProtein(nodeId) || '').trim()
-            }))
-            .filter(candidate => candidate.sequence);
-    }
-
-    // Configurable matching parameters for complex matching prefilter
-    // Exposed on window for quick tuning in the console: window.complexMatchingKmerSize, window.complexMatchingMinSharedKmers
-    window.complexMatchingKmerSize = window.complexMatchingKmerSize || 7;
-    window.complexMatchingMinSharedKmers = window.complexMatchingMinSharedKmers || 5;
-    window.complexMatchingMaxFallbackCandidates = window.complexMatchingMaxFallbackCandidates || 200;
-
-    function buildProteinComplexSequenceIndex(candidates) {
-        const k = Math.max(1, Math.floor(Number(window.complexMatchingKmerSize) || 7));
-        const byKmer = new Map();
-        const candidateList = Array.isArray(candidates) ? candidates : [];
-
-        candidateList.forEach(candidate => {
-            const sequence = String(candidate?.sequence || '').toUpperCase().replace(/[^A-Z]/g, '');
-            if (!sequence) return;
-
-            const kmers = new Set();
-            if (sequence.length < k) {
-                kmers.add(sequence);
-            } else {
-                for (let index = 0; index <= sequence.length - k; index += 1) {
-                    kmers.add(sequence.slice(index, index + k));
-                }
-            }
-
-            candidate._indexedSequence = sequence;
-            candidate._indexedKmers = kmers;
-            kmers.forEach(kmer => {
-                if (!byKmer.has(kmer)) byKmer.set(kmer, []);
-                byKmer.get(kmer).push(candidate);
-            });
-        });
-
-        return { byKmer, candidates: candidateList, k };
-    }
-
-    function getProteinComplexIndexedCandidates(referenceSequence, sequenceIndex) {
-        const k = sequenceIndex?.k || Math.max(1, Math.floor(Number(window.complexMatchingKmerSize) || 7));
-        const minShared = Math.max(1, Math.floor(Number(window.complexMatchingMinSharedKmers) || 3));
-        const maxFallback = Math.max(1, Math.floor(Number(window.complexMatchingMaxFallbackCandidates) || 200));
-
-        const sequence = String(referenceSequence || '').toUpperCase().replace(/[^A-Z]/g, '');
-        const candidates = Array.isArray(sequenceIndex?.candidates) ? sequenceIndex.candidates : [];
-        const byKmer = sequenceIndex?.byKmer instanceof Map ? sequenceIndex.byKmer : new Map();
-
-        if (!sequence) return [];
-        if (sequence.length < k) return candidates;
-
-        const hits = new Map();
-        for (let index = 0; index <= sequence.length - k; index += 1) {
-            const kmer = sequence.slice(index, index + k);
-            const matchedCandidates = byKmer.get(kmer) || [];
-            matchedCandidates.forEach(candidate => {
-                const count = hits.get(candidate.nodeId) || 0;
-                hits.set(candidate.nodeId, count + 1);
-            });
-        }
-
-        const rankedCandidates = Array.from(hits.entries())
-            .sort((a, b) => b[1] - a[1])
-            .map(([nodeId, count]) => ({ nodeId, count, candidate: candidates.find(c => c.nodeId === nodeId) }))
-            .filter(item => item.candidate)
-            .map(item => item.candidate);
-
-        // Return only candidates that meet the minShared cutoff; if none meet, return a bounded fallback set.
-        const filteredByMin = rankedCandidates.filter(node => (hits.get(node.nodeId) || 0) >= minShared);
-        if (filteredByMin.length) return filteredByMin;
-
-        // Fallback: return top-N ranked candidates, or all if fewer than N
-        if (rankedCandidates.length) return rankedCandidates.slice(0, maxFallback);
-        return candidates.slice(0, maxFallback);
-    }
-
-    function getProteinComplexUniProtCandidates(nodeId) {
-        const meta = proteinMetadata.get(nodeId) || {};
-        const aliases = aliasData.get(nodeId) || [];
-        return Array.from(new Set([
-            getPreferredUniProtAliasForProtein(nodeId),
-            meta.uniprotAc,
-            ...aliases
-                .filter(entry => {
-                    const source = String(entry?.source || '').toLowerCase();
-                    return source.includes('swiss_prot') || source === 'uniprot_ac';
-                })
-                .map(entry => entry?.alias)
-        ].map(value => String(value || '').trim()).filter(Boolean)));
-    }
-
-    async function fetchProteinComplexReferenceStructure(pdbId) {
-        const cleanId = String(pdbId || '').trim().toUpperCase();
-        if (!cleanId) throw new Error('Missing PDB ID');
-        const candidates = [
-            { url: `https://files.rcsb.org/download/${encodeURIComponent(cleanId)}.cif`, format: 'mmcif' },
-            { url: `https://files.rcsb.org/download/${encodeURIComponent(cleanId)}.pdb`, format: 'pdb' }
-        ];
-
-        let lastError = null;
-        for (const candidate of candidates) {
-            const candidateStart = performance.now();
-            console.log(`[complex timing] ${cleanId}: fetching reference ${candidate.format} from ${candidate.url}`);
-            try {
-                const response = await fetch(candidate.url, { cache: 'no-store' });
-                console.log(`[complex timing] ${cleanId}: reference ${candidate.format} response ${response.status} in ${(performance.now() - candidateStart).toFixed(1)} ms`);
-                if (!response.ok) {
-                    lastError = new Error(`Reference structure request failed with status ${response.status}`);
-                    continue;
-                }
-                const text = await response.text();
-                if (text && text.trim()) {
-                    console.log(`[complex timing] ${cleanId}: reference ${candidate.format} body read in ${(performance.now() - candidateStart).toFixed(1)} ms`);
-                    return { text, format: candidate.format, url: candidate.url };
-                }
-            } catch (error) {
-                console.warn(`[complex timing] ${cleanId}: reference ${candidate.format} failed after ${(performance.now() - candidateStart).toFixed(1)} ms`, error);
-                lastError = error;
-            }
-        }
-
-        throw lastError || new Error('No reference structure was available');
-    }
-
-    function renderProteinComplexStructureDetailView(view, entry) {
-        const shell = document.createElement('div');
-        shell.id = 'protein-complex-structure-detail-view';
-        shell.className = 'structures-shell protein-complex-detail-shell';
-        shell.style.position = 'relative';
-
-        const header = document.createElement('div');
-        header.className = 'structures-hero protein-complex-detail-hero';
-        const headerCopy = document.createElement('div');
-        headerCopy.className = 'structures-hero-copy';
-        const title = document.createElement('h1');
-        title.className = 'structures-title';
-        title.textContent = entry.title || entry.pdbId || 'Protein complex';
-        const subtitle = document.createElement('div');
-        subtitle.className = 'structures-status';
-        subtitle.textContent = `${entry.pdbId} • hidden reference used for matching`;
-        headerCopy.appendChild(title);
-        headerCopy.appendChild(subtitle);
-
-        const toolbar = document.createElement('div');
-        toolbar.className = 'structures-toolbar';
-        const backBtn = document.createElement('button');
-        backBtn.type = 'button';
-        backBtn.className = 'btn-secondary';
-        backBtn.textContent = 'Back to dashboard';
-        backBtn.addEventListener('click', () => openProteinComplexStructuresDashboard());
-        toolbar.appendChild(backBtn);
-
-        header.appendChild(headerCopy);
-        header.appendChild(toolbar);
-
-        const progressWrap = document.createElement('div');
-        progressWrap.id = 'protein-complex-detail-progress-wrap';
-        const progressBar = document.createElement('div');
-        progressBar.id = 'protein-complex-detail-progress-bar';
-        progressWrap.appendChild(progressBar);
-
-        const status = document.createElement('div');
-        status.id = 'protein-complex-detail-status';
-        status.className = 'protein-complex-detail-muted';
-        status.textContent = 'Preparing complex viewer...';
-
-        const viewer = document.createElement('div');
-        viewer.id = 'protein-complex-detail-viewer';
-        viewer.className = 'protein-complex-detail-viewer-shell';
-        const viewerHost = document.createElement('div');
-        viewerHost.id = 'protein-complex-detail-viewer-host';
-        viewerHost.className = 'protein-complex-detail-viewer-host';
-        viewer.appendChild(viewerHost);
-
-        shell.appendChild(header);
-        shell.appendChild(progressWrap);
-        shell.appendChild(status);
-        shell.appendChild(viewer);
-        view.appendChild(shell);
-    }
-
-    async function loadProteinComplexStructureDetail(entry, renderToken) {
-        const view = document.getElementById('protein-complex-structures-view');
-        if (!view) return;
-
-        const complexTimingStart = performance.now();
-        const complexTiming = (label) => {
-            console.log(`[complex timing] ${entry.pdbId}: ${label} at ${(performance.now() - complexTimingStart).toFixed(1)} ms`);
-        };
-
-        const title = document.querySelector('#protein-complex-structures-view .protein-complex-detail-hero .structures-title');
-        const status = document.getElementById('protein-complex-detail-status');
-        const viewerHost = document.getElementById('protein-complex-detail-viewer-host');
-        if (title) title.textContent = entry.title || entry.pdbId || 'Protein complex';
-        if (status) status.textContent = 'Fetching hidden reference structure and matching chains...';
-        if (viewerHost) viewerHost.innerHTML = '';
-        setProteinComplexStructureDetailProgress(5, 'Opening the complex detail view...');
-        disposeProteinComplexStructureDetailViewer();
-
-        let referenceChains = [];
-        let matches = [];
-        let refinedChains = [];
-
-        try {
-            complexTiming('start');
-            setProteinComplexStructureDetailProgress(12, 'Fetching the hidden reference structure...');
-            complexTiming('before reference fetch');
-            const reference = await fetchProteinComplexReferenceStructure(entry.pdbId);
-            complexTiming(`reference fetched (${reference.format})`);
-            referenceChains = parseProteinComplexAtomChains(reference.text, reference.format);
-            complexTiming(`reference parsed (${referenceChains.length} chains)`);
-
-            setProteinComplexStructureDetailProgress(28, 'Matching reference chains to STRING proteins...');
-            const proteinCandidates = getProteinComplexSearchCandidates();
-            if (!proteinCandidates.length) {
-                setProteinComplexStructureDetailProgress(100, 'No STRING protein sequences were available to match against this complex.');
-                return;
-            }
-
-            const proteinSequenceIndex = buildProteinComplexSequenceIndex(proteinCandidates);
-            console.log(`[complex debug] ${entry.pdbId}: indexed ${proteinSequenceIndex.candidates.length} STRING protein sequences into ${proteinSequenceIndex.byKmer.size} 3-mers`);
-
-            const usedNodeIds = new Set();
-            matches = referenceChains.map(referenceChain => {
-                console.log(`[complex debug] ${entry.pdbId}: reference chain ${referenceChain.chainId} sequence=${referenceChain.sequence}`);
-                const indexedCandidates = getProteinComplexIndexedCandidates(referenceChain.sequence, proteinSequenceIndex);
-                console.log(`[complex debug] ${entry.pdbId}: reference chain ${referenceChain.chainId} indexed candidate count=${indexedCandidates.length}`);
-                let bestMatch = null;
-                indexedCandidates.forEach(candidate => {
-                    if (usedNodeIds.has(candidate.nodeId)) return;
-                    const alignment = alignProteinComplexSequences(referenceChain.sequence, candidate.sequence);
-                    if (!bestMatch || alignment.identity > bestMatch.identity) {
-                        bestMatch = {
-                            referenceChainId: referenceChain.chainId,
-                            proteinLabel: candidate.label || candidate.nodeId,
-                            nodeId: candidate.nodeId,
-                            sequence: candidate.sequence,
-                            uniprotAc: candidate.uniprotAc,
-                            identity: alignment.identity,
-                            matchedPairs: alignment.matchedPairs,
-                            referenceChain,
-                            candidate
-                        };
-                    }
-                });
-                if (!bestMatch || bestMatch.identity < 0.25) {
-                    console.log(`[complex debug] ${entry.pdbId}: reference chain ${referenceChain.chainId} no match above threshold`);
-                    return null;
-                }
-                usedNodeIds.add(bestMatch.nodeId);
-                console.log(`[complex debug] ${entry.pdbId}: reference chain ${referenceChain.chainId} best match ${bestMatch.nodeId} identity=${(bestMatch.identity * 100).toFixed(1)}%`);
-                return bestMatch;
-            }).filter(Boolean);
-            complexTiming(`chain matching complete (${matches.length} matches)`);
-
-            if (!matches.length) {
-                setProteinComplexStructureDetailProgress(100, 'No STRING proteins matched the reference chains in this complex.');
-                return;
-            }
-
-            setProteinComplexStructureDetailProgress(38, 'Fetching AlphaFold models for the matched proteins...');
-            const modelChainsByNodeId = new Map();
-            await Promise.all(matches.map(async match => {
-                const candidate = match.candidate;
-                try {
-                    const modelStart = performance.now();
-                    const accessionCandidates = getProteinComplexUniProtCandidates(candidate.nodeId);
-                    console.log(`[complex timing] ${entry.pdbId}: ${candidate.nodeId} AlphaFold candidates = ${accessionCandidates.join(', ') || '(none)'}`);
-                    for (const accession of accessionCandidates) {
-                        const modelInfo = await getAlphaFoldModelInfo(accession);
-                        if (modelInfo.notAvailable) continue;
-                        const response = await fetch(modelInfo.modelUrl);
-                        if (!response.ok) throw new Error(`AlphaFold model request failed with status ${response.status}`);
-                        const text = await response.text();
-                        const modelChains = parseProteinComplexAtomChains(text, modelInfo.format);
-                        if (modelChains.length) {
-                            modelChainsByNodeId.set(candidate.nodeId, { candidate, modelChains, modelInfo, accession });
-                            console.log(`[complex timing] ${entry.pdbId}: ${candidate.nodeId} AlphaFold loaded via ${accession} in ${(performance.now() - modelStart).toFixed(1)} ms`);
-                            break;
-                        }
-                    }
-                } catch (error) {
-                    console.warn('Skipping AlphaFold model during complex load', candidate.nodeId, error);
-                }
-            }));
-            complexTiming(`AlphaFold fetch complete (${modelChainsByNodeId.size} models)`);
-
-            const matchedChains = matches.map(match => {
-                const modelEntry = modelChainsByNodeId.get(match.nodeId);
-                const modelChain = modelEntry?.modelChains?.[0];
-                if (!modelChain) return null;
-                return {
-                    ...match,
-                    modelResidues: modelChain.residues || []
-                };
-            }).filter(Boolean);
-
-            if (!matchedChains.length) {
-                setProteinComplexStructureDetailProgress(100, 'No AlphaFold models were available for the proteins matched to this complex.');
-                return;
-            }
-
-            if (renderToken !== proteinComplexStructureDetailRenderToken) return;
-            setProteinComplexStructureDetailProgress(45, 'Refining the CA chain relaxation with Ammo.js...');
-            complexTiming('before Ammo refinement');
-            refinedChains = await refineProteinComplexWithAmmo(referenceChains, matchedChains);
-            complexTiming(`Ammo refinement complete (${refinedChains.length} chains)`);
-
-            const assemblyChains = refinedChains.length
-                ? refinedChains
-                : matchedChains.map(match => ({ chainId: match.referenceChain.chainId, residues: match.modelResidues || [] }));
-            const assemblyPdb = buildProteinComplexPdbFromChains(assemblyChains);
-            if (!assemblyPdb || !assemblyPdb.includes('ATOM')) {
-                setProteinComplexStructureDetailProgress(100, 'The refined assembly was empty, so Mol* was not loaded.');
-                return;
-            }
-
-            if (renderToken !== proteinComplexStructureDetailRenderToken) return;
-            setProteinComplexStructureDetailProgress(75, 'Loading the refined predicted complex into Mol*...');
-            complexTiming('before Mol* load');
-            await ensureMolstarLoadedForProteinInfo();
-
-            if (renderToken !== proteinComplexStructureDetailRenderToken) return;
-            if (!viewerHost) throw new Error('Viewer host is unavailable');
-
-            const canvasBg = getComputedStyle(canvas).backgroundColor || '#0f1115';
-            proteinComplexStructureDetailViewer = await window.molstar.Viewer.create(viewerHost, {
-                layoutShowControls: false,
-                layoutIsExpanded: false,
-                collapseLeftPanel: true,
-                layoutShowRemoteState: false,
-                layoutShowSequence: false,
-                layoutShowLog: false,
-                viewportShowExpand: false,
-                viewportShowSelectionMode: false
-            });
-
-            const plugin = proteinComplexStructureDetailViewer?.plugin;
-            const Color = window.molstar?.Color;
-            if (plugin?.canvas3d?.setProps && Color) {
-                try {
-                    plugin.canvas3d.setProps({ renderer: { backgroundColor: Color(parseCssColorToHex(canvasBg)) } });
-                } catch {}
-            }
-
-            proteinComplexStructureDetailBackgroundObserver = new MutationObserver(() => {
-                viewerHost.querySelectorAll('canvas').forEach(canvasEl => {
-                    canvasEl.style.backgroundColor = canvasBg;
-                    canvasEl.style.background = canvasBg;
-                });
-            });
-            proteinComplexStructureDetailBackgroundObserver.observe(viewerHost, { childList: true, subtree: true });
-
-            setProteinComplexStructureDetailProgress(90, 'Rendering the refined predicted complex...');
-            await proteinComplexStructureDetailViewer.loadStructureFromData(assemblyPdb, 'pdb', {
-                dataLabel: `${entry.pdbId} refined complex`
-            });
-            proteinComplexStructureDetailViewer.plugin?.canvas3d?.requestResize?.();
-            proteinComplexStructureDetailViewer.plugin?.canvas3d?.requestCameraReset?.({ durationMs: 0 });
-            complexTiming('Mol* load complete');
-
-            if (renderToken !== proteinComplexStructureDetailRenderToken) return;
-            setProteinComplexStructureDetailProgress(100, 'Complex structure loaded.');
-            console.log(`[complex timing] ${entry.pdbId}: total ${(performance.now() - complexTimingStart).toFixed(1)} ms`);
-        } catch (error) {
-            if (renderToken !== proteinComplexStructureDetailRenderToken) return;
-            setProteinComplexStructureDetailProgress(100, `Could not load the complex structure: ${error?.message || 'Unknown error'}`);
-            console.warn(`[complex timing] ${entry.pdbId}: failed after ${(performance.now() - complexTimingStart).toFixed(1)} ms`, error);
-        }
     }
 
     function renderProteinInfoLinksView(body, nodeId) {
@@ -10828,8 +9798,6 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 // Fallback for Mol* builds with different representation option signatures.
                 await proteinInfoMolstarViewer.loadStructureFromUrl(modelInfo.modelUrl, modelInfo.format, false);
             }
-            proteinInfoMolstarViewer.plugin?.canvas3d?.requestResize?.();
-            proteinInfoMolstarViewer.plugin?.canvas3d?.requestCameraReset?.({ durationMs: 0 });
             applyViewerBackground();
         } catch (err) {
             if (renderToken !== proteinInfoStructureRenderToken) return;
@@ -12850,6 +11818,163 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         return proteinComplexStructuresLoadPromise;
     }
 
+    function getProteinComplexStructureModelInfo(pdbId) {
+        const safePdbId = String(pdbId || '').trim().toUpperCase();
+        if (!safePdbId) return { notAvailable: true, reason: 'missing-id' };
+        return {
+            notAvailable: false,
+            modelUrl: `https://files.rcsb.org/download/${encodeURIComponent(safePdbId)}.cif`,
+            format: 'mmcif'
+        };
+    }
+
+    function ensureProteinComplexStructureOverlay() {
+        let overlay = document.getElementById('protein-complex-structure-overlay');
+        if (overlay) return overlay;
+
+        overlay = document.createElement('div');
+        overlay.id = 'protein-complex-structure-overlay';
+        overlay.innerHTML = `
+            <div class="protein-complex-structure-panel" role="dialog" aria-modal="true" aria-label="Protein complex structure viewer">
+                <div class="protein-complex-structure-head">
+                    <div class="protein-complex-structure-copy">
+                        <h2 class="protein-complex-structure-title"></h2>
+                        <h2 class="protein-complex-structure-subtitle"></h2>
+                    </div>
+                    <button type="button" class="btn-secondary protein-complex-structure-return-btn">Return to dashboard</button>
+                </div>
+                <div class="protein-complex-structure-status"></div>
+                <div id="protein-complex-structure-viewer-host" class="protein-complex-structure-viewer-host"></div>
+            </div>
+        `;
+
+        document.body.appendChild(overlay);
+        overlay.querySelector('.protein-complex-structure-return-btn')?.addEventListener('click', closeProteinComplexStructureOverlay);
+        overlay.addEventListener('click', event => {
+            if (event.target === overlay) closeProteinComplexStructureOverlay();
+        });
+        return overlay;
+    }
+
+    function disposeProteinComplexStructureOverlayViewer() {
+        if (proteinComplexStructureOverlayBackgroundObserver) {
+            proteinComplexStructureOverlayBackgroundObserver.disconnect();
+            proteinComplexStructureOverlayBackgroundObserver = null;
+        }
+        if (proteinComplexStructureOverlayMolstarViewer?.plugin?.dispose) {
+            proteinComplexStructureOverlayMolstarViewer.plugin.dispose();
+        }
+        proteinComplexStructureOverlayMolstarViewer = null;
+    }
+
+    function closeProteinComplexStructureOverlay() {
+        proteinComplexStructureOverlayRenderToken += 1;
+        disposeProteinComplexStructureOverlayViewer();
+        const overlay = document.getElementById('protein-complex-structure-overlay');
+        if (overlay) overlay.style.display = 'none';
+    }
+
+    async function renderProteinComplexStructureOverlay(entry) {
+        const renderToken = ++proteinComplexStructureOverlayRenderToken;
+        const overlay = ensureProteinComplexStructureOverlay();
+        const title = overlay.querySelector('.protein-complex-structure-title');
+        const subtitle = overlay.querySelector('.protein-complex-structure-subtitle');
+        const status = overlay.querySelector('.protein-complex-structure-status');
+        const host = overlay.querySelector('#protein-complex-structure-viewer-host');
+        if (!title || !subtitle || !status || !host) return;
+
+        title.textContent = String(entry?.title || entry?.pdbId || 'Protein Complex Structures').trim();
+        subtitle.textContent = String(entry?.speciesLabel || 'Unknown species/origin').trim();
+        status.style.display = 'block';
+        status.textContent = 'Loading structure from RCSB PDB...';
+        host.innerHTML = '';
+        overlay.style.display = 'flex';
+
+        disposeProteinComplexStructureOverlayViewer();
+
+        try {
+            await ensureMolstarLoadedForProteinInfo();
+        } catch (err) {
+            if (renderToken !== proteinComplexStructureOverlayRenderToken) return;
+            status.textContent = `Could not initialize Mol*: ${err?.message || 'Unknown error'}`;
+            return;
+        }
+
+        if (renderToken !== proteinComplexStructureOverlayRenderToken) return;
+
+        const modelInfo = getProteinComplexStructureModelInfo(entry?.pdbId);
+        if (modelInfo.notAvailable) {
+            status.textContent = 'No PDB ID was provided for this structure.';
+            return;
+        }
+
+        const canvasBg = getComputedStyle(canvas).backgroundColor || '#0f1115';
+
+        const applyViewerBackground = () => {
+            host.querySelectorAll('canvas').forEach(canvasEl => {
+                canvasEl.style.backgroundColor = canvasBg;
+                canvasEl.style.background = canvasBg;
+            });
+            host.querySelectorAll('.msp-layout, .msp-plugin, .msp-plugin > div').forEach(el => {
+                el.style.backgroundColor = canvasBg;
+                el.style.background = canvasBg;
+            });
+        };
+
+        proteinComplexStructureOverlayBackgroundObserver = new MutationObserver(() => applyViewerBackground());
+        proteinComplexStructureOverlayBackgroundObserver.observe(host, { childList: true, subtree: true });
+
+        try {
+            proteinComplexStructureOverlayMolstarViewer = await window.molstar.Viewer.create(host, {
+                layoutShowControls: false,
+                layoutIsExpanded: false,
+                collapseLeftPanel: true,
+                layoutShowRemoteState: false,
+                layoutShowSequence: false,
+                layoutShowLog: false,
+                viewportShowExpand: false,
+                viewportShowSelectionMode: false
+            });
+
+            const colorHex = parseCssColorToHex(canvasBg);
+            const plugin = proteinComplexStructureOverlayMolstarViewer?.plugin;
+            const setCanvasProps = plugin?.canvas3d?.setProps;
+            const Color = window.molstar?.Color;
+            if (setCanvasProps && Color) {
+                try {
+                    plugin.canvas3d.setProps({ renderer: { backgroundColor: Color(colorHex) } });
+                } catch {}
+            }
+            applyViewerBackground();
+
+            try {
+                await proteinComplexStructureOverlayMolstarViewer.loadStructureFromUrl(modelInfo.modelUrl, modelInfo.format, false, {
+                    representationParams: {
+                        type: 'cartoon',
+                        theme: { globalName: 'entity-id' }
+                    }
+                });
+            } catch {
+                await proteinComplexStructureOverlayMolstarViewer.loadStructureFromUrl(modelInfo.modelUrl, modelInfo.format, false);
+            }
+            applyViewerBackground();
+
+            if (renderToken !== proteinComplexStructureOverlayRenderToken) return;
+            status.textContent = '';
+            status.style.display = 'none';
+        } catch (err) {
+            if (renderToken !== proteinComplexStructureOverlayRenderToken) return;
+            disposeProteinComplexStructureOverlayViewer();
+            host.innerHTML = '';
+            status.style.display = 'block';
+            status.textContent = `Could not render structure: ${err?.message || 'Unknown error'}`;
+        }
+    }
+
+    function openProteinComplexStructureOverlay(entry) {
+        renderProteinComplexStructureOverlay(entry);
+    }
+
     function ensureProteinComplexStructuresView() {
         let view = document.getElementById('protein-complex-structures-view');
         if (!view) {
@@ -12874,10 +11999,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const card = document.createElement('article');
         card.className = 'protein-complex-card';
         card.dataset.pdbId = entry.pdbId;
-        card.style.cursor = 'pointer';
         card.tabIndex = 0;
         card.setAttribute('role', 'button');
-        card.setAttribute('aria-label', `Open protein complex ${entry.pdbId}`);
+        card.setAttribute('aria-label', `Open ${entry.title || entry.pdbId}`);
 
         const pinButton = document.createElement('button');
         pinButton.type = 'button';
@@ -12970,12 +12094,15 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         card.appendChild(preview);
         card.appendChild(body);
         card.appendChild(pinButton);
-        card.addEventListener('click', () => openProteinComplexStructureDetail(entry));
+
+        card.addEventListener('click', event => {
+            if (event.target.closest('a, button, input, textarea, select, label')) return;
+            openProteinComplexStructureOverlay(entry);
+        });
         card.addEventListener('keydown', event => {
-            if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                openProteinComplexStructureDetail(entry);
-            }
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            openProteinComplexStructureOverlay(entry);
         });
         return card;
     }
@@ -13055,14 +12182,6 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         setProteinComplexStructuresVisibility(true);
         view.innerHTML = '';
         proteinComplexStructuresLoading = true;
-
-        if (proteinComplexStructuresDetailEntry) {
-            renderProteinComplexStructureDetailView(view, proteinComplexStructuresDetailEntry);
-            proteinComplexStructuresLoading = false;
-            const detailRenderToken = ++proteinComplexStructureDetailRenderToken;
-            await loadProteinComplexStructureDetail(proteinComplexStructuresDetailEntry, detailRenderToken);
-            return;
-        }
 
         const query = String(proteinComplexStructuresSearchQuery || '').trim().toLowerCase();
 
@@ -13222,7 +12341,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             })].join(' ').toLowerCase();
             if (query && !searchText.includes(query)) return;
             const isPinned = proteinComplexStructuresPinnedPdbIds.has(record.pdbId);
-            const card = buildProteinComplexStructureCard({ ...record, title: titleText }, speciesLabel, isPinned, pdbId => {
+            const card = buildProteinComplexStructureCard({ ...record, title: titleText, speciesLabel }, speciesLabel, isPinned, pdbId => {
                 if (proteinComplexStructuresPinnedPdbIds.has(pdbId)) {
                     proteinComplexStructuresPinnedPdbIds.delete(pdbId);
                 } else {
@@ -13514,6 +12633,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             return;
         }
 
+        closeProteinComplexStructureOverlay();
         setRightPanelMinimized(false);
         setProteinComplexStructuresVisibility(false);
 
@@ -13943,6 +13063,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && document.getElementById('protein-complex-structure-overlay')?.style.display === 'flex') {
+            closeProteinComplexStructureOverlay();
+            return;
+        }
         if (document.activeElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
         if (!isPointerOverMainCanvas && currentViewId !== 'Embeddings') return;
         if (isVariableSettingsOpen) return;
@@ -14100,7 +13224,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 : (currentViewId === 'Mind Map' ? mindMapTransform : transform));
         const pt = activeTransform.invert([mx, my]);
 
-        const isUiTarget = !!e.target.closest('#ui-layer, #right-panel, #view-selector-container, #view-selector-box, #view-options, #custom-context-menu, #collection-context-menu, #variables-settings-modal, #variables-settings-modal-overlay, #embeddings-controls, #scatter-controls, #chart-collection-menu, #protein-complex-structures-view');
+        const isUiTarget = !!e.target.closest('#ui-layer, #right-panel, #view-selector-container, #view-selector-box, #view-options, #custom-context-menu, #collection-context-menu, #variables-settings-modal, #variables-settings-modal-overlay, #embeddings-controls, #scatter-controls, #chart-collection-menu, #protein-complex-structures-view, #protein-complex-structure-overlay');
 
         // Keep an existing export frame intact when interacting with UI controls (e.g. frame download buttons).
         if (isFrameMode && isUiTarget) {
