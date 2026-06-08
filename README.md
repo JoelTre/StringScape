@@ -10,6 +10,10 @@ The StringScape home page: https://joeltre.github.io/StringScape
 
 The source code: https://github.com/JoelTre/StringScape/tree/main 
 
+StringScape on X: https://x.com/StringScapeApp
+
+StringScape on Youtube: https://www.youtube.com/@StringScape_app
+
 Video tutorial on how to use StringScape: [coming soon...]
 
 ## 🚀 Key Features
