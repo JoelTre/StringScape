@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StringScape - Interactive Protein Network Visualization</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://unpkg.com/scrollreveal"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        body {
+            background-color: #0B0F19;
+            color: #F3F4F6;
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+        .gradient-text {
+            background: linear-gradient(135deg, #60A5FA 0%, #2eccbf 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        /* Your optimized hover animation */
+        @keyframes waterWobble {
+            0% { transform: scale(1); }
+            30% { transform: scale(1.100); }
+            50% { transform: scale(1.062);}
+            70% { transform: scale(1.045); }
+            90% { transform: scale(1.048); }
+            100% { transform: scale(1.05); }
+        }
+
+        /* The new mouse-leave animation resetting back to 1 */
+        @keyframes waterWobbleOut {
+            0% { transform: scale(1.05); }  
+            30% { transform: scale(0.96); } 
+            50% { transform: scale(1.02); }  
+            70% { transform: scale(0.985); }
+            90% { transform: scale(1.004); }
+            100% { transform: scale(1); }   
+        }
+
+        /* Base class triggers the wobble-out animation when NOT hovering */
+        .hover-wobble {
+            animation: waterWobbleOut 0.6s ease-in-out forwards;
+        }
+
+        /* Hover state overrides it with the wobble-in animation */
+        .hover-wobble:hover {
+            animation: waterWobble 0.6s ease-in-out forwards;
+        }
+    </style>
+</head>
+<body class="overflow-x-hidden">
+
+    <header class="w-full py-6 px-8 flex justify-between items-center border-b border-gray-800 backdrop-blur-md sticky top-0 z-50 bg-[#0B0F19]/80">
+        <div class="flex items-center space-x-3">
+            <svg width="40" height="40" viewBox="0 0 100 100" class="flex-shrink-0 ml-2.5" xmlns="http://www.w3.org/2000/svg">
+                <line x1="27" y1="50" x2="75" y2="22" stroke="#888" stroke-width="11" stroke-linecap="round"/>
+                <line x1="75" y1="22" x2="75" y2="78" stroke="#888" stroke-width="11" stroke-linecap="round"/>
+                
+                <circle cx="27" cy="50" r="20" fill="#3498db" stroke="#6dc5ff" stroke-width="5" />
+                <circle cx="75" cy="22" r="20" fill="#3498db" stroke="#6dc5ff" stroke-width="5" />
+                <circle cx="75" cy="78" r="20" fill="#3498db" stroke="#6dc5ff" stroke-width="5" />
+            </svg>
+
+            <span class="text-3xl font-black tracking-tight gradient-text ml-0.5 py-1 leading-normal">StringScape</span>
+            <span class="bg-gray-800 text-xs text-gray-400 px-2 py-0.5 rounded-full border border-gray-700">Beta 1.0</span>
+        </div>
+        <nav class="hidden md:flex space-x-8 text-sm font-medium text-gray-400">
+            <a href="https://github.com/JoelTre/StringScape/tree/main" target="_blank" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-brands fa-github mr-1"></i> GitHub</a>
+            <a href="https://x.com/StringScapeApp" target="_blank" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-brands fa-x-twitter mr-1"></i> X</a>
+            <a href="https://www.youtube.com/@StringScape_app" target="_blank" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-brands fa-youtube mr-1"></i> YouTube</a>
+        </nav>
+    </header>
+
+    <section class="reveal-hero max-w-5xl mx-auto text-center pt-24 pb-20 px-6">
+        <h1 class="text-4xl md:text-6xl font-extrabold tracking-tight text-white leading-tight mb-6">
+            A high-performance, open-source, webapp for visualizing data from the <span class="gradient-text">STRING database</span>.
+        </h1>
+        <p class="text-lg md:text-xl text-gray-400 max-w-3xl mx-auto mb-10 leading-relaxed">
+            Bridge the gap between raw interactome data and publication-quality visual insights.
+        </p>
+        <div class="flex flex-col sm:flex-row justify-center items-center gap-4">
+            <a href="https://joeltre.github.io/StringScape/app" target="_blank" class="bg-gradient-to-r from-blue-500 to-[#2eccbf] text-slate-950 font-bold px-8 py-4 rounded-full shadow-lg shadow-emerald-500/20 transition-all duration-300 flex items-center gap-3 group hover-wobble">
+                Open StringScape 
+                <i class="fa-solid fa-arrow-up-right-from-square text-sm transition-transform"></i>
+            </a>
+            
+            <a href="https://github.com/JoelTre/StringScape/tree/main" target="_blank" class="bg-gray-900 border border-gray-800 text-gray-300 font-medium px-8 py-4 rounded-full hover:bg-gray-800 transition-all duration-300 flex items-center gap-3 group hover-wobble">
+                View Source Code 
+                <i class="fa-solid fa-arrow-up-right-from-square text-sm transition-transform"></i>
+            </a>
+        </div>
+    </section>
+
+    <main class="max-w-6xl mx-auto px-6 pb-32 space-y-32">
+
+        <section class="reveal-left grid md:grid-cols-2 gap-12 items-center">
+            <div class="space-y-4">
+                <div class="text-emerald-400 text-sm font-semibold tracking-wider uppercase">High-Performance</div>
+                <h2 class="text-3xl font-bold text-white">Interactive Biological Networks</h2>
+                <p class="text-gray-400 leading-relaxed">
+                    View and explore the full STRING network from any species. The app runs compute-heavy tasks on your local GPU, making it super fast and responsive.
+                </p>
+            </div>
+            <div class="bg-gray-900 border border-gray-800 aspect-video rounded-2xl flex items-center justify-center overflow-hidden shadow-2xl relative group">
+            <img src="images_for_website/E_coli_STRING_network.png" alt="E. coli STRING Network Visualization" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500">
+            <div class="absolute inset-0 bg-gradient-to-t from-gray-950 via-transparent to-transparent"></div>
+            <span class="absolute bottom-4 left-4 bg-gray-950/80 px-3 py-1 rounded-md text-xs text-gray-400 backdrop-blur-sm">E. coli STRING Physical-Interaction Network</span>
+        </div>
+        </section>
+
+        <section class="reveal-right grid md:grid-cols-2 gap-12 items-center md:flex-row-reverse">
+            <div class="space-y-4 md:order-2">
+                <div class="text-blue-400 text-sm font-semibold tracking-wider uppercase">Data Intelligence</div>
+                <h2 class="text-3xl font-bold text-white">Synchronized Views & Variables</h2>
+                <p class="text-gray-400 leading-relaxed">
+                    Color and size nodes based on any STRING or custom variables. Visualize these variables as histograms, pie charts, scatter plots, mind maps, or UMAP plots. All views are Synced allowing you to select proteins in one view and see those same proteines selected in another view.
+                </p>
+            </div>
+            <div class="bg-gray-900 border border-gray-800 aspect-video rounded-2xl flex items-center justify-center overflow-hidden shadow-2xl relative group">
+            <img src="images_for_website/Scatter_plot.png" alt="E. coli STRING Network Visualization" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500">
+            <div class="absolute inset-0 bg-gradient-to-t from-gray-950 via-transparent to-transparent"></div>
+            <span class="absolute bottom-4 left-4 bg-gray-950/80 px-3 py-1 rounded-md text-xs text-gray-400 backdrop-blur-sm">Scatter Plot</span>
+            </div>
+        </section>
+
+        <section class="reveal-left grid md:grid-cols-2 gap-12 items-center">
+            <div class="space-y-4">
+                <div class="text-emerald-400 text-sm font-semibold tracking-wider uppercase">Dimensionality Reduction</div>
+                <h2 class="text-3xl font-bold text-white">Visualize High-Dimensional Embeddings</h2>
+                <p class="text-gray-400 leading-relaxed">
+                    View 2D and 3D UMAP plots of both network- and sequence-embedding spaces. Easily identify functional and structural similarities among your proteins.
+                </p>
+            </div>
+            <div class="bg-gray-900 border border-gray-800 aspect-video rounded-2xl flex items-center justify-center overflow-hidden shadow-2xl relative group">
+                <img src="images_for_website/UMAP_embeddings.png" alt="UMAP Embeddings Space" class="w-full h-full object-cover opacity-60 group-hover:scale-105 transition-transform duration-500">
+                <div class="absolute inset-0 bg-gradient-to-t from-gray-950 via-transparent to-transparent"></div>
+                <span class="absolute bottom-4 left-4 bg-gray-950/80 px-3 py-1 rounded-md text-xs text-gray-400 backdrop-blur-sm">2D/3D UMAP Embedding Space Placeholder</span>
+            </div>
+        </section>
+
+        <section class="reveal-right grid md:grid-cols-2 gap-12 items-center md:flex-row-reverse">
+            <div class="space-y-4 md:order-2">
+                <div class="text-blue-400 text-sm font-semibold tracking-wider uppercase">In-Browser Compute</div>
+                <h2 class="text-3xl font-bold text-white">Secure Sandbox Python Console</h2>
+                <p class="text-gray-400 leading-relaxed">
+                    Run advanced analysis natively utilizing an integrated Python/pyodide console. Write custom data workflows using powerhouse libraries like <strong>NumPy, Pandas, Biopython, NetworkX, and Scikit-learn</strong> directly inside your browser. No external servers or setup files required. These scripts can also be used to perform actions in the app via the same tool calls the AI agent uses.
+                </p>
+            </div>
+            <div class="bg-gray-900 border border-gray-800 aspect-video rounded-2xl flex items-center justify-center overflow-hidden shadow-2xl relative group">
+                <img src="images_for_website/Python_console.png" alt="Python Console UI" class="w-full h-full object-cover opacity-60 group-hover:scale-105 transition-transform duration-500">
+                <div class="absolute inset-0 bg-gradient-to-t from-gray-950 via-transparent to-transparent"></div>
+                <span class="absolute bottom-4 left-4 bg-gray-950/80 px-3 py-1 rounded-md text-xs text-gray-400 backdrop-blur-sm">Secure Sandbox Python Console</span>
+            </div>
+        </section>
+
+        <section class="reveal-left grid md:grid-cols-2 gap-12 items-center">
+            <div class="space-y-4">
+                <div class="text-emerald-400 text-sm font-semibold tracking-wider uppercase">Seamless workflow integration</div>
+                <h2 class="text-3xl font-bold text-white">Useful Links and Export Options</h2>
+                <p class="text-gray-400 leading-relaxed">
+                    Export publication-quality images of any view alongside organized spreadsheets of data subsets. Other export options include FASTA and JSON (for submission to the AlphaFold Server). The app also has links to useful information on other websites such as STRING, IntAct, UniProt, NCBI, and relevant PubMed papers.
+                </p>
+            </div>
+            <div class="bg-gray-900 border border-gray-800 aspect-video rounded-2xl flex items-center justify-center overflow-hidden shadow-2xl relative group">
+                <img src="images_for_website/Links_image.png" alt="Python Console UI" class="w-full h-full object-cover opacity-60 group-hover:scale-105 transition-transform duration-500">
+                <div class="absolute inset-0 bg-gradient-to-t from-gray-950 via-transparent to-transparent"></div>
+                <span class="absolute bottom-4 left-4 bg-gray-950/80 px-3 py-1 rounded-md text-xs text-gray-400 backdrop-blur-sm">Useful Links</span>
+            </div>
+        </section>
+
+        <section class="reveal-right grid md:grid-cols-2 gap-12 items-center md:flex-row-reverse">
+            <div class="space-y-4 md:order-2">
+                <div class="text-purple-400 text-sm font-semibold tracking-wider uppercase">Privacy First AI</div>
+                <h2 class="text-3xl font-bold text-white">Integrated AI Research Agent</h2>
+                <p class="text-gray-400 leading-relaxed">
+                    Connect local LLMs via LM Studio for private, free, unlimited AI compute. The agent can answer questions about the data, create interactive guides, perform actions in the app on your behalf, read the apps own code, and help debug issues.
+                </p>
+            </div>
+            <div class="bg-gray-900 border border-gray-800 aspect-video rounded-2xl flex items-center justify-center overflow-hidden shadow-2xl relative group">
+                <img src="images_for_website/AI_agent.png" alt="Python Console UI" class="w-full h-full object-cover opacity-60 group-hover:scale-105 transition-transform duration-500">
+                <div class="absolute inset-0 bg-gradient-to-t from-gray-950 via-transparent to-transparent"></div>
+                <span class="absolute bottom-4 left-4 bg-gray-950/80 px-3 py-1 rounded-md text-xs text-gray-400 backdrop-blur-sm">Integrated AI Research Agent</span>
+            </div>
+        </section>
+
+    </main>
+
+    <footer class="w-full py-12 px-8 border-t border-gray-900 bg-gray-950/50 text-center text-sm text-gray-500">
+        <p class="mb-2">StringScape is completely free and open-source under the Apache-2.0 License.</p>
+        <p class="mb-2">Developed by Joel Tregurtha with funding from the Macdiarmid Institute.</p>
+        <p>&copy; 2026 StringScape App.</p>
+    </footer>
+
+    <script>
+        const sr = ScrollReveal({
+            distance: '60px',
+            duration: 1000,
+            delay: 150,
+            reset: false
+        });
+
+        sr.reveal('.reveal-hero', {
+            origin: 'top',
+            distance: '40px'
+        });
+
+        sr.reveal('.reveal-left', {
+            origin: 'left',
+            interval: 100
+        });
+
+        sr.reveal('.reveal-right', {
+            origin: 'right',
+            interval: 100
+        });
+    </script>
+</body>
+</html>
