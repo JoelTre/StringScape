@@ -8,7 +8,7 @@ The app is available here: https://joeltre.github.io/StringScape/app
 
 The StringScape home page: https://joeltre.github.io/StringScape 
 
-The source code: https://github.com/JoelTre/StringScape/tree/main 
+The source code (look in the folder 'app' above): https://github.com/JoelTre/StringScape/tree/main/app
 
 StringScape on X: https://x.com/StringScapeApp
 
@@ -24,6 +24,7 @@ Video tutorial on how to use StringScape: [coming soon...]
 - **Easily view information about the proteins:** Hovering over a node allows you to preview information about the protein. Clicking on the node allows you to view more information such as its annotation, description, sequence and structure. 
 - **Useful links for each protein:** The information about each protein includes useful links to more information such as its UniProt page, NCBI pages, relevant PubMed papers, IntAct page, and STRING page.
 - **Visualise embeddings:** View 2D and 3D UMAP plots of the network- and sequence-embedding spaces of the proteins to visualize functional and structural similarities.
+- **Visualise protein complex structures:** See how protein interact with one another in 3D space with an intergrated Mol* structure viewer. 
 - **Python console:** The app includes a python console (Pyodide), allowing you to run advanced analysis of the data utilising packages such as NumPy, Pandas, Biopython, NetworkX, and Scikit-learn, all executed securely within the browser's sandbox without needing an external server. 
 - **Analysis tools:** The app includes some basic analysis tools that let you calculate metrics such as Centrality, Eigenvector Centrality, and the shortest paths between two proteins.
 - **Integrated AI Research Agent:** This agent uses local LLMs via LM Studio, allowing for free and unlimited use of the agent, with all processing happening privately on your machine. This agent can;
