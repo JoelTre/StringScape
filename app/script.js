@@ -445,7 +445,44 @@
     const AI_CHAT_HISTORY_STORAGE_KEY = 'stringscape_ai_chat_history_v1';
     const AI_SCRIPT_HISTORY_STORAGE_KEY = 'stringscape_ai_script_history_v1';
     const AI_PYTHON_CONSOLE_SYSTEM_PROMPT = 'You are a Python script generator for StringScape. Return only Python code that can run in Pyodide. Do not include markdown code fences. Use app_data directly (already injected). If the user wants app actions, include tool_call("ToolName", {"arg":"value"}) lines in the script. Keep scripts concise and safe. If you have any questions write them as comments in the code (e.g. # Question: ...).';
-    const AI_PYTHON_SCRIPT_INSTRUCTIONS_TEXT = `You can write Python scripts that run inside StringScape using Pyodide.\n\nAvailable data:\n- app_data["nodes"]: list of node objects\n- app_data["links"]: list of links\n- app_data["python_variables"]: ready-to-use variable arrays\n- app_data["colour_nodes_by_variables"] and app_data["current_colour_mode"]\n\nImportant:\n- Do not import app_data. It is already available.\n- For variable stats, use values from app_data["python_variables"] rather than scanning app_data["nodes"].\n- Use print(...) to show output.\n\nTool calls inside scripts:\n- You can perform app actions with lines such as:\n  tool_call("Change_node_colouring", {"variable_name": "size"})\n  tool_call("Change_view", {"view_name": "selected"})\n- These tool_call lines are executed by StringScape before Python execution.\n- Available tools match the AI tools (for example Search_and_select, Change_node_colouring, Change_view, Save_to_collection, etc.).`;
+    const AI_PYTHON_SCRIPT_INSTRUCTIONS_TEXT = `You can write Python scripts that run inside StringScape using Pyodide.
+
+        Available data:
+        - app_data["nodes"]: list of node objects
+        - app_data["links"]: list of links
+        - app_data["python_variables"]: ready-to-use variable arrays
+        - app_data["colour_nodes_by_variables"] and app_data["current_colour_mode"]
+
+        Built-in colour nodes by options (these are also the available python variables):
+                    { key: 'layer', label: 'Degrees of Separation', type: 'Numerical - Discrete' },
+                    { key: 'centrality', label: 'Centrality', type: 'Numerical - Continuous' },
+                    { key: 'eigen', label: 'Eigenvector centrality', type: 'Numerical - Continuous' },
+                    { key: 'pdb_structure_count', label: 'PDB structure count', type: 'Numerical - Continuous' },
+                    { key: 'complex_pdbs', label: 'Complex PDBs', type: 'Categorical - Nominal' },
+                    { key: 'embeddings', label: 'Embeddings', type: 'Numerical - Continuous' },
+                    { key: 'collection', label: 'Collection', type: 'Categorical - Nominal' },
+                    { key: 'annotation', label: 'Annotation length', type: 'Numerical - Discrete' },
+                    { key: 'localization', label: 'Protein localisation', type: 'Categorical - Nominal' },
+                    { key: 'biological_process', label: 'Biological process (mind-map most specific)', type: 'Categorical - Nominal' },
+                    { key: 'size', label: 'Protein size', type: 'Numerical - Continuous' },
+                    { key: 'random', label: 'Random', type: 'Categorical - Nominal' },
+                    { key: 'mono', label: 'Mono', type: 'Categorical - Nominal' }
+                ];
+
+        You can also use python_variables['nodes'] (lists 'id', 'layer', 'x', 'y', 'centrality', 'randColor', 'r', 'col', 'gpuColorValue', 'renderAlpha', 'gpuIsPath', 'gpuIsHigh', 'index', 'vy', and 'vx'), python_variables['node_ids'] (lists ids), and python_variables['links'] (lists 'source' 'target' and 'value').
+
+        Important:
+        - Do not import app_data. It is already available.
+        - For variable stats, use values from app_data["python_variables"] rather than scanning app_data["nodes"].
+        - Use print(...) to show output.
+
+        Tool calls inside scripts:
+        - You can perform app actions with lines such as:
+        tool_call("Change_node_colouring", {"variable_name": "size"})
+        tool_call("Change_view", {"view_name": "selected"})
+        - These tool_call lines are executed by StringScape before Python execution.
+        - Available tools match the AI tools (for example Search_and_select, Change_node_colouring, Change_view, Save_to_collection, etc.).`;
+
     const AI_EXAMPLE_SCRIPTS = [
         `# Summary of selected nodes by centrality\nvals = app_data["python_variables"].get("centrality", [])\nclean = [float(v) for v in vals if v is not None and str(v).strip() != ""]\nprint("Selected centrality values:", len(clean))\nif clean:\n    print("Mean:", sum(clean) / len(clean))`,
         `# Change the app state with tool calls\ntool_call("Change_view", {"view_name": "selected"})\ntool_call("Change_node_colouring", {"variable_name": "centrality"})\nprint("Switched to selected view and colored by centrality.")`,
@@ -461,6 +498,7 @@
     let aiPythonPromptHistory = [];
     let aiExamplePanelAgentHtml = '';
     let aiPythonCopyFeedbackTimer = null;
+    let aiPythonOutputCopyFeedbackTimer = null;
     const aiChatManualTitleIds = new Set();
 
     // This function toggles the visibility of the AI panel and updates the UI accordingly. It also triggers a redraw of the canvas and updates controls based on the current view to ensure everything is positioned correctly with the new panel state.
@@ -677,6 +715,29 @@
         }
     }
 
+    async function copyPythonOutput() {
+        const output = document.getElementById('ai-python-run-output');
+        const button = document.getElementById('ai-copy-python-output-btn');
+        const text = String(output?.textContent || '');
+        if (!text.trim()) return;
+
+        try {
+            await navigator.clipboard.writeText(text);
+            if (button) {
+                const originalLabel = button.dataset.originalLabel || button.textContent;
+                button.dataset.originalLabel = originalLabel;
+                button.textContent = 'Copied!';
+                if (aiPythonOutputCopyFeedbackTimer) clearTimeout(aiPythonOutputCopyFeedbackTimer);
+                aiPythonOutputCopyFeedbackTimer = setTimeout(() => {
+                    button.textContent = originalLabel;
+                    aiPythonOutputCopyFeedbackTimer = null;
+                }, 1200);
+            }
+        } catch (error) {
+            console.warn('Could not copy Python output', error);
+        }
+    }
+
     function aiFormatToolParameters(toolDefinition) {
         const parameters = toolDefinition?.function?.parameters;
         if (!parameters || !parameters.properties) return 'none';
@@ -705,6 +766,24 @@
         lines.push('- app_data["links"]: list of links');
         lines.push('- app_data["python_variables"]: ready-to-use variable arrays');
         lines.push('- app_data["colour_nodes_by_variables"] and app_data["current_colour_mode"]');
+        lines.push('');
+        lines.push('Built-in colour nodes by options (these are also the available python variables):');
+        lines.push("            { key: 'layer', label: 'Degrees of Separation', type: 'Numerical - Discrete' },");
+        lines.push("            { key: 'centrality', label: 'Centrality', type: 'Numerical - Continuous' },");
+        lines.push("            { key: 'eigen', label: 'Eigenvector centrality', type: 'Numerical - Continuous' },");
+        lines.push("            { key: 'pdb_structure_count', label: 'PDB structure count', type: 'Numerical - Continuous' },");
+        lines.push("            { key: 'complex_pdbs', label: 'Complex PDBs', type: 'Categorical - Nominal' },");
+        lines.push("            { key: 'embeddings', label: 'Embeddings', type: 'Numerical - Continuous' },");
+        lines.push("            { key: 'collection', label: 'Collection', type: 'Categorical - Nominal' },");
+        lines.push("            { key: 'annotation', label: 'Annotation length', type: 'Numerical - Discrete' },");
+        lines.push("            { key: 'localization', label: 'Protein localisation', type: 'Categorical - Nominal' },");
+        lines.push("            { key: 'biological_process', label: 'Biological process (mind-map most specific)', type: 'Categorical - Nominal' },");
+        lines.push("            { key: 'size', label: 'Protein size', type: 'Numerical - Continuous' },");
+        lines.push("            { key: 'random', label: 'Random', type: 'Categorical - Nominal' },");
+        lines.push("            { key: 'mono', label: 'Mono', type: 'Categorical - Nominal' }");
+        lines.push('        ];');
+        lines.push('');
+        lines.push("You can also use python_variables['nodes'] (lists 'id', 'layer', 'x', 'y', 'centrality', 'randColor', 'r', 'col', 'gpuColorValue', 'renderAlpha', 'gpuIsPath', 'gpuIsHigh', 'index', 'vy', and 'vx'), python_variables['node_ids'] (lists ids), and python_variables['links'] (lists 'source' 'target' and 'value').");
         lines.push('');
         lines.push('Important:');
         lines.push('- Do not import app_data. It is already available.');
@@ -1238,6 +1317,16 @@
                     return;
                 }
                 if (entry.kind === 'tool_call') {
+                    if (entry.name === 'Run_python_logic') {
+                        try {
+                            const parsedArgs = typeof entry.arguments === 'string' ? JSON.parse(entry.arguments) : (entry.arguments || {});
+                            aiAddPythonCodeLog(parsedArgs.code || '', entry.output || '');
+                        } catch {
+                            aiAddPythonCodeLog('');
+                        }
+                        hasRenderedContent = true;
+                        return;
+                    }
                     const toolName = entry.name ? String(entry.name).replace(/_/g, ' ') : 'tool';
                     aiAddLog(`Used ${toolName}`);
                     hasRenderedContent = true;
@@ -1876,7 +1965,7 @@
     }
 
     //This function executes AI tools - takes a tool name and arguments, performs the corresponding action, and returns the result
-    async function aiExecuteToolCall(toolName, args) {
+    async function aiExecuteToolCall(toolName, args, options = {}) {
         if (toolName === 'get_current_time') return new Date().toLocaleTimeString();
         if (toolName === 'calculate_equation' || toolName === 'calculate_math') {
             const parser = new exprEval.Parser();
@@ -2178,7 +2267,17 @@
         let pyodideInstance = null;
 
         if (toolName === 'Run_python_logic') {
+            let pythonLog = null;
             try {
+                const code = String(args?.code || '');
+                if (options.requireApproval) {
+                    const approved = await aiRequestPythonExecutionApproval(code);
+                    if (!approved) {
+                        return 'The user rejected you running that code. Ask them why.';
+                    }
+                    pythonLog = aiAddPythonCodeLog(code);
+                }
+
                 if (!pyodideInstance) {
                     pyodideInstance = await loadPyodide();
                     await pyodideInstance.loadPackage(['numpy', 'pandas']);
@@ -2213,6 +2312,15 @@ def clean_numeric(values):
                     ? window.nodes
                     : (typeof nodeMap !== 'undefined' && nodeMap instanceof Map ? Array.from(nodeMap.values()) : []);
                 const safeNodeIds = safeNodes.map(n => n.id);
+                const safeLinks = (Array.isArray(window.links) && window.links.length
+                    ? window.links
+                    : (Array.isArray(links) ? links : [])
+                ).map(link => ({
+                    source: typeof link?.source === 'object' ? link.source?.id : link?.source,
+                    target: typeof link?.target === 'object' ? link.target?.id : link?.target,
+                    value: link?.value ?? link?.score ?? link?.weight ?? null,
+                    edgeType: link?.edgeType ?? null
+                })).filter(link => link.source && link.target);
 
                 const toCleanValueArray = (values) => (Array.isArray(values) ? values : [])
                     .map(v => (v === undefined || v === null) ? null : v)
@@ -2283,7 +2391,7 @@ def clean_numeric(values):
                     ...colourVariableValues,
                     nodes: safeNodes,
                     node_ids: safeNodeIds,
-                    links: window.links || [],
+                    links: safeLinks,
                     current_colour_mode: document.getElementById('colorMode') ? document.getElementById('colorMode').value : null,
                     colour_nodes_by_variables: Array.isArray(colourModeEntries) ? colourModeEntries.map(entry => ({ ...entry })) : []
                 };
@@ -2291,7 +2399,7 @@ def clean_numeric(values):
                 const researchContext = {
                     "nodes": safeNodes,
                     "node_ids": safeNodeIds,
-                    "links": window.links || [],
+                    "links": safeLinks,
                     "accessory_files": window.accessoryDataFiles || {},
                     "accessory_values": window.accessoryVariableValues || {},
                     "colour_nodes_by_variables": Array.isArray(colourModeEntries)
@@ -2314,13 +2422,17 @@ def clean_numeric(values):
                 pyodideInstance.globals.set("app_data", pyContext);
                 // ----------------------------
 
-                await pyodideInstance.runPythonAsync(args.code);
+                await pyodideInstance.runPythonAsync(code);
                 const stdout = pyodideInstance.runPython("sys.stdout.getvalue()").trim();
 
                 // Only add hello if there is actually something in stdout
-                return stdout ? stdout + `\nIf you don't get the output you were looking for, try this: app_data["python_variables"].get("<variable_name>", []) or get_var("<variable_name>"). For numeric stats, clean values first: clean = clean_numeric(vals); print(sum(clean) / len(clean)) if clean else print("No numeric values found.")` : "Calculation complete.";
+                const result = stdout ? stdout : "Calculation complete.";
+                if (pythonLog) pythonLog.setOutput(result);
+                return result;
             } catch (error) {
-                return `Python Error: ${error.message}\n\nTry again with app_data["python_variables"].get("<variable_name>", []) or get_var("<variable_name>") instead of iterating app_data["nodes"]. For numeric stats, clean values first: clean = clean_numeric(vals); print(sum(clean) / len(clean)) if clean else print("No numeric values found.")`;
+                const errorText = `Python Error: ${error.message}\n\nFix the code and try again.`;
+                if (pythonLog) pythonLog.setOutput(errorText);
+                return errorText;
             }
         }
 
@@ -2475,6 +2587,101 @@ def clean_numeric(values):
         wrapper.appendChild(bubble);
         logGroup.appendChild(wrapper);
         return el;
+    }
+
+    function aiAddPythonCodeLog(code, outputText = '') {
+        const logGroup = document.getElementById('ai-chatbox');
+        const wrapper = document.createElement('div');
+        const el = document.createElement('div');
+        el.className = 'log-item ai-python-code-log';
+        el.textContent = 'Running Python code ▾';
+        el.title = 'Click to show the Python code';
+
+        const bubble = document.createElement('div');
+        bubble.className = 'ai-python-code-bubble';
+        bubble.style.display = 'none';
+
+        const codeLabel = document.createElement('div');
+        codeLabel.className = 'ai-python-code-section-label';
+        codeLabel.textContent = 'Code';
+        const codeBox = document.createElement('pre');
+        codeBox.textContent = String(code || '');
+        const outputLabel = document.createElement('div');
+        outputLabel.className = 'ai-python-code-section-label';
+        outputLabel.textContent = 'Output';
+        const outputBox = document.createElement('pre');
+        outputBox.textContent = outputText ? String(outputText) : 'Waiting for output...';
+        bubble.appendChild(codeLabel);
+        bubble.appendChild(codeBox);
+        bubble.appendChild(outputLabel);
+        bubble.appendChild(outputBox);
+
+        el.addEventListener('click', () => {
+            const isHidden = bubble.style.display === 'none';
+            bubble.style.display = isHidden ? 'block' : 'none';
+            el.textContent = isHidden ? 'Running Python code ▴' : 'Running Python code ▾';
+            document.getElementById('ai-chat-scroll').scrollTop = document.getElementById('ai-chat-scroll').scrollHeight;
+        });
+
+        wrapper.appendChild(el);
+        wrapper.appendChild(bubble);
+        logGroup.appendChild(wrapper);
+        return {
+            element: el,
+            setOutput(text) {
+                outputBox.textContent = String(text || 'Calculation complete.');
+            }
+        };
+    }
+
+    function aiRequestPythonExecutionApproval(code) {
+        const chatbox = document.getElementById('ai-chatbox');
+        const scroll = document.getElementById('ai-chat-scroll');
+        if (!chatbox) return Promise.resolve(false);
+
+        return new Promise(resolve => {
+            const panel = document.createElement('div');
+            panel.className = 'ai-python-approval-panel';
+
+            const title = document.createElement('div');
+            title.className = 'ai-python-approval-title';
+            title.textContent = 'The AI wants to run this code';
+
+            const codeBox = document.createElement('pre');
+            codeBox.className = 'ai-python-approval-code';
+            codeBox.textContent = String(code || '');
+
+            const actions = document.createElement('div');
+            actions.className = 'ai-python-approval-actions';
+
+            const rejectBtn = document.createElement('button');
+            rejectBtn.type = 'button';
+            rejectBtn.className = 'ai-python-approval-reject';
+            rejectBtn.textContent = 'Reject';
+
+            const acceptBtn = document.createElement('button');
+            acceptBtn.type = 'button';
+            acceptBtn.className = 'ai-python-approval-accept';
+            acceptBtn.textContent = 'Accept';
+
+            const finish = (approved) => {
+                rejectBtn.disabled = true;
+                acceptBtn.disabled = true;
+                panel.remove();
+                resolve(approved);
+            };
+
+            rejectBtn.addEventListener('click', () => finish(false), { once: true });
+            acceptBtn.addEventListener('click', () => finish(true), { once: true });
+
+            actions.appendChild(rejectBtn);
+            actions.appendChild(acceptBtn);
+            panel.appendChild(title);
+            panel.appendChild(codeBox);
+            panel.appendChild(actions);
+            chatbox.appendChild(panel);
+            if (scroll) scroll.scrollTop = scroll.scrollHeight;
+        });
     }
 
     // This function removes an attached item from the users current message.
@@ -2991,6 +3198,7 @@ def clean_numeric(values):
                         if (thinking) thinking.remove();
                         // 1. Parse arguments to use in the log message
                         const logArgs = call.function.arguments ? JSON.parse(call.function.arguments) : {};
+                        const isPythonLogicTool = call.function.name === 'Run_python_logic';
                         let logMessage = `Using ${call.function.name.replace(/_/g, ' ')}`; // Fallback
 
                         // 2. Map tool names to informative message to display in the chat log as a bullet point (AI tool bullet points)
@@ -3020,21 +3228,30 @@ def clean_numeric(values):
                             'View_code_snippet': logArgs.function_name 
                                 ? `Viewing code for the function "${logArgs.function_name}"` 
                                 : `Viewing code lines ${logArgs.start_line} to ${logArgs.end_line}`,
-                            'View_all_functions': "Viewing list of all functions in the codebase",
-                            'Run_python_logic': `Running Python code: ${logArgs.code ? (logArgs.code.length > 100 ? logArgs.code.substring(0, 100) + '...' : logArgs.code) : 'N/A'}`
+                            'View_all_functions': "Viewing list of all functions in the codebase"
                         };
 
                         if (toolDescriptions[call.function.name]) {
                             logMessage = toolDescriptions[call.function.name];
                         }
 
-                        aiAddLog(logMessage);
-                        thinking = aiAddLog("AI is thinking...", true);
-                        aiRecordTranscript({ kind: 'tool_call', name: call.function.name, arguments: call.function.arguments || JSON.stringify(logArgs || {}) });
+                        if (!isPythonLogicTool) {
+                            aiAddLog(logMessage);
+                            thinking = aiAddLog("AI is thinking...", true);
+                        }
+                        if (!isPythonLogicTool) {
+                            aiRecordTranscript({ kind: 'tool_call', name: call.function.name, arguments: call.function.arguments || JSON.stringify(logArgs || {}) });
+                        }
 
                         let res = "";
                         const args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
-                        res = await aiExecuteToolCall(call.function.name, args);
+                        res = await aiExecuteToolCall(call.function.name, args, { requireApproval: isPythonLogicTool });
+                        if (isPythonLogicTool) {
+                            if (String(res) !== 'The user rejected you running that code. Ask them why.') {
+                                aiRecordTranscript({ kind: 'tool_call', name: call.function.name, arguments: call.function.arguments || JSON.stringify(logArgs || {}), output: String(res) });
+                            }
+                            thinking = aiAddLog("AI is thinking...", true);
+                        }
 
                         if (res && typeof res === 'object' && res.type === 'image' && typeof res.data === 'string') {
                             aiChatHistory.push({ role: "tool", tool_call_id: call.id, content: '[Screenshot captured and attached as image.]' });
@@ -9347,6 +9564,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 'Description': getProteinInfoDescription(id) || '',
                 'Annotation': getProteinInfoAnnotation(id) || '',
                 'KEGG Product': getKeggProductText(id) || '',
+                'Collection(s)': getNodeCollectionMemberships(id).join('; '),
                 'Protein Size': getProteinSizeValue(id, sizeSource) || '',
                 'UniProt': linkData.uniprotUrl || '',
                 'NCBI': [linkData.ncbiProteinUrl, linkData.ncbiGeneUrl].filter(Boolean).join(' '),
@@ -10432,7 +10650,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         updateNodeInfoTableModalChrome('Node Info Table', false);
         calculateEigenvectorCentrality();
         const { rows, extraColumns } = getSelectedNodeInfoRows();
-        const baseColumns = ['Protein ID', 'Preferred Name', 'Gene ID', 'Description', 'Annotation', 'KEGG Product', 'Localisation', 'Protein Size', 'UniProt', 'NCBI', 'Pubmed', 'IntAct', 'STRING', 'Protein Data Bank', 'Aliases',  'Layer', 'Centrality', 'Eigen', 'Sequence'];
+        const baseColumns = ['Protein ID', 'Preferred Name', 'Gene ID', 'Description', 'Annotation', 'KEGG Product', 'Collection(s)', 'Localisation', 'Protein Size', 'UniProt', 'NCBI', 'Pubmed', 'IntAct', 'STRING', 'Protein Data Bank', 'Aliases',  'Layer', 'Centrality', 'Eigen', 'Sequence'];
         const columns = [...baseColumns, ...extraColumns.map(c => c.label)];
         nodeInfoTableState = { columns, rows, filteredRows: rows, searchQuery: '', mode: 'protein' };
         renderNodeInfoTable();
@@ -17940,7 +18158,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             simulation.nodes(nodes);
             const activeLinks = [], processedPairs = new Set();
             nodes.forEach(n => { (fullAdjacency.get(n.id) || []).forEach(edge => { if (edge.score >= threshold && nodeMap.has(edge.target)) { const key = [n.id, edge.target].sort().join('-'); if (!processedPairs.has(key)) { activeLinks.push({ source: nodeMap.get(n.id), target: nodeMap.get(edge.target), value: edge.score }); processedPairs.add(key); } } }); });
-            links = activeLinks; simulation.force("link").links(activeLinks);
+            links = activeLinks;
+            window.links = links;
+            simulation.force("link").links(activeLinks);
             gpuState.needsUpload = true;
             if (canPhysicsRun() && shouldRestart) { restartActivePhysics((isBuilding || isSettling) ? 0.5 : +document.getElementById('alphaSlider').value); }
         }
@@ -18348,7 +18568,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             }
             let seeds = document.getElementById('seedInput').value.trim().split(/[\s,]+/).filter(x => x); const threshold = +document.getElementById('thresholdInput').value; if (seeds.length === 0) seeds = [allIDs[0]]; currentSeeds = [...seeds];
             scatterEigenCacheKey = null;
-            nodes = []; links = []; nodeMap.clear(); document.getElementById('startBtn').style.display = 'none'; document.getElementById('progress-wrapper').style.display = 'block'; document.getElementById('pauseBtn').style.display = 'block'; document.getElementById('physBtn').style.display = 'block';
+            nodes = []; links = []; window.nodes = nodes; window.links = links; nodeMap.clear(); document.getElementById('startBtn').style.display = 'none'; document.getElementById('progress-wrapper').style.display = 'block'; document.getElementById('pauseBtn').style.display = 'block'; document.getElementById('physBtn').style.display = 'block';
             let processedLinks = new Set(), startTime = Date.now(); isBuilding = true; isSettling = false; updateViewMenu();
             let lastBuildRefreshAt = startTime;
             let lastBuildStyleRefreshAt = startTime;
@@ -18719,6 +18939,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         bindClick(document.getElementById('ai-python-instructions-btn'), () => openPythonInstructionsBox());
         bindClick(document.getElementById('ai-run-script-btn'), () => runPythonConsoleScript());
         bindClick(document.getElementById('ai-copy-python-instructions'), () => copyPythonInstructions());
+        bindClick(document.getElementById('ai-copy-python-output-btn'), () => copyPythonOutput());
         bindClick(document.getElementById('ai-close-python-instructions'), () => closePythonInstructionsBox());
         bindClick(document.getElementById('ai-file-btn'), () => document.getElementById('ai-file-input')?.click());
         bindClick(document.getElementById('ai-send-btn'), () => sendAiMessage());
