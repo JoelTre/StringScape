@@ -776,6 +776,33 @@
             font-weight: 600;
             cursor: pointer;
         }
+        #ai-python-output-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        #ai-python-script-output-header {
+            color: #dce8f6;
+            font-size: 0.82rem;
+            font-weight: 600;
+        }
+        #ai-copy-python-output-btn {
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: #fff;
+            border-radius: 999px;
+            padding: 5px 11px;
+            width: auto;
+            font-size: 0.76rem;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        #ai-copy-python-output-btn:hover {
+            background: #3498db;
+            border-color: #3498db;
+        }
         #ai-python-run-output {
             margin-top: 8px;
             margin-bottom: 10px;
@@ -974,6 +1001,79 @@
         .ai-thought-bubble {
             margin: 6px 0 8px 20px;
             color: #aaaaaa;
+        }
+        .ai-python-code-log {
+            cursor: pointer;
+            user-select: none;
+        }
+        .ai-python-code-bubble {
+            margin: 6px 0 8px 20px;
+        }
+        .ai-python-code-section-label {
+            color: #8b949e;
+            font-size: 0.72rem;
+            font-weight: 700;
+            margin: 8px 0 4px;
+            text-transform: uppercase;
+        }
+        .ai-python-code-section-label:first-child {
+            margin-top: 0;
+        }
+        .ai-python-code-bubble pre,
+        .ai-python-approval-code {
+            margin: 0;
+            max-height: 260px;
+            overflow: auto;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            color: #dce8f6;
+            padding: 10px;
+            font-family: Consolas, 'Courier New', monospace;
+            font-size: 0.78rem;
+            line-height: 1.35;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .ai-python-approval-panel {
+            margin: 8px 0;
+            padding: 12px;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            box-shadow: 0 10px 26px rgba(0,0,0,0.28);
+        }
+        .ai-python-approval-title {
+            color: #fff;
+            font-size: 0.92rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .ai-python-approval-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .ai-python-approval-actions button {
+            border-radius: 999px;
+            padding: 6px 14px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .ai-python-approval-reject {
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: #fff;
+        }
+        .ai-python-approval-accept {
+            background: #3498db;
+            border: 1px solid #3498db;
+            color: #fff;
+        }
+        .ai-python-approval-actions button:hover {
+            filter: brightness(1.12);
         }
         @keyframes ai-log-pulse {
             0%, 100% { opacity: 1; }
@@ -3907,7 +4007,10 @@
         <div id="ai-current-script-title">Current Script: Untitled Script</div>
         <textarea id="ai-python-script-editor" spellcheck="false" placeholder="# Write Python here, use one of the example scripts above, or generate a script using the AI below."></textarea>
         <button id="ai-run-script-btn" type="button">Run Script</button>
-        <div id="ai-python-script-output-header">Output:</div>
+        <div id="ai-python-output-toolbar">
+            <div id="ai-python-script-output-header">Output:</div>
+            <button id="ai-copy-python-output-btn" type="button">Copy output</button>
+        </div>
         <pre id="ai-python-run-output"></pre>
     </div>
 
