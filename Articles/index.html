@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Articles - StringScape</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://unpkg.com/scrollreveal"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        body {
+            background-color: #0B0F19;
+            color: #F3F4F6;
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+        .gradient-text {
+            background: linear-gradient(135deg, #60A5FA 0%, #2eccbf 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .article-card {
+            background-color: rgba(17, 24, 39, 0.4);
+            border: 1px solid #1F2937;
+            cursor: pointer;
+            position: relative;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .article-card:hover {
+            border-color: rgba(96, 165, 250, 0.4);
+            transform: translateY(-4px);
+            box-shadow: 0 12px 24px -10px rgba(96, 165, 250, 0.3), 0 12px 24px -10px rgba(46, 204, 191, 0.3);
+        }
+    </style>
+</head>
+<body class="overflow-x-hidden">
+
+    <header class="w-full py-6 px-6 flex justify-between items-center border-b border-gray-800 backdrop-blur-md sticky top-0 z-50 bg-[#0B0F19]/80">
+        <div class="flex items-center space-x-2">
+            <a href="../index.html" class="flex items-center space-x-3 group">
+                <svg width="40" height="40" viewBox="0 0 100 100" class="flex-shrink-0 ml-2.5 transition-transform duration-300 group-hover:scale-105" xmlns="http://www.w3.org/2000/svg">
+                    <line x1="27" y1="50" x2="75" y2="22" stroke="#888" stroke-width="11" stroke-linecap="round"/>
+                    <line x1="75" y1="22" x2="75" y2="78" stroke="#888" stroke-width="11" stroke-linecap="round"/>
+                    
+                    <circle cx="27" cy="50" r="20" fill="#3498db" stroke="#6dc5ff" stroke-width="5" />
+                    <circle cx="75" cy="22" r="20" fill="#3498db" stroke="#6dc5ff" stroke-width="5" />
+                    <circle cx="75" cy="78" r="20" fill="#3498db" stroke="#6dc5ff" stroke-width="5" />
+                </svg>
+                <span class="text-3xl font-black tracking-tight gradient-text ml-0.5 py-1 leading-normal">StringScape</span>
+            </a>
+            <span class="bg-gray-800 text-xs text-gray-400 px-2 py-0.5 rounded-full border border-gray-700">Beta 1.0</span>
+        </div>
+        <nav class="hidden md:flex space-x-8 text-sm font-medium text-gray-400">
+            <a href="index.html" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-solid fa-book-open mr-1"></i> Articles</a>
+            <a href="https://github.com/JoelTre/StringScape/tree/main" target="_blank" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-brands fa-github mr-1"></i> GitHub</a>
+            <a href="https://x.com/StringScapeApp" target="_blank" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-brands fa-x-twitter mr-1"></i> X</a>
+            <a href="https://www.youtube.com/@StringScape_app" target="_blank" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-brands fa-youtube mr-1"></i> YouTube</a>
+        </nav>
+    </header>
+
+    <main class="max-w-6xl mx-auto px-6 pt-16 pb-32">
+        
+        <div class="reveal-hero space-y-4 mb-16 text-center md:text-left">
+            <div class="text-[#2eccbf] text-sm font-semibold tracking-wider uppercase">Knowledge Base</div>
+            <h1 class="text-4xl md:text-5xl font-extrabold tracking-tight text-white leading-tight">
+                Articles & <span class="gradient-text">Guides</span>
+            </h1>
+            <p class="text-base md:text-lg text-gray-400 font-medium tracking-wide max-w-2xl">
+                Insights on accelerating scientific discoveries with software.
+            </p>
+            <div class="w-40 h-1 bg-gradient-to-r from-blue-500 to-[#2eccbf] mx-auto md:mx-0 rounded-full mt-4"></div>
+        </div>
+
+        <div class="reveal-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            
+            <div class="article-card rounded-2xl p-6 flex flex-col justify-between h-full" onclick="window.location.href='using-ai-to-make-apps-for-science.html'">
+                <div class="space-y-4">
+                    <div class="flex items-center justify-between text-xs font-semibold text-blue-400 tracking-wider uppercase">
+                        <span>Research Insights</span>
+                        <span class="text-gray-500">June 15, 2026</span>
+                    </div>
+                    <h3 class="text-xl font-bold text-white tracking-tight leading-snug">
+                        <a href="Guide_AI_apps/" onclick="event.stopPropagation();" class="hover:text-[#6dc5ff] transition-colors">Guide: Using AI to make apps for science</a>
+                    </h3>
+                    <p class="text-gray-400 text-sm line-clamp-3">
+                        AI can be a very helpful tool to accelerate scientific research. Discover recommendations on building, styling, testing, and securing robust software apps even if you have never written code before.
+                    </p>
+                </div>
+                <div class="pt-6 flex items-center justify-between border-t border-gray-800/60 mt-6">
+                    <span class="text-xs text-gray-400 font-medium">By Joel Tregurtha</span>
+                    <span class="text-sm font-semibold text-[#2eccbf] hover:text-emerald-400 flex items-center gap-1.5 transition-colors group">
+                        Read Article <i class="fa-solid fa-arrow-right text-xs transition-transform group-hover:translate-x-1"></i>
+                    </span>
+                </div>
+            </div>
+
+
+        </div>
+
+    </main>
+
+    <footer class="w-full py-12 px-8 border-t border-gray-900 bg-gray-950/50 text-center text-sm text-gray-500">
+        <nav class="flex flex-wrap justify-center gap-y-2 space-x-8 mb-6 text-sm font-medium text-gray-400">            
+            <a href="index.html" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-solid fa-book-open mr-1"></i> Articles</a>
+            <a href="https://github.com/JoelTre/StringScape/tree/main" target="_blank" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-brands fa-github mr-1"></i> GitHub</a>
+            <a href="https://x.com/StringScapeApp" target="_blank" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-brands fa-x-twitter mr-1"></i> X</a>
+            <a href="https://www.youtube.com/@StringScape_app" target="_blank" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-brands fa-youtube mr-1"></i> YouTube</a>
+        </nav>
+        <p class="mb-2">StringScape is completely free and open-source under the Apache-2.0 License.</p>
+        <p class="mb-2">Developed by Joel Tregurtha with funding from the <a href="https://www.macdiarmid.ac.nz/" target="_blank" class="underline hover:text-gray-300 transition-colors">Macdiarmid Institute</a>.</p>
+        <p>&copy; 2026 StringScape App.</p>
+    </footer>
+
+    <script>
+        const sr = ScrollReveal({
+            distance: '40px',
+            duration: 1000,
+            delay: 150,
+            reset: false
+        });
+
+        sr.reveal('.reveal-hero', {
+            origin: 'top'
+        });
+
+        sr.reveal('.reveal-grid', {
+            origin: 'bottom',
+            delay: 300
+        });
+    </script>
+</body>
+</html>

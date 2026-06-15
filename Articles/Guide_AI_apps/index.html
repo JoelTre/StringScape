@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guide: Using AI to make apps for science - StringScape</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://unpkg.com/scrollreveal"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        body {
+            background-color: #0B0F19;
+            color: #F3F4F6;
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+        .gradient-text {
+            background: linear-gradient(135deg, #60A5FA 0%, #2eccbf 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        @keyframes waterWobble {
+            0% { transform: scale(1); }
+            30% { transform: scale(1.100); }
+            50% { transform: scale(1.062);}
+            70% { transform: scale(1.045); }
+            90% { transform: scale(1.048); }
+            100% { transform: scale(1.05); }
+        }
+
+        @keyframes waterWobbleOut {
+            0% { transform: scale(1.05); }  
+            30% { transform: scale(0.96); } 
+            50% { transform: scale(1.02); }  
+            70% { transform: scale(0.985); }
+            90% { transform: scale(1.004); }
+            100% { transform: scale(1); }   
+        }
+
+        .hover-wobble {
+            animation: waterWobbleOut 0.6s ease-in-out forwards;
+        }
+
+        .hover-wobble:hover {
+            animation: waterWobble 0.6s ease-in-out forwards;
+        }
+
+        pre {
+            background-color: #111827;
+            border-radius: 0.75rem;
+            padding: 1rem;
+            overflow-x: auto;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 0.875rem;
+            color: #E5E7EB;
+        }
+
+        /* Custom Scrollbar Styling to eliminate the white background */
+        pre::-webkit-scrollbar {
+            height: 8px; /* Height of the horizontal scrollbar */
+            background-color: transparent; /* Removes any default white background */
+        }
+
+        pre::-webkit-scrollbar-track {
+            background-color: #111827; /* Matches the pre block background */
+            border-radius: 0 0 0.75rem 0.75rem; /* Matches the bottom corners of the box */
+        }
+
+        pre::-webkit-scrollbar-thumb {
+            background-color: #374151; /* Dark gray thumb that fits the theme */
+            border-radius: 9999px; /* Rounded pill shape */
+        }
+
+        pre::-webkit-scrollbar-thumb:hover {
+            background-color: #4B5563; /* Slightly lighter on hover for better UX */
+        }
+        code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            background-color: #1F2937;
+            padding: 0.125rem 0.375rem;
+            border-radius: 0.25rem;
+            font-size: 0.875rem;
+            color: #60A5FA;
+        }
+        pre code {
+            background-color: transparent;
+            padding: 0;
+            border-radius: 0;
+            color: inherit;
+        }
+    </style>
+</head>
+<body class="overflow-x-hidden">
+
+    <header class="w-full py-6 px-6 flex justify-between items-center border-b border-gray-800 backdrop-blur-md sticky top-0 z-50 bg-[#0B0F19]/80">
+        <div class="flex items-center space-x-2">
+            <a href="index.html" class="flex items-center space-x-3 group">
+                <svg width="40" height="40" viewBox="0 0 100 100" class="flex-shrink-0 ml-2.5 transition-transform duration-300 group-hover:scale-105" xmlns="http://www.w3.org/2000/svg">
+                    <line x1="27" y1="50" x2="75" y2="22" stroke="#888" stroke-width="11" stroke-linecap="round"/>
+                    <line x1="75" y1="22" x2="75" y2="78" stroke="#888" stroke-width="11" stroke-linecap="round"/>
+                    
+                    <circle cx="27" cy="50" r="20" fill="#3498db" stroke="#6dc5ff" stroke-width="5" />
+                    <circle cx="75" cy="22" r="20" fill="#3498db" stroke="#6dc5ff" stroke-width="5" />
+                    <circle cx="75" cy="78" r="20" fill="#3498db" stroke="#6dc5ff" stroke-width="5" />
+                </svg>
+                <span class="text-3xl font-black tracking-tight gradient-text ml-0.5 py-1 leading-normal">StringScape</span>
+            </a>
+            <span class="bg-gray-800 text-xs text-gray-400 px-2 py-0.5 rounded-full border border-gray-700">Beta 1.0</span>
+        </div>
+        <nav class="hidden md:flex space-x-8 text-sm font-medium text-gray-400">
+            <a href="https://joeltre.github.io/StringScape/articles" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-solid fa-book-open mr-1"></i> Articles</a>
+            <a href="https://github.com/JoelTre/StringScape/tree/main" target="_blank" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-brands fa-github mr-1"></i> GitHub</a>
+            <a href="https://x.com/StringScapeApp" target="_blank" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-brands fa-x-twitter mr-1"></i> X</a>
+            <a href="https://www.youtube.com/@StringScape_app" target="_blank" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-brands fa-youtube mr-1"></i> YouTube</a>
+        </nav>
+    </header>
+
+    <main class="max-w-4xl mx-auto px-6 pt-16 pb-32">
+        
+        <article class="space-y-8">
+            <div class="reveal-hero space-y-4 text-center md:text-left">
+                <div class="text-emerald-400 text-sm font-semibold tracking-wider uppercase">Research Insights</div>
+                <h1 class="text-4xl md:text-5xl font-extrabold tracking-tight text-white leading-tight">
+                    Guide: Using AI to make <span class="gradient-text">apps for science</span>
+                </h1>
+                <p class="text-sm md:text-base text-gray-400 font-medium tracking-wide">
+                    By <span class="text-gray-200">Joel Tregurtha</span> (creator of StringScape)
+                </p>
+                <div class="w-80 h-1 bg-gradient-to-r from-blue-500 to-[#2eccbf] mx-auto md:mx-0 rounded-full mt-4"></div>
+            </div>
+
+            <div class="reveal-content text-gray-300 leading-relaxed space-y-6 text-base md:text-lg pt-4">
+                <p>
+                    AI can be a very helpful tool to accelerate scientific research. However, AI is well known for making mistakes. Using AI to write code mitigates this issue. This is because you can review the code to check it does exactly what it should. In other words, rather than asking AI to do something, you ask AI to write code that does that thing. You can then check the code before using it for your research. You can do this even if you have never worked with computer code before. 
+                </p>
+                <p>
+                    Below are my recommendations for how best to use AI to write code for research apps.
+                </p>
+
+                <hr class="border-gray-800 my-12">
+
+                <div class="space-y-4">
+                    <h2 class="text-2xl font-bold text-white flex items-center gap-3">
+                        <i class="fa-solid fa-wand-magic-sparkles text-blue-400 text-xl"></i> Simple apps
+                    </h2>
+                    <p>
+                        If making a simple app, you can ask any chat-bot AI (Gemini, ChatGPT, Claude, etc.) to make you an HTML app and describe what you want the app to do. For example:
+                    </p>
+                    <blockquote class="border-l-4 border-[#2eccbf] bg-gray-950/40 p-4 rounded-r-xl italic text-gray-400 my-4">
+                        “Make me a modern, dark-themed HTML app where I can upload one or more files. The app displays a scatter plot of protein_size vs protein_weight with data from different uploaded files coloured differently on the plot. Include buttons to do these: download the scatter plot, set x or y axis to logarithmic, toggle a grid overlay, and download a CSV with the uploaded files merged into one and proteins under 10 kDa removed.”
+                    </blockquote>
+                    <p>
+                        In your message to the AI, include details about the format of the file. For example:
+                    </p>
+                    <blockquote class="border-l-4 border-blue-500 bg-gray-950/40 p-4 rounded-r-xl italic text-gray-400 my-4">
+                        “The uploaded files will be PDB or mmCIF.” <br><br>
+                        Or <br><br>
+                        “The uploaded files are CSVs in this format: [paste the first few rows of an example CSV so the AI can see the column headings and cell data format].”
+                    </blockquote>
+                    <p>
+                        The AI will then give you the code for the app. Copy and paste this into a text/code editor (like Notepad or VS Code) and save it as an HTML file (e.g., <code>my_research_app.html</code>). Double click on the HTML file in file explorer to open it in a browser. You can then use and test the app.
+                    </p>
+                    <p>
+                        If you want to make changes to the app (something is not working or you want to add a feature), just describe to the AI what change you want it to make. It will give you new code that you can copy and paste into the html file. Save the file and refresh the tab to see the new app version.
+                    </p>
+                </div>
+
+                <hr class="border-gray-800 my-12">
+
+                <div class="space-y-4">
+                    <h2 class="text-2xl font-bold text-white flex items-center gap-3">
+                        <i class="fa-solid fa-code text-purple-400 text-xl"></i> Complex apps
+                    </h2>
+                    <p>
+                        For more complex apps, it is better to use AI in a coding app like Visual Studio Code. Download VS Code (it's free!), open your draft app (the .html file) in VS Code, and ask the AI agent on the right hand side to make any changes you want. 
+                    </p>
+                    <p>
+                        You can send the AI agent in VS Code 50 free messages per month. If you need to send more than this and are a student, you can apply for GitHub Education. It will take a few days to get accepted and then you will have a much higher usage limit. You can also buy more credits if needed.
+                    </p>
+                    <p>
+                        Popular alternatives to VS Code for AI-assisted coding include Codex, Windsurf, Replit, Cursor, and Antigravity.
+                    </p>
+                </div>
+
+                <hr class="border-gray-800 my-12">
+
+                <div class="space-y-4">
+                    <h2 class="text-2xl font-bold text-white flex items-center gap-3">
+                        <i class="fa-solid fa-vial text-emerald-400 text-xl"></i> Test your app and review the code!
+                    </h2>
+                    <p>
+                        Don’t trust that the AI has done everything correctly, because it probably hasn’t! Before using the app for proper research or deploying it online, test the app to make sure everything works as it should. If the app processes data, upload a test file and check to see if the output is exactly what it should be.
+                    </p>
+                    <p>
+                        Read the code to check it is doing what it should. If you don’t know how to read computer code, copy and paste any section of the code (or all the code) into any AI and ask it to explain in simple English what the code is doing. You can also ask AI to add comments within the code that explain what each bit does.
+                    </p>
+                </div>
+
+                <hr class="border-gray-800 my-12">
+
+                <div class="space-y-6">
+                    <h2 class="text-2xl font-bold text-white flex items-center gap-3">
+                        <i class="fa-solid fa-shield-halved text-amber-500 text-xl"></i> Mitigate security issues
+                    </h2>
+                    <p>
+                        Before you deploy your app to the web, you should mitigate security issues. Here are some key things to do (you can ask AI for help if unsure):
+                    </p>
+                    
+                    <div class="space-y-6 pl-2">
+                        <div class="bg-gray-900/50 border border-gray-800 p-5 rounded-xl space-y-2">
+                            <div class="font-bold text-white text-base">1) Separate your code</div>
+                            <p class="text-gray-400">Move all the JavaScript into a separate JavaScript file (called <code>script.js</code>), stored in the same folder as your HTML file. The JavaScript is the code between the <code>&lt;script&gt;</code> and <code>&lt;/script&gt;</code> tags in the HTML file. In your HTML file, where the JavaScript used to be, have this instead:</p>
+                            <pre><code>&lt;script id="main-script" src="script.js"&gt;&lt;/script&gt;</code></pre>
+                        </div>
+
+                        <div class="bg-gray-900/50 border border-gray-800 p-5 rounded-xl space-y-2">
+                            <div class="font-bold text-white text-base">2) Remove inline events</div>
+                            <p class="text-gray-400">Replace <code>onclick</code> attributes with event handlers. For example, change:</p>
+                            <pre><code>&lt;button id="guide-btn" onclick="openStartGuide()"&gt;Open Guide&lt;/button&gt;</code></pre>
+                            <p class="text-gray-400">To:</p>
+                            <pre><code>&lt;button id="guide-btn"&gt;Open Guide&lt;/button&gt;</code></pre>
+                            <p class="text-gray-400">And add this to your <code>script.js</code>:</p>
+                            <pre><code>document.getElementById('guide-btn').addEventListener('click', openStartGuide);</code></pre>
+                        </div>
+
+                        <div class="bg-gray-900/50 border border-gray-800 p-5 rounded-xl space-y-2">
+                            <div class="font-bold text-white text-base">3) Add a Content-Security-Policy (CSP)</div>
+                            <p class="text-gray-400">Add a CSP meta tag to the <code>&lt;head&gt;</code> of your HTML file. A CSP tells the browser exactly which domains, resources, and script origins are trusted. Steps 1 and 2 above allow you to enforce a much stricter policy by completely banning inline scripts, heavily mitigating Cross-Site Scripting (XSS) injection attacks.</p>
+                        </div>
+
+                        <div class="bg-gray-900/50 border border-gray-800 p-5 rounded-xl space-y-2">
+                            <div class="font-bold text-white text-base">4) Use Subresource Integrity</div>
+                            <p class="text-gray-400">If your app imports external libraries (like D3.js), use a site like <a href="https://srihash.org/" target="_blank" class="text-[#60A5FA] underline hover:text-emerald-400 transition-colors">srihash.org</a> to generate a SHA-384 hash. Paste the hash into your code like this:</p>
+                            <pre><code>&lt;script src="https://d3js.org/d3.v7.min.js" integrity="sha384-CjloA8y00+1SDAUkjs099PVfnY2KmDC2BZnws9kh8D/lX1s46w6EPhpXdqMfjK6i" crossorigin="anonymous"&gt;&lt;/script&gt;</code></pre>
+                            <p class="text-gray-400">This acts as a digital fingerprint, protecting your users against supply chain attacks if the external hosting server is ever compromised.</p>
+                        </div>
+                        <div class="bg-gray-900/50 border border-gray-800 p-5 rounded-xl space-y-2">
+                            <div class="font-bold text-white text-base">5) Sanitize user, file, and AI inputs</div>
+                            <p class="text-gray-400">
+                                External data—such as file names, text typed into search boxes, or strings generated by AI agents—is untrusted input. If an app renders these strings using <code>innerHTML</code>, a maliciously named file or text payload could inject harmful scripts into your page. 
+                            </p>
+                            <p class="text-gray-400">
+                                For simple UI text changes, force the browser to treat input strictly as a string by using <code>textContent</code>:
+                            </p>
+                            <pre><code>element.textContent = file.name;</code></pre>
+                            <p class="text-gray-400">
+                                When you need to safely insert dynamic data into complex HTML layouts, use a dedicated escaping function to instantly make any code characters inert:
+                            </p>
+                            <pre><code>function escapeHtml(value) {
+    return String(value)
+        .replace(/&amp;/g, '&amp;amp;')
+        .replace(/&lt;/g, '&amp;lt;')
+        .replace(/&gt;/g, '&amp;gt;')
+        .replace(/"/g, '&amp;quot;')
+        .replace(/'/g, '&amp;#39;');
+}</code></pre>
+                        </div>
+                    </div>
+                </div>
+
+                <hr class="border-gray-800 my-12">
+
+                <div class="space-y-4">
+                    <h2 class="text-2xl font-bold text-white flex items-center gap-3">
+                        <i class="fa-solid fa-cloud-arrow-up text-blue-400 text-xl"></i> Deploy to the web
+                    </h2>
+                    <p>
+                        If you want to share your app with others, you can either just share the HTML and JavaScript files or you can deploy it on the web. If deploying it on the web, I would recommend using GitHub Pages. It’s super easy and free. Create a GitHub account and upload the app files to a new GitHub repository. The upload files need to be named <code>index.html</code> and <code>script.js</code>. 
+                    </p>
+                    <p>
+                        At the top of the repository page click Settings, then click Pages on the left panel, and deploy your app as a page. It will then say “Your site is live at [website URL]”. You also have the option to set a custom URL if you own one.
+                    </p>
+                </div>
+
+                <hr class="border-gray-800 my-12">
+
+                <div class="space-y-4">
+                    <p class="text-gray-400 text-base">
+                        Published on the 15th of June, 2026.
+                    </p>
+                </div>
+
+                <div class="bg-gradient-to-r from-gray-900/50 to-gray-920 border border-gray-800 rounded-2xl p-8 space-y-4 text-center md:text-left">
+                    <h2 class="text-2xl font-bold text-white flex items-center justify-center md:justify-start gap-3">
+                        <i class="fa-solid fa-envelope text-emerald-400"></i> Contact
+                    </h2>
+                    <p class="text-gray-400 text-base">
+                        If you have any further questions, feel free to reach out to me for help:
+                    </p>
+                    <div class="pt-2">
+                        <a href="mailto:joel.tregurtha@pg.canterbury.ac.nz" class="inline-flex items-center gap-2 bg-gray-800 hover:bg-gray-700 text-white font-medium px-6 py-3 rounded-xl transition-all duration-300 hover-wobble">
+                            <i class="fa-solid fa-paper-plane text-sm text-[#2eccbf]"></i>
+                            joel.tregurtha@pg.canterbury.ac.nz
+                        </a>
+                    </div>
+                </div>
+
+            </div>
+        </article>
+
+    </main>
+
+    <footer class="w-full py-12 px-8 border-t border-gray-900 bg-gray-950/50 text-center text-sm text-gray-500">
+        <nav class="flex flex-wrap justify-center gap-y-2 space-x-8 mb-6 text-sm font-medium text-gray-400">            
+            <a href="https://joeltre.github.io/StringScape/articles" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-solid fa-book-open mr-1"></i> Articles</a>
+            <a href="https://github.com/JoelTre/StringScape/tree/main" target="_blank" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-brands fa-github mr-1"></i> GitHub</a>
+            <a href="https://x.com/StringScapeApp" target="_blank" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-brands fa-x-twitter mr-1"></i> X</a>
+            <a href="https://www.youtube.com/@StringScape_app" target="_blank" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-brands fa-youtube mr-1"></i> YouTube</a>
+        </nav>
+        <p class="mb-2">StringScape is completely free and open-source under the Apache-2.0 License.</p>
+        <p class="mb-2">Developed by Joel Tregurtha with funding from the <a href="https://www.macdiarmid.ac.nz/" target="_blank" class="underline hover:text-gray-300 transition-colors">Macdiarmid Institute</a>.</p>
+        <p>&copy; 2026 StringScape App.</p>
+    </footer>
+
+    <script>
+        const sr = ScrollReveal({
+            distance: '40px',
+            duration: 1000,
+            delay: 150,
+            reset: false
+        });
+
+        sr.reveal('.reveal-hero', {
+            origin: 'top'
+        });
+
+        sr.reveal('.reveal-content', {
+            origin: 'bottom',
+            delay: 300
+        });
+    </script>
+</body>
+</html>
