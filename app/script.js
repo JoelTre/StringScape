@@ -3367,6 +3367,60 @@ def clean_numeric(values):
     let bgVoronoiOpacity = 0.35;
     let bgVoronoiBlur = 2;
     let bgVoronoiCache = { canvas: null, signature: '', lastBuildMs: 0 };
+    const APP_THEME_STORAGE_KEY = 'stringscape.appTheme';
+    const APP_MODE_STORAGE_KEY = 'stringscape.appMode';
+    const APP_THEME_PRESETS = {
+        grey: {
+            dark: {
+                bg: '#1a1a1a', surface: 'rgba(35, 35, 35, 0.95)', surfaceSoft: 'rgba(35, 35, 35, 0.9)',
+                surfaceStrong: '#161b22', surfacePanel: '#21262d', surfacePanelAlt: '#0d1117',
+                border: '#444', borderStrong: '#30363d', text: '#ffffff', muted: '#dce8f6',
+                accent: '#9ca3af', accentSoft: '#e5e7eb', accentStrong: '#6b7280', accentContrast: '#ffffff',
+                button: '#444', buttonHover: '#555', inputBg: '#242424', inputBorder: '#555', shadow: 'rgba(0,0,0,0.5)'
+            },
+            light: {
+                bg: '#ffffff', surface: 'rgba(255, 255, 255, 0.96)', surfaceSoft: 'rgba(248, 250, 252, 0.96)',
+                surfaceStrong: '#ffffff', surfacePanel: '#eef2f7', surfacePanelAlt: '#e5e7eb',
+                border: '#cbd5e1', borderStrong: '#b6c2d1', text: '#1f2937', muted: '#475569',
+                accent: '#64748b', accentSoft: '#94a3b8', accentStrong: '#334155', accentContrast: '#ffffff',
+                button: '#dbe2ea', buttonHover: '#cbd5e1', inputBg: '#ffffff', inputBorder: '#cbd5e1', shadow: 'rgba(15,23,42,0.14)'
+            }
+        },
+        blue: {
+            dark: {
+                bg: '#171c24', surface: 'rgba(28, 34, 45, 0.96)', surfaceSoft: 'rgba(24, 30, 40, 0.94)',
+                surfaceStrong: '#111720', surfacePanel: '#1e2733', surfacePanelAlt: '#0d1117',
+                border: '#31445b', borderStrong: '#2b3c50', text: '#eef6ff', muted: '#dbe9f7',
+                accent: '#3498db', accentSoft: '#49aef1', accentStrong: '#1c3e68', accentContrast: '#ffffff',
+                button: '#213245', buttonHover: '#2a4260', inputBg: '#11161d', inputBorder: '#38506d', shadow: 'rgba(0,0,0,0.52)'
+            },
+            light: {
+                bg: '#ffffff', surface: 'rgba(241, 248, 255, 0.96)', surfaceSoft: 'rgba(241, 248, 255, 0.96)',
+                surfaceStrong: '#ffffff', surfacePanel: '#e8f2fb', surfacePanelAlt: '#dbeaf7',
+                border: '#bfd2e6', borderStrong: '#a9c3df', text: '#12324a', muted: '#274a66',
+                accent: '#3498db', accentSoft: '#49aef1', accentStrong: '#1c5b86', accentContrast: '#ffffff',
+                button: '#77a1bd', buttonHover: '#86aec9', inputBg: '#f9fbfd', inputBorder: '#b7cde2', shadow: 'rgba(9,30,66,0.14)'
+            }
+        },
+        pink: {
+            dark: {
+                bg: '#20131c', surface: 'rgba(45, 24, 38, 0.96)', surfaceSoft: 'rgba(35, 18, 30, 0.94)',
+                surfaceStrong: '#1a0f16', surfacePanel: '#2a1d27', surfacePanelAlt: '#120b10',
+                border: '#56344b', borderStrong: '#432939', text: '#fff1f7', muted: '#f6dce7',
+                accent: '#ec4899', accentSoft: '#f9a8d4', accentStrong: '#9d174d', accentContrast: '#ffffff',
+                button: '#3c2432', buttonHover: '#553044', inputBg: '#281822', inputBorder: '#5e3750', shadow: 'rgba(0,0,0,0.54)'
+            },
+            light: {
+                bg: '#fdf2f8', surface: 'rgba(255, 255, 255, 0.97)', surfaceSoft: 'rgba(252, 242, 247, 0.97)',
+                surfaceStrong: '#ffffff', surfacePanel: '#fbe6f0', surfacePanelAlt: '#f4d7e4',
+                border: '#ebc6d6', borderStrong: '#d9adc2', text: '#3b182a', muted: '#6b2949',
+                accent: '#ec4899', accentSoft: '#f9a8d4', accentStrong: '#be185d', accentContrast: '#ffffff',
+                button: '#f2d6e2', buttonHover: '#ecc3d5', inputBg: '#ffffff', inputBorder: '#dfb8ca', shadow: 'rgba(82, 24, 56, 0.14)'
+            }
+        }
+    };
+    let currentColorTheme = localStorage.getItem(APP_THEME_STORAGE_KEY) || 'grey';
+    let currentUiMode = localStorage.getItem(APP_MODE_STORAGE_KEY) || 'dark';
     let isFrameMode = false;
     let exportFrame = null; // {x, y, w, h} in world coordinates
     let isDrawing = false;
@@ -3439,6 +3493,80 @@ def clean_numeric(values):
         console.log("function updateBackgroundControlsUI()");
         const wrap = document.getElementById('bgVoronoiControls');
         if (wrap) wrap.style.display = backgroundMode === 'voronoi' ? 'block' : 'none';
+    }
+
+    function getCanvasBackgroundColor() {
+        const computed = getComputedStyle(canvas).backgroundColor;
+        if (computed && computed !== 'rgba(0, 0, 0, 0)') return computed;
+        return document.getElementById('bgColor')?.value || '#1a1a1a';
+    }
+
+    function smoothThemeRedraw(durationMs = 380) {
+        const start = performance.now();
+        const step = (now) => {
+            draw();
+            if (now - start < durationMs) requestAnimationFrame(step);
+        };
+        requestAnimationFrame(step);
+    }
+
+    function updateThemeControlsUI() {
+        const themeSelect = document.getElementById('colorTheme');
+        if (themeSelect && themeSelect.value !== currentColorTheme) themeSelect.value = currentColorTheme;
+        const modeToggle = document.getElementById('darkModeToggle');
+        if (modeToggle) {
+            modeToggle.dataset.mode = currentUiMode;
+            modeToggle.setAttribute('aria-pressed', String(currentUiMode === 'dark'));
+        }
+    }
+
+    function applyTheme(themeName = currentColorTheme, mode = currentUiMode, options = {}) {
+        const preset = APP_THEME_PRESETS[themeName] || APP_THEME_PRESETS.grey;
+        const palette = preset[mode === 'light' ? 'light' : 'dark'];
+        currentColorTheme = APP_THEME_PRESETS[themeName] ? themeName : 'grey';
+        currentUiMode = mode === 'light' ? 'light' : 'dark';
+
+        const root = document.documentElement.style;
+        root.setProperty('--bg-color', palette.bg);
+        root.setProperty('--surface-color', palette.surface);
+        root.setProperty('--surface-color-soft', palette.surfaceSoft);
+        root.setProperty('--surface-color-strong', palette.surfaceStrong);
+        root.setProperty('--surface-color-panel', palette.surfacePanel);
+        root.setProperty('--surface-color-panel-alt', palette.surfacePanelAlt);
+        root.setProperty('--border-color', palette.border);
+        root.setProperty('--border-color-strong', palette.borderStrong);
+        root.setProperty('--text-color', palette.text);
+        root.setProperty('--muted-text-color', palette.muted);
+        root.setProperty('--accent-color', palette.accent);
+        root.setProperty('--accent-color-soft', palette.accentSoft);
+        root.setProperty('--accent-color-strong', palette.accentStrong);
+        root.setProperty('--accent-contrast', palette.accentContrast);
+        root.setProperty('--button-bg', palette.button);
+        root.setProperty('--button-bg-hover', palette.buttonHover);
+        root.setProperty('--input-bg', palette.inputBg);
+        root.setProperty('--input-border', palette.inputBorder);
+        root.setProperty('--shadow-color', palette.shadow);
+
+        document.body.dataset.appTheme = currentColorTheme;
+        document.body.dataset.appMode = currentUiMode;
+
+        const bgColorInput = document.getElementById('bgColor');
+        if (bgColorInput) bgColorInput.value = palette.bg;
+
+        updateThemeControlsUI();
+        if (currentViewId === 'Embeddings') {
+            try { markEmbeddingsDirty(true); } catch (e) {}
+        }
+        if (options.persist !== false) {
+            localStorage.setItem(APP_THEME_STORAGE_KEY, currentColorTheme);
+            localStorage.setItem(APP_MODE_STORAGE_KEY, currentUiMode);
+        }
+        if (options.smooth !== false) smoothThemeRedraw();
+    }
+
+    function getThemeCssVar(name, fallback = '') {
+        const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+        return value || fallback;
     }
 
     // This function extracts the embedding kind (e.g., 'network' or 'sequence') from a given file name (ending in .h5) based on specific naming patterns. 
@@ -7139,7 +7267,7 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         const layout = buildMindMapLayout();
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#1a1a1a';
+        ctx.fillStyle = getCanvasBackgroundColor();
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
         if (!layout || !layout.nodes.size) {
@@ -12768,7 +12896,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             };
 
             // 1. View Menu Section
-            container.append("div").attr("class", "view-menu-header").style("font-size", "18px").style("color", "white").text("View Menu");
+            container.append("div").attr("class", "view-menu-header").style("font-size", "18px").text("View Menu");
             createBtn({ id: 'base', name: 'Full Network (F)' });
             const hasSelection = selectedNodes && selectedNodes.size > 0;
 
@@ -14321,7 +14449,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         console.log("function drawPieChartView()")
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#1a1a1a';
+        ctx.fillStyle = getCanvasBackgroundColor();
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         
         // Parse current color mode to get data
@@ -14501,12 +14629,12 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             ctx.lineTo(x, y + r);
             ctx.arcTo(x, y, x + r, y, r);
             ctx.closePath();
-            ctx.fillStyle = isActive ? '#4caf50' : 'rgba(40, 40, 40, 0.9)';
+            ctx.fillStyle = isActive ? getThemeCssVar('--accent-color', '#4caf50') : getThemeCssVar('--surface-color-panel', 'rgba(40, 40, 40, 0.9)');
             ctx.fill();
-            ctx.strokeStyle = isActive ? '#53bd57' : '#555';
+            ctx.strokeStyle = isActive ? getThemeCssVar('--accent-color-soft', '#53bd57') : getThemeCssVar('--input-border', '#555');
             ctx.lineWidth = 1.5;
             ctx.stroke();
-            ctx.fillStyle = '#fff';
+            ctx.fillStyle = getThemeCssVar('--accent-contrast', '#fff');
             ctx.font = 'bold 13px Arial';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
@@ -14540,7 +14668,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     function drawHistogramView() {
         console.log("function drawHistogramView()");
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#1a1a1a';
+        ctx.fillStyle = getCanvasBackgroundColor();
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         
         if (!currentColorMode || !currentColorRange) return;
@@ -14826,12 +14954,12 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             ctx.lineTo(x, y + r);
             ctx.arcTo(x, y, x + r, y, r);
             ctx.closePath();
-            ctx.fillStyle = isActive ? '#4caf50' : 'rgba(40, 40, 40, 0.9)';
+            ctx.fillStyle = isActive ? getThemeCssVar('--accent-color', '#4caf50') : getThemeCssVar('--surface-color-panel', 'rgba(40, 40, 40, 0.9)');
             ctx.fill();
-            ctx.strokeStyle = isActive ? '#53bd57' : '#555';
+            ctx.strokeStyle = isActive ? getThemeCssVar('--accent-color-soft', '#53bd57') : getThemeCssVar('--input-border', '#555');
             ctx.lineWidth = 1.5;
             ctx.stroke();
-            ctx.fillStyle = '#fff';
+            ctx.fillStyle = getThemeCssVar('--accent-contrast', '#fff');
             ctx.font = 'bold 13px Arial';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
@@ -14855,7 +14983,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     function drawVennDiagramView() {
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#1a1a1a';
+        ctx.fillStyle = getCanvasBackgroundColor();
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
         syncVennSourcesWithOptions();
@@ -15203,7 +15331,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     function drawScatterPlotView() {
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#1a1a1a';
+        ctx.fillStyle = getCanvasBackgroundColor();
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
         const margins = { left: 300, right: 220, top: 145, bottom: 220 };
@@ -15492,7 +15620,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         if (currentViewId === 'selected' && (activeSubData?.nodes?.length || 0) === 0) {
             ctx.setTransform(1, 0, 0, 1, 0, 0);
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.fillStyle = '#1a1a1a';
+            ctx.fillStyle = getCanvasBackgroundColor();
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             ctx.fillStyle = '#ccc';
             ctx.font = '28px Arial';
@@ -16814,7 +16942,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             const toggleContainer = legend.append("div").style("margin-bottom", "8px");
             const toggle = toggleContainer.append("div")
                 .style("cursor", "pointer")
-                .style("color", "#fff")
+                .style("color", "var(--textColor)")
                 .style("font-size", "13px")
                 .style("padding", "6px")
                 .style("background", "rgba(255,255,255,0.08)")
@@ -18772,6 +18900,17 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         invalidateVoronoiCache();
         draw();
     };
+    document.getElementById('colorTheme').onchange = e => {
+        applyTheme(e.target.value, currentUiMode);
+        invalidateVoronoiCache();
+        draw();
+    };
+    document.getElementById('darkModeToggle').onclick = () => {
+        const nextMode = currentUiMode === 'dark' ? 'light' : 'dark';
+        applyTheme(currentColorTheme, nextMode);
+        invalidateVoronoiCache();
+        draw();
+    };
     document.getElementById('bgVoronoiOpacitySlider').oninput = e => {
         bgVoronoiOpacity = +e.target.value;
         document.getElementById('val-bg-voronoi-opacity').innerText = Number(bgVoronoiOpacity.toFixed(2)).toString();
@@ -18782,6 +18921,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         document.getElementById('val-bg-voronoi-blur').innerText = Number(bgVoronoiBlur.toFixed(1)).toString();
         draw();
     };
+    applyTheme(currentColorTheme, currentUiMode, { persist: false });
     updateBackgroundControlsUI();
     document.getElementById('physBtn').onclick = (e) => togglePhysics(!physicsEnabled, 'physBtn');
     document.getElementById('stopPhysBtn').onclick = (e) => {
