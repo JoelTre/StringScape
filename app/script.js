@@ -3382,8 +3382,8 @@ def clean_numeric(values):
                 bg: '#ffffff', surface: 'rgba(255, 255, 255, 0.96)', surfaceSoft: 'rgba(248, 250, 252, 0.96)',
                 surfaceStrong: '#ffffff', surfacePanel: '#eef2f7', surfacePanelAlt: '#e5e7eb',
                 border: '#cbd5e1', borderStrong: '#b6c2d1', text: '#1f2937', muted: '#475569',
-                accent: '#64748b', accentSoft: '#94a3b8', accentStrong: '#334155', accentContrast: '#ffffff',
-                button: '#dbe2ea', buttonHover: '#cbd5e1', inputBg: '#ffffff', inputBorder: '#cbd5e1', shadow: 'rgba(15,23,42,0.14)'
+                accent: '#8c96a7', accentSoft: '#565e69', accentStrong: '#334155', accentContrast: '#ffffff',
+                button: '#7b8186', buttonHover: '#cbd5e1', inputBg: '#ffffff', inputBorder: '#cbd5e1', shadow: 'rgba(15,23,42,0.14)'
             }
         },
         blue: {
@@ -3414,8 +3414,8 @@ def clean_numeric(values):
                 bg: '#fdf2f8', surface: 'rgba(255, 255, 255, 0.97)', surfaceSoft: 'rgba(252, 242, 247, 0.97)',
                 surfaceStrong: '#ffffff', surfacePanel: '#fbe6f0', surfacePanelAlt: '#f4d7e4',
                 border: '#ebc6d6', borderStrong: '#d9adc2', text: '#3b182a', muted: '#6b2949',
-                accent: '#ec4899', accentSoft: '#f9a8d4', accentStrong: '#be185d', accentContrast: '#ffffff',
-                button: '#f2d6e2', buttonHover: '#ecc3d5', inputBg: '#ffffff', inputBorder: '#dfb8ca', shadow: 'rgba(82, 24, 56, 0.14)'
+                accent: '#ec4899', accentSoft: '#f782c2', accentStrong: '#e67da8', accentContrast: '#ffffff',
+                button: '#eba5c3', buttonHover: '#ecc3d5', inputBg: '#ffffff', inputBorder: '#dfb8ca', shadow: 'rgba(82, 24, 56, 0.14)'
             }
         }
     };
