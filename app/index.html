@@ -36,7 +36,7 @@
         worker-src 'self' blob: https://unpkg.com;
     ">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>StringScape - Network Visualiser</title>
+    <title>StringScape app</title>
     <!-- Below are third party scripts that are imported into StringScape. The import uses a SHA-384 hash to ensure the scripts have not been tampered with, for security purposes -->
     <!-- D3.js -->
     <script src="https://d3js.org/d3.v7.min.js" integrity="sha384-CjloA8y00+1SDAUkjs099PVfnY2KmDC2BZnws9kh8D/lX1s46w6EPhpXdqMfjK6i" crossorigin="anonymous"></script>
@@ -2797,7 +2797,7 @@
         #more-toggle {
             display: block;
             text-align: center;
-            font-size: 11px;
+            font-size: 13px;
             margin-top: 6px;
         }
 
@@ -3644,7 +3644,7 @@
                     class="upload-inline-open-btn" 
                 Open File
             </button>
-            <div class="uploaded-file-items"><span class="uploaded-file-list-empty">No files uploaded</span></div>
+            <div class="uploaded-file-items"><span class="uploaded-file-list-empty">No files loaded</span></div>
         </div>
         <div class="upload-progress" id="fileInputProgress"><div class="upload-progress-track"><div class="upload-progress-bar" id="fileInputProgressBar"></div></div><div class="upload-progress-text">Loading...</div></div>
 
@@ -3655,19 +3655,19 @@
                     class="upload-inline-open-btn" 
                 Open Files
             </button>
-            <div class="uploaded-file-items"><span class="uploaded-file-list-empty">No files uploaded</span></div>
+            <div class="uploaded-file-items"><span class="uploaded-file-list-empty">No files loaded</span></div>
         </div>
         <div class="upload-progress" id="infoInputProgress"><div class="upload-progress-track"><div class="upload-progress-bar" id="infoInputProgressBar"></div></div><div class="upload-progress-text">Loading...</div></div>
 
-        <span id="more-toggle" class="dropdown-toggle">More ▾</span>
+        <span id="more-toggle" class="dropdown-toggle">Advanced ▾</span>
         <div id="more-drop" class="dropdown-content">
             <!-- <button id="genomeInputBtn" type="button" style="background:#3498db; margin-bottom:10px;">Load Genome (fasta) (optional)</button> -->
             <!-- <input type="file" id="genomeInput" accept=".fa,.fasta,.fna" multiple style="display:none;"> -->
 
-            <label style="font-size:14px;">Build Score Threshold (optional)</label>
+            <label style="font-size:14px;">Build Score Threshold</label>
             <input type="number" id="thresholdInput" value="0">
 
-            <label style="font-size:14px;">Seed ID (optional)</label>
+            <label style="font-size:14px;">Seed ID</label>
             <input type="text" id="seedInput" placeholder="e.g. W2P887">
         </div>
 
@@ -3923,7 +3923,7 @@
         <hr style="border:0; border-top:1px solid var(--border-color);">
         <p style="font-size:0.9em; color: var(--muted-text-color);">
         <b>App basics:</b><br>
-            The app displays network graphs of nodes (representing proteins) and links/edges (representing connections between proteins, such as physical interactions). The nodes and links have data associated with them in the form of variables. You can change the size or colour of the nodes and links based on these variables. You can also visualise the variables in as graphs (hover over “Full Network” at the bottom to see the view menu). 
+            The app displays network graphs of nodes (representing proteins) and links/edges (representing connections between proteins, such as physical interactions). The nodes and links have data associated with them in the form of variables. You can change the size or colour of the nodes and links based on these variables. You can also visualise the variables as graphs (hover over “Full Network” at the bottom to see the view menu). 
         </p>
 
         <p style="font-size:0.9em; color: var(--muted-text-color);">
