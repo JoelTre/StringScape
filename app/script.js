@@ -444,7 +444,7 @@
     let aiPromptsPanelOpen = false;
     const AI_CHAT_HISTORY_STORAGE_KEY = 'stringscape_ai_chat_history_v1';
     const AI_SCRIPT_HISTORY_STORAGE_KEY = 'stringscape_ai_script_history_v1';
-    const AI_PYTHON_CONSOLE_SYSTEM_PROMPT = 'You are a Python script generator for StringScape. Return only Python code that can run in Pyodide. Do not include markdown code fences. Use app_data directly (already injected). If the user wants app actions, include tool_call("ToolName", {"arg":"value"}) lines in the script. Keep scripts concise and safe. If you have any questions write them as comments in the code (e.g. # Question: ...).';
+    const AI_PYTHON_CONSOLE_SYSTEM_PROMPT = 'You are a Python script generator for StringScape. Return only Python code that can run in Pyodide. Do not include markdown code fences. app_data and ss are already injected. For app actions use ss.search_and_select(), ss.add_to_collection(), ss.set_view(), ss.set_node_colouring(), ss.select(), and ss.set_color(); every method returns a structured status dictionary. Use with ss.batch_update(): for many mutations. Keep scripts concise and safe.';
     const AI_PYTHON_SCRIPT_INSTRUCTIONS_TEXT = `You can write Python scripts that run inside StringScape using Pyodide.
 
         Available data:
@@ -476,16 +476,18 @@
         - For variable stats, use values from app_data["python_variables"] rather than scanning app_data["nodes"].
         - Use print(...) to show output.
 
-        Tool calls inside scripts:
-        - You can perform app actions with lines such as:
-        tool_call("Change_node_colouring", {"variable_name": "size"})
-        tool_call("Change_view", {"view_name": "selected"})
-        - These tool_call lines are executed by StringScape before Python execution.
-        - Available tools match the AI tools (for example Search_and_select, Change_node_colouring, Change_view, Save_to_collection, etc.).`;
+        StringScape API (ss is already available; import stringscape as ss is also supported):
+        - ss.search_and_select(query, scope='all', animate=False)
+        - ss.select(node_id, append=True, animate=False), ss.select_many(node_ids), ss.deselect_all()
+        - ss.add_to_collection(name), ss.set_view(view), ss.set_node_colouring(variable), ss.set_color(node_id, '#ff0055')
+        - ss.get_selected_nodes(), ss.list_collections(), ss.list_views()
+        - All methods return structured status dictionaries. A no-match search returns status='warning' and matched_count=0, not an exception.
+        - Use with ss.batch_update(): around large edit loops; it renders once when the block exits.
+        - App state updates immediately. Set animate=True only when a visual transition is wanted.`;
 
     const AI_EXAMPLE_SCRIPTS = [
         `# Summary of selected nodes by centrality\nvals = app_data["python_variables"].get("centrality", [])\nclean = [float(v) for v in vals if v is not None and str(v).strip() != ""]\nprint("Selected centrality values:", len(clean))\nif clean:\n    print("Mean:", sum(clean) / len(clean))`,
-        `# Change the app state with tool calls\ntool_call("Change_view", {"view_name": "selected"})\ntool_call("Change_node_colouring", {"variable_name": "centrality"})\nprint("Switched to selected view and colored by centrality.")`,
+        `# Change the app state with the injected StringScape API\nprint(ss.set_view("selected"))\nprint(ss.set_node_colouring("centrality"))`,
         `# Top values from protein size\nvals = app_data["python_variables"].get("size", [])\nclean = [float(v) for v in vals if v is not None and str(v).strip() != ""]\nclean.sort(reverse=True)\nprint("Top 10 sizes:")\nfor v in clean[:10]:\n    print(v)`
     ];
     let aiChatHistoryRecords = [];
@@ -790,16 +792,14 @@
         lines.push('- For variable stats, use values from app_data["python_variables"] rather than scanning app_data["nodes"].');
         lines.push('- Use print(...) to show output.');
         lines.push('');
-        lines.push('Tool calls inside scripts:');
-        lines.push('- Write tool calls as lines such as tool_call("Change_node_colouring", {"variable_name": "size"}).');
-        lines.push('- These tool_call lines are executed by StringScape before Python execution.');
-        lines.push('- Available tools:');
-        aiTools.forEach(toolEntry => {
-            const tool = toolEntry?.function || {};
-            lines.push(`  - ${tool.name}: ${tool.description || 'No description provided.'}`);
-            const params = aiFormatToolParameters(toolEntry);
-            if (params && params !== 'none') lines.push(`    Parameters: ${params}`);
-        });
+        lines.push('StringScape API (ss is already injected):');
+        lines.push('- ss.search_and_select(query, scope="all", animate=False)');
+        lines.push('- ss.select(node_id, append=True), ss.select_many(node_ids), ss.deselect_all()');
+        lines.push('- ss.add_to_collection(name), ss.set_view(view), ss.set_node_colouring(variable), ss.set_color(node_id, "#ff0055")');
+        lines.push('- ss.get_selected_nodes(), ss.list_collections(), ss.list_views()');
+        lines.push('- Every method returns a structured status dictionary. No-match searches return status="warning" and matched_count=0.');
+        lines.push('- For large edits: with ss.batch_update(): ...  This produces one render on exit.');
+        lines.push('- State changes are applied before each result is returned; animate=False is the instant default.');
         return lines.join('\n').replace(/&quot;/g, '"');
     }
 
@@ -1781,6 +1781,125 @@
         return `Saved ${selectedIds.length} selected node(s) to collection "${collectionName}".`;
     }
 
+    // Direct, structured Python API bridge. State updates happen before a result is
+    // returned; draw work is coalesced and awaited by the Python runner's flush().
+    const stringScapePythonBridge = (() => {
+        let batchDepth = 0, pendingDraw = null;
+        const result = (status, values = {}) => ({ status, ...values });
+        const queueDraw = (animate = false) => {
+            if (batchDepth) return;
+            // The default script path is deliberately immediate.  This makes the
+            // Promise already settled before the Python method returns, so a following
+            // ss call cannot observe stale graph state.  Animated calls use a frame and
+            // are awaited by flush() before the script is reported complete.
+            if (!animate) { draw(); pendingDraw = Promise.resolve(); return; }
+            if (!pendingDraw) pendingDraw = new Promise(resolve => {
+                const finish = () => { try { draw(); } finally { pendingDraw = null; resolve(); } };
+                requestAnimationFrame(finish);
+            });
+        };
+        const activeNodes = () => currentViewId === 'base' ? nodes : (activeSubData?.nodes || []);
+        const selected = () => Array.from(getEffectiveSelectedNodesSet() || new Set());
+        const normal = value => String(value || '').trim().toLowerCase();
+        const call = (method, args = {}) => {
+            const animate = args.animate === true;
+            try {
+                if (method === 'search_and_select') {
+                    const query = String(args.query || '').trim(), requestedScope = String(args.scope || 'all');
+                    const scopeOptions = [...(document.getElementById('searchScope')?.options || [])].map(option => option.value);
+                    const scope = scopeOptions.length && !scopeOptions.includes(requestedScope) ? 'all' : requestedScope;
+                    if (!query) return result('warning', { query, matched_count: 0, selected_node_ids: [], message: 'No search query provided.' });
+                    // Use the same path as the search button, including its Boolean
+                    // query handling and view-specific behaviour.
+                    const input = document.getElementById('searchInput');
+                    const scopeInput = document.getElementById('searchScope');
+                    if (input && scopeInput && typeof triggerSearch === 'function') {
+                        input.value = query;
+                        scopeInput.value = scope;
+                        triggerSearch();
+                    } else {
+                    const matches = new Map();
+                    query.split(/[\s,]+/).filter(Boolean).forEach(term => activeNodes().forEach(node => {
+                        if (matchesSearchQuery(node, proteinMetadata.get(node.id) || {}, term.toLowerCase(), scope)) matches.set(node.id, node);
+                    }));
+                        applySearchLogic([...matches.values()], query);
+                    }
+                    const matchedIds = selected(); queueDraw(animate);
+                    return result(matchedIds.length ? 'success' : 'warning', { query, scope, matched_count: matchedIds.length, selected_node_ids: matchedIds, message: matchedIds.length ? undefined : 'No nodes matched this query.' });
+                }
+                if (method === 'select') {
+                    const ids = (Array.isArray(args.node_ids) ? args.node_ids : [args.node_id ?? args.id]).filter(x => x != null).map(String);
+                    const found = activeNodes().filter(node => ids.includes(String(node.id)));
+                    const next = args.append === false ? found : activeNodes().filter(node => selected().includes(node.id) || ids.includes(String(node.id)));
+                    selectNodes(next, false, 'Python API selection'); queueDraw(animate);
+                    return result(found.length ? 'success' : 'warning', { requested_node_ids: ids, selected_node_ids: selected(), selected_count: selected().length, missing_node_ids: ids.filter(id => !found.some(node => String(node.id) === id)) });
+                }
+                if (method === 'deselect_all') { selectNodes([], false, 'Python API deselect'); queueDraw(animate); return result('success', { selected_count: 0, selected_node_ids: [] }); }
+                if (method === 'expand_to_connected') {
+                    const before = selected();
+                    if (!before.length) return result('warning', { previous_count: 0, selected_count: 0, message: 'No nodes are selected.' });
+                    const expanded = modifySelection(1);
+                    selectedNodes = expanded; queueDraw(animate);
+                    return result('success', { previous_count: before.length, selected_count: expanded.size, selected_node_ids: [...expanded] });
+                }
+                if (method === 'create_collection') {
+                    const name = String(args.name || '').trim();
+                    if (!name) return result('warning', { message: 'A collection name is required.' });
+                    if (collections.has(name)) return result('warning', { collection: name, created: false, message: 'Collection already exists.' });
+                    collections.set(name, { nodeIds: new Set(), nodes: [], links: [] }); updateViewMenu(); queueDraw(animate);
+                    return result('success', { collection: name, created: true, node_count: 0 });
+                }
+                if (method === 'delete_collection') {
+                    const name = String(args.name || '').trim();
+                    if (!collections.has(name)) return result('warning', { collection: name, deleted: false, message: 'Collection was not found.' });
+                    const nodeCount = collections.get(name).nodeIds?.size || 0; collections.delete(name); updateViewMenu(); refreshLegendIfCollectionMode(); queueDraw(animate);
+                    return result('success', { collection: name, deleted: true, removed_node_count: nodeCount });
+                }
+                if (method === 'add_to_collection') {
+                    let name = String(args.name || args.collection_name || '').trim(); const ids = selected();
+                    if (!ids.length) return result('warning', { collection: name, added_count: 0, message: 'No nodes are selected.' });
+                    if (!name) name = `Python Collection ${collections.size + 1}`;
+                    const created = !collections.has(name); if (created) collections.set(name, { nodeIds: new Set(), nodes: [], links: [] });
+                    const collection = collections.get(name), before = collection.nodeIds.size;
+                    ids.forEach(id => collection.nodeIds.add(id)); collection.nodes = nodes.filter(node => collection.nodeIds.has(node.id));
+                    refreshLegendIfCollectionMode(); updateViewMenu(); queueDraw(animate);
+                    return result('success', { collection: name, created, added_count: collection.nodeIds.size - before, collection_count: collection.nodeIds.size, node_ids: ids });
+                }
+                if (method === 'set_view') {
+                    const raw = String(args.view || args.view_name || args.name || '').trim();
+                    const aliases = { 'full network':'base', base:'base', selected:'selected', 'selected nodes':'selected', scatter:'Scatter Plot', 'scatter plot':'Scatter Plot', venn:'Venn Diagram', 'venn diagram':'Venn Diagram', histogram:'histogram', pie:'pie_chart', 'pie chart':'pie_chart', 'mind map':'Mind Map', embeddings:'Embeddings' };
+                    // Collection buttons display their name but internally use coll_<name>.
+                    // Accept either form so scripts can use the same label the user sees.
+                    const view = aliases[normal(raw)] || (collections.has(raw) ? `coll_${raw}` : raw);
+                    if (!['base','selected','Scatter Plot','Venn Diagram','histogram','pie_chart','Mind Map','Embeddings'].includes(view) && !(view.startsWith('coll_') && collections.has(view.slice(5)))) return result('warning', { view: raw, message: 'View was not found.' });
+                    switchView(view); queueDraw(animate); return result('success', { view, animate });
+                }
+                if (method === 'set_node_colouring') {
+                    const requested = String(args.variable || args.variable_name || args.name || '').trim();
+                    const entries = getVisibleColorModeVariableEntries?.() || [];
+                    const alias = { 'degrees of separation':'layer', 'eigenvector centrality':'eigen', 'protein size':'size' };
+                    const entry = entries.find(item => [item.key, item.label, item.value].some(v => normal(v) === normal(requested)));
+                    const mode = entry?.key || alias[normal(requested)] || requested;
+                    const select = document.getElementById('colorMode');
+                    if (!select || ![...select.options].some(option => option.value === mode)) return result('warning', { variable: requested, message: 'Colour variable was not found.' });
+                    select.value = mode; handleColorModeChange(mode); queueDraw(animate); return result('success', { variable: mode, animate });
+                }
+                if (method === 'set_color') {
+                    const nodeId = String(args.node_id ?? args.id ?? ''), color = String(args.color || ''), node = nodeMap.get(nodeId);
+                    if (!node || !/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return result('warning', { node_id: nodeId, color, message: 'Node or colour was invalid.' });
+                    node.col = color; queueDraw(animate); return result('success', { node_id: nodeId, color });
+                }
+                if (method === 'get_selected_nodes') return result('success', { selected_count: selected().length, selected_node_ids: selected() });
+                if (method === 'list_collections') return result('success', { collections: [...collections.entries()].map(([name, c]) => ({ name, node_count: c.nodeIds?.size || 0 })) });
+                if (method === 'list_views') return result('success', { current_view: currentViewId, views: ['base','selected','Scatter Plot','Venn Diagram','histogram','pie_chart','Mind Map','Embeddings', ...[...collections.keys()].map(name => `coll_${name}`)] });
+                if (method === 'begin_batch') { batchDepth++; return result('success', { batch_depth: batchDepth }); }
+                if (method === 'end_batch') { batchDepth = Math.max(0, batchDepth - 1); if (!batchDepth) queueDraw(animate); return result('success', { batch_depth: batchDepth }); }
+                return result('warning', { method, message: 'Unknown StringScape API method.' });
+            } catch (error) { return result('error', { method, message: error?.message || String(error) }); }
+        };
+        return { call_json: (method, args) => JSON.stringify(call(method, args || {})), flush: () => Promise.resolve(pendingDraw).then(() => ({ status: 'success' })) };
+    })();
+
     // This function captures a screenshot of the current view and returns it as a data URL for the AI to view.
     async function aiCaptureScreenshot() {
         if (typeof html2canvas !== 'function') {
@@ -2417,16 +2536,65 @@ def clean_numeric(values):
                 // Convert the whole suite to Python-friendly formats
                 const pyContext = pyodideInstance.toPy(researchContext);
                 
-                // --- CHANGE THIS SECTION ---
-                // Directly set 'app_data' in the globals
                 pyodideInstance.globals.set("app_data", pyContext);
-                // ----------------------------
+                pyodideInstance.globals.set("_stringscape_bridge", stringScapePythonBridge);
+                // ss is injected for every run.  The bridge serializes structured JS
+                // results, while to_js makes Python arguments safe JS values.
+                pyodideInstance.runPython(`
+import json, sys, types
+from pyodide.ffi import to_js
+from js import Object
+_stringscape_api_results = []
+
+class _StringScapeAPI:
+    def _call(self, method, **kwargs):
+        # Pyodide's default dict conversion is a JS Map. The bridge API uses
+        # named object properties, so preserve that shape explicitly.
+        raw = _stringscape_bridge.call_json(method, to_js(kwargs, dict_converter=Object.fromEntries))
+        response = json.loads(raw)
+        _stringscape_api_results.append(response)
+        return response
+    def search_and_select(self, query, scope='all', animate=False): return self._call('search_and_select', query=query, scope=scope, animate=animate)
+    def select(self, node_id, append=True, animate=False): return self._call('select', node_id=node_id, append=append, animate=animate)
+    def select_many(self, node_ids, append=True, animate=False): return self._call('select', node_ids=list(node_ids), append=append, animate=animate)
+    def deselect_all(self, animate=False): return self._call('deselect_all', animate=animate)
+    def expand_to_connected(self, animate=False): return self._call('expand_to_connected', animate=animate)
+    def create_collection(self, name, animate=False): return self._call('create_collection', name=name, animate=animate)
+    def delete_collection(self, name, animate=False): return self._call('delete_collection', name=name, animate=animate)
+    def add_to_collection(self, name, animate=False): return self._call('add_to_collection', name=name, animate=animate)
+    def set_view(self, view, animate=False): return self._call('set_view', view=view, animate=animate)
+    def set_node_colouring(self, variable, animate=False): return self._call('set_node_colouring', variable=variable, animate=animate)
+    def set_color(self, node_id, color, animate=False): return self._call('set_color', node_id=node_id, color=color, animate=animate)
+    def get_selected_nodes(self): return self._call('get_selected_nodes')
+    def list_collections(self): return self._call('list_collections')
+    def list_views(self): return self._call('list_views')
+    def batch_update(self, animate=False): return _StringScapeBatch(self, animate)
+
+class _StringScapeBatch:
+    def __init__(self, api, animate): self.api, self.animate, self.result = api, animate, None
+    def __enter__(self): return self.api._call('begin_batch')
+    def __exit__(self, exc_type, exc, tb):
+        self.result = self.api._call('end_batch', animate=self.animate)
+        return False
+
+ss = _StringScapeAPI()
+_stringscape_module = types.ModuleType('stringscape')
+_stringscape_module.ss = ss
+_stringscape_module.__dict__.update({name: getattr(ss, name) for name in dir(ss) if not name.startswith('_')})
+sys.modules['stringscape'] = _stringscape_module
+                `);
 
                 await pyodideInstance.runPythonAsync(code);
+                // All ss calls schedule their render through a Promise. Awaiting it here
+                // means the next Python script never observes a half-applied app update.
+                await stringScapePythonBridge.flush();
                 const stdout = pyodideInstance.runPython("sys.stdout.getvalue()").trim();
+                let apiResults = [];
+                try { apiResults = JSON.parse(pyodideInstance.runPython("json.dumps(_stringscape_api_results)")); } catch (e) {}
 
                 // Only add hello if there is actually something in stdout
-                const result = stdout ? stdout : "Calculation complete.";
+                const apiOutput = apiResults.length ? `StringScape API:\n${apiResults.map(item => JSON.stringify(item)).join('\n')}` : '';
+                const result = [stdout, apiOutput].filter(Boolean).join('\n\n') || "Calculation complete.";
                 if (pythonLog) pythonLog.setOutput(result);
                 return result;
             } catch (error) {
