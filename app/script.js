@@ -63,7 +63,7 @@
                 if (accessoryInput) accessoryInput.onchange = window.handleAccessoryUploadChange;
             })();
 
-    console.log("Hello, welcome to the colsole! Below you will see console logs of function calls (except for the functions draw and checkOffscreenNodes). This is useful for debugging and understanding what the code is doing.");
+    console.log("Hello, welcome to the colsole! Below you will see console logs of function calls (except for some functions, such as draw and checkOffscreenNodes). This is useful for debugging and understanding what the code is doing.");
     const GLOBAL_SCRIPT_OFFSET = 0; // The app code now lives in App/script.js.
     const MAIN_SCRIPT_URL = (() => {
         return 'https://joeltre.github.io/StringScape/app/script.js';
@@ -632,7 +632,7 @@
         const fileBtn = document.getElementById('ai-file-btn');
         const preview = document.getElementById('ai-preview-area');
         const chatScroll = document.getElementById('ai-chat-scroll');
-        const pythonConsole = document.getElementById('ai-python-console');
+        const pythonpanel = document.getElementById('ai-python-console');
         const input = document.getElementById('ai-user-input');
         const statusOverlay = document.getElementById('ai-status-overlay');
         const agentModeOption = document.getElementById('ai-mode-agent-option');
@@ -646,7 +646,7 @@
         if (historyBtn) historyBtn.textContent = isPython ? 'Script History' : 'Chat History';
         if (promptsBtn) promptsBtn.textContent = isPython ? 'Example Scripts' : 'Example Prompts';
         if (chatScroll) chatScroll.style.display = isPython ? 'none' : 'flex';
-        if (pythonConsole) pythonConsole.style.display = isPython ? 'block' : 'none';
+        if (pythonpanel) pythonpanel.style.display = isPython ? 'block' : 'none';
         if (preview) preview.style.display = isPython ? 'none' : 'flex';
         if (fileBtn) fileBtn.style.display = isPython ? 'none' : 'inline-block';
         if (statusOverlay) statusOverlay.style.display = isPython ? 'none' : 'block';
@@ -807,9 +807,9 @@
         const button = document.getElementById('ai-python-console-btn');
         if (!button) return;
         if (document.body.classList.contains('ai-panel-open') && aiPanelMode === 'python') {
-            button.textContent = 'Close Console';
+            button.textContent = 'Close Python';
         } else {
-            button.textContent = 'Python Console';
+            button.textContent = 'Python';
         }
     }
 
@@ -840,7 +840,7 @@
         };
     }
 
-    function togglePythonConsoleMode() {
+    function togglepythonpanelMode() {
         if (document.body.classList.contains('ai-panel-open') && aiPanelMode === 'python') {
             toggleAiPanel(false);
             aiRefreshFloatingConsoleButton();
@@ -2808,7 +2808,7 @@ def clean_numeric(values):
         };
     }
 
-    async function runPythonConsoleScript() {
+    async function runpythonpanelScript() {
         const editor = document.getElementById('ai-python-script-editor');
         const output = document.getElementById('ai-python-run-output');
         if (!editor) return;
@@ -3373,9 +3373,9 @@ def clean_numeric(values):
         grey: {
             dark: {
                 bg: '#1a1a1a', surface: 'rgba(35, 35, 35, 0.95)', surfaceSoft: 'rgba(35, 35, 35, 0.9)',
-                surfaceStrong: '#161b22', surfacePanel: '#21262d', surfacePanelAlt: '#0d1117',
+                surfaceStrong: '#232425', surfacePanel: '#27292c', surfacePanelAlt: '#0d1117',
                 border: '#444', borderStrong: '#30363d', text: '#ffffff', muted: '#dce8f6',
-                accent: '#9ca3af', accentSoft: '#e5e7eb', accentStrong: '#6b7280', accentContrast: '#ffffff',
+                accent: '#848992', accentSoft: '#c0c2c5', accentStrong: '#6b7280', accentContrast: '#ffffff',
                 button: '#444', buttonHover: '#555', inputBg: '#242424', inputBorder: '#555', shadow: 'rgba(0,0,0,0.5)'
             },
             light: {
@@ -3388,14 +3388,14 @@ def clean_numeric(values):
         },
         blue: {
             dark: {
-                bg: '#171c24', surface: 'rgba(28, 34, 45, 0.96)', surfaceSoft: 'rgba(24, 30, 40, 0.94)',
+                bg: '#171c24', surface: 'rgba(28, 34, 45, 0.96)', surfaceSoft: 'rgba(11, 13, 17, 0.94)',
                 surfaceStrong: '#111720', surfacePanel: '#1e2733', surfacePanelAlt: '#0d1117',
-                border: '#31445b', borderStrong: '#2b3c50', text: '#eef6ff', muted: '#dbe9f7',
+                border: '#31445b', borderStrong: '#2b3c50', text: '#eef6ff', muted: '#959ea8',
                 accent: '#3498db', accentSoft: '#49aef1', accentStrong: '#1c3e68', accentContrast: '#ffffff',
-                button: '#213245', buttonHover: '#2a4260', inputBg: '#11161d', inputBorder: '#38506d', shadow: 'rgba(0,0,0,0.52)'
+                button: '#213245', buttonHover: '#34698d', inputBg: '#11161d', inputBorder: '#38506d', shadow: 'rgba(0,0,0,0.52)'
             },
             light: {
-                bg: '#ffffff', surface: 'rgba(241, 248, 255, 0.96)', surfaceSoft: 'rgba(241, 248, 255, 0.96)',
+                bg: '#ffffff', surface: 'rgba(241, 248, 255, 0.96)', surfaceSoft: 'rgba(253, 254, 255, 0.96)',
                 surfaceStrong: '#ffffff', surfacePanel: '#e8f2fb', surfacePanelAlt: '#dbeaf7',
                 border: '#bfd2e6', borderStrong: '#a9c3df', text: '#12324a', muted: '#274a66',
                 accent: '#3498db', accentSoft: '#49aef1', accentStrong: '#1c5b86', accentContrast: '#ffffff',
@@ -3404,14 +3404,14 @@ def clean_numeric(values):
         },
         pink: {
             dark: {
-                bg: '#20131c', surface: 'rgba(45, 24, 38, 0.96)', surfaceSoft: 'rgba(35, 18, 30, 0.94)',
+                bg: '#20131c', surface: 'rgba(45, 24, 38, 0.96)', surfaceSoft: 'rgba(19, 11, 16, 0.94)',
                 surfaceStrong: '#1a0f16', surfacePanel: '#2a1d27', surfacePanelAlt: '#120b10',
                 border: '#56344b', borderStrong: '#432939', text: '#fff1f7', muted: '#f6dce7',
-                accent: '#ec4899', accentSoft: '#f9a8d4', accentStrong: '#9d174d', accentContrast: '#ffffff',
+                accent: '#ec4899', accentSoft: '#e097c0', accentStrong: '#9d174d', accentContrast: '#ffffff',
                 button: '#3c2432', buttonHover: '#553044', inputBg: '#281822', inputBorder: '#5e3750', shadow: 'rgba(0,0,0,0.54)'
             },
             light: {
-                bg: '#fdf2f8', surface: 'rgba(255, 255, 255, 0.97)', surfaceSoft: 'rgba(252, 242, 247, 0.97)',
+                bg: '#fdf2f8', surface: 'rgba(255, 255, 255, 0.97)', surfaceSoft: 'rgba(255, 253, 254, 0.97)',
                 surfaceStrong: '#ffffff', surfacePanel: '#fbe6f0', surfacePanelAlt: '#f4d7e4',
                 border: '#ebc6d6', borderStrong: '#d9adc2', text: '#3b182a', muted: '#6b2949',
                 accent: '#ec4899', accentSoft: '#f782c2', accentStrong: '#e67da8', accentContrast: '#ffffff',
@@ -12774,7 +12774,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             // Add Button Group
             const btns = row.append("div").attr("class", "inline-btn-group");
 
-            btns.append("button").text("Cancel").style("background", "#444").on("click", (e) => {
+            btns.append("button").text("Cancel").style("background", "var(--button-bg)").on("click", (e) => {
                 e.stopPropagation(); 
                 isRenamingColl = null; 
                 box.classed('form-mode', false); // Leave Form Mode
@@ -12782,7 +12782,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 updateViewMenu();
             });
 
-            btns.append("button").text("Rename").on("click", (e) => {
+            btns.append("button").text("Rename").style("background", "var(--button-bg)").on("click", (e) => {
                 e.stopPropagation();
                 const newName = document.getElementById('rename-input').value.trim();
                 if (newName && newName !== isRenamingColl && !collections.has(newName)) {
@@ -12820,14 +12820,14 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             // Add Button Group
             const btns = row.append("div").attr("class", "inline-btn-group");
             
-            btns.append("button").text("Cancel").style("background", "#444").on("click", (e) => {
+            btns.append("button").text("Cancel").style("background", "var(--button-bg)").on("click", (e) => {
                 e.stopPropagation(); 
                 isCreatingInline = false; 
                 box.classed('form-mode', false); // Leave Form Mode
                 updateViewMenu();
             });
 
-            btns.append("button").text("Create").on("click", (e) => {
+            btns.append("button").text("Create").style("background", "var(--button-bg)").on("click", (e) => {
                 e.stopPropagation();
                 const val = document.getElementById('inline-name-input').value.trim();
                 if (val && !collections.has(val)) {
@@ -16101,6 +16101,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 .attr("class", "action-btn")
                 .style("width", "100%")
                 .style("justify-content", "center")
+                .style("background", "var(--accent-color)")
                 .text(collections.size === 0 ? "Create Collection" : "Add to Collection")
                 .on("click", function() {
                 d3.select(this).style("display", "none");
@@ -19077,7 +19078,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             aiServerUrlInput.addEventListener('input', () => aiToggleConnectColor(aiServerUrlInput));
         }
         bindClick(document.getElementById('ai-python-instructions-btn'), () => openPythonInstructionsBox());
-        bindClick(document.getElementById('ai-run-script-btn'), () => runPythonConsoleScript());
+        bindClick(document.getElementById('ai-run-script-btn'), () => runpythonpanelScript());
         bindClick(document.getElementById('ai-copy-python-instructions'), () => copyPythonInstructions());
         bindClick(document.getElementById('ai-copy-python-output-btn'), () => copyPythonOutput());
         bindClick(document.getElementById('ai-close-python-instructions'), () => closePythonInstructionsBox());
@@ -19088,7 +19089,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             aiFileInput.addEventListener('change', () => aiHandleFile(aiFileInput));
         }
         bindClick(document.getElementById('ask-ai-btn'), () => toggleAiPanel());
-        bindClick(document.getElementById('ai-python-console-btn'), () => togglePythonConsoleMode());
+        bindClick(document.getElementById('ai-python-console-btn'), () => togglepythonpanelMode());
 
         bindClick(document.getElementById('protein-info-toggle-btn'), () => openProteinInfoBox());
         bindClick(document.getElementById('protein-info-prev-btn'), () => navigateProteinInfo('left'));
