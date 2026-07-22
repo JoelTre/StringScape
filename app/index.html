@@ -121,7 +121,7 @@
         #right-panel {
             position: absolute; top: 10px; right: calc(10px + var(--ai-panel-offset)); width: 280px;
             z-index: 20; overflow: visible;
-            background: var(--surface-color-soft); padding: 15px; border-radius: 8px;
+            background: var(--surface-color); padding: 15px; border-radius: 8px;
             border: 1px solid var(--border-color); display: flex; flex-direction: column; 
             border-radius: 14px;
             transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), right 0.4s cubic-bezier(0.4, 0, 0.2, 1);
@@ -266,7 +266,7 @@
             border: 1px solid var(--border-color);
             width: 310px;
             display: block;
-            background: var(--surface-color-soft);
+            background: var(--surface-color);
             padding: 15px;
             box-sizing: border-box;
         }
@@ -279,7 +279,7 @@
             bottom: 0;
             width: var(--ai-panel-width);
             z-index: 25;
-            background-color: var(--surface-color-soft);
+            background-color: var(--surface-color);
             border-left: 1px solid var(--border-color-strong);
             display: flex;
             flex-direction: column;
@@ -304,7 +304,7 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            background: var(--surface-color-soft);
+            background: var(--surface-color);
         }
         #ai-header-title {
             font-weight: bold;
@@ -742,14 +742,14 @@
             display: flex;
             flex-direction: column;
             position: relative;
-            background: var(--surface-color-panel);
+            background: var(--surface-color-strong);
         }
         #ai-python-console {
             display: none;
             flex: 1;
             overflow-y: auto;
             padding: 12px 15px;
-            background: var(--surface-color-panel-alt);
+            background: var(--surface-color-strong);
             color: var(--text-color);
         }
         .ai-python-intro {
@@ -1391,8 +1391,8 @@
 
         .protein-info-mode-btn.active {
             color: #fff;
-            background-image: linear-gradient(#3498db, #3498db), 
-                            linear-gradient(175deg, #6dc5ff 0%, #3498db 50%, #6dc5ff 100%);
+            background-image: linear-gradient(var(--accent-color), var(--accent-color)), 
+                            linear-gradient(175deg, var(--accent-color-soft) 0%, var(--accent-color) 50%, var(--accent-color-soft) 100%);
             background-origin: border-box;
             background-clip: padding-box, border-box;
         }
@@ -1406,8 +1406,8 @@
 
         .protein-info-mode-btn.active:hover {
             color: #fff;
-            background-image: linear-gradient(#3498db, #3498db), 
-                            linear-gradient(175deg, #6dc5ff 0%, #3498db 50%, #6dc5ff 100%);
+            background-image: linear-gradient(var(--accent-color), var(--accent-color)), 
+                            linear-gradient(175deg, var(--accent-color-soft) 0%, var(--accent-color) 50%, var(--accent-color-soft) 100%);
             background-origin: border-box;
             background-clip: padding-box, border-box;
         }
@@ -1549,7 +1549,7 @@
 
         #view-selector-box {
             position: relative;
-            background: var(--surface-color-soft);
+            background: var(--surface-color);
             border: 1px solid var(--border-color);
             border-radius: 20px;
             color: var(--text-color);
@@ -2033,7 +2033,11 @@
             grid-column: 1 / -1; /* Spans both columns */
             justify-content: center !important; 
             margin-top: 5px;
-            background: var(--button-bg) !important;
+            background: var(--surface-color-panel) !important;
+        }
+
+        .new-coll-btn-full:hover {
+            background: var(--button-bg-hover) !important;
         }
 
         .structures-full-width-btn {
@@ -2195,15 +2199,15 @@
             
             /* Look & Feel */
             cursor: pointer;
-            background: #2d2d2d !important;
+            background: var(--button-bg) !important;
             color: #fff;
-            border: 1px solid #555;
+            border: 1px solid var(--input-border);
             font-size: 14px;
         }
 
         .action-btn:hover {
-            background: var(--accent-color) !important;
-            border-color: #53bd57;
+            background: var(--button-bg-hover) !important;
+            border-color: var(--input-border) !important;
         }
 
         #shortest-path-control {
@@ -2759,7 +2763,7 @@
             margin: 0 !important;
             padding: 3px 8px !important;
             border-radius: 999px !important;
-            border: 1px solid var(--button-bg-hover) !important;
+            border: 1px solid var(--border-color) !important;
             background: var(--button-bg) !important;
             color: white !important;
             font-size: 11px !important;
@@ -3955,14 +3959,6 @@
     </div>
 </div>
 
-<div id="feedbackModal" class="modal">
-    <div class="modal-content">
-        <span class="close-modal">&times;</span>
-        <h3>Feedback & Support</h3>
-        <p>Send feedback, suggested additional features or bugs found to <a href="mailto:joel.tregurtha@pg.canterbury.ac.nz">joel.tregurtha@pg.canterbury.ac.nz</a></p>
-    </div>
-</div>
-
 <div id="aboutModal" class="modal">
     <div class="modal-content">
         <span class="close-modal">&times;</span>
@@ -4213,13 +4209,13 @@
             </div>
         </div>
         <div id="info-content" style="font-size:11px; margin-bottom: 5px;">Select Nodes to View Information</div>
-        <button id="node-info-table-btn" class="action-btn" style="margin-top:6px; width:100%; justify-content:center; background:var(--button-bg) !important; color:var(--text-color); border:none;">Node Info Table</button>
+        <button id="node-info-table-btn" class="action-btn" style="margin-top:6px; width:100%; justify-content:center;">Node Info Table</button>
         <div id="shortest-path-control" style="display:none;">
             <button id="shortest-path-toggle-btn" class="action-btn">Shortest Path Tools</button>
             <div id="shortest-path-menu" aria-label="Shortest path options">
                 <div class="shortest-path-menu-title" style="display:flex; justify-content:space-between; gap:10px; align-items:center">
                     <span>Path options</span>
-                    <span id="shortest-path-length-display" style="color:#4caf50; font-size:11px; white-space:nowrap;">Shortest path length: -</span>
+                    <span id="shortest-path-length-display" style="color:var(--accent-color); font-size:11px; white-space:nowrap;">Shortest path length: -</span>
                 </div>
                 <div class="shortest-path-menu-actions">
                     <button id="shortest-path-overlay-btn" class="btn-secondary">Show shortest path overlay</button>
