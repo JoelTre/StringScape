@@ -444,7 +444,7 @@
     let aiPromptsPanelOpen = false;
     const AI_CHAT_HISTORY_STORAGE_KEY = 'stringscape_ai_chat_history_v1';
     const AI_SCRIPT_HISTORY_STORAGE_KEY = 'stringscape_ai_script_history_v1';
-    const AI_PYTHON_CONSOLE_SYSTEM_PROMPT = 'You are a Python script generator for StringScape. Return only Python code that can run in Pyodide. Do not include markdown code fences. app_data and ss are already injected. For app actions use ss.search_and_select(), ss.add_to_collection(), ss.set_view(), ss.set_node_colouring(), ss.select(), and ss.set_color(); every method returns a structured status dictionary. Use with ss.batch_update(): for many mutations. Keep scripts concise and safe.';
+    const AI_PYTHON_CONSOLE_SYSTEM_PROMPT = 'You are a Python script generator for StringScape. Return only Python code that can run in Pyodide. Do not include markdown code fences. app_data and ss are already injected. For app actions use ss.search_and_select(), ss.add_to_collection(), ss.set_view(), ss.set_node_colouring(), ss.select(), and ss.set_node_color(); every method returns a structured status dictionary. Use with ss.batch_update(): for many mutations. Keep scripts concise and safe.';
     const AI_PYTHON_SCRIPT_INSTRUCTIONS_TEXT = `You can write Python scripts that run inside StringScape using Pyodide.
 
         Available data:
@@ -476,12 +476,49 @@
         - For variable stats, use values from app_data["python_variables"] rather than scanning app_data["nodes"].
         - Use print(...) to show output.
 
-        StringScape API (ss is already available; import stringscape as ss is also supported):
-        - ss.search_and_select(query, scope='all', animate=False)
-        - ss.select(node_id, append=True, animate=False), ss.select_many(node_ids), ss.deselect_all()
-        - ss.add_to_collection(name), ss.set_view(view), ss.set_node_colouring(variable), ss.set_color(node_id, '#ff0055')
-        - ss.get_selected_nodes(), ss.list_collections(), ss.list_views()
-        - All methods return structured status dictionaries. A no-match search returns status='warning' and matched_count=0, not an exception.
+        StringScape API (ss is already available; import stringscape as ss is also supported). Every method returns a dictionary containing at least {"status": "success" | "warning" | "error"}:
+        - ss.search_and_select(query, scope='all', animate=False) -> Returns {"status", "query", "scope", "matched_count", "selected_node_ids", "message"}
+        - ss.select(node_ids, mode='replace', animate=False) -> Returns {"status", "mode", "requested_node_ids", "selected_node_ids", "selected_count", "missing_node_ids", "message"} (modes: replace, add, subtract, intersect, invert)
+        - ss.deselect_all() -> Returns {"status": "success", "selected_count": 0, "selected_node_ids": []}
+        - ss.select_neighbors(node_id, depth=1, animate=False) -> Returns {"status", "node_id", "depth", "neighbor_node_ids", "selected_node_ids", "message"}
+        - ss.expand_to_connected() -> Returns {"status", "previous_count", "selected_count", "selected_node_ids", "message"}
+        - ss.get_selected_nodes() -> Returns {"status": "success", "selected_count", "selected_node_ids"}
+        - ss.list_variables() -> Returns {"status": "success", "variables": [{key, label, type}]}
+        - ss.get_variable_range(variable_key) -> Returns {"status", "variable_key", "min", "max", "message"}
+        - ss.get_variable_categories(variable_key) -> Returns {"status", "variable_key", "categories", "message"}
+        - ss.select_by_range(variable_key, min=None, max=None, animate=False) -> Returns {"status", "variable_key", "selected_node_ids", "selected_count"}
+        - ss.select_by_category(variable_key, category, animate=False) -> Returns {"status", "variable_key", "selected_node_ids", "selected_count"}
+        - ss.set_node_size(nodes='all', size=10), ss.set_node_glow(nodes='all', magnitude=0) -> Returns {"status", "affected_count", "message"}
+        - ss.set_node_visibility(nodes='all', visibility='show'), ss.set_node_label_visibility(nodes='all', visibility='show') -> Returns {"status", "affected_count", "message"}
+        - ss.set_node_label(nodes='all', label_key='') -> Returns {"status", "affected_count"}
+        - ss.set_node_size_by_variable(key, magnitude=0.5) -> Returns {"status", "key", "magnitude", "message"}
+        - ss.color_links_by(link_variable_key) -> Returns {"status": "success", "link_variable_key"}
+        - ss.set_link_color(links='all', color='#ff0055') -> Returns {"status", "affected_count", "message"}
+        - ss.set_link_label_visibility(links='all', visibility='show'), ss.set_link_label(links='all', label_key='') -> Returns {"status", "affected_count", "message"}
+        - ss.set_link_direction_arrow_visibility(links='all', visibility='show') -> Returns {"status", "affected_count", "message"}
+        - ss.set_link_width(links='all', magnitude=1), ss.set_link_opacity(links='all', opacity=1) -> Returns {"status", "affected_count", "message"}
+        - ss.when_nodes_are_selected_display(mode='all links') -> Returns {"status", "mode", "message"}
+        - ss.set_app_style(color_theme='blue', mode='dark') -> Returns {"status", "color_theme", "mode", "message"}
+        - ss.set_app_background_colour(color='#171c24') -> Returns {"status", "color", "message"}
+        - ss.set_app_background_by(mode='mono') -> Returns {"status", "mode", "message"}
+        - ss.set_physics(physics='on', alpha=None) -> Returns {"status", "physics", "alpha", "message"}
+        - ss.export_selection(format='json') -> Returns {"status", "format", "exported_count", "message"}
+        - ss.reset_visuals() -> Returns {"status": "success"}
+        - ss.focus_on(node_ids) -> Returns {"status", "node_ids", "message"}
+        - ss.set_as_layer_zero(node_ids) -> Returns {"status": "success", "node_ids"}
+        - ss.set_mono_node_color(color='#ff0055') -> Returns {"status", "color", "message"}
+        - ss.get_node_data(node_id, attribute=None) -> Returns {"status", "node_id", "data", "message"}
+        - ss.build_network(score_threshold=0) -> Returns {"status", "score_threshold", "message"}
+        - ss.message_ai(system='', prompt='') -> Returns {"status", "reply", "message"}
+        - ss.create_collection(name) -> Returns {"status", "collection", "created", "node_count", "message"}
+        - ss.delete_collection(name) -> Returns {"status", "collection", "deleted", "removed_node_count", "message"}
+        - ss.add_to_collection(name) -> Returns {"status", "collection", "created", "added_count", "collection_count", "node_ids", "message"}
+        - ss.list_collections() -> Returns {"status": "success", "collections": [{name, node_count}]}
+        - ss.list_views() -> Returns {"status": "success", "current_view", "views"}
+        - ss.set_view(view) -> Returns {"status", "view", "animate", "message"}
+        - ss.set_node_colouring(variable) -> Returns {"status", "variable", "animate", "message"}
+        - ss.set_node_color(node_id, '#ff0055') -> Returns {"status", "node_id", "color", "message"}
+        - ss.begin_batch(), ss.end_batch() -> Returns {"status": "success", "batch_depth"}
         - Use with ss.batch_update(): around large edit loops; it renders once when the block exits.
         - App state updates immediately. Set animate=True only when a visual transition is wanted.`;
 
@@ -642,7 +679,7 @@
 
         const isPython = aiPanelMode === 'python';
 
-        if (title) title.textContent = isPython ? 'Python Console ▾' : 'AI Agent ▾';
+        if (title) title.textContent = isPython ? 'Python Scripts ▾' : 'AI Agent ▾';
         if (newBtn) newBtn.textContent = isPython ? '+ New Script' : '+ New Chat';
         if (downloadBtn) downloadBtn.textContent = isPython ? 'Download Script' : 'Download Chat';
         if (historyBtn) historyBtn.textContent = isPython ? 'Script History' : 'Chat History';
@@ -792,12 +829,49 @@
         lines.push('- For variable stats, use values from app_data["python_variables"] rather than scanning app_data["nodes"].');
         lines.push('- Use print(...) to show output.');
         lines.push('');
-        lines.push('StringScape API (ss is already injected):');
-        lines.push('- ss.search_and_select(query, scope="all", animate=False)');
-        lines.push('- ss.select(node_id, append=True), ss.select_many(node_ids), ss.deselect_all()');
-        lines.push('- ss.add_to_collection(name), ss.set_view(view), ss.set_node_colouring(variable), ss.set_color(node_id, "#ff0055")');
-        lines.push('- ss.get_selected_nodes(), ss.list_collections(), ss.list_views()');
-        lines.push('- Every method returns a structured status dictionary. No-match searches return status="warning" and matched_count=0.');
+        lines.push('StringScape API (ss is already injected; import stringscape as ss is also supported). Every method returns a dictionary containing at least {"status": "success" | "warning" | "error"}:');
+        lines.push('- ss.search_and_select(query, scope="all", animate=False) -> Returns {"status", "query", "scope", "matched_count", "selected_node_ids", "message"}');
+        lines.push('- ss.select(node_ids, mode="replace", animate=False) -> Returns {"status", "mode", "requested_node_ids", "selected_node_ids", "selected_count", "missing_node_ids", "message"} (modes: replace, add, subtract, intersect, invert)');
+        lines.push('- ss.deselect_all() -> Returns {"status": "success", "selected_count": 0, "selected_node_ids": []}');
+        lines.push('- ss.select_neighbors(node_id, depth=1, animate=False) -> Returns {"status", "node_id", "depth", "neighbor_node_ids", "selected_node_ids", "message"}');
+        lines.push('- ss.expand_to_connected() -> Returns {"status", "previous_count", "selected_count", "selected_node_ids", "message"}');
+        lines.push('- ss.get_selected_nodes() -> Returns {"status": "success", "selected_count", "selected_node_ids"}');
+        lines.push('- ss.list_variables() -> Returns {"status": "success", "variables": [{key, label, type}]}');
+        lines.push('- ss.get_variable_range(variable_key) -> Returns {"status", "variable_key", "min", "max", "message"}');
+        lines.push('- ss.get_variable_categories(variable_key) -> Returns {"status", "variable_key", "categories", "message"}');
+        lines.push('- ss.select_by_range(variable_key, min=None, max=None, animate=False) -> Returns {"status", "variable_key", "selected_node_ids", "selected_count"}');
+        lines.push('- ss.select_by_category(variable_key, category, animate=False) -> Returns {"status", "variable_key", "selected_node_ids", "selected_count"}');
+        lines.push('- ss.set_node_size(nodes="all", size=10), ss.set_node_glow(nodes="all", magnitude=0) -> Returns {"status", "affected_count", "message"}');
+        lines.push('- ss.set_node_visibility(nodes="all", visibility="show"), ss.set_node_label_visibility(nodes="all", visibility="show") -> Returns {"status", "affected_count", "message"}');
+        lines.push('- ss.set_node_label(nodes="all", label_key="") -> Returns {"status", "affected_count"}');
+        lines.push('- ss.set_node_size_by_variable(key, magnitude=0.5) -> Returns {"status", "key", "magnitude", "message"}');
+        lines.push('- ss.color_links_by(link_variable_key) -> Returns {"status": "success", "link_variable_key"}');
+        lines.push('- ss.set_link_color(links="all", color="#ff0055") -> Returns {"status", "affected_count", "message"}');
+        lines.push('- ss.set_link_label_visibility(links="all", visibility="show"), ss.set_link_label(links="all", label_key="") -> Returns {"status", "affected_count", "message"}');
+        lines.push('- ss.set_link_direction_arrow_visibility(links="all", visibility="show") -> Returns {"status", "affected_count", "message"}');
+        lines.push('- ss.set_link_width(links="all", magnitude=1), ss.set_link_opacity(links="all", opacity=1) -> Returns {"status", "affected_count", "message"}');
+        lines.push('- ss.when_nodes_are_selected_display(mode="all links") -> Returns {"status", "mode", "message"}');
+        lines.push('- ss.set_app_style(color_theme="blue", mode="dark") -> Returns {"status", "color_theme", "mode", "message"}');
+        lines.push('- ss.set_app_background_colour(color="#171c24") -> Returns {"status", "color", "message"}');
+        lines.push('- ss.set_app_background_by(mode="mono") -> Returns {"status", "mode", "message"}');
+        lines.push('- ss.set_physics(physics="on", alpha=None) -> Returns {"status", "physics", "alpha", "message"}');
+        lines.push('- ss.export_selection(format="json") -> Returns {"status", "format", "exported_count", "message"}');
+        lines.push('- ss.reset_visuals() -> Returns {"status": "success"}');
+        lines.push('- ss.focus_on(node_ids) -> Returns {"status", "node_ids", "message"}');
+        lines.push('- ss.set_as_layer_zero(node_ids) -> Returns {"status": "success", "node_ids"}');
+        lines.push('- ss.set_mono_node_color(color="#ff0055") -> Returns {"status", "color", "message"}');
+        lines.push('- ss.get_node_data(node_id, attribute=None) -> Returns {"status", "node_id", "data", "message"}');
+        lines.push('- ss.build_network(score_threshold=0) -> Returns {"status", "score_threshold", "message"}');
+        lines.push('- ss.message_ai(system="", prompt="") -> Returns {"status", "reply", "message"}');
+        lines.push('- ss.create_collection(name) -> Returns {"status", "collection", "created", "node_count", "message"}');
+        lines.push('- ss.delete_collection(name) -> Returns {"status", "collection", "deleted", "removed_node_count", "message"}');
+        lines.push('- ss.add_to_collection(name) -> Returns {"status", "collection", "created", "added_count", "collection_count", "node_ids", "message"}');
+        lines.push('- ss.list_collections() -> Returns {"status": "success", "collections": [{name, node_count}]}');
+        lines.push('- ss.list_views() -> Returns {"status": "success", "current_view", "views"}');
+        lines.push('- ss.set_view(view) -> Returns {"status", "view", "animate", "message"}');
+        lines.push('- ss.set_node_colouring(variable) -> Returns {"status", "variable", "animate", "message"}');
+        lines.push('- ss.set_node_color(node_id, "#ff0055") -> Returns {"status", "node_id", "color", "message"}');
+        lines.push('- ss.begin_batch(), ss.end_batch() -> Returns {"status": "success", "batch_depth"}');
         lines.push('- For large edits: with ss.batch_update(): ...  This produces one render on exit.');
         lines.push('- State changes are applied before each result is returned; animate=False is the instant default.');
         return lines.join('\n').replace(/&quot;/g, '"');
@@ -1801,6 +1875,27 @@
         const activeNodes = () => currentViewId === 'base' ? nodes : (activeSubData?.nodes || []);
         const selected = () => Array.from(getEffectiveSelectedNodesSet() || new Set());
         const normal = value => String(value || '').trim().toLowerCase();
+        const allNodes = () => nodes || [];
+        const linkId = link => String(link.id ?? `${link.source?.id ?? link.source}::${link.target?.id ?? link.target}`);
+        const targeted = (items, target, idFor) => {
+            if (target === 'all' || target == null) return items;
+            const ids = new Set((Array.isArray(target) ? target : [target]).map(String));
+            return items.filter(item => ids.has(idFor(item)));
+        };
+        const variableEntry = key => (getVisibleColorModeVariableEntries?.() || []).find(entry => entry.key === key || entry.label === key || entry.value === key);
+        const variableValue = (node, key) => {
+            const id = String(node.id);
+            if (key === 'centrality' || key === 'eigen' || key === 'layer') return node[key];
+            if (key === 'size') return getProteinSizeValue?.(id, resolveBuiltInColorSource?.('size')) ?? proteinMetadata.get(id)?.size;
+            if (key === 'annotation') return (getProteinInfoAnnotation?.(id) || '').length;
+            if (key === 'localization') return proteinMetadata.get(id)?.localization;
+            if (key === 'biological_process') return proteinMetadata.get(id)?.biological_process;
+            const entry = variableEntry(key); const parts = String(entry?.key || key).split('::');
+            if (parts.length >= 3) return accessoryVariableValues?.[parts[1]]?.[parts.slice(2).join('::')]?.get(id);
+            for (const vars of Object.values(accessoryVariableValues || {})) if (vars?.[key] instanceof Map && vars[key].has(id)) return vars[key].get(id);
+            return proteinMetadata.get(id)?.[key] ?? node[key];
+        };
+        const download = (name, type, value) => { const url = URL.createObjectURL(new Blob([value], { type })); const a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); };
         const call = (method, args = {}) => {
             const animate = args.animate === true;
             try {
@@ -1828,11 +1923,98 @@
                     return result(matchedIds.length ? 'success' : 'warning', { query, scope, matched_count: matchedIds.length, selected_node_ids: matchedIds, message: matchedIds.length ? undefined : 'No nodes matched this query.' });
                 }
                 if (method === 'select') {
-                    const ids = (Array.isArray(args.node_ids) ? args.node_ids : [args.node_id ?? args.id]).filter(x => x != null).map(String);
+                    // A single id is deliberately accepted for script ergonomics; internally
+                    // selection is always a set operation on a list of ids.
+                    const rawIds = args.node_ids ?? args.node_id ?? args.id;
+                    const ids = (Array.isArray(rawIds) ? rawIds : [rawIds]).filter(x => x != null).map(String);
+                    const mode = normal(args.mode || 'replace');
+                    if (!['replace', 'add', 'subtract', 'intersect', 'invert'].includes(mode)) return result('warning', { mode, message: 'mode must be replace, add, subtract, intersect, or invert.' });
                     const found = activeNodes().filter(node => ids.includes(String(node.id)));
-                    const next = args.append === false ? found : activeNodes().filter(node => selected().includes(node.id) || ids.includes(String(node.id)));
+                    const foundIds = new Set(found.map(node => String(node.id)));
+                    const selectedIds = new Set(selected().map(String));
+                    const nextIds = mode === 'replace' ? foundIds
+                        : mode === 'add' ? new Set([...selectedIds, ...foundIds])
+                        : mode === 'subtract' ? new Set([...selectedIds].filter(id => !foundIds.has(id)))
+                        : mode === 'intersect' ? new Set([...selectedIds].filter(id => foundIds.has(id)))
+                        : new Set(activeNodes().map(node => String(node.id)).filter(id => !selectedIds.has(id)));
+                    const next = activeNodes().filter(node => nextIds.has(String(node.id)));
                     selectNodes(next, false, 'Python API selection'); queueDraw(animate);
-                    return result(found.length ? 'success' : 'warning', { requested_node_ids: ids, selected_node_ids: selected(), selected_count: selected().length, missing_node_ids: ids.filter(id => !found.some(node => String(node.id) === id)) });
+                    return result(found.length || mode === 'invert' ? 'success' : 'warning', { mode, requested_node_ids: ids, selected_node_ids: selected(), selected_count: selected().length, missing_node_ids: ids.filter(id => !foundIds.has(id)) });
+                }
+                if (method === 'select_neighbors') {
+                    const nodeId = String(args.node_id ?? args.id ?? ''); const depth = Math.max(1, Math.floor(+args.depth || 1));
+                    if (!nodeMap.has(nodeId)) return result('warning', { node_id: nodeId, neighbor_node_ids: [], message: 'Node was not found.' });
+                    const adjacent = new Map(activeNodes().map(node => [String(node.id), new Set()]));
+                    links.forEach(link => { const a = String(link.source?.id ?? link.source), b = String(link.target?.id ?? link.target); if (adjacent.has(a) && adjacent.has(b)) { adjacent.get(a).add(b); adjacent.get(b).add(a); } });
+                    const seen = new Set([nodeId]); let frontier = new Set([nodeId]);
+                    for (let step = 0; step < depth; step++) { const next = new Set(); frontier.forEach(id => (adjacent.get(id) || []).forEach(neighbor => { if (!seen.has(neighbor)) { seen.add(neighbor); next.add(neighbor); } })); frontier = next; if (!frontier.size) break; }
+                    const neighborIds = [...seen].filter(id => id !== nodeId); selectNodes(activeNodes().filter(node => seen.has(String(node.id))), false, 'Python API neighbor selection'); queueDraw(animate);
+                    return result('success', { node_id: nodeId, depth, neighbor_node_ids: neighborIds, selected_node_ids: selected() });
+                }
+                if (method === 'list_variables') return result('success', { variables: (getVisibleColorModeVariableEntries?.() || []).map(({ key, label, type }) => ({ key, label, type })) });
+                if (method === 'get_variable_range') {
+                    const key = String(args.variable_key ?? args.key ?? ''); const values = allNodes().map(n => +variableValue(n, key)).filter(Number.isFinite);
+                    return values.length ? result('success', { variable_key: key, min: Math.min(...values), max: Math.max(...values) }) : result('warning', { variable_key: key, message: 'No numerical values were found.' });
+                }
+                if (method === 'get_variable_categories') {
+                    const key = String(args.variable_key ?? args.key ?? ''); const categories = [...new Set(allNodes().map(n => variableValue(n, key)).filter(v => v != null && String(v).trim() !== '').map(String))];
+                    return result(categories.length ? 'success' : 'warning', { variable_key: key, categories });
+                }
+                if (method === 'select_by_range' || method === 'select_by_category') {
+                    const key = String(args.variable_key ?? args.key ?? ''); const lower = args.min == null ? -Infinity : +args.min, upper = args.max == null ? Infinity : +args.max;
+                    const matched = allNodes().filter(node => method === 'select_by_range' ? (Number.isFinite(+variableValue(node, key)) && +variableValue(node, key) >= lower && +variableValue(node, key) <= upper) : String(variableValue(node, key)) === String(args.category));
+                    selectNodes(matched, false, `Python API ${method}`); queueDraw(animate); return result(matched.length ? 'success' : 'warning', { variable_key: key, selected_node_ids: selected(), selected_count: selected().length });
+                }
+                if (method === 'set_node_size' || method === 'set_node_glow' || method === 'set_node_visibility' || method === 'set_node_label_visibility' || method === 'set_node_label') {
+                    const target = args.nodes ?? 'all'; const targets = targeted(allNodes(), target, n => String(n.id));
+                    if (method === 'set_node_size') { const size = +args.size; if (!Number.isFinite(size) || size < 0) return result('warning', { message: 'size must be a non-negative number.' }); targets.forEach(n => n._ssSize = size); }
+                    if (method === 'set_node_glow') { const magnitude = +args.magnitude; if (!(magnitude >= 0 && magnitude <= 500)) return result('warning', { message: 'magnitude must be between 0 and 500.' }); targets.forEach(n => n._ssGlow = magnitude); }
+                    if (method === 'set_node_visibility') { if (!['show','hide'].includes(args.visibility)) return result('warning', { message: 'visibility must be show or hide.' }); targets.forEach(n => n._ssVisible = args.visibility); }
+                    if (method === 'set_node_label_visibility') { if (!['show','hide'].includes(args.visibility)) return result('warning', { message: 'visibility must be show or hide.' }); targets.forEach(n => n._ssLabelVisible = args.visibility); }
+                    if (method === 'set_node_label') { const key = String(args.label_key ?? args.key ?? ''); targets.forEach(n => n._ssLabelKey = key); }
+                    queueDraw(animate); return result('success', { affected_count: targets.length });
+                }
+                if (method === 'set_node_size_by_variable') {
+                    const key = String(args.key ?? ''); const magnitude = +args.magnitude; if (!(magnitude >= 0 && magnitude <= 1)) return result('warning', { message: 'magnitude must be between 0 and 1.' });
+                    const vals = allNodes().map(n => +variableValue(n, key)).filter(Number.isFinite); if (!vals.length) return result('warning', { key, message: 'No numerical values were found.' }); const min = Math.min(...vals), max = Math.max(...vals);
+                    allNodes().forEach(n => { const v = +variableValue(n, key); if (Number.isFinite(v)) n._ssSize = Math.max(1, 5 + ((v - min) / (max - min || 1)) * magnitude * 30); }); queueDraw(animate); return result('success', { key, magnitude });
+                }
+                if (method === 'color_links_by') { const key = String(args.link_variable_key ?? args.key ?? ''); const select = document.getElementById('linkMode'); if (select && [...select.options].some(o => o.value === key)) select.value = key; queueDraw(animate); return result('success', { link_variable_key: key }); }
+                if (method.startsWith('set_link_')) {
+                    const target = args.links ?? 'all'; const targets = targeted(links, target, linkId);
+                    if (method === 'set_link_color') { const color = String(args.color || ''); if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return result('warning', { message: 'color must be a hex colour.' }); targets.forEach(l => l._ssColor = color); }
+                    if (method === 'set_link_label_visibility' || method === 'set_link_direction_arrow_visibility') { if (!['show','hide'].includes(args.visibility)) return result('warning', { message: 'visibility must be show or hide.' }); targets.forEach(l => l[method === 'set_link_label_visibility' ? '_ssLabelVisible' : '_ssArrowVisible'] = args.visibility); }
+                    if (method === 'set_link_label') targets.forEach(l => l._ssLabelKey = String(args.label_key ?? args.key ?? ''));
+                    if (method === 'set_link_width') { const magnitude = +args.magnitude; if (!(magnitude >= 0 && magnitude <= 5)) return result('warning', { message: 'magnitude must be between 0 and 5.' }); targets.forEach(l => l._ssWidth = magnitude); }
+                    if (method === 'set_link_opacity') { const opacity = +args.opacity; if (!(opacity >= 0 && opacity <= 1)) return result('warning', { message: 'opacity must be between 0 and 1.' }); targets.forEach(l => l._ssOpacity = opacity); }
+                    queueDraw(animate); return result('success', { affected_count: targets.length });
+                }
+                if (method === 'when_nodes_are_selected_display') {
+                    const modes = { 'all links': 'all', 'links from selected nodes': 'from_selected', 'links between selected nodes': 'between_selected' }; const requested = normal(args.mode);
+                    if (!modes[requested]) return result('warning', { message: 'Invalid selection link display mode.' }); document.getElementById('linkVisibilityMode').value = modes[requested]; queueDraw(animate); return result('success', { mode: requested });
+                }
+                if (method === 'set_app_style') {
+                    const theme = normal(args.color_theme), mode = normal(args.mode); if (!APP_THEME_PRESETS[theme] || !APP_THEME_PRESETS[theme][mode]) return result('warning', { message: 'Invalid theme or mode.' }); applyTheme(theme, mode); return result('success', { color_theme: theme, mode });
+                }
+                if (method === 'set_app_background_colour') { const color = String(args.color || ''); if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return result('warning', { message: 'color must be a hex colour.' }); const input = document.getElementById('bgColor'); input.value = color; input.dispatchEvent(new Event('input')); return result('success', { color }); }
+                if (method === 'set_app_background_by') { const mode = normal(args.mode); if (!['mono','voronoi'].includes(mode)) return result('warning', { message: 'mode must be mono or voronoi.' }); backgroundMode = mode; document.getElementById('bgMode').value = mode; updateBackgroundControlsUI(); queueDraw(animate); return result('success', { mode }); }
+                if (method === 'set_physics') { const physics = normal(args.physics); if (!['on','off'].includes(physics)) return result('warning', { message: 'physics must be on or off.' }); if (args.alpha != null) { const alpha = +args.alpha; if (!Number.isFinite(alpha)) return result('warning', { message: 'alpha must be numerical.' }); document.getElementById('alphaSlider').value = alpha; } togglePhysics(physics === 'on'); if (args.alpha != null) updatePhysicsForce(); return result('success', { physics, alpha: args.alpha ?? null }); }
+                if (method === 'export_selection') { const format = normal(args.format); if (!['csv','json'].includes(format)) return result('warning', { message: 'format must be csv or json.' }); const rows = selected().map(id => ({ id, ...(proteinMetadata.get(id) || {}) })); if (format === 'json') download('stringscape_selection.json', 'application/json', JSON.stringify(rows, null, 2)); else { const keys = [...new Set(rows.flatMap(Object.keys))]; download('stringscape_selection.csv', 'text/csv;charset=utf-8', [keys.join(','), ...rows.map(row => keys.map(key => JSON.stringify(row[key] ?? '')).join(','))].join('\n')); } return result('success', { format, exported_count: rows.length }); }
+                if (method === 'reset_visuals') { allNodes().forEach(n => { delete n._ssSize; delete n._ssGlow; delete n._ssVisible; delete n._ssLabelVisible; delete n._ssLabelKey; delete n._ssColor; }); links.forEach(l => ['_ssColor','_ssWidth','_ssOpacity','_ssLabelVisible','_ssLabelKey','_ssArrowVisible'].forEach(k => delete l[k])); updateSizesAndColors(); queueDraw(animate); return result('success'); }
+                if (method === 'focus_on') { const ids = new Set((Array.isArray(args.node_ids) ? args.node_ids : [args.node_ids]).filter(Boolean).map(String)); const targets = activeNodes().filter(n => ids.has(String(n.id))); if (!targets.length) return result('warning', { message: 'No target nodes were found.' }); const targetTransform = fitNodesInView(targets); d3.select(canvas).transition().duration(350).call(zoomBehavior.transform, targetTransform); return result('success', { node_ids: targets.map(n => n.id) }); }
+                if (method === 'set_as_layer_zero') { const ids = new Set((Array.isArray(args.node_ids) ? args.node_ids : [args.node_ids]).filter(Boolean).map(String)); allNodes().forEach(n => { if (ids.has(String(n.id))) n.layer = 0; }); updateSizesAndColors(); queueDraw(animate); return result('success', { node_ids: [...ids] }); }
+                if (method === 'set_mono_node_color') { const color = String(args.color || ''); if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return result('warning', { message: 'color must be a hex colour.' }); document.getElementById('nodeMonoColor').value = color; updateSizesAndColors(); return result('success', { color }); }
+                if (method === 'get_node_data') { const id = String(args.node_id ?? args.id ?? ''); const node = nodeMap.get(id); if (!node) return result('warning', { node_id: id, message: 'Node was not found.' }); const data = { ...node, ...(proteinMetadata.get(id) || {}) }; const attribute = args.attribute; return result('success', { node_id: id, data: attribute == null ? data : data[attribute] }); }
+                if (method === 'build_network') { const threshold = +args.score_threshold; if (!Number.isFinite(threshold)) return result('warning', { message: 'score_threshold must be numerical.' }); const input = document.getElementById('thresholdInput'); input.value = threshold; input.dispatchEvent(new Event('change')); document.getElementById('startBtn')?.click(); return result('success', { score_threshold: threshold }); }
+                if (method === 'message_ai') {
+                    const baseUrl = document.getElementById('ai-server-url')?.value.trim() || document.getElementById('ai-server-url')?.placeholder.trim();
+                    if (!baseUrl) return result('warning', { message: 'No AI server URL is configured.' });
+                    // The Python API is synchronous, so use a synchronous request here to
+                    // preserve its direct-return contract while reusing the configured API.
+                    const request = new XMLHttpRequest(); request.open('POST', `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`, false); request.setRequestHeader('Content-Type', 'application/json');
+                    request.send(JSON.stringify({ messages: [{ role: 'system', content: String(args.system || '') }, { role: 'user', content: String(args.prompt || '') }] }));
+                    if (request.status < 200 || request.status >= 300) return result('error', { message: `AI server returned HTTP ${request.status}.` });
+                    const reply = JSON.parse(request.responseText)?.choices?.[0]?.message?.content || ''; return result('success', { reply });
                 }
                 if (method === 'deselect_all') { selectNodes([], false, 'Python API deselect'); queueDraw(animate); return result('success', { selected_count: 0, selected_node_ids: [] }); }
                 if (method === 'expand_to_connected') {
@@ -1884,7 +2066,7 @@
                     if (!select || ![...select.options].some(option => option.value === mode)) return result('warning', { variable: requested, message: 'Colour variable was not found.' });
                     select.value = mode; handleColorModeChange(mode); queueDraw(animate); return result('success', { variable: mode, animate });
                 }
-                if (method === 'set_color') {
+                if (method === 'set_node_color') {
                     const nodeId = String(args.node_id ?? args.id ?? ''), color = String(args.color || ''), node = nodeMap.get(nodeId);
                     if (!node || !/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return result('warning', { node_id: nodeId, color, message: 'Node or colour was invalid.' });
                     node.col = color; queueDraw(animate); return result('success', { node_id: nodeId, color });
@@ -2555,8 +2737,40 @@ class _StringScapeAPI:
         _stringscape_api_results.append(response)
         return response
     def search_and_select(self, query, scope='all', animate=False): return self._call('search_and_select', query=query, scope=scope, animate=animate)
-    def select(self, node_id, append=True, animate=False): return self._call('select', node_id=node_id, append=append, animate=animate)
-    def select_many(self, node_ids, append=True, animate=False): return self._call('select', node_ids=list(node_ids), append=append, animate=animate)
+    def select(self, node_ids, mode='replace', animate=False):
+        return self._call('select', node_ids=[node_ids] if isinstance(node_ids, str) else list(node_ids), mode=mode, animate=animate)
+    def select_neighbors(self, node_id, depth=1, animate=False): return self._call('select_neighbors', node_id=node_id, depth=depth, animate=animate)
+    def list_variables(self): return self._call('list_variables')
+    def get_variable_range(self, variable_key): return self._call('get_variable_range', variable_key=variable_key)
+    def get_variable_categories(self, variable_key): return self._call('get_variable_categories', variable_key=variable_key)
+    def select_by_range(self, variable_key, min=None, max=None, animate=False): return self._call('select_by_range', variable_key=variable_key, min=min, max=max, animate=animate)
+    def select_by_category(self, variable_key, category, animate=False): return self._call('select_by_category', variable_key=variable_key, category=category, animate=animate)
+    def set_node_size(self, nodes='all', size=5, animate=False): return self._call('set_node_size', nodes=nodes, size=size, animate=animate)
+    def set_node_size_by_variable(self, key, magnitude, animate=False): return self._call('set_node_size_by_variable', key=key, magnitude=magnitude, animate=animate)
+    def set_node_glow(self, nodes='all', magnitude=0, animate=False): return self._call('set_node_glow', nodes=nodes, magnitude=magnitude, animate=animate)
+    def set_node_visibility(self, nodes='all', visibility='show', animate=False): return self._call('set_node_visibility', nodes=nodes, visibility=visibility, animate=animate)
+    def set_node_label_visibility(self, nodes='all', visibility='show', animate=False): return self._call('set_node_label_visibility', nodes=nodes, visibility=visibility, animate=animate)
+    def set_node_label(self, nodes='all', label_key='', animate=False): return self._call('set_node_label', nodes=nodes, label_key=label_key, animate=animate)
+    def color_links_by(self, link_variable_key, animate=False): return self._call('color_links_by', link_variable_key=link_variable_key, animate=animate)
+    def set_link_color(self, links='all', color='#ff0055', animate=False): return self._call('set_link_color', links=links, color=color, animate=animate)
+    def when_nodes_are_selected_display(self, mode, animate=False): return self._call('when_nodes_are_selected_display', mode=mode, animate=animate)
+    def set_link_label_visibility(self, links='all', visibility='show', animate=False): return self._call('set_link_label_visibility', links=links, visibility=visibility, animate=animate)
+    def set_link_label(self, links='all', label_key='', animate=False): return self._call('set_link_label', links=links, label_key=label_key, animate=animate)
+    def set_link_direction_arrow_visibility(self, links='all', visibility='show', animate=False): return self._call('set_link_direction_arrow_visibility', links=links, visibility=visibility, animate=animate)
+    def set_link_width(self, links='all', magnitude=1, animate=False): return self._call('set_link_width', links=links, magnitude=magnitude, animate=animate)
+    def set_link_opacity(self, links='all', opacity=1, animate=False): return self._call('set_link_opacity', links=links, opacity=opacity, animate=animate)
+    def set_app_style(self, color_theme='blue', mode='dark'): return self._call('set_app_style', color_theme=color_theme, mode=mode)
+    def set_app_background_colour(self, color='#171c24'): return self._call('set_app_background_colour', color=color)
+    def set_app_background_by(self, mode='mono'): return self._call('set_app_background_by', mode=mode)
+    def set_physics(self, physics='on', alpha=None): return self._call('set_physics', physics=physics, alpha=alpha)
+    def export_selection(self, format='csv'): return self._call('export_selection', format=format)
+    def reset_visuals(self, animate=False): return self._call('reset_visuals', animate=animate)
+    def focus_on(self, node_ids): return self._call('focus_on', node_ids=node_ids)
+    def message_ai(self, system='system prompt', prompt='prompt'): return self._call('message_ai', system=system, prompt=prompt)
+    def build_network(self, score_threshold=0): return self._call('build_network', score_threshold=score_threshold)
+    def set_as_layer_zero(self, node_ids, animate=False): return self._call('set_as_layer_zero', node_ids=node_ids, animate=animate)
+    def set_mono_node_color(self, color='#ff0055'): return self._call('set_mono_node_color', color=color)
+    def get_node_data(self, node_id, attribute=None): return self._call('get_node_data', node_id=node_id, attribute=attribute)
     def deselect_all(self, animate=False): return self._call('deselect_all', animate=animate)
     def expand_to_connected(self, animate=False): return self._call('expand_to_connected', animate=animate)
     def create_collection(self, name, animate=False): return self._call('create_collection', name=name, animate=animate)
@@ -2564,7 +2778,7 @@ class _StringScapeAPI:
     def add_to_collection(self, name, animate=False): return self._call('add_to_collection', name=name, animate=animate)
     def set_view(self, view, animate=False): return self._call('set_view', view=view, animate=animate)
     def set_node_colouring(self, variable, animate=False): return self._call('set_node_colouring', variable=variable, animate=animate)
-    def set_color(self, node_id, color, animate=False): return self._call('set_color', node_id=node_id, color=color, animate=animate)
+    def set_node_color(self, node_id, color, animate=False): return self._call('set_node_color', node_id=node_id, color=color, animate=animate)
     def get_selected_nodes(self): return self._call('get_selected_nodes')
     def list_collections(self): return self._call('list_collections')
     def list_views(self): return self._call('list_views')
@@ -2592,8 +2806,9 @@ sys.modules['stringscape'] = _stringscape_module
                 let apiResults = [];
                 try { apiResults = JSON.parse(pyodideInstance.runPython("json.dumps(_stringscape_api_results)")); } catch (e) {}
 
-                // Only add hello if there is actually something in stdout
-                const apiOutput = apiResults.length ? `StringScape API:\n${apiResults.map(item => JSON.stringify(item)).join('\n')}` : '';
+                // API output is currently disabled to avoid overwhelming the user with too much data. If you want to see the API results, you can uncomment the line below.
+                const apiOutput = ''
+                //apiResults.length ? `StringScape API:\n${apiResults.map(item => JSON.stringify(item)).join('\n')}` : '';
                 const result = [stdout, apiOutput].filter(Boolean).join('\n\n') || "Calculation complete.";
                 if (pythonLog) pythonLog.setOutput(result);
                 return result;
@@ -9211,7 +9426,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     function getNodeLabelText(node) {
         if (!node) return '';
-        if (nodeLabelField === '#string_protein_id') {
+        const labelField = node._ssLabelKey || nodeLabelField;
+        if (labelField === '#string_protein_id') {
             // Check if all nodes have the same taxon ID prefix
             const taxonPrefixes = getAllTaxonIdPrefixes();
             if (taxonPrefixes.size === 1) {
@@ -9224,18 +9440,18 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             }
             return node.id;
         }
-        if (nodeLabelField === '#kegg_product') {
+        if (labelField === '#kegg_product') {
             return getKeggProductText(node.id);
         }
-        if (nodeLabelField === '#description') {
+        if (labelField === '#description') {
             return getProteinInfoDescription(node.id);
         }
-        if (nodeLabelField === '#annotation') {
+        if (labelField === '#annotation') {
             return (getProteinInfoAnnotation(node.id) || '').slice(0, 50);
         }
-        if (!nodeLabelField.startsWith('var::')) return '';
+        if (!labelField.startsWith('var::')) return String(proteinMetadata.get(node.id)?.[labelField] ?? node[labelField] ?? '');
 
-        const parts = nodeLabelField.split('::');
+        const parts = labelField.split('::');
         if (parts.length < 3) return '';
         const fileName = parts[1];
         const variable = parts[2];
@@ -15868,14 +16084,16 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     if (linkMode === 'score') { linkStrokeColor = getScoreLinkGreyColor(l.value); linkStrokeWidth = (Math.sqrt(l.value) / 8) * (isHigh ? 2 : 1); }
                     else { linkStrokeColor = d3.color(linkBaseCol).brighter(1.5); linkStrokeWidth = 1 * (isHigh ? 2 : 1); }
                 }
+                if (l._ssColor) linkStrokeColor = l._ssColor;
+                if (Number.isFinite(l._ssOpacity)) ctx.globalAlpha *= l._ssOpacity;
                 ctx.strokeStyle = linkStrokeColor;
-                const scaledLinkWidth = linkStrokeWidth * linkWidthMultiplier;
+                const scaledLinkWidth = Number.isFinite(l._ssWidth) ? l._ssWidth : linkStrokeWidth * linkWidthMultiplier;
                 ctx.lineWidth = scaledLinkWidth;
                 ctx.stroke();
-                drawLinkDirectionArrow(ctx, l.source, l.target, linkStrokeColor, scaledLinkWidth);
+                if (l._ssArrowVisible !== 'hide') drawLinkDirectionArrow(ctx, l.source, l.target, linkStrokeColor, scaledLinkWidth);
 
-                if (linkLabelToggle === 'show' && ctx.globalAlpha > 0) {
-                    const label = getLinkLabelForLink(l);
+                if ((l._ssLabelVisible || linkLabelToggle) === 'show' && ctx.globalAlpha > 0) {
+                    const label = l._ssLabelKey ? String(l[l._ssLabelKey] ?? interactionLinkLabelValues.get(getUndirectedEdgeKey(l.source.id, l.target.id))?.[l._ssLabelKey] ?? '') : getLinkLabelForLink(l);
                     if (label) {
                         linkLabelsToDraw.push({
                             x: (l.source.x + l.target.x) * 0.5,
@@ -15938,13 +16156,15 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             n.renderAlpha = nodeAlpha;
             n.gpuIsPath = isPath;
             n.gpuIsHigh = isHigh;
-            if (nodeVisibilityToggle !== 'show') return;
+            if ((nodeVisibilityToggle !== 'show' && n._ssVisible !== 'show') || n._ssVisible === 'hide') return;
             const nodeColor = currentNodeColorMode === 'collection'
                 ? getCollectionColorForNode(n.id, nowMs)
                 : (currentNodeColorMode === 'complex_pdbs' ? getComplexPdbColorForNode(n.id, nowMs) : (n.col || "#4caf50"));
             ctx.globalAlpha = nodeAlpha;
-            ctx.beginPath(); ctx.arc(n.x, n.y, n.r || 5, 0, 2 * Math.PI); ctx.fillStyle = nodeColor;
-            if (glowVal > 0 && nodeAlpha > 0.3 && (!isSearching || isHigh || isPath)) { ctx.shadowBlur = glowVal * 0.4; ctx.shadowColor = d3.color(nodeColor).brighter(glowVal / 250); } else ctx.shadowBlur = 0;
+            const nodeRadius = n._ssSize ?? n.r ?? 5;
+            ctx.beginPath(); ctx.arc(n.x, n.y, nodeRadius, 0, 2 * Math.PI); ctx.fillStyle = nodeColor;
+            const effectiveGlow = n._ssGlow ?? glowVal;
+            if (effectiveGlow > 0 && nodeAlpha > 0.3 && (!isSearching || isHigh || isPath)) { ctx.shadowBlur = effectiveGlow * 0.4; ctx.shadowColor = d3.color(nodeColor).brighter(effectiveGlow / 250); } else ctx.shadowBlur = 0;
             ctx.fill(); ctx.shadowBlur = 0; ctx.strokeStyle = isPath ? "#ff4444" : (d3.color(nodeColor).brighter(1)); ctx.lineWidth = isPath ? 4 : 1; ctx.stroke();
             if (isEmbeddingReferenceNode(n.id)) {
                 ctx.beginPath();
@@ -15977,7 +16197,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             });
         }
 
-        if (nodeVisibilityToggle === 'show' && nodeLabelToggle === 'show') {
+        if ((nodeVisibilityToggle === 'show' || drawNodes.some(n => n._ssVisible === 'show')) && (nodeLabelToggle === 'show' || drawNodes.some(n => n._ssLabelVisible === 'show'))) {
             const screenBg = document.getElementById('bgColor')?.value || '#1a1a1a';
             ctx.save();
             ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -15994,6 +16214,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
             if (zoomAlpha > 0) {
                 drawNodes.forEach(n => {
+                    if (n._ssVisible === 'hide' || (nodeLabelToggle !== 'show' && n._ssLabelVisible !== 'show') || n._ssLabelVisible === 'hide') return;
                     const label = getNodeLabelText(n);
                     if (!label) return;
                     const [x, y] = transform.apply([n.x, n.y]);
@@ -17760,7 +17981,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             }
         }
         if (mode === 'layer' && selectedNodes.size > 0) {
-            legend.append("button").text("Update Selection as Layer 1").style("background", "#444").on("click", () => { 
+            legend.append("button").text("Update Selection as Layer 0").attr("class", "action-btn").style("width", "100%").on("click", () => { 
                 const selectedIds = Array.from(getEffectiveSelectedNodesSet());
                 if (!selectedIds.length) return;
 
