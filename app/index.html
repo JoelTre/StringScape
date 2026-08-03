@@ -119,20 +119,74 @@
         #ui-layer.minimized .toggle-tab span { transform: rotate(180deg); }
 
         #right-panel {
-            position: absolute; top: 10px; right: calc(10px + var(--ai-panel-offset)); width: 280px;
+            position: absolute;
+            top: 10px;
+            right: calc(10px + var(--ai-panel-offset));
+            bottom: auto;
+            width: 310px;
+            max-height: calc(100vh - 175px);
             z-index: 20; overflow: visible;
             background: var(--surface-color); padding: 15px; border-radius: 8px;
             border: 1px solid var(--border-color); display: flex; flex-direction: column; 
             border-radius: 14px;
             transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), right 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-            margin-bottom: 500px;
+            box-sizing: border-box;
         }
         #right-panel-content {
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            flex: 1 1 auto;
+        }
+        #right-panel-static {
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            flex: 0 0 auto;
+            gap: 0;
+        }
+        #legend-controls {
+            flex: 0 0 auto;
+            min-height: 0;
+        }
+        #legend-content {
+            flex: 1 1 auto;
+            min-height: 0;
             overflow-y: auto;
-            max-height: calc(100vh - 330px);
+            padding-right: 4px;
         }
         
         #legend-content.hidden { display: none; }
+        #right-panel-footer {
+            margin-top: auto;
+            padding-top: 10px;
+            min-height: 72px;
+            max-height: clamp(96px, 18vh, 190px);
+            overflow-y: auto;
+        }
+        #right-panel-footer-text {
+            font-size: 11px;
+            color: #aaa;
+            margin-bottom: 8px;
+            line-height: 1.35;
+            white-space: pre-line;
+        }
+        #collection-cycle-toggle-btn {
+            width: 100%;
+            margin-top: 0;
+            background: var(--button-bg) !important;
+            border: 1px solid var(--input-border);
+            color: var(--text-color);
+            border-radius: 20px;
+            padding: 8px 36px;
+            font-size: 14px;
+            font-weight: 400;
+            cursor: pointer;
+        }
+        #collection-cycle-toggle-btn:hover {
+            background: var(--button-bg-hover) !important;
+            border-color: var(--input-border);
+        }
 
         #right-panel.minimized { transform: translateX(310px); border-left: none; }
         
@@ -150,7 +204,7 @@
             position: absolute;
             bottom: 25px;
             right: calc(10px + var(--ai-panel-offset));
-            width: 280px;
+            width: 310px;
             z-index: 20;
             display: flex;
             flex-direction: column;
@@ -788,7 +842,6 @@
             resize: vertical;
         }
         #ai-run-script-btn {
-            margin-top: 8px;
             background: var(--accent-color);
             border: none;
             color: #fff;
@@ -797,6 +850,28 @@
             font-size: 0.8rem;
             font-weight: 600;
             cursor: pointer;
+        }
+        #ai-run-line-btn {
+            background: var(--accent-color);
+            border: none;
+            color: #fff;
+            border-radius: 999px;
+            padding: 7px 14px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        #ai-run-script-btn, #ai-run-line-btn {
+            flex: 1 1 0;
+            min-width: 0;
+        }
+        #ai-python-run-buttons {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: nowrap;
+            width: 100%;
+            margin-top: 8px;
         }
         #ai-python-output-toolbar {
             display: flex;
@@ -4008,9 +4083,10 @@
     </div>
 </div>
 
-<div id="right-panel">
+    <div id="right-panel">
     <div id="right-panel-toggle-tab" class="toggle-tab"><span>▸</span></div>
     <div id="right-panel-content">
+            <div id="right-panel-static">
         <label>Search Protein IDs or Terms</label>
         <div class="search-container">
             <input type="text" id="searchInput" placeholder="Search...">
@@ -4046,8 +4122,14 @@
                 <option value="size">Protein size</option>
             </select>
         </div>
-        <h4 id="right-panel-key-toggle" style="cursor:pointer; margin:15px 0 5px 0; color: var(--text-color);">Key ▾</h4>
-        <div id="legend-content"></div>
+            <h4 id="right-panel-key-toggle" style="cursor:pointer; margin:15px 0 5px 0; color: var(--text-color);">Key ▾</h4>
+            <div id="legend-controls"></div>
+            </div>
+            <div id="legend-content"></div>
+            <div id="right-panel-footer">
+                <div id="right-panel-footer-text" style="font-size:11px; color:#aaa; margin-bottom:8px; line-height:1.35;"></div>
+                <button id="collection-cycle-toggle-btn" type="button" class="action-btn" style="justify-content:center; display:none;">Pause cycle</button>
+            </div>
     </div>
 </div>
 
@@ -4112,7 +4194,10 @@
         <button id="ai-python-instructions-btn" type="button">Instructions for writing python scripts.</button>
         <div id="ai-current-script-title">Current Script: Untitled Script</div>
         <textarea id="ai-python-script-editor" spellcheck="false" placeholder="# Write Python here, use one of the example scripts above, or generate a script using the AI below."></textarea>
-        <button id="ai-run-script-btn" type="button">Run Script</button>
+        <div id="ai-python-run-buttons">
+            <button id="ai-run-line-btn" type="button">Run Line</button>
+            <button id="ai-run-script-btn" type="button">Run Script</button>
+        </div>
         <div id="ai-python-output-toolbar">
             <div id="ai-python-script-output-header">Output:</div>
             <button id="ai-copy-python-output-btn" type="button">Copy output</button>
