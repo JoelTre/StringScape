@@ -3191,18 +3191,32 @@ sys.modules['stringscape'] = _stringscape_module
         };
     }
 
-    async function runpythonpanelScript() {
+    function getPythonPanelRunSnippet(editor) {
+        const text = String(editor?.value || '');
+        if (!text.trim()) return '';
+        const selectionStart = editor?.selectionStart ?? 0;
+        const selectionEnd = editor?.selectionEnd ?? 0;
+        if (selectionEnd > selectionStart) {
+            return text.slice(selectionStart, selectionEnd);
+        }
+        const lineStart = text.lastIndexOf('\n', Math.max(0, selectionStart - 1)) + 1;
+        let lineEnd = text.indexOf('\n', selectionStart);
+        if (lineEnd === -1) lineEnd = text.length;
+        return text.slice(lineStart, lineEnd);
+    }
+
+    async function runPythonPanelCode(scriptText, runningMessage = 'Running script...') {
         const editor = document.getElementById('ai-python-script-editor');
         const output = document.getElementById('ai-python-run-output');
         if (!editor) return;
-        const scriptText = String(editor.value || '').trim();
-        if (!scriptText) {
+        const trimmedScriptText = String(scriptText || '');
+        if (!trimmedScriptText.trim()) {
             if (output) output.textContent = 'No script to run.';
             return;
         }
         try {
-            if (output) output.textContent = 'Running script...';
-            const parsed = aiParseScriptToolCalls(scriptText);
+            if (output) output.textContent = runningMessage;
+            const parsed = aiParseScriptToolCalls(trimmedScriptText);
             const responses = [];
             for (const call of parsed.toolCalls) {
                 const res = await aiExecuteToolCall(call.toolName, call.args || {});
@@ -3239,6 +3253,23 @@ sys.modules['stringscape'] = _stringscape_module
                 aiAutoExpand(input);
             }
         }
+    }
+
+    async function runpythonpanelScript() {
+        const editor = document.getElementById('ai-python-script-editor');
+        await runPythonPanelCode(editor?.value || '', 'Running script...');
+    }
+
+    async function runpythonpanelLine() {
+        const editor = document.getElementById('ai-python-script-editor');
+        if (!editor) return;
+        const lineText = getPythonPanelRunSnippet(editor);
+        const output = document.getElementById('ai-python-run-output');
+        if (!lineText) {
+            if (output) output.textContent = 'No line to run.';
+            return;
+        }
+        await runPythonPanelCode(lineText, 'Running line...');
     }
 
     async function sendPythonScriptAssistMessage() {
@@ -3817,6 +3848,8 @@ sys.modules['stringscape'] = _stringscape_module
     let lastHoveredBar = null; // Global scope variable to track the last hovered histogram bar
     let currentHistogramBins = []; // This will store your binData globally
     let collectionColorCycleTimer = null;
+    let collectionColorCyclePaused = false;
+    let collectionColorCyclePausedAtMs = null;
     
     const FRAME_HANDLE_SIZE = 10; // Hit area for corners in world units
 
@@ -5636,7 +5669,10 @@ self.onmessage = async (event) => {
         console.log("function getCollectionColorForNode()");
         const memberships = getNodeCollectionMemberships(nodeId);
         if (!memberships.length) return '#444';
-        const slot = Math.floor(timestampMs / 500);
+        const effectiveTimestampMs = collectionColorCyclePaused && Number.isFinite(collectionColorCyclePausedAtMs)
+            ? collectionColorCyclePausedAtMs
+            : timestampMs;
+        const slot = Math.floor(effectiveTimestampMs / 500);
         const activeName = memberships[slot % memberships.length];
         return getCollectionColorByName(activeName);
     }
@@ -5686,7 +5722,10 @@ self.onmessage = async (event) => {
     function getComplexPdbColorForNode(nodeId, timestampMs = Date.now()) {
         const memberships = getComplexPdbMemberships(nodeId);
         if (!memberships.length) return '#444';
-        const slot = Math.floor(timestampMs / 500);
+        const effectiveTimestampMs = collectionColorCyclePaused && Number.isFinite(collectionColorCyclePausedAtMs)
+            ? collectionColorCyclePausedAtMs
+            : timestampMs;
+        const slot = Math.floor(effectiveTimestampMs / 500);
         const activePdbId = memberships[slot % memberships.length];
         return ensureComplexPdbColorState().colorScale(activePdbId);
     }
@@ -5765,7 +5804,8 @@ self.onmessage = async (event) => {
         console.log("function updateCollectionColorCycleTimer()");
         
         const mode = document.getElementById('colorMode')?.value;
-        if (mode === 'collection' || mode === 'complex_pdbs') {
+        const shouldCycle = !collectionColorCyclePaused && (mode === 'collection' || mode === 'complex_pdbs');
+        if (shouldCycle) {
             if (!collectionColorCycleTimer) {
                 collectionColorCycleTimer = setInterval(() => draw(), 500);
             }
@@ -5773,6 +5813,26 @@ self.onmessage = async (event) => {
             clearInterval(collectionColorCycleTimer);
             collectionColorCycleTimer = null;
         }
+        updateCollectionColorCycleButton();
+    }
+
+    function updateCollectionColorCycleButton() {
+        const button = document.getElementById('collection-cycle-toggle-btn');
+        if (!button) return;
+        const mode = document.getElementById('colorMode')?.value;
+        const isCyclingMode = mode === 'collection' || mode === 'complex_pdbs';
+        button.style.display = isCyclingMode ? 'block' : 'none';
+        if (!isCyclingMode) return;
+        button.textContent = collectionColorCyclePaused ? 'Play cycle' : 'Pause cycle';
+        button.title = 'Pause or resume the 0.5-second color cycle for collection and complex PDB modes.';
+        button.setAttribute('aria-pressed', String(collectionColorCyclePaused));
+    }
+
+    function toggleCollectionColorCycle() {
+        collectionColorCyclePaused = !collectionColorCyclePaused;
+        collectionColorCyclePausedAtMs = collectionColorCyclePaused ? Date.now() : null;
+        updateCollectionColorCycleTimer();
+        draw();
     }
 
     // This function calculates the eigenvector centrality scores for a subset of nodes and links, using an iterative approach. It constructs a local adjacency structure based on the provided nodes and links, and then repeatedly updates the centrality scores until they converge or a maximum number of iterations is reached. The resulting scores are normalized to the range [0, 1] for use in visualizations or further analysis.
@@ -6779,7 +6839,7 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
                 if (proteinInfoZoomHotkeyState && e.sourceEvent) {
                     proteinInfoZoomHotkeyState.invalidated = true;
                 }
-                if (physicsEnabled && transform.k >= 1.0) {
+                if (currentViewId !== 'selected' && physicsEnabled && transform.k >= 1.0) {
                     togglePhysics(false, 'auto-zoom');
                 }
             }
@@ -17291,11 +17351,15 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     function updateLegend(mode, cRange, sRange, catScale, eRange = null, embeddingSimilarityState = null) {
         console.log(`function updateLegend(mode: ${mode}, cRange: ${cRange}, sRange: ${sRange}, catScale: ${catScale}, eRange: ${eRange})`);
+        const legendControls = d3.select("#legend-controls");
         const legend = d3.select("#legend-content");
+        const footerTextEl = document.getElementById('right-panel-footer-text');
         const rangeUINode = document.getElementById('range-ui');
         const wasRangeOpen = rangeUINode ? rangeUINode.style.display === 'block' : false;
 
+        legendControls.html("");
         legend.html("");
+        if (footerTextEl) footerTextEl.innerHTML = '';
         const activeNodes = (currentViewId === 'base' || currentViewId === 'Venn Diagram' || currentViewId === 'Scatter Plot' || currentViewId === 'Embeddings')
             ? nodes
             : (activeSubData?.nodes || []);
@@ -17311,7 +17375,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         currentColorMode = mode;
         currentColorRange = [cRange, sRange, eRange];
 
-        const keyColorWrap = legend.append("div").style("margin-bottom", "10px");
+        const keyColorWrap = legendControls.append("div").style("margin-bottom", "10px");
         keyColorWrap.append("label")
             .style("display", "block")
             .style("margin-bottom", "4px")
@@ -17327,9 +17391,21 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             };
         }
 
+        const footerNotes = [];
+        const setFooterNotes = (notes) => {
+            if (!footerTextEl) return;
+            footerTextEl.innerHTML = '';
+            const items = Array.isArray(notes) ? notes : [notes];
+            items.filter(Boolean).forEach(note => {
+                const line = document.createElement('div');
+                line.textContent = String(note);
+                footerTextEl.appendChild(line);
+            });
+        };
+
         // Helper function to create pie chart toggle button
         const createPieChartToggle = (counts, mode, label) => {
-            const toggleContainer = legend.append("div").style("margin-bottom", "8px");
+            const toggleContainer = legendControls.append("div").style("margin-bottom", "8px");
             const toggle = toggleContainer.append("div")
                 .style("cursor", "pointer")
                 .style("color", "var(--textColor)")
@@ -17354,7 +17430,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
         // Helper function to create histogram toggle button
         const createHistogramToggle = (numericValues, range, mode) => {
-            const toggleContainer = legend.append("div").style("margin-bottom", "8px");
+            const toggleContainer = legendControls.append("div").style("margin-bottom", "8px");
             const toggle = toggleContainer.append("div")
                 .style("cursor", "pointer")
                 .style("color", "#fff")
@@ -17392,7 +17468,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             const hasUploadedEmbeddingFiles = Object.keys(uploadedEmbeddingFiles || {}).length > 0;
 
             if (!hasUploadedEmbeddingFiles) {
-                legend.append('div')
+                legendControls.append('div')
                     .style('font-size', '12px')
                     .style('font-weight', '700')
                     .style('color', '#fff')
@@ -17406,10 +17482,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             
             // Gradient bar and labels
             const gradient = d3.range(0, 1.01, 0.1).map(t => getEmbeddingSimilarityColor((t * 2) - 1)).join(', ');
-            const container = legend.append('div').attr('class', 'gradient-container');
+            const container = legendControls.append('div').attr('class', 'gradient-container');
             container.append('div').attr('class', 'gradient-bar').style('background', `linear-gradient(to right, ${gradient})`);
 
-            const labels = legend.append('div').attr('class', 'grad-labels');
+            const labels = legendControls.append('div').attr('class', 'grad-labels');
             labels.append('span').text(Number(range[0]).toFixed(3));
             labels.append('span').text(Number(range[1]).toFixed(3));
 
@@ -17418,8 +17494,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             container.append('div').attr('class', 'range-overlay').style('right', '0').style('width', '0%');
 
             if (hasReference) {
-                const rangeToggle = legend.append("div").attr("class", "select-range-toggle").style("color", "white").text("Select range ▾");
-                const rangeUI = legend.append("div").attr("id", "range-ui-embeddings").style("display", "none");
+                const rangeToggle = legendControls.append("div").attr("class", "select-range-toggle").style("color", "white").text("Select range ▾");
+                const rangeUI = legendControls.append("div").attr("id", "range-ui-embeddings").style("display", "none");
                 const inputs = rangeUI.append("div").attr("class", "range-inputs");
                 const minBox = inputs.append("div");
                 minBox.append("label").text("Min");
@@ -17476,14 +17552,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 updateEmbeddingRangeFromInputs(range, false);
             }
 
-            legend.append('div')
-                .style('font-size', '12px')
-                .style('color', '#bbb')
-                .style('line-height', '1.35')
-                .style('margin', '8px 0 8px 0')
-                .text('Select one or more nodes to set as the reference');
+            footerNotes.push('Select one or more nodes to set as the reference');
 
-            legend.append('button')
+            legendControls.append('button')
                 .style('width', '100%')
                 .style('background', '#666')
                 .style('margin-bottom', '8px')
@@ -17492,7 +17563,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     setEmbeddingReferenceFromCurrentSelection();
                 });
 
-            const toggleWrap = legend.append('div').style('margin-bottom', '8px');
+            const toggleWrap = legendControls.append('div').style('margin-bottom', '8px');
             toggleWrap.append('label')
                 .style('display', 'block')
                 .style('margin-bottom', '4px')
@@ -17532,22 +17603,13 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 ? 'Proteins with more similar colouring to the reference node(s) tend to have similar functional context or be part of the same biological pathways as the reference node(s). Coloured based on cosine similarity to the reference node(s). '
                 : 'Proteins with more similar colouring to the reference node(s) tend to have a similar structure to the reference node(s). Coloured based on cosine similarity to the reference node(s). ';
 
-            legend.append('div')
-                .style('font-size', '11px')
-                .style('color', '#bbb')
-                .style('line-height', '1.35')
-                .style('margin', '8px 0 8px 0')
-                .text(description);
+            footerNotes.push(description.trim());
 
             const refCount = getActiveEmbeddingReferenceSet().size;
             const refsWithVectors = simState.refWithVectors?.size || 0;
-            legend.append('div')
-                .style('font-size', '11px')
-                .style('color', '#aaa')
-                .style('margin-bottom', '8px')
-                .text(`Reference nodes (circled in red): ${refCount} (${refsWithVectors} with embeddings)`);
+            footerNotes.push(`Reference nodes (circled in red): ${refCount} (${refsWithVectors} with embeddings)`);
 
-            legend.append('button')
+            legendControls.append('button')
                 .attr('type', 'button')
                 .style('display', 'inline-block')
                 .style('padding', '5px 12px')
@@ -17628,20 +17690,20 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 mode
             );
 
-            const container = legend.append("div").attr("class", "gradient-container");
+            const container = legendControls.append("div").attr("class", "gradient-container");
             const bar = container.append("div")
                 .attr("class", "gradient-bar")
                 .style("background", `linear-gradient(to right, ${d3.range(0, 1.1, 0.1).map(t => interp(clamp01(t))).join(', ')})`);
             
             container.append("div").attr("class", "range-overlay").style("left", "0").style("width", "0%");
             container.append("div").attr("class", "range-overlay").style("right", "0").style("width", "0%");
-            const labels = legend.append("div").attr("class", "grad-labels");
+            const labels = legendControls.append("div").attr("class", "grad-labels");
             // FIX 1: Use formatVal for the text labels
             labels.append("span").text(formatVal(range[0] || 0)); 
             labels.append("span").text(formatVal(range[1] || 0));
             
-            const toggle = legend.append("div").attr("class", "select-range-toggle").style("color", "white").text("Select range ▾");
-            const rangeUI = legend.append("div").attr("id", "range-ui").style("display", wasRangeOpen ? "block" : "none");
+            const toggle = legendControls.append("div").attr("class", "select-range-toggle").style("color", "white").text("Select range ▾");
+            const rangeUI = legendControls.append("div").attr("id", "range-ui").style("display", wasRangeOpen ? "block" : "none");
             const inputs = rangeUI.append("div").attr("class", "range-inputs");
             const minBox = inputs.append("div"); 
             minBox.append("label").text("Min"); 
@@ -17697,7 +17759,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             toggle.on("click", () => { rangeUI.style("display", rangeUI.style("display") === "none" ? "block" : "none"); });
 
             if (mode === 'centrality') {
-                legend.append("div")
+                legendControls.append("div")
                     .style("font-size", "11px")
                     .style("color", "#bbb")
                     .style("line-height", "1.35")
@@ -17705,7 +17767,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     .text("Centrality is a count of how many links are connected to each node");
             }
             if (mode === 'eigen') {
-                legend.append("div")
+                legendControls.append("div")
                     .style("font-size", "11px")
                     .style("color", "#bbb")
                     .style("line-height", "1.35")
@@ -17713,7 +17775,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     .text("Eigenvector centrality is a measure of a node's importance based on the centrality of the nodes it is connected to.");
             };
             if (mode === 'annotation') {
-                legend.append("div")
+                legendControls.append("div")
                     .style("font-size", "11px")
                     .style("color", "#bbb")
                     .style("line-height", "1.35")
@@ -17721,7 +17783,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     .text("Nodes coloured by their annotation character count. This can be used as a proxy of how well researched/known the proteins are.");
             }
             if (mode === 'pdb_structure_count') {
-                legend.append("div")
+                legendControls.append("div")
                     .style("font-size", "11px")
                     .style("color", "#bbb")
                     .style("line-height", "1.35")
@@ -17730,7 +17792,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             }
             
             if ((mode === 'centrality' || mode === 'eigen') && (currentViewId === 'selected' || currentViewId.startsWith('coll_'))) {
-                const scopeRow = legend.append("div")
+                const scopeRow = legendControls.append("div")
                     .attr("class", "link-direction-toggle")
                     .style("margin", "6px 0 8px 0");
                 const localActive = mode === 'centrality' ? (centralityScope === 'local') : (eigenScope === 'local');
@@ -17757,7 +17819,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     const centralityScopeText = centralityScope === 'global'
                         ? 'Global calculates centrality using only the nodes and links in the Full Network.'
                         : 'Local calculates centrality using the nodes and links in the current view.';
-                    legend.append("div")
+                    legendControls.append("div")
                         .style("font-size", "11px")
                         .style("color", "#bbb")
                         .style("line-height", "1.35")
@@ -17765,7 +17827,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                         .text(centralityScopeText);
                 }
                 if (mode === 'eigen') {
-                    legend.append("div")
+                    legendControls.append("div")
                         .style("font-size", "11px")
                         .style("color", "#bbb")
                         .style("line-height", "1.35")
@@ -17818,16 +17880,16 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 const minv = d3.min(numericValues) || 0;
                 const maxv = d3.max(numericValues) || 1;
                 createHistogramToggle(numericValues, [minv, maxv], mode);
-                const container = legend.append('div').attr('class', 'gradient-container');
+                const container = legendControls.append('div').attr('class', 'gradient-container');
                 container.append('div').attr('class', 'gradient-bar').style('background', `linear-gradient(to right, ${d3.range(0, 1.1, 0.1).map(t => d3.interpolateInferno(t)).join(', ')})`);
-                const labels = legend.append('div').attr('class', 'grad-labels');
+                const labels = legendControls.append('div').attr('class', 'grad-labels');
                 labels.append('span').text(Math.round(minv)); labels.append('span').text(Math.round(maxv));
-                legend.append('div').attr('style', 'color:#ccc; font-size:11px; margin-top:6px;').text(`Continuous values: ${numericValues.length} nodes`);
+                legendControls.append('div').attr('style', 'color:#ccc; font-size:11px; margin-top:6px;').text(`Continuous values: ${numericValues.length} nodes`);
                 
                 // Add range selection UI for continuous variables in embeddings view
                 if (currentViewId === 'Embeddings') {
-                    const rangeToggle = legend.append("div").attr("class", "select-range-toggle").style("color", "white").text("Select range ▾");
-                    const rangeUI = legend.append("div").attr("id", `embedding-range-ui-${file}-${variable}`).style("display", "none");
+                    const rangeToggle = legendControls.append("div").attr("class", "select-range-toggle").style("color", "white").text("Select range ▾");
+                    const rangeUI = legendControls.append("div").attr("id", `embedding-range-ui-${file}-${variable}`).style("display", "none");
                     const inputs = rangeUI.append("div").attr("class", "range-inputs");
                     
                     const minBox = inputs.append("div");
@@ -17844,7 +17906,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                         .attr("step", 0.001)
                         .attr("value", Number(maxv).toFixed(3));
 
-                    const container = legend.append('div').attr('class', 'gradient-container-var');
+                    const container = legendControls.append('div').attr('class', 'gradient-container-var');
                     const bar = container.append('div').attr('class', 'gradient-bar').style('background', `linear-gradient(to right, ${d3.range(0, 1.1, 0.1).map(t => d3.interpolateInferno(t)).join(', ')})`);
                     const hMin = container.append("div").attr("class", "range-handle").style("left", "0%");
                     const hMax = container.append("div").attr("class", "range-handle").style("right", "0%");
@@ -17974,17 +18036,15 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     : (mode === 'collection' ? (lbl === 'No Collection' ? '#444' : getCollectionColorByName(lbl)) : (mode === 'complex_pdbs' ? ensureComplexPdbColorState().colorScale(lbl) : (mode === 'localization' ? localizationScale(lbl) : catScale(lbl))));
                 item.append("div").attr("class", "color-box").style("background", color); item.append("span").text(`${lbl} (${cnt})`);
             });
-            if (mode === 'collection') {
-                legend.append('div').attr('style', 'color:#aaa; font-size:11px; margin-top:6px;').text('Nodes in multiple collections cycle every 0.5s.');
-            } else if (mode === 'complex_pdbs') {
-                legend.append('div').attr('style', 'color:#aaa; font-size:11px; margin-top:6px;').text('Nodes with multiple complex PDBs cycle every 0.5s.');
-            }
+            if (mode === 'collection') footerNotes.push('Nodes in multiple collections cycle every 0.5s.');
+            if (mode === 'complex_pdbs') footerNotes.push('Nodes with multiple complex PDBs cycle every 0.5s.');
         }
         if (mode === 'layer' && selectedNodes.size > 0) {
-            legend.append("button").text("Update Selection as Layer 0").attr("class", "action-btn").style("width", "100%").on("click", () => { 
+            legendControls.append("button").text("Update Selection as Layer 0").attr("class", "action-btn").style("width", "100%").on("click", () => { 
                 const selectedIds = Array.from(getEffectiveSelectedNodesSet());
                 if (!selectedIds.length) return;
 
+            if (mode === 'layer') footerNotes.push('Select one or more nodes to set as layer 0');
                 currentSeeds = selectedIds;
                 const useGlobalLayerTargets = currentViewId === 'base' || currentViewId === 'Embeddings' || !activeSubData?.nodes?.length;
                 const targetNodes = useGlobalLayerTargets ? nodes : activeSubData.nodes;
@@ -18042,10 +18102,15 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         }
 
         if (currentViewId === 'Embeddings' && !isFullNetworkBuildComplete()) {
-            const hint = legend.append('div').attr('class', 'legend-item').style('cursor', 'default');
+            const hint = legendControls.append('div').attr('class', 'legend-item').style('cursor', 'default');
             hint.append('div').attr('class', 'color-box').style('background', '#58b8ff');
             hint.append('span').text('Not yet built in Full Network');
         }
+
+        if (footerNotes.length) {
+            setFooterNotes(footerNotes);
+        }
+        updateCollectionColorCycleButton();
     }
 
     function updateRangeFromInputs(range, mode, shouldSelect = false) {
@@ -19435,6 +19500,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         });
 
         bindClick(document.querySelector('[data-download-action="session"]'), () => openDownloadSessionModal());
+        bindClick(document.querySelector('[data-download-action="svg"]'), () => exportCanvas('svg'));
+        bindClick(document.querySelector('[data-download-action="png-8k"]'), () => exportCanvas('png'));
 
         const variableSettingsButton = document.querySelector('#variables-drop button');
         bindClick(variableSettingsButton, () => openVariableSettings());
@@ -19468,6 +19535,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         }
         bindClick(document.getElementById('ai-python-instructions-btn'), () => openPythonInstructionsBox());
         bindClick(document.getElementById('ai-run-script-btn'), () => runpythonpanelScript());
+        bindClick(document.getElementById('ai-run-line-btn'), () => runpythonpanelLine());
         bindClick(document.getElementById('ai-copy-python-instructions'), () => copyPythonInstructions());
         bindClick(document.getElementById('ai-copy-python-output-btn'), () => copyPythonOutput());
         bindClick(document.getElementById('ai-close-python-instructions'), () => closePythonInstructionsBox());
@@ -19479,6 +19547,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         }
         bindClick(document.getElementById('ask-ai-btn'), () => toggleAiPanel());
         bindClick(document.getElementById('ai-python-console-btn'), () => togglepythonpanelMode());
+        bindClick(document.getElementById('collection-cycle-toggle-btn'), () => toggleCollectionColorCycle());
 
         bindClick(document.getElementById('protein-info-toggle-btn'), () => openProteinInfoBox());
         bindClick(document.getElementById('protein-info-prev-btn'), () => navigateProteinInfo('left'));
