@@ -2034,6 +2034,7 @@
                 if (method === 'delete_collection') {
                     const name = String(args.name || '').trim();
                     if (!collections.has(name)) return result('warning', { collection: name, deleted: false, message: 'Collection was not found.' });
+                    deleteCategoryLegendItemState('collection', name);
                     const nodeCount = collections.get(name).nodeIds?.size || 0; collections.delete(name); updateViewMenu(); refreshLegendIfCollectionMode(); queueDraw(animate);
                     return result('success', { collection: name, deleted: true, removed_node_count: nodeCount });
                 }
@@ -5634,14 +5635,238 @@ self.onmessage = async (event) => {
         return d3.schemeTableau10;
     }
 
+    const CATEGORY_LEGEND_STATE_STORAGE_KEY = 'stringscape.categoryLegendState';
+    let categoryLegendStateByMode = null;
+
+    function loadCategoryLegendState() {
+        if (categoryLegendStateByMode) return categoryLegendStateByMode;
+        try {
+            const raw = localStorage.getItem(CATEGORY_LEGEND_STATE_STORAGE_KEY);
+            categoryLegendStateByMode = raw ? JSON.parse(raw) : {};
+        } catch (error) {
+            categoryLegendStateByMode = {};
+        }
+        return categoryLegendStateByMode;
+    }
+
+    function persistCategoryLegendState() {
+        try {
+            localStorage.setItem(CATEGORY_LEGEND_STATE_STORAGE_KEY, JSON.stringify(loadCategoryLegendState()));
+        } catch (error) {
+        }
+    }
+
+    function getCategoryLegendModeState(mode) {
+        const store = loadCategoryLegendState();
+        const key = String(mode || '');
+        if (!store[key] || typeof store[key] !== 'object') store[key] = {};
+        return store[key];
+    }
+
+    function getCategoryLegendItemState(mode, label) {
+        const store = loadCategoryLegendState();
+        const modeKey = String(mode || '');
+        const labelKey = String(label ?? 'Unknown');
+        return store[modeKey]?.[labelKey] || {};
+    }
+
+    function ensureCategoryLegendItemState(mode, label) {
+        const modeState = getCategoryLegendModeState(mode);
+        const key = String(label ?? 'Unknown');
+        if (!modeState[key] || typeof modeState[key] !== 'object') modeState[key] = {};
+        return modeState[key];
+    }
+
+    function getCategoryLegendItemColor(mode, label, defaultColor) {
+        const itemState = getCategoryLegendItemState(mode, label);
+        return itemState.color || defaultColor;
+    }
+
+    function isCategoryLegendItemHidden(mode, label) {
+        return !!getCategoryLegendItemState(mode, label).hidden;
+    }
+
+    function setCategoryLegendItemColor(mode, label, color) {
+        const itemState = ensureCategoryLegendItemState(mode, label);
+        itemState.color = normalizeLegendColor(color, '#444444');
+        persistCategoryLegendState();
+    }
+
+    function resetCategoryLegendItemColor(mode, label) {
+        const itemState = ensureCategoryLegendItemState(mode, label);
+        delete itemState.color;
+        persistCategoryLegendState();
+    }
+
+    function setCategoryLegendItemHidden(mode, label, hidden) {
+        const itemState = ensureCategoryLegendItemState(mode, label);
+        itemState.hidden = !!hidden;
+        persistCategoryLegendState();
+    }
+
+    function deleteCategoryLegendItemState(mode, label) {
+        const store = loadCategoryLegendState();
+        const modeKey = String(mode || '');
+        const labelKey = String(label ?? 'Unknown');
+        if (!store[modeKey]) return;
+        delete store[modeKey][labelKey];
+        if (!Object.keys(store[modeKey]).length) delete store[modeKey];
+        persistCategoryLegendState();
+    }
+
+    function renameCategoryLegendItemState(mode, oldLabel, newLabel) {
+        const store = loadCategoryLegendState();
+        const modeKey = String(mode || '');
+        const oldKey = String(oldLabel ?? 'Unknown');
+        const newKey = String(newLabel ?? 'Unknown');
+        if (!store[modeKey] || oldKey === newKey) return;
+        if (store[modeKey][oldKey]) {
+            store[modeKey][newKey] = store[modeKey][oldKey];
+            delete store[modeKey][oldKey];
+            persistCategoryLegendState();
+        }
+    }
+
+    function normalizeLegendColor(color, fallback = '#444444') {
+        const parsed = d3.color(color);
+        return parsed ? parsed.formatHex() : fallback;
+    }
+
+    function getCategoricalLegendFillColor(mode, label, defaultColor) {
+        return getCategoryLegendItemColor(mode, label, defaultColor);
+    }
+
+    function getCategoricalNodeColor(mode, label, defaultColor) {
+        return isCategoryLegendItemHidden(mode, label) ? '#444' : getCategoryLegendItemColor(mode, label, defaultColor);
+    }
+
+    function appendCategoricalLegendItem(parentSelection, options) {
+        const { mode, label, count, defaultColor, onActivate } = options;
+        const item = parentSelection.append('div')
+            .attr('class', 'legend-item')
+            .style('display', 'flex')
+            .style('align-items', 'center')
+            .style('gap', '8px')
+            .style('width', '100%')
+            .style('margin-bottom', '-3px');
+
+        const leftSide = item.append('div')
+            .style('display', 'flex')
+            .style('align-items', 'center')
+            .style('gap', '8px')
+            .style('min-width', '0')
+            .style('flex', '1 1 auto')
+            .style('cursor', 'pointer');
+
+        const hidden = isCategoryLegendItemHidden(mode, label);
+        const itemColor = getCategoricalLegendFillColor(mode, label, defaultColor);
+        const itemState = getCategoryLegendItemState(mode, label);
+
+        const colorBox = leftSide.append('div')
+            .attr('class', 'color-box')
+            .style('background', itemColor)
+            .style('width', '12px')
+            .style('height', '12px')
+            .style('flex-shrink', '0')
+            .style('opacity', hidden ? '0.45' : '1')
+            .style('cursor', 'pointer')
+            .style('position', 'relative');
+
+        leftSide.append('span')
+            .style('min-width', '0')
+            .style('flex', '1 1 auto')
+            .style('opacity', hidden ? '0.7' : '1')
+            .text(`${label} (${count})`);
+
+        leftSide.on('click', () => {
+            if (typeof onActivate === 'function') onActivate();
+        });
+
+        const controls = item.append('div')
+            .style('display', 'flex')
+            .style('align-items', 'center')
+            .style('gap', '4px')
+            .style('margin-left', 'auto')
+            .style('flex-shrink', '0');
+
+        if (itemState.color) {
+            controls.append('button')
+                .attr('type', 'button')
+                .attr('title', 'Reset to default colour')
+                .style('border-radius', '999px')
+                .style('background', 'rgba(255,255,255,0.08)')
+                .style('color', '#fff')
+                .style('padding', '0')
+                .style('width', '18px')
+                .style('height', '18px')
+                .style('font-size', '10px')
+                .style('cursor', 'pointer')
+                .text('↺')
+                .on('click', (event) => {
+                    event.stopPropagation();
+                    resetCategoryLegendItemColor(mode, label);
+                    updateSizesAndColors();
+                });
+        }
+
+        controls.append('button')
+            .attr('type', 'button')
+            .attr('title', hidden ? 'Show this item in colouring' : 'Hide this item from colouring')
+            .style('border-radius', '999px')
+            .style('background', hidden ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.08)')
+            .style('color', '#fff')
+            .style('padding', '0')
+            .style('width', '18px')
+            .style('height', '18px')
+            .style('cursor', 'pointer')
+            .html(hidden
+                ? '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M3.28 2.22a.75.75 0 0 0-1.06 1.06l10.5 10.5a.75.75 0 1 0 1.06-1.06l-1.322-1.323a7.012 7.012 0 0 0 2.16-3.11.87.87 0 0 0 0-.567A7.003 7.003 0 0 0 4.82 3.76l-1.54-1.54Zm3.196 3.195 1.135 1.136A1.502 1.502 0 0 1 9.45 8.389l1.136 1.135a3 3 0 0 0-4.109-4.109Z" clip-rule="evenodd" /><path d="m7.812 10.994 1.816 1.816A7.003 7.003 0 0 1 1.38 8.28a.87.87 0 0 1 0-.566 6.985 6.985 0 0 1 1.113-2.039l2.513 2.513a3 3 0 0 0 2.806 2.806Z" /></svg>'
+                : '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 9.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" /><path fill-rule="evenodd" d="M1.38 8.28a.87.87 0 0 1 0-.566 7.003 7.003 0 0 1 13.238.006.87.87 0 0 1 0 .566A7.003 7.003 0 0 1 1.379 8.28ZM11 8a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" clip-rule="evenodd" /></svg>')
+            .on('click', (event) => {
+                event.stopPropagation();
+                setCategoryLegendItemHidden(mode, label, !hidden);
+                updateSizesAndColors();
+            });
+
+        const colorInput = document.createElement('input');
+        colorInput.type = 'color';
+        colorInput.value = normalizeLegendColor(itemColor, '#444444');
+        colorInput.style.position = 'absolute';
+        colorInput.style.inset = '0';
+        colorInput.style.opacity = '0';
+        colorInput.style.width = '100%';
+        colorInput.style.height = '100%';
+        colorInput.style.margin = '0';
+        colorInput.style.padding = '0';
+        colorInput.style.border = '0';
+        colorInput.style.cursor = 'pointer';
+        colorInput.addEventListener('input', () => {
+            setCategoryLegendItemColor(mode, label, colorInput.value);
+            updateSizesAndColors();
+        });
+        colorBox.node().appendChild(colorInput);
+
+        colorBox.on('click', (event) => {
+            event.stopPropagation();
+            colorInput.value = normalizeLegendColor(getCategoricalLegendFillColor(mode, label, defaultColor), '#444444');
+            if (typeof colorInput.showPicker === 'function') {
+                colorInput.showPicker();
+            } else {
+                colorInput.click();
+            }
+        });
+
+        return item;
+    }
+
     // This function determines the color associated with a given collection name by mapping it to a color in the collection color palette. It uses the index of the collection name in the list of collection names to assign a consistent color, cycling through the palette if there are more collections than colors.
     function getCollectionColorByName(name) {
         console.log("function getCollectionColorByName()");
         const palette = getCollectionColorPalette();
         const names = Array.from(collections.keys());
         const idx = names.indexOf(name);
-        if (idx < 0) return palette[0];
-        return palette[idx % palette.length];
+        const defaultColor = idx < 0 ? palette[0] : palette[idx % palette.length];
+        return getCategoricalLegendFillColor('collection', name, defaultColor);
     }
 
     function getLocalizationColorScale(activeNodes, builtInColorSource = null) {
@@ -5668,12 +5893,13 @@ self.onmessage = async (event) => {
     function getCollectionColorForNode(nodeId, timestampMs = Date.now()) {
         console.log("function getCollectionColorForNode()");
         const memberships = getNodeCollectionMemberships(nodeId);
-        if (!memberships.length) return '#444';
+        const visibleMemberships = memberships.filter(name => !isCategoryLegendItemHidden('collection', name));
+        if (!visibleMemberships.length) return '#444';
         const effectiveTimestampMs = collectionColorCyclePaused && Number.isFinite(collectionColorCyclePausedAtMs)
             ? collectionColorCyclePausedAtMs
             : timestampMs;
         const slot = Math.floor(effectiveTimestampMs / 500);
-        const activeName = memberships[slot % memberships.length];
+        const activeName = visibleMemberships[slot % visibleMemberships.length];
         return getCollectionColorByName(activeName);
     }
 
@@ -5721,13 +5947,15 @@ self.onmessage = async (event) => {
 
     function getComplexPdbColorForNode(nodeId, timestampMs = Date.now()) {
         const memberships = getComplexPdbMemberships(nodeId);
-        if (!memberships.length) return '#444';
+        const visibleMemberships = memberships.filter(pdbId => !isCategoryLegendItemHidden('complex_pdbs', pdbId));
+        if (!visibleMemberships.length) return '#444';
         const effectiveTimestampMs = collectionColorCyclePaused && Number.isFinite(collectionColorCyclePausedAtMs)
             ? collectionColorCyclePausedAtMs
             : timestampMs;
         const slot = Math.floor(effectiveTimestampMs / 500);
-        const activePdbId = memberships[slot % memberships.length];
-        return ensureComplexPdbColorState().colorScale(activePdbId);
+        const activePdbId = visibleMemberships[slot % visibleMemberships.length];
+        const defaultColor = ensureComplexPdbColorState().colorScale(activePdbId);
+        return getCategoricalLegendFillColor('complex_pdbs', activePdbId, defaultColor);
     }
 
     // Escape first so any user, AI, or file-derived text becomes inert before it is rendered anywhere in the UI.
@@ -6241,8 +6469,10 @@ self.onmessage = async (event) => {
 
             let colorValue = 0.5;
             if (mode === 'layer') {
-                n.col = (n.layer === 99) ? '#888' : d3.interpolateViridis(1 - ((n.layer || 0) / 10));
-                colorValue = clamp01(1 - ((n.layer || 0) / 10));
+                const layerLabel = n.layer === 99 ? 'Disconnected' : `Layer ${n.layer}`;
+                const defaultColor = (n.layer === 99) ? '#888' : d3.interpolateViridis(1 - ((n.layer || 0) / 10));
+                n.col = getCategoricalNodeColor('layer', layerLabel, defaultColor);
+                colorValue = hashStringToUnit(n.col);
             } else if (mode === 'centrality') {
                 const normalized = clamp01((centralityVal - cMin) / cSpan);
                 n.col = d3.interpolateInferno(0.3 + 0.8 * normalized);
@@ -6253,9 +6483,8 @@ self.onmessage = async (event) => {
                 colorValue = normalized;
             } else if (mode === 'collection') {
                 const color = getCollectionColorForNode(n.id, nowMs);
-                const paletteIndex = d3.schemeTableau10.indexOf(color);
                 n.col = color;
-                colorValue = clamp01((paletteIndex >= 0 ? paletteIndex : 0) / 9);
+                colorValue = hashStringToUnit(color);
             } else if (mode === 'size') {
                 const normalized = clamp01((proteinSizeVal - sMin) / sSpan);
                 n.col = d3.interpolateCool(normalized);
@@ -6289,23 +6518,16 @@ self.onmessage = async (event) => {
                 n.col = d3.interpolateCool(normalized);
                 colorValue = normalized;
             } else if (mode === 'complex_pdbs') {
-                const memberships = getComplexPdbMemberships(n.id);
-                if (!memberships.length) {
-                    n.col = '#444';
-                    colorValue = 0.5;
-                } else {
-                    const activePdbId = memberships[Math.floor(nowMs / 500) % memberships.length];
-                    n.col = complexPdbScale(activePdbId);
-                    colorValue = hashStringToUnit(activePdbId);
-                }
+                n.col = getComplexPdbColorForNode(n.id, nowMs);
+                colorValue = hashStringToUnit(n.col);
             } else if (mode === 'localization') {
                 const raw = getBuiltInColorValueFromSource(n.id, mode, builtInColorSource);
-                n.col = localizationScale(raw);
-                colorValue = hashStringToUnit(raw);
+                n.col = getCategoricalNodeColor('localization', raw, localizationScale(raw));
+                colorValue = hashStringToUnit(n.col);
             } else if (mode === 'biological_process') {
                 const raw = getBiologicalProcessKey(n.id);
-                n.col = catScale(raw);
-                colorValue = hashStringToUnit(raw);
+                n.col = getCategoricalNodeColor('biological_process', raw, catScale(raw));
+                colorValue = hashStringToUnit(n.col);
             } else if (mode && mode.startsWith('var::')) {
                 const modeParts = String(mode).split('::');
                 const file = modeParts[1], variable = modeParts[2];
@@ -6344,8 +6566,9 @@ self.onmessage = async (event) => {
                         n.col = valueScale(rawValue);
                         colorValue = clamp01((paletteIndex >= 0 ? paletteIndex : 0) / 9);
                     } else {
-                        n.col = catScale(rawValue || 'Unknown');
-                        colorValue = hashStringToUnit(rawValue || 'Unknown');
+                        const categoryValue = rawValue || 'Unknown';
+                        n.col = getCategoricalNodeColor(mode, categoryValue, catScale(categoryValue));
+                        colorValue = hashStringToUnit(n.col);
                     }
                 }
             } else if (mode === 'random') {
@@ -13232,6 +13455,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 if (newName && newName !== isRenamingColl && !collections.has(newName)) {
                     const data = collections.get(isRenamingColl);
                     collections.set(newName, data);
+                    renameCategoryLegendItemState('collection', isRenamingColl, newName);
                     collections.delete(isRenamingColl);
                     if (currentViewId === `coll_${isRenamingColl}`) currentViewId = `coll_${newName}`;
                     
@@ -13320,6 +13544,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     });
                     btnGroup.append("button").attr("class", "btn-delete-final").text("Delete").on("click", (e) => {
                         e.stopPropagation();
+                        deleteCategoryLegendItemState('collection', opt.name);
                         collections.delete(opt.name);
                         if (currentViewId === `coll_${opt.name}`) switchView('base');
                         refreshLegendIfCollectionMode();
@@ -17223,7 +17448,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 + (centralityVal * 0.5 * cVal)
                 + (eigenVal * 60 * eVal)
                 + ((proteinSizeVal / 500) * 4 * pVal);
-            if (mode === 'layer') n.col = (n.layer === 99) ? "#888" : d3.interpolateViridis(1 - (n.layer / 10));
+            if (mode === 'layer') {
+                const layerLabel = n.layer === 99 ? 'Disconnected' : `Layer ${n.layer}`;
+                const defaultColor = n.layer === 99 ? '#888' : d3.interpolateViridis(1 - (n.layer / 10));
+                n.col = getCategoricalNodeColor('layer', layerLabel, defaultColor);
+            }
             else if (mode === 'centrality') n.col = d3.interpolateInferno(0.3 + (0.8 * ((n.centrality - (cRange[0]||0)) / ((cRange[1]-cRange[0]) || 1))));
             else if (mode === 'eigen') n.col = d3.interpolateInferno(0.3 + (0.8 * ((eigenVal - (eRange[0]||0)) / ((eRange[1]-eRange[0]) || 1))));
             else if (mode === 'embeddings') {
@@ -17269,7 +17498,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             }
             else if (mode === 'localization') {
                 const builtInVal = getBuiltInColorValueFromSource(n.id, mode, builtInColorSource);
-                n.col = localizationScale(builtInVal);
+                n.col = getCategoricalNodeColor('localization', builtInVal, localizationScale(builtInVal));
+            }
+            else if (mode === 'biological_process') {
+                const processKey = getBiologicalProcessKey(n.id);
+                n.col = getCategoricalNodeColor('biological_process', processKey, catScale(processKey));
             }
             else if (mode && mode.startsWith('var::')) {
                 const modeParts = String(mode).split('::');
@@ -17307,7 +17540,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     } else if (effectiveType === 'Numerical - Discrete' || effectiveType === 'Categorical - Ordinal') {
                         n.col = valueScale(rawValue);
                     } else {
-                        n.col = catScale(rawValue || 'Unknown');
+                        const categoryValue = rawValue || 'Unknown';
+                        n.col = getCategoricalNodeColor(mode, categoryValue, catScale(categoryValue));
                     }
                 }
             }
@@ -17315,13 +17549,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 const pdbCount = getPdbStructureCount(n.id);
                 n.col = d3.interpolateCool((pdbCount - minPdb) / pdbRange);
             } else if (mode === 'complex_pdbs') {
-                const memberships = getComplexPdbMemberships(n.id);
-                if (!memberships.length) {
-                    n.col = '#444';
-                } else {
-                    const activePdbId = memberships[Math.floor(nowMs / 500) % memberships.length];
-                    n.col = complexPdbScale(activePdbId);
-                }
+                n.col = getComplexPdbColorForNode(n.id, nowMs);
             }
             else if (mode === 'random') n.col = n.randColor || "#fff";
             else n.col = monoCol;
@@ -18024,17 +18252,27 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             const sortedCounts = Array.from(counts.entries()).sort((a,b) => { if (a[0] === "Disconnected") return 1; if (b[0] === "Disconnected") return -1; if (mode === 'layer') return parseInt(a[0].split(' ')[1]) - parseInt(b[0].split(' ')[1]); return b[1] - a[1]; });
             const visibleCounts = mode === 'complex_pdbs' ? sortedCounts : sortedCounts.slice(0, 30);
             visibleCounts.forEach(([lbl, cnt]) => {
-                const item = legend.append("div").attr("class", "legend-item").on("click", () => {
-                    handleLegendHighlight(mode, lbl);
-                    if (currentViewId === 'Embeddings') {
-                        handleEmbeddingLegendHighlight(mode, lbl);
-                    }
-                });
                 const color = mode === 'layer'
                     ? (lbl === "Disconnected" ? "#888" : d3.interpolateViridis(1 - ((parseInt(lbl.split(' ')[1])-1)/10)))
-                    //make the grey darker for 'No Collection' to differentiate from the collections 
-                    : (mode === 'collection' ? (lbl === 'No Collection' ? '#444' : getCollectionColorByName(lbl)) : (mode === 'complex_pdbs' ? ensureComplexPdbColorState().colorScale(lbl) : (mode === 'localization' ? localizationScale(lbl) : catScale(lbl))));
-                item.append("div").attr("class", "color-box").style("background", color); item.append("span").text(`${lbl} (${cnt})`);
+                    : (mode === 'collection'
+                        ? (lbl === 'No Collection' ? '#444' : getCollectionColorByName(lbl))
+                        : (mode === 'complex_pdbs'
+                            ? ensureComplexPdbColorState().colorScale(lbl)
+                            : (mode === 'localization'
+                                ? localizationScale(lbl)
+                                : catScale(lbl))));
+                appendCategoricalLegendItem(legend, {
+                    mode,
+                    label: lbl,
+                    count: cnt,
+                    defaultColor: color,
+                    onActivate: () => {
+                        handleLegendHighlight(mode, lbl);
+                        if (currentViewId === 'Embeddings') {
+                            handleEmbeddingLegendHighlight(mode, lbl);
+                        }
+                    }
+                });
             });
             if (mode === 'collection') footerNotes.push('Nodes in multiple collections cycle every 0.5s.');
             if (mode === 'complex_pdbs') footerNotes.push('Nodes with multiple complex PDBs cycle every 0.5s.');
