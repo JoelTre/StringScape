@@ -122,9 +122,9 @@
             position: absolute;
             top: 10px;
             right: calc(10px + var(--ai-panel-offset));
-            bottom: auto;
+            bottom: 285px;
             width: 310px;
-            max-height: calc(100vh - 175px);
+            max-height: calc(100vh - 195px);
             z-index: 20; overflow: visible;
             background: var(--surface-color); padding: 15px; border-radius: 8px;
             border: 1px solid var(--border-color); display: flex; flex-direction: column; 
@@ -1366,7 +1366,10 @@
         #protein-info-box {
             position: relative;
             isolation: isolate;
-            width: calc(100vw - 680px);
+            width: calc(100vw - 680px - var(--ai-panel-offset)); 
+            margin-right: calc(var(--ai-panel-offset));
+            margin-left: 0px;
+            transition: width 0.3s ease-in-out, margin-right 0.3s ease-in-out;
             box-sizing: border-box;
             display: none;
             border: 1px solid var(--border-color);
