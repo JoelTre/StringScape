@@ -518,6 +518,7 @@
         - ss.set_view(view) -> Returns {"status", "view", "animate", "message"}
         - ss.set_node_colouring(variable) -> Returns {"status", "variable", "animate", "message"}
         - ss.set_node_color(node_id, '#ff0055') -> Returns {"status", "node_id", "color", "message"}
+        - await ss.display_notification(text, button1_text='Close', button2_text=None, auto_close=False, default_button_index=0, auto_close_ms=5000) -> Returns {"status", "button_index", "button_text", "auto_closed"}
         - ss.begin_batch(), ss.end_batch() -> Returns {"status": "success", "batch_depth"}
         - Use with ss.batch_update(): around large edit loops; it renders once when the block exits.
         - App state updates immediately. Set animate=True only when a visual transition is wanted.`;
@@ -871,6 +872,7 @@
         lines.push('- ss.set_view(view) -> Returns {"status", "view", "animate", "message"}');
         lines.push('- ss.set_node_colouring(variable) -> Returns {"status", "variable", "animate", "message"}');
         lines.push('- ss.set_node_color(node_id, "#ff0055") -> Returns {"status", "node_id", "color", "message"}');
+        lines.push('- await ss.display_notification(text, button1_text="Close", button2_text=None, auto_close=False, default_button_index=0, auto_close_ms=5000) -> Returns {"status", "button_index", "button_text", "auto_closed"}');
         lines.push('- ss.begin_batch(), ss.end_batch() -> Returns {"status": "success", "batch_depth"}');
         lines.push('- For large edits: with ss.batch_update(): ...  This produces one render on exit.');
         lines.push('- State changes are applied before each result is returned; animate=False is the instant default.');
@@ -1855,6 +1857,133 @@
         return `Saved ${selectedIds.length} selected node(s) to collection "${collectionName}".`;
     }
 
+    const stringScapeNotificationQueue = [];
+    let stringScapeNotificationActive = null;
+
+    function ensureStringScapeNotificationLayer() {
+        let layer = document.getElementById('notification-layer');
+        if (!layer) {
+            layer = document.createElement('div');
+            layer.id = 'notification-layer';
+            layer.className = 'notification-layer';
+            layer.setAttribute('aria-live', 'polite');
+            layer.setAttribute('aria-atomic', 'true');
+            document.body.appendChild(layer);
+        }
+        return layer;
+    }
+
+    function normalizeStringScapeNotificationOptions(options = {}) {
+        const text = String(options?.text ?? options?.message ?? '').trim();
+        const button1Text = String(options?.button1_text ?? options?.button1Text ?? 'Close').trim() || 'Close';
+        const button2Raw = options?.button2_text ?? options?.button2Text ?? null;
+        const button2Text = button2Raw == null || String(button2Raw).trim() === '' ? null : String(button2Raw).trim();
+        const autoClose = options?.auto_close ?? options?.autoClose;
+        let autoCloseMs = Number(options?.auto_close_ms ?? options?.autoCloseMs ?? 5000);
+        if (!Number.isFinite(autoCloseMs) || autoCloseMs < 300) autoCloseMs = 5000;
+        let defaultButtonIndex = options?.default_button_index ?? options?.defaultButtonIndex ?? 0;
+        defaultButtonIndex = Number.isFinite(+defaultButtonIndex) ? Math.floor(+defaultButtonIndex) : 0;
+        defaultButtonIndex = button2Text ? Math.max(0, Math.min(1, defaultButtonIndex)) : 0;
+        return { text, button1Text, button2Text, autoClose: !!autoClose, autoCloseMs, defaultButtonIndex };
+    }
+
+    function displayStringScapeNotification(options = {}) {
+        console.log('displayStringScapeNotification');
+        const normalized = normalizeStringScapeNotificationOptions(options);
+        return new Promise(resolve => {
+            stringScapeNotificationQueue.push({ normalized, resolve });
+            if (!stringScapeNotificationActive) processNextStringScapeNotification();
+        });
+    }
+
+    function processNextStringScapeNotification() {
+        if (stringScapeNotificationActive || !stringScapeNotificationQueue.length) return;
+        const entry = stringScapeNotificationQueue.shift();
+        const { normalized, resolve } = entry;
+        stringScapeNotificationActive = entry;
+
+        const layer = ensureStringScapeNotificationLayer();
+        layer.innerHTML = '';
+
+        const toast = document.createElement('div');
+        toast.className = 'notification-toast notification-entering';
+
+        const message = document.createElement('div');
+        message.className = 'notification-message';
+        message.textContent = normalized.text;
+        toast.appendChild(message);
+
+        const actions = document.createElement('div');
+        actions.className = 'notification-actions';
+
+        const buttons = [normalized.button1Text];
+        if (normalized.button2Text) buttons.push(normalized.button2Text);
+
+        let closed = false;
+        let autoCloseTimer = null;
+
+        const finalize = (buttonIndex, buttonText, autoClosed = false) => {
+            if (closed) return;
+            closed = true;
+            if (autoCloseTimer) {
+                clearTimeout(autoCloseTimer);
+                autoCloseTimer = null;
+            }
+            if (resizeObserver) resizeObserver.disconnect();
+            toast.classList.remove('notification-entering');
+            toast.classList.add('notification-exiting');
+            window.setTimeout(() => {
+                if (layer.contains(toast)) layer.removeChild(toast);
+                stringScapeNotificationActive = null;
+                resolve({
+                    status: 'success',
+                    button_index: buttonIndex,
+                    button_text: buttonText,
+                    auto_closed: autoClosed
+                });
+                processNextStringScapeNotification();
+            }, 270);
+        };
+
+        buttons.forEach((buttonText, index) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'notification-button';
+            if (normalized.autoClose && index === normalized.defaultButtonIndex) {
+                button.classList.add('notification-button-default', 'notification-button-autoclose');
+                button.style.setProperty('--notification-duration', `${normalized.autoCloseMs}ms`);
+            }
+            const label = document.createElement('span');
+            label.className = 'notification-button-label';
+            label.textContent = buttonText;
+            button.appendChild(label);
+            button.addEventListener('click', () => finalize(index, buttonText, false));
+            actions.appendChild(button);
+        });
+
+        toast.appendChild(actions);
+        layer.appendChild(toast);
+
+        const updateLayout = () => {
+            if (buttons.length < 2) {
+                actions.classList.remove('stacked');
+                return;
+            }
+            const shouldStack = actions.scrollWidth > actions.clientWidth + 1 || Array.from(actions.children).some(button => button.scrollWidth > button.clientWidth + 1);
+            actions.classList.toggle('stacked', shouldStack);
+        };
+
+        const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(updateLayout) : null;
+        requestAnimationFrame(updateLayout);
+        if (resizeObserver) resizeObserver.observe(toast);
+
+        if (normalized.autoClose) {
+            autoCloseTimer = window.setTimeout(() => finalize(normalized.defaultButtonIndex, buttons[normalized.defaultButtonIndex], true), normalized.autoCloseMs);
+        }
+    }
+
+    window.displayStringScapeNotification = displayStringScapeNotification;
+
     // Direct, structured Python API bridge. State updates happen before a result is
     // returned; draw work is coalesced and awaited by the Python runner's flush().
     const stringScapePythonBridge = (() => {
@@ -2072,6 +2201,9 @@
                     if (!node || !/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return result('warning', { node_id: nodeId, color, message: 'Node or colour was invalid.' });
                     node.col = color; queueDraw(animate); return result('success', { node_id: nodeId, color });
                 }
+                if (method === 'display_notification') {
+                    return result('warning', { message: 'display_notification must be called asynchronously.' });
+                }
                 if (method === 'get_selected_nodes') return result('success', { selected_count: selected().length, selected_node_ids: selected() });
                 if (method === 'list_collections') return result('success', { collections: [...collections.entries()].map(([name, c]) => ({ name, node_count: c.nodeIds?.size || 0 })) });
                 if (method === 'list_views') return result('success', { current_view: currentViewId, views: ['base','selected','Scatter Plot','Venn Diagram','histogram','pie_chart','Mind Map','Embeddings', ...[...collections.keys()].map(name => `coll_${name}`)] });
@@ -2080,7 +2212,15 @@
                 return result('warning', { method, message: 'Unknown StringScape API method.' });
             } catch (error) { return result('error', { method, message: error?.message || String(error) }); }
         };
-        return { call_json: (method, args) => JSON.stringify(call(method, args || {})), flush: () => Promise.resolve(pendingDraw).then(() => ({ status: 'success' })) };
+        const callAsync = async (method, args = {}) => {
+            if (method === 'display_notification') return displayStringScapeNotification(args || {});
+            return call(method, args || {});
+        };
+        return {
+            call_json: (method, args) => JSON.stringify(call(method, args || {})),
+            call_async_json: async (method, args) => JSON.stringify(await callAsync(method, args || {})),
+            flush: () => Promise.resolve(pendingDraw).then(() => ({ status: 'success' }))
+        };
     })();
 
     // This function captures a screenshot of the current view and returns it as a data URL for the AI to view.
@@ -2737,6 +2877,11 @@ class _StringScapeAPI:
         response = json.loads(raw)
         _stringscape_api_results.append(response)
         return response
+    async def _call_async(self, method, **kwargs):
+        raw = await _stringscape_bridge.call_async_json(method, to_js(kwargs, dict_converter=Object.fromEntries))
+        response = json.loads(raw)
+        _stringscape_api_results.append(response)
+        return response
     def search_and_select(self, query, scope='all', animate=False): return self._call('search_and_select', query=query, scope=scope, animate=animate)
     def select(self, node_ids, mode='replace', animate=False):
         return self._call('select', node_ids=[node_ids] if isinstance(node_ids, str) else list(node_ids), mode=mode, animate=animate)
@@ -2780,6 +2925,7 @@ class _StringScapeAPI:
     def set_view(self, view, animate=False): return self._call('set_view', view=view, animate=animate)
     def set_node_colouring(self, variable, animate=False): return self._call('set_node_colouring', variable=variable, animate=animate)
     def set_node_color(self, node_id, color, animate=False): return self._call('set_node_color', node_id=node_id, color=color, animate=animate)
+    async def display_notification(self, text, button1_text='Close', button2_text=None, auto_close=False, default_button_index=0, auto_close_ms=5000): return await self._call_async('display_notification', text=text, button1_text=button1_text, button2_text=button2_text, auto_close=auto_close, default_button_index=default_button_index, auto_close_ms=auto_close_ms)
     def get_selected_nodes(self): return self._call('get_selected_nodes')
     def list_collections(self): return self._call('list_collections')
     def list_views(self): return self._call('list_views')
@@ -2792,10 +2938,12 @@ class _StringScapeBatch:
         self.result = self.api._call('end_batch', animate=self.animate)
         return False
 
-ss = _StringScapeAPI()
+_stringscape_api = _StringScapeAPI()
+ss = _stringscape_api
 _stringscape_module = types.ModuleType('stringscape')
 _stringscape_module.ss = ss
-_stringscape_module.__dict__.update({name: getattr(ss, name) for name in dir(ss) if not name.startswith('_')})
+_stringscape_module.__dict__.update({name: getattr(_stringscape_api, name) for name in dir(_stringscape_api) if not name.startswith('_')})
+_stringscape_module.display_notification = _stringscape_api.display_notification
 sys.modules['stringscape'] = _stringscape_module
                 `);
 
@@ -14974,7 +15122,19 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const zoomK = Math.max(transform.k || 1, 1e-6);
         const zoomAdjustedMultiplier = Math.max(1, 5 - 2 * zoomK);
         const found = drawNodes.find(n => { const dx = n.x - mx, dy = n.y - my; const baseRadius = n.r || 5; const hoverRadius = baseRadius * zoomAdjustedMultiplier; return Math.sqrt(dx*dx + dy*dy) < hoverRadius; });
-        if (found) { if (isAdditiveMode || isSubtractMode || isIntersectMode) applySearchLogic([found], "Custom Selection"); else selectNodes([found], false); } else deselectNodes();
+        if (found) {
+            const effectiveSelection = getEffectiveSelectedNodesSet?.() || new Set();
+            if (isAdditiveMode && effectiveSelection.has(found.id)) {
+                displayStringScapeNotification({
+                    text: 'Additive selection mode is active',
+                    button1_text: 'Close',
+                    auto_close: true,
+                    default_button_index: 0,
+                    auto_close_ms: 2400
+                });
+            }
+            if (isAdditiveMode || isSubtractMode || isIntersectMode) applySearchLogic([found], "Custom Selection"); else selectNodes([found], false);
+        } else deselectNodes();
         draw();
     });
 
@@ -16743,7 +16903,20 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     // This function takes an array of target nodes and updates the current selection state. It also manages the selection history for undo functionality, updates the info box with details about the selected nodes, and shows buttons for creating or modifying collections based on the selection. The function can be triggered by various user actions, such as clicking on nodes, using the legend, or performing a search.
     function selectNodes(targets, isLegendClick = false, query = "", searchSummary = null, preserveProteinInfoHistory = false) {
         console.log(`function selectNodes(targets: [not displaying to save console space], isLegendClick: ${isLegendClick}, query: ${query})`);
+        const previousSelection = new Set(getEffectiveSelectedNodesSet() || new Set());
         const nextSelection = new Set(targets.map(n => n.id));
+        if (isAdditiveMode && nextSelection.size === 1) {
+            const nextId = nextSelection.values().next().value;
+            if (previousSelection.has(nextId)) {
+                displayStringScapeNotification({
+                    text: 'Additive selection mode is active',
+                    button1_text: 'Close',
+                    auto_close: true,
+                    default_button_index: 0,
+                    auto_close_ms: 2400
+                });
+            }
+        }
         const useDraft = currentViewId === 'selected';
 
         if (useDraft) {
@@ -19891,6 +20064,20 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     bindStaticUiEventListeners();
+
+    window.setTimeout(() => {
+        displayStringScapeNotification({
+            text: 'This is the Beta 1.1 version of StringScape.',
+            button1_text: 'About StringScape',
+            button2_text: 'Close',
+            auto_close: false,
+            default_button_index: 0
+        }).then(result => {
+            if (result?.button_text === 'About StringScape') {
+                openModal('aboutModal');
+            }
+        });
+    }, 150);
 
     const hoverTooltip = document.getElementById('node-hover-tooltip');
     if (hoverTooltip) {
