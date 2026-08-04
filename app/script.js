@@ -17581,12 +17581,14 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         console.log(`function updateLegend(mode: ${mode}, cRange: ${cRange}, sRange: ${sRange}, catScale: ${catScale}, eRange: ${eRange})`);
         const legendControls = d3.select("#legend-controls");
         const legend = d3.select("#legend-content");
+        const footer = d3.select("#right-panel-footer");
         const footerTextEl = document.getElementById('right-panel-footer-text');
         const rangeUINode = document.getElementById('range-ui');
         const wasRangeOpen = rangeUINode ? rangeUINode.style.display === 'block' : false;
 
         legendControls.html("");
         legend.html("");
+        footer.select('#layer0-update-selection-btn').remove();
         if (footerTextEl) footerTextEl.innerHTML = '';
         const activeNodes = (currentViewId === 'base' || currentViewId === 'Venn Diagram' || currentViewId === 'Scatter Plot' || currentViewId === 'Embeddings')
             ? nodes
@@ -18278,7 +18280,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             if (mode === 'complex_pdbs') footerNotes.push('Nodes with multiple complex PDBs cycle every 0.5s.');
         }
         if (mode === 'layer' && selectedNodes.size > 0) {
-            legendControls.append("button").text("Update Selection as Layer 0").attr("class", "action-btn").style("width", "100%").on("click", () => { 
+            footer.append("button").attr("id", "layer0-update-selection-btn").text("Update Selection as Layer 0").attr("class", "action-btn").style("width", "100%").on("click", () => { 
                 const selectedIds = Array.from(getEffectiveSelectedNodesSet());
                 if (!selectedIds.length) return;
 
@@ -19786,6 +19788,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         bindClick(document.getElementById('ask-ai-btn'), () => toggleAiPanel());
         bindClick(document.getElementById('ai-python-console-btn'), () => togglepythonpanelMode());
         bindClick(document.getElementById('collection-cycle-toggle-btn'), () => toggleCollectionColorCycle());
+        bindClick(document.getElementById('downloadSessionDownloadBtn'), () => downloadSessionFiles());
 
         bindClick(document.getElementById('protein-info-toggle-btn'), () => openProteinInfoBox());
         bindClick(document.getElementById('protein-info-prev-btn'), () => navigateProteinInfo('left'));
@@ -19795,6 +19798,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         });
         bindClick(document.getElementById('protein-info-explain-btn'), () => explainProteinInSimpleEnglish());
         bindClick(document.getElementById('protein-info-close-btn'), () => closeProteinInfoBox());
+        bindClick(document.getElementById('mind-map-grow-btn'), () => modifySelection(1));
+        bindClick(document.getElementById('mind-map-shrink-btn'), () => modifySelection(-1));
 
         const proteinInfoBox = document.getElementById('protein-info-box');
         const resizeHandle = document.getElementById('protein-info-resize-handle');
@@ -19834,6 +19839,15 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         }
 
         bindClick(document.getElementById('mind-map-parent-btn'), event => selectMindMapParents(event));
+        bindClick(document.getElementById('node-info-table-download-csv-btn'), () => downloadNodeInfoTableCSV());
+        bindClick(document.getElementById('node-info-table-copy-tsv-btn'), () => copyNodeInfoTableTSV());
+        bindClick(document.getElementById('node-info-table-download-fasta-btn'), () => downloadSelectedFasta());
+        bindClick(document.getElementById('node-info-table-download-json-btn'), () => downloadSelectedNodesJSON());
+        const nodeInfoTableSearch = document.getElementById('node-info-table-search');
+        if (nodeInfoTableSearch) {
+            nodeInfoTableSearch.addEventListener('input', () => handleNodeInfoTableSearch(nodeInfoTableSearch.value));
+        }
+        bindClick(document.getElementById('node-info-table-clear-btn'), () => clearNodeInfoTableSearch());
         const nodeInfoTableWrap = document.getElementById('node-info-table-wrap');
         if (nodeInfoTableWrap && nodeInfoTableWrap.dataset.boundNodeInfoClicks !== 'true') {
             nodeInfoTableWrap.dataset.boundNodeInfoClicks = 'true';
