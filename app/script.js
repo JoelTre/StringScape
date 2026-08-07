@@ -540,6 +540,345 @@
     let aiPythonCopyFeedbackTimer = null;
     let aiPythonOutputCopyFeedbackTimer = null;
     const aiChatManualTitleIds = new Set();
+    const AI_ACTION_HISTORY_STORAGE_KEY = 'stringscape.actionHistoryScript';
+    let aiActionHistoryLines = [];
+
+    function aiLoadActionHistory() {
+        try {
+            const raw = localStorage.getItem(AI_ACTION_HISTORY_STORAGE_KEY);
+            if (!raw) {
+                aiActionHistoryLines = [];
+                return;
+            }
+            const parsed = JSON.parse(raw);
+            aiActionHistoryLines = Array.isArray(parsed) ? parsed.map(line => String(line)) : [];
+        } catch {
+            aiActionHistoryLines = [];
+        }
+    }
+
+    function aiPersistActionHistory() {
+        try {
+            localStorage.setItem(AI_ACTION_HISTORY_STORAGE_KEY, JSON.stringify(aiActionHistoryLines));
+        } catch {
+        }
+    }
+
+    function aiFormatPythonString(value) {
+        return JSON.stringify(String(value));
+    }
+
+    function aiFormatPythonSingleQuotedString(value) {
+        return `'${String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+    }
+
+    function aiFormatPythonStringList(values) {
+        return `[${values.map(value => aiFormatPythonString(value)).join(', ')}]`;
+    }
+
+    function aiEscapeHtml(value) {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function aiHighlightPythonText(text) {
+        const source = String(text || '');
+        if (!source) return '';
+        const tokenPattern = /('''[\s\S]*?'''|"""[\s\S]*?"""|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|#.*|\b(?:def|class|if|elif|else|for|while|try|except|finally|return|import|from|as|with|lambda|yield|async|await|True|False|None|and|or|not|in|is|pass|break|continue|raise|assert|del|global|nonlocal)\b|\b(?:ss|print|len|range|list|dict|set|tuple|sorted|sum|min|max|map|filter|zip|enumerate|str|int|float|bool|type|help)\b|\b\d+(?:\.\d+)?\b)/g;
+        let html = '';
+        let lastIndex = 0;
+        source.replace(tokenPattern, (...args) => {
+            const match = args[0];
+            const offset = args[args.length - 2];
+            html += aiEscapeHtml(source.slice(lastIndex, offset));
+            let className = 'py-token-text';
+            if (match.startsWith('#')) className = 'py-token-comment';
+            else if (match.startsWith("'''") || match.startsWith('"""') || match.startsWith('"') || match.startsWith("'")) className = 'py-token-string';
+            else if (/^\d/.test(match)) className = 'py-token-number';
+            else if (/\b(?:def|class|if|elif|else|for|while|try|except|finally|return|import|from|as|with|lambda|yield|async|await|True|False|None|and|or|not|in|is|pass|break|continue|raise|assert|del|global|nonlocal)\b/.test(match)) className = 'py-token-keyword';
+            else if (/\b(?:ss|print|len|range|list|dict|set|tuple|sorted|sum|min|max|map|filter|zip|enumerate|str|int|float|bool|type|help)\b/.test(match)) className = 'py-token-builtin';
+            html += `<span class="${className}">${aiEscapeHtml(match)}</span>`;
+            lastIndex = offset + match.length;
+            return match;
+        });
+        html += aiEscapeHtml(source.slice(lastIndex));
+        return html;
+    }
+
+    function aiRenderPythonSyntaxIntoElement(element, text, emptyText = '') {
+        if (!element) return;
+        const source = String(text || '');
+        element.innerHTML = source.trim().length ? aiHighlightPythonText(source) : `<span class="ai-script-empty-state">${aiEscapeHtml(emptyText)}</span>`;
+    }
+
+    function aiRenderActionHistoryPanel() {
+        const script = document.getElementById('ai-action-history-script');
+        if (!script) return;
+        aiRenderPythonSyntaxIntoElement(script, aiActionHistoryLines.join('\n'), 'No actions recorded yet.');
+    }
+
+    function aiRenderPythonScriptEditorHighlight() {
+        const editor = document.getElementById('ai-python-script-editor');
+        const mirror = document.getElementById('ai-python-script-highlight');
+        if (!editor || !mirror) return;
+        aiRenderPythonSyntaxIntoElement(mirror, editor.value || '', '');
+        mirror.scrollTop = editor.scrollTop;
+        mirror.scrollLeft = editor.scrollLeft;
+    }
+
+    function aiGetActionHistoryText() {
+        return aiActionHistoryLines.length ? aiActionHistoryLines.join('\n') : '';
+    }
+
+    function aiCloseHistoryMenu() {
+        const dropdown = document.getElementById('ai-history-menu-dropdown');
+        if (dropdown) dropdown.classList.remove('open');
+    }
+
+    function toggleHistoryMenu() {
+        const dropdown = document.getElementById('ai-history-menu-dropdown');
+        if (!dropdown) return;
+        dropdown.classList.toggle('open');
+    }
+
+    function aiClearActionHistory() {
+        aiActionHistoryLines = [];
+        aiPersistActionHistory();
+        aiRenderActionHistoryPanel();
+        aiCloseHistoryMenu();
+    }
+
+    async function aiCopyActionHistory() {
+        const text = aiGetActionHistoryText();
+        if (!text.trim()) return;
+        await navigator.clipboard.writeText(text);
+        aiCloseHistoryMenu();
+    }
+
+    function aiDownloadActionHistory() {
+        const text = aiGetActionHistoryText();
+        if (!text.trim()) return;
+        const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `StringScape_Action_History_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.txt`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        aiCloseHistoryMenu();
+    }
+
+    function aiAppendActionHistory(actor, actionText, pythonLines) {
+        const cleanedLines = Array.isArray(pythonLines) ? pythonLines.map(line => String(line)).filter(Boolean) : [];
+        if (!cleanedLines.length) return;
+        if (aiActionHistoryLines.length) aiActionHistoryLines.push('');
+        aiActionHistoryLines.push(`# ${actor}: ${actionText}`, ...cleanedLines);
+        aiPersistActionHistory();
+        aiRenderActionHistoryPanel();
+    }
+
+    function aiRecordSearchHistory(query, scope = 'all', actor = 'Human') {
+        const cleanQuery = String(query || '').trim();
+        if (!cleanQuery) return;
+        const cleanScope = String(scope || 'all').trim() || 'all';
+        aiAppendActionHistory(actor, `Searched ${aiFormatPythonString(cleanQuery)}`, [
+            `ss.search_and_select(${aiFormatPythonString(cleanQuery)}, scope=${aiFormatPythonString(cleanScope)}, animate=True)`
+        ]);
+    }
+
+    function aiRecordSelectionHistory(nodeIds, actor = 'Human') {
+        const ids = Array.isArray(nodeIds) ? nodeIds.map(id => String(id)).filter(Boolean) : [];
+        if (!ids.length) return;
+        aiAppendActionHistory(actor, 'Selected node(s)', [
+            `ss.select(${aiFormatPythonStringList(ids)}, mode="replace", animate=False)`
+        ]);
+    }
+
+    function aiRecordDeselectHistory(actor = 'Human') {
+        aiAppendActionHistory(actor, 'Deselected all nodes', [
+            'ss.deselect_all()'
+        ]);
+    }
+
+    function aiRecordExpandHistory(actor = 'Human') {
+        aiAppendActionHistory(actor, 'Expanded selection to connected nodes', [
+            'ss.expand_to_connected()'
+        ]);
+    }
+
+    function aiRecordSelectByRangeHistory(variableKey, minValue, maxValue, actor = 'Human') {
+        aiAppendActionHistory(actor, `Selects nodes with ${variableKey === 'centrality' ? 'Centrality' : variableKey} between ${minValue} and ${maxValue}`, [
+            `ss.select_by_range(${aiFormatPythonSingleQuotedString(variableKey)}, min=${minValue}, max=${maxValue})`
+        ]);
+    }
+
+    function aiRecordSelectByCategoryHistory(variableKey, category, actor = 'Human') {
+        aiAppendActionHistory(actor, `Selected nodes in ${variableKey === 'localization' ? 'protein localisation' : variableKey} category ${category}`, [
+            `ss.select_by_category(${aiFormatPythonSingleQuotedString(variableKey)}, ${aiFormatPythonSingleQuotedString(category)})`
+        ]);
+    }
+
+    function aiRecordBuildNetworkHistory(scoreThreshold, actor = 'Human') {
+        aiAppendActionHistory(actor, 'Built network', [
+            `ss.build_network(score_threshold=${Number(scoreThreshold)})`
+        ]);
+    }
+
+    function aiRecordCreateCollectionHistory(name, actor = 'Human') {
+        aiAppendActionHistory(actor, 'Created a collection', [
+            `ss.create_collection(${aiFormatPythonSingleQuotedString(name)})`
+        ]);
+    }
+
+    function aiRecordDeleteCollectionHistory(name, actor = 'Human') {
+        aiAppendActionHistory(actor, 'Deleted a collection', [
+            `ss.delete_collection(${aiFormatPythonSingleQuotedString(name)})`
+        ]);
+    }
+
+    function aiRecordAddToCollectionHistory(name, actor = 'Human') {
+        aiAppendActionHistory(actor, 'Added selected nodes to a collection', [
+            `ss.add_to_collection(${aiFormatPythonSingleQuotedString(name)})`
+        ]);
+    }
+
+    function aiRecordSetViewHistory(viewName, actor = 'Human') {
+        aiAppendActionHistory(actor, `Set view to ${viewName}`, [
+            `ss.set_view(${aiFormatPythonSingleQuotedString(viewName)})`
+        ]);
+    }
+
+    function aiRecordSetNodeColouringHistory(variableName, actor = 'Human') {
+        aiAppendActionHistory(actor, `Set node colouring to ${variableName}`, [
+            `ss.set_node_colouring(${aiFormatPythonSingleQuotedString(variableName)})`
+        ]);
+    }
+
+    function aiRecordSetNodeSizeHistory(size, actor = 'Human') {
+        aiAppendActionHistory(actor, `Set node size to ${size}`, [
+            `ss.set_node_size(nodes="all", size=${Number(size)})`
+        ]);
+    }
+
+    function aiRecordSetNodeGlowHistory(magnitude, actor = 'Human') {
+        aiAppendActionHistory(actor, `Set node glow to ${magnitude}`, [
+            `ss.set_node_glow(nodes="all", magnitude=${Number(magnitude)})`
+        ]);
+    }
+
+    function aiRecordSetNodeVisibilityHistory(visibility, actor = 'Human') {
+        aiAppendActionHistory(actor, `Set node visibility to ${visibility}`, [
+            `ss.set_node_visibility(nodes="all", visibility=${aiFormatPythonSingleQuotedString(visibility)})`
+        ]);
+    }
+
+    function aiRecordSetNodeLabelVisibilityHistory(visibility, actor = 'Human') {
+        aiAppendActionHistory(actor, `Set node label visibility to ${visibility}`, [
+            `ss.set_node_label_visibility(nodes="all", visibility=${aiFormatPythonSingleQuotedString(visibility)})`
+        ]);
+    }
+
+    function aiRecordSetNodeLabelHistory(labelKey, actor = 'Human') {
+        aiAppendActionHistory(actor, `Set node label key to ${labelKey}`, [
+            `ss.set_node_label(nodes="all", label_key=${aiFormatPythonSingleQuotedString(labelKey)})`
+        ]);
+    }
+
+    function aiRecordSetNodeSizeByVariableHistory(variableName, magnitude, actor = 'Human') {
+        aiAppendActionHistory(actor, `Set node size by ${variableName} to ${magnitude}`, [
+            `ss.set_node_size_by_variable(${aiFormatPythonSingleQuotedString(variableName)}, magnitude=${Number(magnitude)})`
+        ]);
+    }
+
+    function aiRecordColorLinksByHistory(linkVariableKey, actor = 'Human') {
+        aiAppendActionHistory(actor, `Set color links by to ${linkVariableKey}`, [
+            `ss.color_links_by(${aiFormatPythonSingleQuotedString(linkVariableKey)})`
+        ]);
+    }
+
+    function aiRecordSetLinkColorHistory(color, actor = 'Human') {
+        aiAppendActionHistory(actor, `Set link colour to ${color}`, [
+            `ss.set_link_color(links="all", color="${String(color)}")`
+        ]);
+    }
+
+    function aiRecordSetLinkLabelVisibilityHistory(visibility, actor = 'Human') {
+        aiAppendActionHistory(actor, `Set link label visibility to ${visibility}`, [
+            `ss.set_link_label_visibility(links="all", visibility="${String(visibility)}")`
+        ]);
+    }
+
+    function aiRecordSetLinkLabelHistory(labelKey, actor = 'Human') {
+        aiAppendActionHistory(actor, `Set link label key to ${labelKey}`, [
+            `ss.set_link_label(links="all", label_key="${String(labelKey)}")`
+        ]);
+    }
+
+    function aiRecordSetLinkDirectionArrowVisibilityHistory(visibility, actor = 'Human') {
+        aiAppendActionHistory(actor, `Set link direction arrow to ${visibility}`, [
+            `ss.set_link_direction_arrow_visibility(links="all", visibility="${String(visibility)}")`
+        ]);
+    }
+
+    function aiRecordSetLinkWidthHistory(magnitude, actor = 'Human') {
+        aiAppendActionHistory(actor, `Set link width to ${magnitude}`, [
+            `ss.set_link_width(links="all", magnitude=${Number(magnitude)})`
+        ]);
+    }
+
+    function aiRecordSetLinkOpacityHistory(opacity, actor = 'Human') {
+        aiAppendActionHistory(actor, `Set link opacity to ${opacity}`, [
+            `ss.set_link_opacity(links="all", opacity=${Number(opacity)})`
+        ]);
+    }
+
+    function aiFormatLinkVisibilityModeLabel(mode) {
+        const labelMap = {
+            all: 'all links',
+            from_selected: 'links from selected nodes',
+            between_selected: 'links between selected nodes'
+        };
+        return labelMap[String(mode || '').trim()] || String(mode || '').trim();
+    }
+
+    function aiRecordWhenNodesAreSelectedDisplayHistory(mode, actor = 'Human') {
+        const label = aiFormatLinkVisibilityModeLabel(mode);
+        aiAppendActionHistory(actor, `Set when nodes are selected display ${label}`, [
+            `ss.when_nodes_are_selected_display(mode="${label}")`
+        ]);
+    }
+
+    function aiRecordSetAppStyleHistory(colorTheme, mode, actor = 'Human') {
+        aiAppendActionHistory(actor, `Set app style to ${mode} ${colorTheme}`, [
+            `ss.set_app_style(color_theme="${colorTheme}", mode="${mode}")`
+        ]);
+    }
+
+    function aiRecordSetAppBackgroundColourHistory(color, actor = 'Human') {
+        aiAppendActionHistory(actor, `Set app background colour to ${color}`, [
+            `ss.set_app_background_colour(color="${color}")`
+        ]);
+    }
+
+    function aiRecordSetAppBackgroundByHistory(mode, actor = 'Human') {
+        aiAppendActionHistory(actor, `Coloured background by to ${mode}`, [
+            `ss.set_app_background_by(mode="${mode}")`
+        ]);
+    }
+
+    function aiRecordSetMonoNodeColorHistory(color, actor = 'Human') {
+        aiAppendActionHistory(actor, `Set mono node colour to ${color}`, [
+            `ss.set_mono_node_color(color="${color}")`
+        ]);
+    }
+
+    aiLoadActionHistory();
 
     // This function toggles the visibility of the AI panel and updates the UI accordingly. It also triggers a redraw of the canvas and updates controls based on the current view to ensure everything is positioned correctly with the new panel state.
     function toggleAiPanel(forceState) {
@@ -673,44 +1012,64 @@
         const preview = document.getElementById('ai-preview-area');
         const chatScroll = document.getElementById('ai-chat-scroll');
         const pythonpanel = document.getElementById('ai-python-console');
+        const topTools = document.getElementById('ai-top-tools');
+        const actionHistoryPanel = document.getElementById('ai-action-history-panel');
+        const actionHistoryScript = document.getElementById('ai-action-history-script');
+        const inputArea = document.getElementById('ai-input-area');
+        const pythonInstructions = document.getElementById('ai-python-instructions-box');
+        const menuBtn = document.getElementById('ai-menu-btn');
+        const historyMenuWrap = document.getElementById('ai-history-menu-wrap');
         const input = document.getElementById('ai-user-input');
         const statusOverlay = document.getElementById('ai-status-overlay');
         const agentModeOption = document.getElementById('ai-mode-agent-option');
         const pythonModeOption = document.getElementById('ai-mode-python-option');
+        const historyModeOption = document.getElementById('ai-mode-history-option');
 
         const isPython = aiPanelMode === 'python';
+        const isHistory = aiPanelMode === 'history';
 
-        if (title) title.textContent = isPython ? 'Python Scripts ▾' : 'AI Agent ▾';
-        if (newBtn) newBtn.textContent = isPython ? '+ New Script' : '+ New Chat';
-        if (downloadBtn) downloadBtn.textContent = isPython ? 'Download Script' : 'Download Chat';
+        if (title) title.textContent = isHistory ? 'History ▾' : (isPython ? 'Python Scripts ▾' : 'AI Agent ▾');
+        if (newBtn) newBtn.style.display = isHistory ? 'none' : 'inline-flex';
+        if (downloadBtn) downloadBtn.style.display = isHistory ? 'none' : 'inline-flex';
         if (historyBtn) historyBtn.textContent = isPython ? 'Script History' : 'Chat History';
         if (promptsBtn) promptsBtn.textContent = isPython ? 'Example Scripts' : 'Example Prompts';
-        if (chatScroll) chatScroll.style.display = isPython ? 'none' : 'flex';
+        if (topTools) topTools.style.display = isHistory ? 'none' : 'block';
+        if (actionHistoryPanel) actionHistoryPanel.style.display = isHistory ? 'flex' : 'none';
         if (pythonpanel) pythonpanel.style.display = isPython ? 'block' : 'none';
-        if (preview) preview.style.display = isPython ? 'none' : 'flex';
-        if (fileBtn) fileBtn.style.display = isPython ? 'none' : 'inline-block';
-        if (statusOverlay) statusOverlay.style.display = isPython ? 'none' : 'block';
-        if (input) input.placeholder = isPython ? 'Describe what you want the script to do...' : 'Ask AI anything...';
-        if (agentModeOption) agentModeOption.classList.toggle('active', !isPython);
+        if (pythonInstructions && !isPython) pythonInstructions.classList.remove('open');
+        if (chatScroll) chatScroll.style.display = isHistory ? 'none' : (isPython ? 'none' : 'flex');
+        if (preview) preview.style.display = isHistory ? 'none' : (isPython ? 'none' : 'flex');
+        if (inputArea) inputArea.style.display = isHistory ? 'none' : 'block';
+        if (fileBtn) fileBtn.style.display = (isPython || isHistory) ? 'none' : 'inline-block';
+        if (statusOverlay) statusOverlay.style.display = isHistory ? 'none' : (isPython ? 'none' : 'block');
+        if (menuBtn) menuBtn.style.display = isHistory ? 'none' : 'inline-flex';
+        if (historyMenuWrap) historyMenuWrap.style.display = isHistory ? 'inline-block' : 'none';
+        if (input) input.placeholder = isHistory ? 'Action history is read only.' : (isPython ? 'Describe what you want the script to do...' : 'Ask AI anything...');
+        if (agentModeOption) agentModeOption.classList.toggle('active', !isPython && !isHistory);
         if (pythonModeOption) pythonModeOption.classList.toggle('active', isPython);
+        if (historyModeOption) historyModeOption.classList.toggle('active', isHistory);
 
         const instructionsBody = document.getElementById('ai-python-instructions-body');
         if (instructionsBody) instructionsBody.textContent = aiBuildPythonInstructionsText();
         aiRenderExamplePanel();
+        aiRenderActionHistoryPanel();
+        if (isPython) aiRenderPythonScriptEditorHighlight();
+        if (historyMenuWrap && !isHistory) aiCloseHistoryMenu();
+        if (!isHistory) aiCloseHistoryMenu();
 
         aiRefreshFloatingConsoleButton();
         aiRefreshAskAiButton();
     }
 
     function setAiPanelMode(mode) {
-        if (mode !== 'agent' && mode !== 'python') return;
+        if (mode !== 'agent' && mode !== 'python' && mode !== 'history') return;
         if (aiPanelMode === mode) {
             closeAiModeDropdown();
             return;
         }
         if (aiPanelMode === 'agent') {
             aiArchiveCurrentChat(false);
-        } else {
+        } else if (aiPanelMode === 'python') {
             aiArchiveCurrentScript(false);
         }
         aiPanelMode = mode;
@@ -1486,12 +1845,22 @@
         aiPythonPromptHistory = Array.isArray(record.messages) ? record.messages.map(message => aiSafeClone(message)).filter(msg => msg?.role === 'user' || msg?.role === 'assistant') : [];
         const scriptEditor = document.getElementById('ai-python-script-editor');
         if (scriptEditor) scriptEditor.value = String(record.script || '');
+        aiRenderPythonScriptEditorHighlight();
         aiActiveScriptId = record.id;
         const runOut = document.getElementById('ai-python-run-output');
         if (runOut) runOut.textContent = '';
         aiCloseHistoryPanel();
         aiRefreshCurrentScriptTitle();
         aiRenderChatHistory();
+    }
+
+    function togglePythonInstructionsBox(forceOpen = null) {
+        const box = document.getElementById('ai-python-instructions-box');
+        const body = document.getElementById('ai-python-instructions-body');
+        if (!box) return;
+        const shouldOpen = typeof forceOpen === 'boolean' ? forceOpen : !box.classList.contains('open');
+        if (shouldOpen && body) body.textContent = aiBuildPythonInstructionsText();
+        box.classList.toggle('open', shouldOpen);
     }
 
     function aiDeleteScriptFromHistory(scriptId) {
@@ -1505,6 +1874,7 @@
             aiPythonPromptHistory = [];
             const scriptEditor = document.getElementById('ai-python-script-editor');
             if (scriptEditor) scriptEditor.value = '';
+            aiRenderPythonScriptEditorHighlight();
             const runOut = document.getElementById('ai-python-run-output');
             if (runOut) runOut.textContent = '';
         }
@@ -1544,6 +1914,7 @@
                 aiNewChat();
             }
             if (scriptEditor) scriptEditor.value = String(promptText || '').trim();
+            aiRenderPythonScriptEditorHighlight();
             aiPromptsPanelOpen = false;
             refreshAiTopPanels(false);
             aiRefreshPanelModeUi();
@@ -1606,6 +1977,7 @@
             aiPythonPromptHistory = [];
             const scriptEditor = document.getElementById('ai-python-script-editor');
             if (scriptEditor) scriptEditor.value = '';
+            aiRenderPythonScriptEditorHighlight();
             const runOut = document.getElementById('ai-python-run-output');
             if (runOut) runOut.textContent = '';
             const input = document.getElementById('ai-user-input');
@@ -1806,7 +2178,7 @@
 
     //AI tool execution functions
     // This function performs a search for nodes based on a query and selects the matching nodes in the network visualization. It takes a search query and an optional scope parameter that defines where to search (e.g., all, layer, centrality, annotation, localization, size, or a specific variable). It returns a message indicating how many nodes were selected based on the search.
-    function aiSearchAndSelect(query, scope = 'all') {
+    function aiSearchAndSelect(query, scope = 'all', historyMeta = { actor: 'AI' }) {
         const rawInput = String(query || '').trim();
         if (!rawInput) return 'No search query provided.';
 
@@ -1827,6 +2199,7 @@
         });
 
         const matches = Array.from(matchedById.values());
+        if (historyMeta?.actor) aiRecordSearchHistory(rawInput, resolvedScope, historyMeta.actor);
         applySearchLogic(matches, rawInput);
         draw();
         return `Selected ${getEffectiveSelectedNodesSet().size} node(s) for query "${rawInput}" using scope "${resolvedScope}".`;
@@ -2040,12 +2413,13 @@
                     if (input && scopeInput && typeof triggerSearch === 'function') {
                         input.value = query;
                         scopeInput.value = scope;
-                        triggerSearch();
+                        triggerSearch({ actor: 'AI' });
                     } else {
                     const matches = new Map();
                     query.split(/[\s,]+/).filter(Boolean).forEach(term => activeNodes().forEach(node => {
                         if (matchesSearchQuery(node, proteinMetadata.get(node.id) || {}, term.toLowerCase(), scope)) matches.set(node.id, node);
                     }));
+                        aiRecordSearchHistory(query, scope, 'AI');
                         applySearchLogic([...matches.values()], query);
                     }
                     const matchedIds = selected(); queueDraw(animate);
@@ -2067,7 +2441,7 @@
                         : mode === 'intersect' ? new Set([...selectedIds].filter(id => foundIds.has(id)))
                         : new Set(activeNodes().map(node => String(node.id)).filter(id => !selectedIds.has(id)));
                     const next = activeNodes().filter(node => nextIds.has(String(node.id)));
-                    selectNodes(next, false, 'Python API selection'); queueDraw(animate);
+                    selectNodes(next, false, 'Python API selection', null, false, { actor: 'AI' }); queueDraw(animate);
                     return result(found.length || mode === 'invert' ? 'success' : 'warning', { mode, requested_node_ids: ids, selected_node_ids: selected(), selected_count: selected().length, missing_node_ids: ids.filter(id => !foundIds.has(id)) });
                 }
                 if (method === 'select_neighbors') {
@@ -2077,7 +2451,7 @@
                     links.forEach(link => { const a = String(link.source?.id ?? link.source), b = String(link.target?.id ?? link.target); if (adjacent.has(a) && adjacent.has(b)) { adjacent.get(a).add(b); adjacent.get(b).add(a); } });
                     const seen = new Set([nodeId]); let frontier = new Set([nodeId]);
                     for (let step = 0; step < depth; step++) { const next = new Set(); frontier.forEach(id => (adjacent.get(id) || []).forEach(neighbor => { if (!seen.has(neighbor)) { seen.add(neighbor); next.add(neighbor); } })); frontier = next; if (!frontier.size) break; }
-                    const neighborIds = [...seen].filter(id => id !== nodeId); selectNodes(activeNodes().filter(node => seen.has(String(node.id))), false, 'Python API neighbor selection'); queueDraw(animate);
+                    const neighborIds = [...seen].filter(id => id !== nodeId); selectNodes(activeNodes().filter(node => seen.has(String(node.id))), false, 'Python API neighbor selection', null, false, { actor: 'AI' }); queueDraw(animate);
                     return result('success', { node_id: nodeId, depth, neighbor_node_ids: neighborIds, selected_node_ids: selected() });
                 }
                 if (method === 'list_variables') return result('success', { variables: (getVisibleColorModeVariableEntries?.() || []).map(({ key, label, type }) => ({ key, label, type })) });
@@ -2092,49 +2466,51 @@
                 if (method === 'select_by_range' || method === 'select_by_category') {
                     const key = String(args.variable_key ?? args.key ?? ''); const lower = args.min == null ? -Infinity : +args.min, upper = args.max == null ? Infinity : +args.max;
                     const matched = allNodes().filter(node => method === 'select_by_range' ? (Number.isFinite(+variableValue(node, key)) && +variableValue(node, key) >= lower && +variableValue(node, key) <= upper) : String(variableValue(node, key)) === String(args.category));
-                    selectNodes(matched, false, `Python API ${method}`); queueDraw(animate); return result(matched.length ? 'success' : 'warning', { variable_key: key, selected_node_ids: selected(), selected_count: selected().length });
+                    if (method === 'select_by_range') aiRecordSelectByRangeHistory(key, args.min, args.max, 'AI');
+                    else aiRecordSelectByCategoryHistory(key, args.category, 'AI');
+                    selectNodes(matched, false, `Python API ${method}`, null, false, { actor: 'AI' }); queueDraw(animate); return result(matched.length ? 'success' : 'warning', { variable_key: key, selected_node_ids: selected(), selected_count: selected().length });
                 }
                 if (method === 'set_node_size' || method === 'set_node_glow' || method === 'set_node_visibility' || method === 'set_node_label_visibility' || method === 'set_node_label') {
                     const target = args.nodes ?? 'all'; const targets = targeted(allNodes(), target, n => String(n.id));
-                    if (method === 'set_node_size') { const size = +args.size; if (!Number.isFinite(size) || size < 0) return result('warning', { message: 'size must be a non-negative number.' }); targets.forEach(n => n._ssSize = size); }
-                    if (method === 'set_node_glow') { const magnitude = +args.magnitude; if (!(magnitude >= 0 && magnitude <= 500)) return result('warning', { message: 'magnitude must be between 0 and 500.' }); targets.forEach(n => n._ssGlow = magnitude); }
-                    if (method === 'set_node_visibility') { if (!['show','hide'].includes(args.visibility)) return result('warning', { message: 'visibility must be show or hide.' }); targets.forEach(n => n._ssVisible = args.visibility); }
-                    if (method === 'set_node_label_visibility') { if (!['show','hide'].includes(args.visibility)) return result('warning', { message: 'visibility must be show or hide.' }); targets.forEach(n => n._ssLabelVisible = args.visibility); }
-                    if (method === 'set_node_label') { const key = String(args.label_key ?? args.key ?? ''); targets.forEach(n => n._ssLabelKey = key); }
+                    if (method === 'set_node_size') { const size = +args.size; if (!Number.isFinite(size) || size < 0) return result('warning', { message: 'size must be a non-negative number.' }); targets.forEach(n => n._ssSize = size); aiRecordSetNodeSizeHistory(size, 'AI'); }
+                    if (method === 'set_node_glow') { const magnitude = +args.magnitude; if (!(magnitude >= 0 && magnitude <= 500)) return result('warning', { message: 'magnitude must be between 0 and 500.' }); targets.forEach(n => n._ssGlow = magnitude); aiRecordSetNodeGlowHistory(magnitude, 'AI'); }
+                    if (method === 'set_node_visibility') { if (!['show','hide'].includes(args.visibility)) return result('warning', { message: 'visibility must be show or hide.' }); targets.forEach(n => n._ssVisible = args.visibility); aiRecordSetNodeVisibilityHistory(args.visibility, 'AI'); }
+                    if (method === 'set_node_label_visibility') { if (!['show','hide'].includes(args.visibility)) return result('warning', { message: 'visibility must be show or hide.' }); targets.forEach(n => n._ssLabelVisible = args.visibility); aiRecordSetNodeLabelVisibilityHistory(args.visibility, 'AI'); }
+                    if (method === 'set_node_label') { const key = String(args.label_key ?? args.key ?? ''); targets.forEach(n => n._ssLabelKey = key); aiRecordSetNodeLabelHistory(key, 'AI'); }
                     queueDraw(animate); return result('success', { affected_count: targets.length });
                 }
                 if (method === 'set_node_size_by_variable') {
                     const key = String(args.key ?? ''); const magnitude = +args.magnitude; if (!(magnitude >= 0 && magnitude <= 1)) return result('warning', { message: 'magnitude must be between 0 and 1.' });
                     const vals = allNodes().map(n => +variableValue(n, key)).filter(Number.isFinite); if (!vals.length) return result('warning', { key, message: 'No numerical values were found.' }); const min = Math.min(...vals), max = Math.max(...vals);
-                    allNodes().forEach(n => { const v = +variableValue(n, key); if (Number.isFinite(v)) n._ssSize = Math.max(1, 5 + ((v - min) / (max - min || 1)) * magnitude * 30); }); queueDraw(animate); return result('success', { key, magnitude });
+                    allNodes().forEach(n => { const v = +variableValue(n, key); if (Number.isFinite(v)) n._ssSize = Math.max(1, 5 + ((v - min) / (max - min || 1)) * magnitude * 30); }); aiRecordSetNodeSizeByVariableHistory(key, magnitude, 'AI'); queueDraw(animate); return result('success', { key, magnitude });
                 }
-                if (method === 'color_links_by') { const key = String(args.link_variable_key ?? args.key ?? ''); const select = document.getElementById('linkMode'); if (select && [...select.options].some(o => o.value === key)) select.value = key; queueDraw(animate); return result('success', { link_variable_key: key }); }
+                if (method === 'color_links_by') { const key = String(args.link_variable_key ?? args.key ?? ''); const select = document.getElementById('linkMode'); if (select && [...select.options].some(o => o.value === key)) select.value = key; aiRecordColorLinksByHistory(key, 'AI'); queueDraw(animate); return result('success', { link_variable_key: key }); }
                 if (method.startsWith('set_link_')) {
                     const target = args.links ?? 'all'; const targets = targeted(links, target, linkId);
-                    if (method === 'set_link_color') { const color = String(args.color || ''); if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return result('warning', { message: 'color must be a hex colour.' }); targets.forEach(l => l._ssColor = color); }
-                    if (method === 'set_link_label_visibility' || method === 'set_link_direction_arrow_visibility') { if (!['show','hide'].includes(args.visibility)) return result('warning', { message: 'visibility must be show or hide.' }); targets.forEach(l => l[method === 'set_link_label_visibility' ? '_ssLabelVisible' : '_ssArrowVisible'] = args.visibility); }
-                    if (method === 'set_link_label') targets.forEach(l => l._ssLabelKey = String(args.label_key ?? args.key ?? ''));
-                    if (method === 'set_link_width') { const magnitude = +args.magnitude; if (!(magnitude >= 0 && magnitude <= 5)) return result('warning', { message: 'magnitude must be between 0 and 5.' }); targets.forEach(l => l._ssWidth = magnitude); }
-                    if (method === 'set_link_opacity') { const opacity = +args.opacity; if (!(opacity >= 0 && opacity <= 1)) return result('warning', { message: 'opacity must be between 0 and 1.' }); targets.forEach(l => l._ssOpacity = opacity); }
+                    if (method === 'set_link_color') { const color = String(args.color || ''); if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return result('warning', { message: 'color must be a hex colour.' }); targets.forEach(l => l._ssColor = color); aiRecordSetLinkColorHistory(color, 'AI'); }
+                    if (method === 'set_link_label_visibility' || method === 'set_link_direction_arrow_visibility') { if (!['show','hide'].includes(args.visibility)) return result('warning', { message: 'visibility must be show or hide.' }); targets.forEach(l => l[method === 'set_link_label_visibility' ? '_ssLabelVisible' : '_ssArrowVisible'] = args.visibility); if (method === 'set_link_label_visibility') aiRecordSetLinkLabelVisibilityHistory(args.visibility, 'AI'); else aiRecordSetLinkDirectionArrowVisibilityHistory(args.visibility, 'AI'); }
+                    if (method === 'set_link_label') { const key = String(args.label_key ?? args.key ?? ''); targets.forEach(l => l._ssLabelKey = key); aiRecordSetLinkLabelHistory(key, 'AI'); }
+                    if (method === 'set_link_width') { const magnitude = +args.magnitude; if (!(magnitude >= 0 && magnitude <= 5)) return result('warning', { message: 'magnitude must be between 0 and 5.' }); targets.forEach(l => l._ssWidth = magnitude); aiRecordSetLinkWidthHistory(magnitude, 'AI'); }
+                    if (method === 'set_link_opacity') { const opacity = +args.opacity; if (!(opacity >= 0 && opacity <= 1)) return result('warning', { message: 'opacity must be between 0 and 1.' }); targets.forEach(l => l._ssOpacity = opacity); aiRecordSetLinkOpacityHistory(opacity, 'AI'); }
                     queueDraw(animate); return result('success', { affected_count: targets.length });
                 }
                 if (method === 'when_nodes_are_selected_display') {
                     const modes = { 'all links': 'all', 'links from selected nodes': 'from_selected', 'links between selected nodes': 'between_selected' }; const requested = normal(args.mode);
-                    if (!modes[requested]) return result('warning', { message: 'Invalid selection link display mode.' }); document.getElementById('linkVisibilityMode').value = modes[requested]; queueDraw(animate); return result('success', { mode: requested });
+                    if (!modes[requested]) return result('warning', { message: 'Invalid selection link display mode.' }); document.getElementById('linkVisibilityMode').value = modes[requested]; aiRecordWhenNodesAreSelectedDisplayHistory(args.mode, 'AI'); queueDraw(animate); return result('success', { mode: requested });
                 }
                 if (method === 'set_app_style') {
-                    const theme = normal(args.color_theme), mode = normal(args.mode); if (!APP_THEME_PRESETS[theme] || !APP_THEME_PRESETS[theme][mode]) return result('warning', { message: 'Invalid theme or mode.' }); applyTheme(theme, mode); return result('success', { color_theme: theme, mode });
+                    const theme = normal(args.color_theme), mode = normal(args.mode); if (!APP_THEME_PRESETS[theme] || !APP_THEME_PRESETS[theme][mode]) return result('warning', { message: 'Invalid theme or mode.' }); applyTheme(theme, mode); aiRecordSetAppStyleHistory(theme, mode, 'AI'); return result('success', { color_theme: theme, mode });
                 }
-                if (method === 'set_app_background_colour') { const color = String(args.color || ''); if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return result('warning', { message: 'color must be a hex colour.' }); const input = document.getElementById('bgColor'); input.value = color; input.dispatchEvent(new Event('input')); return result('success', { color }); }
-                if (method === 'set_app_background_by') { const mode = normal(args.mode); if (!['mono','voronoi'].includes(mode)) return result('warning', { message: 'mode must be mono or voronoi.' }); backgroundMode = mode; document.getElementById('bgMode').value = mode; updateBackgroundControlsUI(); queueDraw(animate); return result('success', { mode }); }
+                if (method === 'set_app_background_colour') { const color = String(args.color || ''); if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return result('warning', { message: 'color must be a hex colour.' }); const input = document.getElementById('bgColor'); input.value = color; input.dispatchEvent(new Event('input')); aiRecordSetAppBackgroundColourHistory(color, 'AI'); return result('success', { color }); }
+                if (method === 'set_app_background_by') { const mode = normal(args.mode); if (!['mono','voronoi'].includes(mode)) return result('warning', { message: 'mode must be mono or voronoi.' }); backgroundMode = mode; document.getElementById('bgMode').value = mode; updateBackgroundControlsUI(); aiRecordSetAppBackgroundByHistory(mode, 'AI'); queueDraw(animate); return result('success', { mode }); }
                 if (method === 'set_physics') { const physics = normal(args.physics); if (!['on','off'].includes(physics)) return result('warning', { message: 'physics must be on or off.' }); if (args.alpha != null) { const alpha = +args.alpha; if (!Number.isFinite(alpha)) return result('warning', { message: 'alpha must be numerical.' }); document.getElementById('alphaSlider').value = alpha; } togglePhysics(physics === 'on'); if (args.alpha != null) updatePhysicsForce(); return result('success', { physics, alpha: args.alpha ?? null }); }
                 if (method === 'export_selection') { const format = normal(args.format); if (!['csv','json'].includes(format)) return result('warning', { message: 'format must be csv or json.' }); const rows = selected().map(id => ({ id, ...(proteinMetadata.get(id) || {}) })); if (format === 'json') download('stringscape_selection.json', 'application/json', JSON.stringify(rows, null, 2)); else { const keys = [...new Set(rows.flatMap(Object.keys))]; download('stringscape_selection.csv', 'text/csv;charset=utf-8', [keys.join(','), ...rows.map(row => keys.map(key => JSON.stringify(row[key] ?? '')).join(','))].join('\n')); } return result('success', { format, exported_count: rows.length }); }
                 if (method === 'reset_visuals') { allNodes().forEach(n => { delete n._ssSize; delete n._ssGlow; delete n._ssVisible; delete n._ssLabelVisible; delete n._ssLabelKey; delete n._ssColor; }); links.forEach(l => ['_ssColor','_ssWidth','_ssOpacity','_ssLabelVisible','_ssLabelKey','_ssArrowVisible'].forEach(k => delete l[k])); updateSizesAndColors(); queueDraw(animate); return result('success'); }
                 if (method === 'focus_on') { const ids = new Set((Array.isArray(args.node_ids) ? args.node_ids : [args.node_ids]).filter(Boolean).map(String)); const targets = activeNodes().filter(n => ids.has(String(n.id))); if (!targets.length) return result('warning', { message: 'No target nodes were found.' }); const targetTransform = fitNodesInView(targets); d3.select(canvas).transition().duration(350).call(zoomBehavior.transform, targetTransform); return result('success', { node_ids: targets.map(n => n.id) }); }
                 if (method === 'set_as_layer_zero') { const ids = new Set((Array.isArray(args.node_ids) ? args.node_ids : [args.node_ids]).filter(Boolean).map(String)); allNodes().forEach(n => { if (ids.has(String(n.id))) n.layer = 0; }); updateSizesAndColors(); queueDraw(animate); return result('success', { node_ids: [...ids] }); }
-                if (method === 'set_mono_node_color') { const color = String(args.color || ''); if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return result('warning', { message: 'color must be a hex colour.' }); document.getElementById('nodeMonoColor').value = color; updateSizesAndColors(); return result('success', { color }); }
+                if (method === 'set_mono_node_color') { const color = String(args.color || ''); if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return result('warning', { message: 'color must be a hex colour.' }); document.getElementById('nodeMonoColor').value = color; aiRecordSetMonoNodeColorHistory(color, 'AI'); updateSizesAndColors(); return result('success', { color }); }
                 if (method === 'get_node_data') { const id = String(args.node_id ?? args.id ?? ''); const node = nodeMap.get(id); if (!node) return result('warning', { node_id: id, message: 'Node was not found.' }); const data = { ...node, ...(proteinMetadata.get(id) || {}) }; const attribute = args.attribute; return result('success', { node_id: id, data: attribute == null ? data : data[attribute] }); }
-                if (method === 'build_network') { const threshold = +args.score_threshold; if (!Number.isFinite(threshold)) return result('warning', { message: 'score_threshold must be numerical.' }); const input = document.getElementById('thresholdInput'); input.value = threshold; input.dispatchEvent(new Event('change')); document.getElementById('startBtn')?.click(); return result('success', { score_threshold: threshold }); }
+                if (method === 'build_network') { const threshold = +args.score_threshold; if (!Number.isFinite(threshold)) return result('warning', { message: 'score_threshold must be numerical.' }); aiRecordBuildNetworkHistory(threshold, 'AI'); window.__stringscapeSuppressNextBuildHistory = true; const input = document.getElementById('thresholdInput'); input.value = threshold; input.dispatchEvent(new Event('change')); document.getElementById('startBtn')?.click(); return result('success', { score_threshold: threshold }); }
                 if (method === 'message_ai') {
                     const baseUrl = document.getElementById('ai-server-url')?.value.trim() || document.getElementById('ai-server-url')?.placeholder.trim();
                     if (!baseUrl) return result('warning', { message: 'No AI server URL is configured.' });
@@ -2145,11 +2521,11 @@
                     if (request.status < 200 || request.status >= 300) return result('error', { message: `AI server returned HTTP ${request.status}.` });
                     const reply = JSON.parse(request.responseText)?.choices?.[0]?.message?.content || ''; return result('success', { reply });
                 }
-                if (method === 'deselect_all') { selectNodes([], false, 'Python API deselect'); queueDraw(animate); return result('success', { selected_count: 0, selected_node_ids: [] }); }
+                if (method === 'deselect_all') { deselectNodes({ actor: 'AI' }); queueDraw(animate); return result('success', { selected_count: 0, selected_node_ids: [] }); }
                 if (method === 'expand_to_connected') {
                     const before = selected();
                     if (!before.length) return result('warning', { previous_count: 0, selected_count: 0, message: 'No nodes are selected.' });
-                    const expanded = modifySelection(1);
+                    const expanded = modifySelection(1, { actor: 'AI' });
                     selectedNodes = expanded; queueDraw(animate);
                     return result('success', { previous_count: before.length, selected_count: expanded.size, selected_node_ids: [...expanded] });
                 }
@@ -2157,23 +2533,23 @@
                     const name = String(args.name || '').trim();
                     if (!name) return result('warning', { message: 'A collection name is required.' });
                     if (collections.has(name)) return result('warning', { collection: name, created: false, message: 'Collection already exists.' });
-                    collections.set(name, { nodeIds: new Set(), nodes: [], links: [] }); updateViewMenu(); queueDraw(animate);
+                    collections.set(name, { nodeIds: new Set(), nodes: [], links: [] }); aiRecordCreateCollectionHistory(name, 'AI'); updateViewMenu(); queueDraw(animate);
                     return result('success', { collection: name, created: true, node_count: 0 });
                 }
                 if (method === 'delete_collection') {
                     const name = String(args.name || '').trim();
                     if (!collections.has(name)) return result('warning', { collection: name, deleted: false, message: 'Collection was not found.' });
                     deleteCategoryLegendItemState('collection', name);
-                    const nodeCount = collections.get(name).nodeIds?.size || 0; collections.delete(name); updateViewMenu(); refreshLegendIfCollectionMode(); queueDraw(animate);
+                    const nodeCount = collections.get(name).nodeIds?.size || 0; collections.delete(name); aiRecordDeleteCollectionHistory(name, 'AI'); updateViewMenu(); refreshLegendIfCollectionMode(); queueDraw(animate);
                     return result('success', { collection: name, deleted: true, removed_node_count: nodeCount });
                 }
                 if (method === 'add_to_collection') {
                     let name = String(args.name || args.collection_name || '').trim(); const ids = selected();
                     if (!ids.length) return result('warning', { collection: name, added_count: 0, message: 'No nodes are selected.' });
                     if (!name) name = `Python Collection ${collections.size + 1}`;
-                    const created = !collections.has(name); if (created) collections.set(name, { nodeIds: new Set(), nodes: [], links: [] });
+                    const created = !collections.has(name); if (created) { collections.set(name, { nodeIds: new Set(), nodes: [], links: [] }); aiRecordCreateCollectionHistory(name, 'AI'); }
                     const collection = collections.get(name), before = collection.nodeIds.size;
-                    ids.forEach(id => collection.nodeIds.add(id)); collection.nodes = nodes.filter(node => collection.nodeIds.has(node.id));
+                    ids.forEach(id => collection.nodeIds.add(id)); collection.nodes = nodes.filter(node => collection.nodeIds.has(node.id)); aiRecordAddToCollectionHistory(name, 'AI');
                     refreshLegendIfCollectionMode(); updateViewMenu(); queueDraw(animate);
                     return result('success', { collection: name, created, added_count: collection.nodeIds.size - before, collection_count: collection.nodeIds.size, node_ids: ids });
                 }
@@ -2184,7 +2560,7 @@
                     // Accept either form so scripts can use the same label the user sees.
                     const view = aliases[normal(raw)] || (collections.has(raw) ? `coll_${raw}` : raw);
                     if (!['base','selected','Scatter Plot','Venn Diagram','histogram','pie_chart','Mind Map','Embeddings'].includes(view) && !(view.startsWith('coll_') && collections.has(view.slice(5)))) return result('warning', { view: raw, message: 'View was not found.' });
-                    switchView(view); queueDraw(animate); return result('success', { view, animate });
+                    switchView(view, { actor: 'AI' }); queueDraw(animate); return result('success', { view, animate });
                 }
                 if (method === 'set_node_colouring') {
                     const requested = String(args.variable || args.variable_name || args.name || '').trim();
@@ -2194,7 +2570,7 @@
                     const mode = entry?.key || alias[normal(requested)] || requested;
                     const select = document.getElementById('colorMode');
                     if (!select || ![...select.options].some(option => option.value === mode)) return result('warning', { variable: requested, message: 'Colour variable was not found.' });
-                    select.value = mode; handleColorModeChange(mode); queueDraw(animate); return result('success', { variable: mode, animate });
+                    select.value = mode; handleColorModeChange(mode, { actor: 'AI' }); queueDraw(animate); return result('success', { variable: mode, animate });
                 }
                 if (method === 'set_node_color') {
                     const nodeId = String(args.node_id ?? args.id ?? ''), color = String(args.color || ''), node = nodeMap.get(nodeId);
@@ -2425,7 +2801,7 @@
                 return 'Error: Invalid Math';
             }
         }
-        if (toolName === 'Search_and_select') return aiSearchAndSelect(args.query, args.scope || 'all');
+        if (toolName === 'Search_and_select') return aiSearchAndSelect(args.query, args.scope || 'all', { actor: 'AI' });
         if (toolName === 'View_node_IDs') return aiBuildSelectedTable(node => node.id);
         if (toolName === 'View_preferred_name') return aiBuildSelectedTable(node => {
             return getPreferredProteinName(node.id) || 'Unknown';
@@ -2461,6 +2837,7 @@
                 selectedWedges.clear();
                 aiLastSentSelectedNodes = new Set();
                 draw();
+                aiRecordDeselectHistory('AI');
                 return 'Deselected all nodes.';
             } catch (e) { return 'Error deselecting nodes: ' + e.message; }
         }
@@ -2468,10 +2845,11 @@
             try {
                 const originalSelection = new Set(getEffectiveSelectedNodesSet());
                 if (originalSelection.size === 0) return 'No nodes currently selected to expand.';
-                const expanded = modifySelection(1);
+                const expanded = modifySelection(1, { actor: 'AI' });
                 selectedNodes = expanded;
                 aiLastSentSelectedNodes = new Set(expanded);
                 draw();
+                aiRecordExpandHistory('AI');
                 return `Expanded selection from ${originalSelection.size} to ${expanded.size} nodes.`;
             } catch (e) { return 'Error expanding selection: ' + e.message; }
         }
@@ -2545,7 +2923,7 @@
                 }
 
                 colorModeSelect.value = matchedEntry.key;
-                handleColorModeChange(matchedEntry.key);
+                handleColorModeChange(matchedEntry.key, { actor: 'AI' });
                 return `Changed node colouring to "${matchedEntry.label}".`;
             } catch (e) { return 'Error changing colouring: ' + e.message; }
         }
@@ -2587,7 +2965,7 @@
             }
 
             try {
-                switchView(targetId);
+                switchView(targetId, { actor: 'AI' });
                 return `Successfully switched view to: ${target}`;
             } catch (e) {
                 return `Error switching view: ${e.message}. Ensure you use the exact Name or ID.`;
@@ -3902,9 +4280,14 @@ sys.modules['stringscape'] = _stringscape_module
         document.addEventListener('click', (e) => {
             const title = document.getElementById('ai-header-title');
             const dropdown = document.getElementById('ai-mode-dropdown');
-            if (!dropdown || !title) return;
-            if (title.contains(e.target) || dropdown.contains(e.target)) return;
-            dropdown.classList.remove('open');
+            const historyMenuWrap = document.getElementById('ai-history-menu-wrap');
+            const historyMenu = document.getElementById('ai-history-menu-dropdown');
+            if (dropdown && title && !(title.contains(e.target) || dropdown.contains(e.target))) {
+                dropdown.classList.remove('open');
+            }
+            if (historyMenu && historyMenuWrap && !historyMenuWrap.contains(e.target)) {
+                historyMenu.classList.remove('open');
+            }
         });
         // Initialize status
         const pill = document.getElementById('ai-status-pill');
@@ -6292,11 +6675,14 @@ self.onmessage = async (event) => {
     }
 
     // This function toggles the display of directional arrows on the links between nodes based on the provided enabled flag. It updates the UI to reflect the current state and triggers a redraw of the canvas to show or hide the link direction indicators accordingly.
-    function setLinkDirection(enabled) {
+    function setLinkDirection(enabled, historyMeta = null) {
         console.log("function setLinkDirection(enabled: " + enabled + ")");
         linkDirectionEnabled = !!enabled;
         document.getElementById('linkDirectionOn')?.classList.toggle('active', linkDirectionEnabled);
         document.getElementById('linkDirectionOff')?.classList.toggle('active', !linkDirectionEnabled);
+        if (historyMeta?.actor) {
+            aiRecordSetLinkDirectionArrowVisibilityHistory(linkDirectionEnabled ? 'show' : 'hide', historyMeta.actor);
+        }
         draw();
     }
 
@@ -8536,7 +8922,17 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
 
         if (currentViewId === 'histogram') {
             const matches = selectedHistogramBins.size > 0 ? applyHistogramSelectionsFromSet(selectedHistogramBins) : [];
-            if (matches.length > 0) selectNodes(matches, false, 'Histogram selection commit');
+            if (matches.length > 0) {
+                selectNodes(matches, false, 'Histogram selection commit');
+                const bins = Array.from(selectedHistogramBins)
+                    .map(x0 => window.histogramBins?.find(bin => bin.x0 === x0))
+                    .filter(Boolean);
+                if (bins.length > 0) {
+                    const minValue = Math.min(...bins.map(bin => bin.x0));
+                    const maxValue = Math.max(...bins.map(bin => bin.x1));
+                    aiRecordSelectByRangeHistory(getHistogramDisplayMode() || 'histogram', minValue, maxValue, 'Human');
+                }
+            }
             else deselectNodes();
             return;
         }
@@ -9653,8 +10049,12 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         }
     }
 
-    function handleColorModeChange(mode) {
+    function handleColorModeChange(mode, historyMeta = null) {
         syncColorModeSelects(mode);
+        const historyActor = historyMeta?.actor || 'Human';
+        if (mode !== currentColorMode) {
+            aiRecordSetNodeColouringHistory(mode, historyActor);
+        }
         if (mode === 'eigen') {
             calculateEigenvectorCentrality();
         }
@@ -12666,6 +13066,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     const coll = collections.get(name);
                     if (!coll) return;
                     effectiveSelection.forEach(id => coll.nodeIds.add(id));
+                    aiRecordAddToCollectionHistory(name, 'Human');
                     refreshLegendIfCollectionMode();
                     updateViewMenu();
                     closeCollectionMenu();
@@ -12734,6 +13135,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 }
                 collections.set(name, { nodeIds: new Set(), nodes: [], links: [] });
                 selectedNodes.forEach(id => collections.get(name).nodeIds.add(id));
+                aiRecordCreateCollectionHistory(name, 'Human');
+                aiRecordAddToCollectionHistory(name, 'Human');
                 refreshLegendIfCollectionMode();
                 updateViewMenu();
                 closeCollectionMenu();
@@ -13648,6 +14051,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 const val = document.getElementById('inline-name-input').value.trim();
                 if (val && !collections.has(val)) {
                     collections.set(val, { nodeIds: new Set(), nodes: [], links: [] });
+                        aiRecordCreateCollectionHistory(val, 'Human');
                     refreshLegendIfCollectionMode();
                     isCreatingInline = false; 
                     box.classed('form-mode', false); // Leave Form Mode
@@ -13681,7 +14085,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                         if (isBtnDisabled) return; 
 
                         if (opt.isAction) { isCreatingInline = true; updateViewMenu(); } 
-                        else { switchView(opt.id); }
+                        else { switchView(opt.id, { actor: 'Human' }); }
                     });
 
                 if (pendingDelete === opt.name) {
@@ -13694,6 +14098,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                         e.stopPropagation();
                         deleteCategoryLegendItemState('collection', opt.name);
                         collections.delete(opt.name);
+                        aiRecordDeleteCollectionHistory(opt.name, 'Human');
                         if (currentViewId === `coll_${opt.name}`) switchView('base');
                         refreshLegendIfCollectionMode();
                         pendingDelete = null; updateViewMenu();
@@ -13754,10 +14159,12 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 updateVennControls();
     }
 
-    function switchView(viewId) {
+    function switchView(viewId, historyMeta = null) {
         console.log("function switchView(viewId)");
         const fromViewId = currentViewId;
+        const historyActor = historyMeta?.actor || 'Human';
         if (viewId !== fromViewId) {
+            aiRecordSetViewHistory(viewId, historyActor);
             previousViewId = fromViewId;
         }
 
@@ -14315,7 +14722,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             }
             return;
         }
-        if (e.key === 'Escape') { switchView('base'); deselectNodes(); closeCollectionMenu(); return; }
+        if (e.key === 'Escape') { switchView('base'); deselectNodes({ actor: 'Human' }); closeCollectionMenu(); return; }
         if (key === 'm') {
             const effectiveSelection = getEffectiveSelectedNodesSet();
             if (effectiveSelection && effectiveSelection.size > 0) {
@@ -14352,11 +14759,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             refreshSelectionModeState();
             // Do not auto-pause physics on modifier keys; this was stopping GPU physics unexpectedly in base view.
         }
-        if (key === '+' || key === '=') modifySelection(1);
+        if (key === '+' || key === '=') modifySelection(1, { actor: 'Human' });
         if (key === '-') modifySelection(-1);
         if (e.ctrlKey && key === 'd') {
             e.preventDefault();
-            deselectNodes();
+            deselectNodes({ actor: 'Human' });
             draw();
             return;
         }
@@ -15133,8 +15540,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     auto_close_ms: 2400
                 });
             }
-            if (isAdditiveMode || isSubtractMode || isIntersectMode) applySearchLogic([found], "Custom Selection"); else selectNodes([found], false);
-        } else deselectNodes();
+            if (isAdditiveMode || isSubtractMode || isIntersectMode) applySearchLogic([found], "Custom Selection"); else selectNodes([found], false, "", null, false, { actor: 'Human' });
+        } else deselectNodes({ actor: 'Human' });
         draw();
     });
 
@@ -16901,7 +17308,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     // This function takes an array of target nodes and updates the current selection state. It also manages the selection history for undo functionality, updates the info box with details about the selected nodes, and shows buttons for creating or modifying collections based on the selection. The function can be triggered by various user actions, such as clicking on nodes, using the legend, or performing a search.
-    function selectNodes(targets, isLegendClick = false, query = "", searchSummary = null, preserveProteinInfoHistory = false) {
+    function selectNodes(targets, isLegendClick = false, query = "", searchSummary = null, preserveProteinInfoHistory = false, historyMeta = null) {
         console.log(`function selectNodes(targets: [not displaying to save console space], isLegendClick: ${isLegendClick}, query: ${query})`);
         const previousSelection = new Set(getEffectiveSelectedNodesSet() || new Set());
         const nextSelection = new Set(targets.map(n => n.id));
@@ -16987,9 +17394,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                         target = nameInput.property("value").trim();
                         if (!target || collections.has(target)) return;
                         collections.set(target, { nodeIds: new Set(), nodes: [], links: [] });
+                        aiRecordCreateCollectionHistory(target, 'Human');
                         refreshLegendIfCollectionMode();
                     }
                     effectiveSelection.forEach(id => collections.get(target).nodeIds.add(id));
+                    aiRecordAddToCollectionHistory(target, 'Human');
                     updateViewMenu(); selectNodes(targets, false, query);
                 });
             });
@@ -17032,6 +17441,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         updateViewMenu();
         updateVennControls();
         updateVennControls();
+        if (historyMeta?.actor && effectiveSelection.size > 0) {
+            aiRecordSelectionHistory(Array.from(effectiveSelection), historyMeta.actor);
+        }
     }
 
     // This function implements a breadth-first search to find the shortest path between two nodes in the graph, considering only edges that meet the current score threshold and exist in the node map. It returns an array of node IDs representing the path from id1 to id2, or an empty array if no path is found. The function is used as part of the shortest path visualization and analysis features in the application.
@@ -17435,7 +17847,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         }
     }
 
-    function modifySelection(dir) {
+    function modifySelection(dir, historyMeta = null) {
         console.log(`function modifySelection(dir: ${dir})`);
         const effectiveSelection = getEffectiveSelectedNodesSet();
         if (dir === 1) {
@@ -17452,6 +17864,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             });
             const activeNodes = currentViewId === 'base' ? nodes : (activeSubData?.nodes || []);
             selectNodes(activeNodes.filter(n => newSet.has(n.id)), false, "Expanded Selection");
+            if (historyMeta?.actor) {
+                aiRecordExpandHistory(historyMeta.actor);
+            }
             draw();
             return newSet;
         } else {
@@ -17790,7 +18205,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const keyColorSelect = document.getElementById('keyColorMode');
         if (keyColorSelect) {
             keyColorSelect.onchange = function() {
-                handleColorModeChange(this.value);
+                handleColorModeChange(this.value, { actor: 'Human' });
             };
         }
 
@@ -17858,7 +18273,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 renderMiniHistogram(chartDiv.node(), numericValues, range, mode, [selectedMin, selectedMax]);
 
                 chartDiv.style("cursor", "pointer").on("click", () => {
-                    switchView(getMiniChartNavigationTarget(`histogram`));
+                    switchView(getMiniChartNavigationTarget(`histogram`), { actor: 'Human' });
                 });
             }
         };
@@ -18570,7 +18985,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 }
                 return v >= minV && v <= maxV;
             });
-            applySearchLogic(matches, `Range ${minV} - ${maxV}`); draw(); 
+            applySearchLogic(matches, `Range ${minV} - ${maxV}`);
+            aiRecordSelectByRangeHistory(mode, minV, maxV, 'Human');
+            draw(); 
         }
     }
 
@@ -18630,7 +19047,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             }
             return proteinMetadata.get(n.id)?.[mode] === value;
         });
-        if (matches.length > 0) applySearchLogic(matches, value);
+        if (matches.length > 0) {
+            applySearchLogic(matches, value);
+            aiRecordSelectByCategoryHistory(mode, value, 'Human');
+        }
         
         // Also update pie chart wedge selection if in pie chart view
         if (currentViewId === 'pie_chart') {
@@ -18714,6 +19134,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 applyEmbeddingsSelectionToGraphNodes();
             }).catch(e => console.error('Error applying embedding styling:', e));
         }
+        aiRecordSelectByRangeHistory(mode, minV, maxV, 'Human');
     }
 
     function handleEmbeddingVariableRangeSelection(mode, minV, maxV) {
@@ -18775,6 +19196,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 applyEmbeddingsSelectionToGraphNodes();
             }).catch(e => console.error('Error applying embedding styling:', e));
         }
+        aiRecordSelectByRangeHistory(mode, minV, maxV, 'Human');
     }
 
     function applySearchLogic(matches, queryStr, searchSummary = null) {
@@ -18916,7 +19338,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         };
     }
 
-    function triggerSearch() {
+    function triggerSearch(historyMeta = { actor: 'Human' }) {
         console.log("function triggerSearch()");
         const rawInput = document.getElementById('searchInput').value.trim();
         if (!rawInput) return;
@@ -18925,6 +19347,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const searchTerms = tokens.filter(token => !isBooleanOperatorToken(token));
         if (!searchTerms.length) return;
         const booleanMode = tokens.some(isBooleanOperatorToken);
+        if (historyMeta?.actor) aiRecordSearchHistory(rawInput, scope, historyMeta.actor);
 
         // Handle Mind Map search separately
         if (currentViewId === 'Mind Map') {
@@ -19563,6 +19986,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 switchView('base');
             }
             let seeds = document.getElementById('seedInput').value.trim().split(/[\s,]+/).filter(x => x); const threshold = +document.getElementById('thresholdInput').value; if (seeds.length === 0) seeds = [allIDs[0]]; currentSeeds = [...seeds];
+            if (!window.__stringscapeSuppressNextBuildHistory) aiRecordBuildNetworkHistory(threshold, 'Human');
+            window.__stringscapeSuppressNextBuildHistory = false;
             scatterEigenCacheKey = null;
             nodes = []; links = []; window.nodes = nodes; window.links = links; nodeMap.clear(); document.getElementById('startBtn').style.display = 'none'; document.getElementById('progress-wrapper').style.display = 'block'; document.getElementById('pauseBtn').style.display = 'block'; document.getElementById('physBtn').style.display = 'block';
             let processedLinks = new Set(), startTime = Date.now(); isBuilding = true; isSettling = false; updateViewMenu();
@@ -19607,9 +20032,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         }
     };
 
-    function deselectNodes() { 
+    function deselectNodes(historyMeta = null) { 
         console.log("function deselectNodes()");
         if (currentViewId === 'Embeddings' && !embeddingSelectionClearIntent) return;
+        const hadSelection = getEffectiveSelectedNodesSet().size > 0;
         if (currentViewId === 'selected') {
             selectedNodesDraft = new Set();
         } else {
@@ -19632,12 +20058,16 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         if (document.getElementById('colorMode').value === 'layer') updateLegend('layer', null, null, null); 
         updateVennControls();
         checkOffscreenNodes(); 
+        if (historyMeta?.actor && hadSelection) {
+            aiRecordDeselectHistory(historyMeta.actor);
+        }
     }
 
     document.getElementById('colorMode').onchange = function() {
-        handleColorModeChange(this.value);
+        handleColorModeChange(this.value, { actor: 'Human' });
     };
     document.getElementById('nodeSizeSlider').oninput = updateSizesAndColors;
+    document.getElementById('nodeSizeSlider').onchange = (e) => aiRecordSetNodeSizeHistory(e.target.value, 'Human');
     const nodeMonoColorEl = document.getElementById('nodeMonoColor');
     if (nodeMonoColorEl) {
         nodeMonoColorEl.oninput = () => {
@@ -19649,6 +20079,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 }
             }
         };
+        nodeMonoColorEl.onchange = (e) => aiRecordSetMonoNodeColorHistory(e.target.value, 'Human');
     }
 
     const nodeLabelShowBtn = document.getElementById('nodeLabelShow');
@@ -19660,44 +20091,47 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     const nodeShowBtn = document.getElementById('nodeShow');
     const nodeHideBtn = document.getElementById('nodeHide');
 
-    const setNodeVisibilityMode = (mode) => {
+    const setNodeVisibilityMode = (mode, historyMeta = null) => {
         nodeVisibilityToggle = mode;
         if (nodeShowBtn && nodeHideBtn) {
             nodeShowBtn.classList.toggle('active', mode === 'show');
             nodeHideBtn.classList.toggle('active', mode === 'hide');
         }
+        if (historyMeta?.actor) aiRecordSetNodeVisibilityHistory(mode, historyMeta.actor);
         draw();
     };
 
     if (nodeShowBtn && nodeHideBtn) {
-        nodeShowBtn.onclick = () => setNodeVisibilityMode('show');
-        nodeHideBtn.onclick = () => setNodeVisibilityMode('hide');
+        nodeShowBtn.onclick = () => setNodeVisibilityMode('show', { actor: 'Human' });
+        nodeHideBtn.onclick = () => setNodeVisibilityMode('hide', { actor: 'Human' });
     }
 
-    const setNodeLabelMode = (mode) => {
+    const setNodeLabelMode = (mode, historyMeta = null) => {
         nodeLabelToggle = mode;
         if (nodeLabelShowBtn && nodeLabelHideBtn) {
             nodeLabelShowBtn.classList.toggle('active', mode === 'show');
             nodeLabelHideBtn.classList.toggle('active', mode === 'hide');
         }
         document.getElementById('nodeLabelFieldContainer').style.display = (mode === 'show') ? 'block' : 'none';
+        if (historyMeta?.actor) aiRecordSetNodeLabelVisibilityHistory(mode, historyMeta.actor);
         draw();
     };
 
     if (nodeLabelShowBtn && nodeLabelHideBtn) {
-        nodeLabelShowBtn.onclick = () => setNodeLabelMode('show');
-        nodeLabelHideBtn.onclick = () => setNodeLabelMode('hide');
+        nodeLabelShowBtn.onclick = () => setNodeLabelMode('show', { actor: 'Human' });
+        nodeLabelHideBtn.onclick = () => setNodeLabelMode('hide', { actor: 'Human' });
     }
 
     if (nodeLabelFieldEl) {
         nodeLabelFieldEl.onchange = (e) => {
             nodeLabelField = e.target.value;
+            aiRecordSetNodeLabelHistory(nodeLabelField, 'Human');
             draw();
         };
         nodeLabelFieldEl.value = nodeLabelField;
     }
 
-    const setLinkLabelMode = (mode) => {
+    const setLinkLabelMode = (mode, historyMeta = null) => {
         linkLabelToggle = mode;
         if (linkLabelShowBtn && linkLabelHideBtn) {
             linkLabelShowBtn.classList.toggle('active', mode === 'show');
@@ -19705,17 +20139,19 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         }
         const container = document.getElementById('linkLabelFieldContainer');
         if (container) container.style.display = (mode === 'show') ? 'block' : 'none';
+        if (historyMeta?.actor) aiRecordSetLinkLabelVisibilityHistory(mode, historyMeta.actor);
         draw();
     };
 
     if (linkLabelShowBtn && linkLabelHideBtn) {
-        linkLabelShowBtn.onclick = () => setLinkLabelMode('show');
-        linkLabelHideBtn.onclick = () => setLinkLabelMode('hide');
+        linkLabelShowBtn.onclick = () => setLinkLabelMode('show', { actor: 'Human' });
+        linkLabelHideBtn.onclick = () => setLinkLabelMode('hide', { actor: 'Human' });
     }
 
     if (linkLabelFieldEl) {
         linkLabelFieldEl.onchange = (e) => {
             linkLabelField = e.target.value;
+            aiRecordSetLinkLabelHistory(linkLabelField, 'Human');
             draw();
         };
     }
@@ -19727,18 +20163,41 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     setLinkLabelMode('hide');
     updatePhysicsControlButtons();
     document.getElementById('glowSlider').oninput = (e) => { document.getElementById('val-glw').innerText = e.target.value; draw(); };
+    document.getElementById('glowSlider').onchange = (e) => aiRecordSetNodeGlowHistory(e.target.value, 'Human');
     document.getElementById('sizeSlider').oninput = updateSizesAndColors;
+    document.getElementById('sizeSlider').onchange = (e) => aiRecordSetNodeSizeByVariableHistory('centrality', e.target.value, 'Human');
     document.getElementById('eigenSlider').oninput = updateSizesAndColors;
+    document.getElementById('eigenSlider').onchange = (e) => aiRecordSetNodeSizeByVariableHistory('eigen', e.target.value, 'Human');
     document.getElementById('proteinSizeSlider').oninput = updateSizesAndColors;
+    document.getElementById('proteinSizeSlider').onchange = (e) => aiRecordSetNodeSizeByVariableHistory('size', e.target.value, 'Human');
     document.getElementById('linkWidthSlider').oninput = (e) => {
         document.getElementById('val-linkw').innerText = e.target.value;
         draw();
     };
+    document.getElementById('linkWidthSlider').onchange = (e) => aiRecordSetLinkWidthHistory(e.target.value, 'Human');
     document.getElementById('brightnessSlider').oninput = e => setLinkBrightness(+e.target.value);
+    document.getElementById('brightnessSlider').onchange = (e) => aiRecordSetLinkOpacityHistory(e.target.value, 'Human');
     document.getElementById('geneBrightnessSlider').oninput = e => setGeneLinkBrightness(+e.target.value);
-    document.getElementById('linkVisibilityMode').onchange = () => draw();
-    document.getElementById('linkDirectionOn').onclick = () => setLinkDirection(true);
-    document.getElementById('linkDirectionOff').onclick = () => setLinkDirection(false);
+    document.getElementById('linkVisibilityMode').onchange = (e) => {
+        aiRecordWhenNodesAreSelectedDisplayHistory(e.target.value, 'Human');
+        draw();
+    };
+    const linkModeEl = document.getElementById('linkMode');
+    if (linkModeEl) {
+        linkModeEl.onchange = (e) => {
+            aiRecordColorLinksByHistory(e.target.value, 'Human');
+            draw();
+        };
+    }
+    const linkColorEl = document.getElementById('linkColor');
+    if (linkColorEl) {
+        linkColorEl.onchange = (e) => {
+            aiRecordSetLinkColorHistory(e.target.value, 'Human');
+            draw();
+        };
+    }
+    document.getElementById('linkDirectionOn').onclick = () => setLinkDirection(true, { actor: 'Human' });
+    document.getElementById('linkDirectionOff').onclick = () => setLinkDirection(false, { actor: 'Human' });
     document.getElementById('alphaSlider').oninput = updatePhysicsForce;
     document.getElementById('repulsionSlider').oninput = updatePhysicsForce;
     document.getElementById('attractionSlider').oninput = updatePhysicsForce;
@@ -19762,21 +20221,25 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         }
         draw();
     };
+    document.getElementById('bgColor').onchange = e => aiRecordSetAppBackgroundColourHistory(e.target.value, 'Human');
     document.getElementById('bgMode').onchange = e => {
         backgroundMode = e.target.value;
         updateBackgroundControlsUI();
         invalidateVoronoiCache();
+        aiRecordSetAppBackgroundByHistory(e.target.value, 'Human');
         draw();
     };
     document.getElementById('colorTheme').onchange = e => {
         applyTheme(e.target.value, currentUiMode);
         invalidateVoronoiCache();
+        aiRecordSetAppStyleHistory(currentColorTheme, currentUiMode, 'Human');
         draw();
     };
     document.getElementById('darkModeToggle').onclick = () => {
         const nextMode = currentUiMode === 'dark' ? 'light' : 'dark';
         applyTheme(currentColorTheme, nextMode);
         invalidateVoronoiCache();
+        aiRecordSetAppStyleHistory(currentColorTheme, currentUiMode, 'Human');
         draw();
     };
     document.getElementById('bgVoronoiOpacitySlider').oninput = e => {
@@ -19844,6 +20307,15 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             selectedRatio = this.getAttribute('data-ratio');
         };
     });
+
+    const pythonScriptEditor = document.getElementById('ai-python-script-editor');
+    if (pythonScriptEditor) {
+        pythonScriptEditor.addEventListener('input', aiRenderPythonScriptEditorHighlight);
+        pythonScriptEditor.addEventListener('scroll', aiRenderPythonScriptEditorHighlight);
+        pythonScriptEditor.addEventListener('keyup', aiRenderPythonScriptEditorHighlight);
+        pythonScriptEditor.addEventListener('mouseup', aiRenderPythonScriptEditorHighlight);
+        aiRenderPythonScriptEditorHighlight();
+    }
 
     // Resolution Selection
     document.querySelectorAll('.res-btn').forEach(btn => {
@@ -19932,6 +20404,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         bindClick(document.getElementById('ai-header-title'), () => toggleAiModeDropdown());
         bindClick(document.getElementById('ai-mode-agent-option'), () => setAiPanelMode('agent'));
         bindClick(document.getElementById('ai-mode-python-option'), () => setAiPanelMode('python'));
+        bindClick(document.getElementById('ai-mode-history-option'), () => setAiPanelMode('history'));
         bindClick(document.getElementById('ai-menu-btn'), () => toggleAiMenu());
         bindClick(document.getElementById('ai-download-menu-btn'), () => {
             downloadAiChat();
@@ -19946,12 +20419,20 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         if (aiServerUrlInput) {
             aiServerUrlInput.addEventListener('input', () => aiToggleConnectColor(aiServerUrlInput));
         }
-        bindClick(document.getElementById('ai-python-instructions-btn'), () => openPythonInstructionsBox());
+        bindClick(document.getElementById('ai-python-instructions-btn'), () => togglePythonInstructionsBox(true));
         bindClick(document.getElementById('ai-run-script-btn'), () => runpythonpanelScript());
         bindClick(document.getElementById('ai-run-line-btn'), () => runpythonpanelLine());
         bindClick(document.getElementById('ai-copy-python-instructions'), () => copyPythonInstructions());
         bindClick(document.getElementById('ai-copy-python-output-btn'), () => copyPythonOutput());
-        bindClick(document.getElementById('ai-close-python-instructions'), () => closePythonInstructionsBox());
+        bindClick(document.getElementById('ai-close-python-instructions'), () => togglePythonInstructionsBox(false));
+        bindClick(document.getElementById('ai-history-menu-btn'), () => toggleHistoryMenu());
+        bindClick(document.getElementById('ai-clear-history-menu-btn'), () => aiClearActionHistory());
+        bindClick(document.getElementById('ai-copy-history-menu-btn'), () => aiCopyActionHistory());
+        bindClick(document.getElementById('ai-download-history-menu-btn'), () => aiDownloadActionHistory());
+        bindClick(document.getElementById('ai-history-launch-btn'), () => {
+            toggleAiPanel(true);
+            setAiPanelMode('history');
+        });
         bindClick(document.getElementById('ai-file-btn'), () => document.getElementById('ai-file-input')?.click());
         bindClick(document.getElementById('ai-send-btn'), () => sendAiMessage());
         const aiFileInput = document.getElementById('ai-file-input');
@@ -19971,7 +20452,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         });
         bindClick(document.getElementById('protein-info-explain-btn'), () => explainProteinInSimpleEnglish());
         bindClick(document.getElementById('protein-info-close-btn'), () => closeProteinInfoBox());
-        bindClick(document.getElementById('mind-map-grow-btn'), () => modifySelection(1));
+        bindClick(document.getElementById('mind-map-grow-btn'), () => modifySelection(1, { actor: 'Human' }));
         bindClick(document.getElementById('mind-map-shrink-btn'), () => modifySelection(-1));
 
         const proteinInfoBox = document.getElementById('protein-info-box');
