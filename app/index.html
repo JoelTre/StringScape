@@ -293,7 +293,8 @@
             justify-content: flex-end;
             width: 100%;
         }
-        #ai-python-console-btn {
+        #ai-python-console-btn,
+        #ai-history-launch-btn {
             width: auto;
             padding: 8px 18px;
             border: 1px solid transparent;
@@ -308,7 +309,8 @@
             cursor: pointer;
             transition: filter 0.2s ease, transform 0.2s ease;
         }
-        #ai-python-console-btn:hover {
+        #ai-python-console-btn:hover,
+        #ai-history-launch-btn:hover {
             filter: brightness(1.12);
             transform: translateY(-2px);
         }
@@ -389,7 +391,7 @@
             background: var(--surface-color-panel);
             border: 1px solid var(--border-color-strong);
             border-radius: 8px;
-            min-width: 180px;
+            min-width: 210px;
             box-shadow: 0 2px 8px var(--shadow-color);
             z-index: 130;
         }
@@ -807,6 +809,166 @@
             background: var(--surface-color-strong);
             color: var(--text-color);
         }
+        #ai-action-history-panel {
+            display: none;
+            flex: 1;
+            flex-direction: column;
+            min-height: 0;
+            overflow: hidden;
+            padding: 12px 15px;
+            background: var(--surface-color-strong);
+            color: var(--text-color);
+        }
+        #ai-action-history-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        #ai-action-history-header-text {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 0;
+        }
+        #ai-action-history-title {
+            margin: 0;
+            font-size: 1rem;
+            line-height: 1.25;
+            color: var(--accent-color-soft);
+        }
+        #ai-action-history-subtitle {
+            margin: 0;
+            font-size: 0.8rem;
+            line-height: 1.35;
+            color: var(--muted-text-color);
+        }
+        #ai-action-history-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 0 0 auto;
+        }
+        #ai-history-clear-btn {
+            border-radius: 9999px;
+            font-weight: 600;
+            font-size: 0.8rem;
+            padding: 6px 10px;
+            width: auto;
+            min-width: 0;
+            flex: 0 0 auto;
+            margin: 0;
+            background: var(--surface-color-panel);
+            border: 1px solid var(--border-color-strong);
+            color: var(--text-color);
+            cursor: pointer;
+        }
+        #ai-history-clear-btn:hover {
+            background: var(--accent-color);
+            border-color: var(--accent-color);
+        }
+        #ai-history-menu-wrap {
+            position: relative;
+            flex: 0 0 auto;
+        }
+        #ai-history-menu-btn {
+            border-radius: 9999px;
+            font-weight: 600;
+            font-size: 1rem;
+            padding: 6px 8px;
+            width: 35px;
+            height: 35px;
+            min-width: 0;
+            flex: 0 0 auto;
+            margin: 0;
+            background: var(--surface-color-panel);
+            border: 1px solid var(--border-color-strong);
+            color: var(--text-color);
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        #ai-history-menu-btn:hover {
+            background: var(--accent-color);
+            border-color: var(--accent-color);
+        }
+        #ai-history-menu-dropdown {
+            display: none;
+            position: absolute;
+            top: 100%;
+            right: 0;
+            margin-top: 4px;
+            min-width: 170px;
+            background: var(--surface-color-panel);
+            border: 1px solid var(--border-color-strong);
+            border-radius: 8px;
+            z-index: 100;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
+        #ai-history-menu-dropdown.open {
+            display: block;
+        }
+        #ai-history-menu-dropdown button {
+            display: block;
+            width: 100%;
+            padding: 10px 14px;
+            background: none;
+            border: none;
+            color: var(--muted-text-color);
+            text-align: left;
+            cursor: pointer;
+            font-size: 0.85rem;
+        }
+        #ai-history-menu-dropdown button:hover {
+            background: var(--button-bg);
+        }
+        #ai-history-menu-dropdown button:first-child {
+            border-radius: 8px 8px 0 0;
+        }
+        #ai-history-menu-dropdown button:last-child {
+            border-radius: 0 0 8px 8px;
+        }
+        #ai-action-history-box {
+            flex: 1;
+            min-height: 0;
+            border: 1px solid var(--border-color-strong);
+            border-radius: 12px;
+            background: var(--surface-color-panel-alt);
+            overflow: auto;
+        }
+        #ai-action-history-script {
+            margin: 0;
+            padding: 12px 14px;
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: var(--muted-text-color);
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+            font-size: 0.82rem;
+            line-height: 1.5;
+        }
+        .ai-script-empty-state {
+            color: var(--muted-text-color);
+            opacity: 0.8;
+        }
+        .py-token-comment {
+            color: #7f8c8d;
+        }
+        .py-token-string {
+            color: #7bd88f;
+        }
+        .py-token-keyword {
+            color: #5cc8ff;
+            font-weight: 600;
+        }
+        .py-token-number {
+            color: #f5c16c;
+        }
+        .py-token-builtin {
+            color: #d7a6ff;
+        }
+        .py-token-text {
+            color: inherit;
+        }
         .ai-python-intro {
             font-size: 1rem;
             line-height: 1.35;
@@ -832,15 +994,56 @@
         #ai-python-script-editor {
             width: 100%;
             min-height: 220px;
-            background: var(--surface-color-panel-alt);
-            border: 1px solid var(--border-color-strong);
-            border-radius: 10px;
-            color: var(--muted-text-color);
+            background: transparent;
+            border: 0;
+            color: transparent;
+            caret-color: var(--text-color);
             padding: 10px;
             box-sizing: border-box;
             font-family: Consolas, 'Courier New', monospace;
             font-size: 0.82rem;
+            line-height: 1.5;
             resize: vertical;
+            position: relative;
+            z-index: 2;
+            white-space: pre-wrap;
+            word-break: break-word;
+            overflow: auto;
+        }
+        #ai-python-script-editor::placeholder {
+            color: var(--muted-text-color);
+            opacity: 0.45;
+        }
+        #ai-python-script-editor::selection {
+            background: rgba(92, 200, 255, 0.28);
+        }
+        #ai-python-script-editor-shell {
+            position: relative;
+            min-height: 220px;
+            border: 1px solid var(--border-color-strong);
+            border-radius: 10px;
+            background: var(--surface-color-panel-alt);
+            overflow: hidden;
+        }
+        #ai-python-script-highlight {
+            position: absolute;
+            inset: 0;
+            margin: 0;
+            padding: 10px;
+            box-sizing: border-box;
+            font-family: Consolas, 'Courier New', monospace;
+            font-size: 0.82rem;
+            line-height: 1.5;
+            color: var(--muted-text-color);
+            white-space: pre-wrap;
+            word-break: break-word;
+            overflow: auto;
+            pointer-events: none;
+            z-index: 1;
+            scrollbar-width: none;
+        }
+        #ai-python-script-highlight::-webkit-scrollbar {
+            display: none;
         }
         #ai-run-script-btn {
             background: var(--accent-color);
@@ -4248,6 +4451,7 @@
             <div id="ai-mode-dropdown">
                 <button id="ai-mode-agent-option" class="active" type="button">AI Agent</button>
                 <button id="ai-mode-python-option" type="button">Python Scripts</button>
+                <button id="ai-mode-history-option" type="button">History</button>
             </div>
         </div>
         <div id="ai-header-actions">
@@ -4255,6 +4459,14 @@
                 <button id="ai-menu-btn" type="button" title="Menu">⋮</button>
                 <div id="ai-menu-dropdown">
                     <button id="ai-download-menu-btn">Download Chat</button>
+                </div>
+            </div>
+            <div id="ai-history-menu-wrap" style="position: relative; display:none;">
+                <button id="ai-history-menu-btn" type="button" title="History menu">⋮</button>
+                <div id="ai-history-menu-dropdown">
+                    <button id="ai-clear-history-menu-btn" type="button">Clear History</button>
+                    <button id="ai-copy-history-menu-btn" type="button">Copy History</button>
+                    <button id="ai-download-history-menu-btn" type="button">Download History</button>
                 </div>
             </div>
             <button id="ai-close-panel-btn" type="button" aria-label="Close AI panel">&times;</button>
@@ -4300,7 +4512,10 @@
         <div class="ai-python-intro">Write and run python scripts to analyse your data or perform actions in the app.</div>
         <button id="ai-python-instructions-btn" type="button">Instructions for writing python scripts.</button>
         <div id="ai-current-script-title">Current Script: Untitled Script</div>
-        <textarea id="ai-python-script-editor" spellcheck="false" placeholder="# Write Python here, use one of the example scripts above, or generate a script using the AI below."></textarea>
+        <div id="ai-python-script-editor-shell">
+            <pre id="ai-python-script-highlight" aria-hidden="true"></pre>
+            <textarea id="ai-python-script-editor" spellcheck="false" placeholder="# Write Python here, use one of the example scripts above, or generate a script using the AI below."></textarea>
+        </div>
         <div id="ai-python-run-buttons">
             <button id="ai-run-line-btn" type="button">Run Line</button>
             <button id="ai-run-script-btn" type="button">Run Script</button>
@@ -4324,6 +4539,18 @@
             </div>
         </div>
         <pre id="ai-python-instructions-body"></pre>
+    </div>
+
+    <div id="ai-action-history-panel">
+        <div id="ai-action-history-header">
+            <div id="ai-action-history-header-text">
+                <h3 id="ai-action-history-title">Action History</h3>
+                <p id="ai-action-history-subtitle">A running Python script of the actions performed in StringScape.</p>
+            </div>
+        </div>
+        <div id="ai-action-history-box">
+            <pre id="ai-action-history-script"></pre>
+        </div>
     </div>
 
     <div id="ai-chat-scroll">
@@ -4388,6 +4615,7 @@
 <div id="right-lower-stack">
     <div id="ai-launch-buttons">
         <button id="ask-ai-btn" type="button">Ask AI</button>
+            <button id="ai-history-launch-btn" type="button">History</button>
         <button id="ai-python-console-btn" type="button">Python Scripts</button>
     </div>
     <div id="info-box">
