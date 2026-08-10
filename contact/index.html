@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StringScape - Contact</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        body {
+            background-color: #0B0F19;
+            color: #F3F4F6;
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+        .gradient-text {
+            background: linear-gradient(135deg, #60A5FA 0%, #2eccbf 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+    </style>
+</head>
+<body class="overflow-x-hidden flex flex-col min-h-screen">
+
+    <header class="w-full py-6 px-6 flex justify-between items-center border-b border-gray-800 backdrop-blur-md sticky top-0 z-50 bg-[#0B0F19]/60">
+        <div class="flex items-center space-x-2">
+            <a href="index.html" class="flex items-center space-x-3 group">
+                <svg width="40" height="40" viewBox="0 0 100 100" class="flex-shrink-0 ml-2.5 transition-transform duration-300 group-hover:scale-105" xmlns="http://www.w3.org/2000/svg">
+                    <line x1="27" y1="50" x2="75" y2="22" stroke="#888" stroke-width="11" stroke-linecap="round"/>
+                    <line x1="75" y1="22" x2="75" y2="78" stroke="#888" stroke-width="11" stroke-linecap="round"/>
+                    <circle cx="27" cy="50" r="20" fill="#3498db" stroke="#6dc5ff" stroke-width="5" />
+                    <circle cx="75" cy="22" r="20" fill="#3498db" stroke="#6dc5ff" stroke-width="5" />
+                    <circle cx="75" cy="78" r="20" fill="#3498db" stroke="#6dc5ff" stroke-width="5" />
+                </svg>
+                <span class="text-3xl font-black tracking-tight gradient-text ml-0.5 py-1 leading-normal">StringScape</span>
+            </a>
+            <span class="bg-gray-800 text-xs text-gray-400 px-2 py-0.5 rounded-full border border-gray-700">Beta 1.0</span>
+        </div>
+        <nav class="hidden md:flex space-x-8 text-sm font-medium text-gray-400">
+            <a href="https://joeltre.github.io/StringScape/articles" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-solid fa-book-open mr-1"></i> Articles</a>
+            <a href="https://stringscape.net/contact" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-solid fa-envelope mr-1"></i> Contact</a>
+            <a href="https://github.com/JoelTre/StringScape/tree/main" target="_blank" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-brands fa-github mr-1"></i> GitHub</a>
+            <a href="https://x.com/StringScapeApp" target="_blank" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-brands fa-x-twitter mr-1"></i> X</a>
+            <a href="https://www.youtube.com/@StringScape_app" target="_blank" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-brands fa-youtube mr-1"></i> YouTube</a>
+        </nav>
+    </header>
+
+    <main class="max-w-4xl mx-auto px-6 pt-16 pb-24 flex-grow w-full">
+        <div class="space-y-4 text-center md:text-left mb-10">
+            <div class="text-emerald-400 text-sm font-semibold tracking-wider uppercase">Get in Touch</div>
+            <h1 class="text-4xl md:text-5xl font-extrabold tracking-tight text-white leading-tight">
+                Contact <span class="gradient-text">StringScape</span>
+            </h1>
+            <p class="text-gray-400 text-base">
+                Have a question, general feedback, found a bug, a new feature request, or need help? Fill out the form below.
+            </p>
+            <div class="w-80 h-1 bg-gradient-to-r from-blue-500 to-[#2eccbf] mx-auto md:mx-0 rounded-full mt-4"></div>
+        </div>
+
+        <div class="w-full">
+            <iframe src="https://docs.google.com/forms/d/e/1FAIpQLSdZVcAPkBQxj6fdOFY_0QQq_GyOJqRvo6WjA7Wp7KB_1w4onw/viewform?embedded=true" width="640" height="1450" frameborder="0" marginheight="0" marginwidth="0" class="w-full" style="height: 1450px;">Loading…</iframe>
+        </div>
+    </main>
+
+    <footer class="w-full py-12 px-8 border-t border-gray-900 bg-gray-950/50 text-center text-sm text-gray-500">
+        <nav class="flex flex-wrap justify-center gap-y-2 space-x-8 mb-6 text-sm font-medium text-gray-400">            
+            <a href="https://joeltre.github.io/StringScape/articles" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-solid fa-book-open mr-1"></i> Articles</a>
+            <a href="https://stringscape.net/contact" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-solid fa-envelope mr-1"></i> Contact</a>
+            <a href="https://github.com/JoelTre/StringScape/tree/main" target="_blank" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-brands fa-github mr-1"></i> GitHub</a>
+            <a href="https://x.com/StringScapeApp" target="_blank" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-brands fa-x-twitter mr-1"></i> X</a>
+            <a href="https://www.youtube.com/@StringScape_app" target="_blank" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-brands fa-youtube mr-1"></i> YouTube</a>
+        </nav>
+        <p class="mb-2">StringScape is completely free and open-source under the Apache-2.0 License.</p>
+        <p class="mb-2">Developed by Joel Tregurtha with funding from the <a href="https://www.macdiarmid.ac.nz/" target="_blank" class="underline hover:text-gray-300 transition-colors">Macdiarmid Institute</a>.</p>
+        <p>&copy; 2026 StringScape App.</p>
+    </footer>
+
+</body>
+</html>
