@@ -4365,7 +4365,8 @@ sys.modules['stringscape'] = _stringscape_module
             }
         }
     };
-    let currentColorTheme = localStorage.getItem(APP_THEME_STORAGE_KEY) || 'grey';
+    // Default to blue theme in dark mode
+    let currentColorTheme = localStorage.getItem(APP_THEME_STORAGE_KEY) || 'blue';
     let currentUiMode = localStorage.getItem(APP_MODE_STORAGE_KEY) || 'dark';
     let isFrameMode = false;
     let exportFrame = null; // {x, y, w, h} in world coordinates
@@ -9110,8 +9111,29 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     function openModal(id) { 
         console.log("function openModal(id: " + id + ")");
-        d3.select(`#${id}`).style("display", "block"); 
+        d3.select(`#${id}`).style("display", "block");
     }
+    
+    // Copy captured error logs (from aiLogHistory) to clipboard
+    async function copyErrorLogs() {
+        try {
+            const errors = aiLogHistory.filter(e => String(e.type || '').toUpperCase() === 'ERROR');
+            if (!errors.length) {
+                displayStringScapeNotification({ text: 'No error logs to copy.', auto_close: true, auto_close_ms: 2000 });
+                return;
+            }
+            const text = errors.map(e => `[${e.timestamp}] ${e.type}: ${e.message}`).join('\n');
+            await navigator.clipboard.writeText(text);
+            displayStringScapeNotification({ text: `Copied ${errors.length} error log(s) to clipboard.`, auto_close: true, auto_close_ms: 2200 });
+        } catch (err) {
+            console.error('Failed to copy error logs', err);
+            displayStringScapeNotification({ text: 'Failed to copy error logs.', auto_close: true, auto_close_ms: 2200 });
+        }
+    }
+
+    // Attach handler to the Copy Error Logs button if present
+    const _copyBtn = document.getElementById('copyErrorLogsBtn');
+    if (_copyBtn) _copyBtn.addEventListener('click', (e) => { e.preventDefault(); copyErrorLogs(); });
 
     function closeModal(id) { 
         console.log("function closeModal(id: " + id + ")");
@@ -12920,6 +12942,16 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         return selectedNodes;
     }
 
+    // Return a Set of node IDs that are visible in the current view
+    function getVisibleNodeSet() {
+        if (currentViewId === 'base') return new Set((nodes || []).map(n => n.id));
+        if (currentViewId === 'Venn Diagram') return new Set((vennDiagramState?.nodes || []).map(n => n.id));
+        if (currentViewId === 'Mind Map') return new Set((mindMapLayoutState?.nodes || []).map(n => n.id));
+        if (currentViewId === 'selected' || currentViewId.startsWith('coll_')) return new Set((activeSubData?.nodes || []).map(n => n.id));
+        // Fallback to full node set
+        return new Set((nodes || []).map(n => n.id));
+    }
+
     function ensureChartCollectionMenu() {
         let menu = document.getElementById('chart-collection-menu');
         if (menu) return menu;
@@ -14638,7 +14670,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             return;
         }
         if (document.activeElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
-        if (!isPointerOverMainCanvas && currentViewId !== 'Embeddings') return;
+        // Allow modifier keys to be detected even when pointer is outside the canvas
+        if (!isPointerOverMainCanvas && currentViewId !== 'Embeddings' && !['Shift','Control','Alt'].includes(e.key)) return;
         if (isVariableSettingsOpen) return;
         const key = e.key.toLowerCase();
 
@@ -17449,10 +17482,21 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     // This function implements a breadth-first search to find the shortest path between two nodes in the graph, considering only edges that meet the current score threshold and exist in the node map. It returns an array of node IDs representing the path from id1 to id2, or an empty array if no path is found. The function is used as part of the shortest path visualization and analysis features in the application.
     function findShortestPath(id1, id2) {
         console.log(`function findShortestPath(id1: ${id1}, id2: ${id2})`);
-        if (!id1 || !id2) return []; const queue = [[id1]], visited = new Set([id1]), threshold = +document.getElementById('thresholdInput').value;
+        if (!id1 || !id2) return [];
+        const visible = getVisibleNodeSet();
+        if (!visible.has(id1) || !visible.has(id2)) return [];
+        const queue = [[id1]], visited = new Set([id1]);
+        const threshold = +document.getElementById('thresholdInput').value;
         while (queue.length > 0) {
-            const path = queue.shift(), node = path[path.length - 1]; if (node === id2) return path;
-            (fullAdjacency.get(node) || []).forEach(edge => { if (edge.score >= threshold && !visited.has(edge.target) && nodeMap.has(edge.target)) { visited.add(edge.target); queue.push([...path, edge.target]); } });
+            const path = queue.shift();
+            const node = path[path.length - 1];
+            if (node === id2) return path;
+            (fullAdjacency.get(node) || []).forEach(edge => {
+                if (edge.score >= threshold && !visited.has(edge.target) && visible.has(edge.target)) {
+                    visited.add(edge.target);
+                    queue.push([...path, edge.target]);
+                }
+            });
         }
         return [];
     }
@@ -17470,6 +17514,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     function buildShortestPathOverlayData(id1, id2) {
         if (!id1 || !id2) return { paths: [], nodes: new Set(), edges: new Set() };
+        const visible = getVisibleNodeSet();
+        if (!visible.has(id1) || !visible.has(id2)) return { paths: [], nodes: new Set(), edges: new Set() };
 
         const threshold = +document.getElementById('thresholdInput').value;
         const distances = new Map([[id1, 0]]);
@@ -17483,7 +17529,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             if (nodeDistance >= shortestDistance) continue;
 
             (fullAdjacency.get(node) || []).forEach(edge => {
-                if (edge.score < threshold || !nodeMap.has(edge.target)) return;
+                if (edge.score < threshold || !visible.has(edge.target)) return;
                 const nextDistance = nodeDistance + 1;
                 if (nextDistance > shortestDistance) return;
 
@@ -20551,8 +20597,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             text: 'This is the Beta 1.1 version of StringScape.',
             button1_text: 'About StringScape',
             button2_text: 'Close',
-            auto_close: false,
-            default_button_index: 0
+            auto_close: true,
+            auto_close_ms: 8000,
+            default_button_index: 1
         }).then(result => {
             if (result?.button_text === 'About StringScape') {
                 openModal('aboutModal');
