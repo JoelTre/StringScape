@@ -2785,7 +2785,7 @@
             content: '';
             position: absolute;
             inset: 0;
-            background: linear-gradient(90deg, rgba(73, 174, 241, 0.18), rgba(73, 174, 241, 0.92), rgba(52, 152, 219, 1));
+            background: linear-gradient(90deg, color-mix(in srgb, var(--accent-color) 60%, transparent), color-mix(in srgb, var(--accent-color) 60%, transparent), color-mix(in srgb, var(--accent-color-soft) 60%, transparent));
             transform-origin: left center;
             transform: scaleX(0);
             opacity: 0.95;
@@ -4346,9 +4346,9 @@
 
 <div id="aboutModal" class="modal">
     <div class="modal-content">
-        <span class="close-modal">&times;</span>
+        <span class="close-modal" id="about-close-btn">&times;</span>
         <h3>About StringScape</h3>
-        <p>Beta version 1.0</p>
+        <p>This is the Beta 1.1 version of StringScape.</p>
         <p>The StringScape network visualiser app was developed for viewing network data from the <a href="https://string-db.org/" target="_blank" style="color: var(--accent-color); text-decoration: none;">STRING database</a>, but can be used to view any type of network data.</p>
         <p>This app was developed by Joel Tregurtha as part of a PhD program at the University of Canterbury, New Zealand. PhD funded by The MacDiarmid Institute.</p>
         <p>The code was generated using AI models, including Gemini, Codex, and Claude.</p>
@@ -4357,7 +4357,10 @@
         <p>Video tutorial on how to use this app: <a href="#" target="_blank" style="color: var(--accent-color); text-decoration: none;">[coming soon...]</a></p>
         <p>This is an open-source project. The source code is available here: <a href="https://github.com/JoelTre/StringScape/tree/main" target="_blank" rel="noopener noreferrer" style="color: var(--accent-color); text-decoration: none;">https://github.com/JoelTre/StringScape/tree/main</a></p>
         <hr style="border:0; border-top:1px solid var(--border-color);">
-        <p>I'd love to hear from you! Send feedback, suggested additional features or bugs found to <a href="mailto:joel.tregurtha@pg.canterbury.ac.nz" style="color: var(--accent-color); text-decoration: none;">joel.tregurtha@pg.canterbury.ac.nz</a></p>
+            <p>I'd love to hear from you! Send feedback, suggested additional features or bugs found to <a href="mailto:joel.tregurtha@pg.canterbury.ac.nz" style="color: var(--accent-color); text-decoration: none;">joel.tregurtha@pg.canterbury.ac.nz</a></p>
+        <div style="display:flex; gap:8px; margin-top:10px;">
+            <button id="copyErrorLogsBtn" class="btn-secondary" style="width:100%;">Copy Error Logs</button>
+        </div>
         <p>If using StringScape for a research paper, a mention of StringScape is not required, but is appreciated. A paper is in preparation. For now, cite:</p>
             <p style="font-size:0.9em; color:#bbb; font-style: italic; font-size:0.9em; margin-top:5px;">
                 Tregurtha, J., (2026). StringScape: A high-performance, open-source web app for visualizing data from the STRING database, <a href="https://github.com/JoelTre/StringScape/tree/main" target="_blank" rel="noopener noreferrer" style="color: var(--accent-color); text-decoration: none;">https://github.com/JoelTre/StringScape/tree/main</a>
