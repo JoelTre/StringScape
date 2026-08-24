@@ -456,12 +456,14 @@
         Built-in colour nodes by options (these are also the available python variables):
                     { key: 'layer', label: 'Degrees of Separation', type: 'Numerical - Discrete' },
                     { key: 'centrality', label: 'Centrality', type: 'Numerical - Continuous' },
+                    { key: 'local_clustering_coefficient', label: 'Local Clustering Coefficient', type: 'Numerical - Continuous' },
                     { key: 'eigen', label: 'Eigenvector centrality', type: 'Numerical - Continuous' },
                     { key: 'pdb_structure_count', label: 'PDB structure count', type: 'Numerical - Continuous' },
                     { key: 'complex_pdbs', label: 'Complex PDBs', type: 'Categorical - Nominal' },
                     { key: 'embeddings', label: 'Embeddings', type: 'Numerical - Continuous' },
                     { key: 'collection', label: 'Collection', type: 'Categorical - Nominal' },
                     { key: 'annotation', label: 'Annotation length', type: 'Numerical - Discrete' },
+                    { key: 'characterization', label: 'Characterization', type: 'Categorical - Nominal' },
                     { key: 'localization', label: 'Protein localisation', type: 'Categorical - Nominal' },
                     { key: 'biological_process', label: 'Biological process (mind-map most specific)', type: 'Categorical - Nominal' },
                     { key: 'size', label: 'Protein size', type: 'Numerical - Continuous' },
@@ -1169,12 +1171,14 @@
         lines.push('Built-in colour nodes by options (these are also the available python variables):');
         lines.push("            { key: 'layer', label: 'Degrees of Separation', type: 'Numerical - Discrete' },");
         lines.push("            { key: 'centrality', label: 'Centrality', type: 'Numerical - Continuous' },");
+        lines.push("            { key: 'local_clustering_coefficient', label: 'Local Clustering Coefficient', type: 'Numerical - Continuous' },");
         lines.push("            { key: 'eigen', label: 'Eigenvector centrality', type: 'Numerical - Continuous' },");
         lines.push("            { key: 'pdb_structure_count', label: 'PDB structure count', type: 'Numerical - Continuous' },");
         lines.push("            { key: 'complex_pdbs', label: 'Complex PDBs', type: 'Categorical - Nominal' },");
         lines.push("            { key: 'embeddings', label: 'Embeddings', type: 'Numerical - Continuous' },");
         lines.push("            { key: 'collection', label: 'Collection', type: 'Categorical - Nominal' },");
         lines.push("            { key: 'annotation', label: 'Annotation length', type: 'Numerical - Discrete' },");
+        lines.push("            { key: 'characterization', label: 'Characterization', type: 'Categorical - Nominal' },");
         lines.push("            { key: 'localization', label: 'Protein localisation', type: 'Categorical - Nominal' },");
         lines.push("            { key: 'biological_process', label: 'Biological process (mind-map most specific)', type: 'Categorical - Nominal' },");
         lines.push("            { key: 'size', label: 'Protein size', type: 'Numerical - Continuous' },");
@@ -2387,9 +2391,10 @@
         const variableEntry = key => (getVisibleColorModeVariableEntries?.() || []).find(entry => entry.key === key || entry.label === key || entry.value === key);
         const variableValue = (node, key) => {
             const id = String(node.id);
-            if (key === 'centrality' || key === 'eigen' || key === 'layer') return node[key];
+            if (key === 'centrality' || key === 'eigen' || key === 'layer' || key === 'local_clustering_coefficient') return node[key];
             if (key === 'size') return getProteinSizeValue?.(id, resolveBuiltInColorSource?.('size')) ?? proteinMetadata.get(id)?.size;
             if (key === 'annotation') return (getProteinInfoAnnotation?.(id) || '').length;
+            if (key === 'characterization') return getCharacterizationValue(id);
             if (key === 'localization') return proteinMetadata.get(id)?.localization;
             if (key === 'biological_process') return proteinMetadata.get(id)?.biological_process;
             const entry = variableEntry(key); const parts = String(entry?.key || key).split('::');
@@ -6968,6 +6973,9 @@ self.onmessage = async (event) => {
         const sSpan = (sRange?.[1] - sMin) || 1;
         const eMin = eRange?.[0] ?? 0;
         const eSpan = (eRange?.[1] - eMin) || 1;
+        const clusteringRange = d3.extent(targetNodes, node => Number.isFinite(node.local_clustering_coefficient) ? node.local_clustering_coefficient : 0);
+        const clusteringMin = clusteringRange[0] ?? 0;
+        const clusteringSpan = (clusteringRange[1] - clusteringMin) || 1;
         const catScale = d3.scaleOrdinal(d3.schemeTableau10);
         const embeddingState = mode === 'embeddings' ? computeEmbeddingSimilarityState(targetNodes) : null;
         const embeddingVectorsByNode = mode === 'embeddings' ? getEmbeddingVectorsByNodeForType(embeddingColorSimilarityType) : null;
@@ -7019,6 +7027,10 @@ self.onmessage = async (event) => {
                 const normalized = clamp01((centralityVal - cMin) / cSpan);
                 n.col = d3.interpolateInferno(0.3 + 0.8 * normalized);
                 colorValue = normalized;
+            } else if (mode === 'local_clustering_coefficient') {
+                const normalized = clamp01((n.local_clustering_coefficient - clusteringMin) / clusteringSpan);
+                n.col = d3.interpolateCool(normalized);
+                colorValue = normalized;
             } else if (mode === 'eigen') {
                 const normalized = clamp01((eigenVal - eMin) / eSpan);
                 n.col = d3.interpolateInferno(0.3 + 0.8 * normalized);
@@ -7054,6 +7066,10 @@ self.onmessage = async (event) => {
                 const normalized = clamp01((annLen - annotationMin) / annotationSpan);
                 n.col = d3.interpolatePlasma(normalized);
                 colorValue = normalized;
+            } else if (mode === 'characterization') {
+                const characterization = getCharacterizationValue(n.id);
+                n.col = getCategoricalNodeColor('characterization', characterization, catScale(characterization));
+                colorValue = hashStringToUnit(n.col);
             } else if (mode === 'pdb_structure_count') {
                 const pdbCount = getPdbStructureCount(n.id);
                 const normalized = clamp01((pdbCount - pdbMin) / pdbSpan);
@@ -7798,7 +7814,14 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
             ? 'Unknown'
             : String(fallback).trim();
     }
-
+    function getCharacterizationValue(nodeId) {
+        const annotation = getProteinInfoAnnotation(nodeId);
+        if (!annotation || annotation.trim() === '' || annotation.trim().toLowerCase() === 'unknown') return 'N/A';
+        const normalized = annotation.trim();
+        if (normalized === 'Uncharacterized protein.') return 'Uncharacterized';
+        if (normalized.includes('Uncharacterized protein')) return 'Uncharacterized; other info';
+        return 'Characterized';
+    }
     function getAnnotationLengthFromSource(nodeId, source = null) {
         const raw = getBuiltInColorValueFromSource(nodeId, 'annotation', source);
         const normalized = String(raw || '').trim();
@@ -8821,6 +8844,7 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     function getHistogramNodeValue(node, displayMode) {
         if (displayMode === 'centrality') return node.centrality || 0;
+        if (displayMode === 'local_clustering_coefficient') return node.local_clustering_coefficient || 0;
         if (displayMode === 'size') {
             const sizeSource = resolveProteinSizeSource(nodes);
             return getProteinSizeValue(node.id, sizeSource);
@@ -8875,8 +8899,8 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
                 if (!memberships.length) return selectedWedges.has('No Collection');
                 return memberships.some(name => selectedWedges.has(name));
             }
-            if (['annotation', 'localization'].includes(displayMode)) {
-                const key = getBuiltInColorValueFromSource(node.id, displayMode, builtInSource);
+            if (['annotation', 'characterization', 'localization'].includes(displayMode)) {
+                const key = displayMode === 'characterization' ? getCharacterizationValue(node.id) : getBuiltInColorValueFromSource(node.id, displayMode, builtInSource);
                 return selectedWedges.has(key);
             }
             if (displayMode?.startsWith('var::')) {
@@ -9806,6 +9830,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             { key: 'embeddings', label: 'Embeddings', type: 'Numerical - Continuous' },
             { key: 'collection', label: 'Collection', type: 'Categorical - Nominal' },
             { key: 'annotation', label: 'Annotation length', type: 'Numerical - Discrete' },
+            { key: 'characterization', label: 'Characterization', type: 'Categorical - Nominal' },
             { key: 'localization', label: 'Protein localisation', type: 'Categorical - Nominal' },
             { key: 'biological_process', label: 'Biological process (mind-map most specific)', type: 'Categorical - Nominal' },
             { key: 'size', label: 'Protein size', type: 'Numerical - Continuous' },
@@ -10053,12 +10078,14 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const defaults = [
             {value:'layer', text:'Degrees of separation', color:'#93c5fd'},
             {value:'centrality', text:'Centrality', color:'#93c5fd'},
+            {value:'local_clustering_coefficient', text:'Local Clustering Coefficient', color:'#93c5fd'},
             {value:'eigen', text:'Eigenvector centrality', color:'#93c5fd'},
             {value:'pdb_structure_count', text:'PDB structure count', color:'#93c5fd'},
             {value:'complex_pdbs', text:'Complex PDBs', color:'#ccc'},
             {value:'embeddings', text:'Embeddings', color:'#93c5fd'},
             {value:'collection', text:'Collection', color:'#ccc'},
             {value:'annotation', text:'Annotation length', color:'#93c5fd'},
+            {value:'characterization', text:'Characterization', color:'#ccc'},
             {value:'localization', text:'Protein localisation', color:'#ccc'},
             {value:'biological_process', text:'Biological process (mind-map most specific)', color:'#ccc'},
             {value:'size', text:'Protein size', color:'#93c5fd'},
@@ -10196,6 +10223,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         if (mode === 'collection') {
             const memberships = getNodeCollectionMemberships(node.id).sort((a, b) => a.localeCompare(b));
             return memberships.length ? `collection::${memberships.join('|')}` : 'collection::__none__';
+        }
+
+        if (mode === 'characterization') {
+            return `characterization::${getCharacterizationValue(node.id)}`;
         }
 
         if (mode === 'annotation' || mode === 'localization') {
@@ -15875,7 +15906,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         
         // Determine what data to display
         let displayMode = currentColorMode;
-        let isSupportedMode = displayMode === 'layer' || displayMode === 'collection' || displayMode === 'complex_pdbs' || ['annotation', 'localization'].includes(displayMode);
+        let isSupportedMode = displayMode === 'layer' || displayMode === 'collection' || displayMode === 'complex_pdbs' || ['annotation', 'characterization', 'localization'].includes(displayMode);
         if (currentColorMode.startsWith('var::')) {
             const parts = currentColorMode.split('::');
             const file = parts[1], variable = parts[2];
@@ -15910,9 +15941,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     dataCounts.set(pdbId, (dataCounts.get(pdbId) || 0) + 1);
                 });
             });
-        } else if (isSupportedMode && ['annotation', 'localization'].includes(displayMode)) {
+        } else if (isSupportedMode && ['annotation', 'characterization', 'localization'].includes(displayMode)) {
             activeNodes.forEach(d => {
-                const key = getBuiltInColorValueFromSource(d.id, displayMode, builtInColorSource);
+            const key = displayMode === 'characterization' ? getCharacterizationValue(d.id) : getBuiltInColorValueFromSource(d.id, displayMode, builtInColorSource);
                 dataCounts.set(key, (dataCounts.get(key) || 0) + 1);
             });
         } else if (isSupportedMode && displayMode.startsWith('var::')) {
@@ -15939,6 +15970,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             : displayMode === 'collection' ? 'Collection'
             : displayMode === 'complex_pdbs' ? 'Complex PDBs'
             : displayMode === 'annotation' ? 'Annotation'
+            : displayMode === 'characterization' ? 'Characterization'
             : displayMode === 'localization' ? 'Localization'
             : displayMode.startsWith('var::') ? displayMode.split('::')[2] : displayMode;
         ctx.fillStyle = '#fff';
@@ -16110,13 +16142,15 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             }
         }
 
-        const isSupportedMode = displayMode === 'centrality' || displayMode === 'eigen' || displayMode === 'size' || displayMode === 'annotation' || displayMode.startsWith('var::');
+        const isSupportedMode = displayMode === 'centrality' || displayMode === 'local_clustering_coefficient' || displayMode === 'eigen' || displayMode === 'size' || displayMode === 'annotation' || displayMode.startsWith('var::');
         const histogramSizeSource = displayMode === 'size' ? resolveProteinSizeSource(nodes) : null;
 
         let numericValues = [];
 
         if (displayMode === 'centrality') {
             numericValues = activeNodes.map(n => n.centrality || 0);
+        } else if (displayMode === 'local_clustering_coefficient') {
+            numericValues = activeNodes.map(n => n.local_clustering_coefficient || 0);
             variableName = 'Centrality';
         } else if (displayMode === 'eigen') {
             numericValues = activeNodes.map(n => Number.isFinite(n.eigen) ? n.eigen : 0);
@@ -16141,6 +16175,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         let fullNetworkNumericValues = [];
         if (displayMode === 'centrality') {
             fullNetworkNumericValues = nodes.map(n => n.centrality || 0);
+        } else if (displayMode === 'local_clustering_coefficient') {
+            fullNetworkNumericValues = nodes.map(n => n.local_clustering_coefficient || 0);
         } else if (displayMode === 'eigen') {
             fullNetworkNumericValues = nodes.map(n => Number.isFinite(n.eigen) ? n.eigen : 0);
         } else if (displayMode === 'size') {
@@ -18106,6 +18142,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             const clusterSupported = mode === 'collection'
                 || mode === 'layer'
                 || mode === 'annotation'
+                || mode === 'characterization'
                 || mode === 'localization'
                 || (mode.startsWith('var::') && !!targetNodes.find(n => getClusterVariableKey(n, mode) !== null));
             customPhysicsTimer?.mark('cluster support check');
@@ -18147,6 +18184,30 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         }
     }
 
+    function calculateLocalClusteringCoefficients(targetNodes, targetLinks) {
+        const neighbors = new Map(targetNodes.map(node => [node.id, new Set()]));
+        (targetLinks || []).forEach(link => {
+            const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+            const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+            if (!neighbors.has(sourceId) || !neighbors.has(targetId) || sourceId === targetId) return;
+            neighbors.get(sourceId).add(targetId);
+            neighbors.get(targetId).add(sourceId);
+        });
+
+        const connectedNeighbors = (first, second) => neighbors.get(first)?.has(second) || false;
+        targetNodes.forEach(node => {
+            const nodeNeighbors = Array.from(neighbors.get(node.id) || []);
+            const possibleConnections = nodeNeighbors.length * (nodeNeighbors.length - 1) / 2;
+            let actualConnections = 0;
+            for (let i = 0; i < nodeNeighbors.length; i++) {
+                for (let j = i + 1; j < nodeNeighbors.length; j++) {
+                    if (connectedNeighbors(nodeNeighbors[i], nodeNeighbors[j])) actualConnections++;
+                }
+            }
+            node.local_clustering_coefficient = possibleConnections ? actualConnections / possibleConnections : 0;
+        });
+    }
+
     function updateSizesAndColors() {
         console.log("function updateSizesAndColors()");
         const mode = document.getElementById('colorMode').value, monoCol = document.getElementById('nodeMonoColor').value, cVal = +document.getElementById('sizeSlider').value, eVal = +document.getElementById('eigenSlider').value;
@@ -18163,6 +18224,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const targetNodes = useGlobalNodesForStyle ? nodes : (activeSubData?.nodes || []);
         const targetLinks = useGlobalNodesForStyle ? links : (activeSubData?.links || []);
         const customColourTimer = startCustomColourDebug(mode, targetNodes.length);
+        calculateLocalClusteringCoefficients(targetNodes, targetLinks);
         
         if (mode === 'collection' || mode === 'complex_pdbs') {
             updateCollectionColorCycleTimer();
@@ -18200,6 +18262,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         // Determine ranges for node scaling
         const proteinSizeSource = resolveProteinSizeSource(targetNodes);
         const cRange = d3.extent(targetNodes, d => d.centrality), sRange = d3.extent(targetNodes, d => getProteinSizeValue(d.id, proteinSizeSource)), eRange = d3.extent(targetNodes, d => (Number.isFinite(d.eigen) ? d.eigen : 0)), catScale = d3.scaleOrdinal(d3.schemeTableau10);
+        const clusteringRange = d3.extent(targetNodes, d => Number.isFinite(d.local_clustering_coefficient) ? d.local_clustering_coefficient : 0);
         const embeddingSimilarityState = mode === 'embeddings' ? computeEmbeddingSimilarityState(targetNodes) : null;
         const embeddingVectorsByNode = mode === 'embeddings' ? getEmbeddingVectorsByNodeForType(embeddingColorSimilarityType) : null;
         const embMin = embeddingSimilarityState?.min ?? -1;
@@ -18243,6 +18306,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 n.col = getCategoricalNodeColor('layer', layerLabel, defaultColor);
             }
             else if (mode === 'centrality') n.col = d3.interpolateInferno(0.3 + (0.8 * ((n.centrality - (cRange[0]||0)) / ((cRange[1]-cRange[0]) || 1))));
+            else if (mode === 'local_clustering_coefficient') n.col = d3.interpolateCool((n.local_clustering_coefficient - (clusteringRange[0] || 0)) / ((clusteringRange[1] - clusteringRange[0]) || 1));
             else if (mode === 'eigen') n.col = d3.interpolateInferno(0.3 + (0.8 * ((eigenVal - (eRange[0]||0)) / ((eRange[1]-eRange[0]) || 1))));
             else if (mode === 'embeddings') {
                 const hasEmbedding = !!embeddingVectorsByNode?.has(n.id);
@@ -18284,6 +18348,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 const aMin = annotationLengthRange?.[0] || 0;
                 const aMax = annotationLengthRange?.[1] || 1;
                 n.col = d3.interpolatePlasma((annLen - aMin) / ((aMax - aMin) || 1));
+            }
+            else if (mode === 'characterization') {
+                const characterization = getCharacterizationValue(n.id);
+                n.col = getCategoricalNodeColor('characterization', characterization, catScale(characterization));
             }
             else if (mode === 'localization') {
                 const builtInVal = getBuiltInColorValueFromSource(n.id, mode, builtInColorSource);
@@ -18406,6 +18474,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         }
 
         const footerNotes = [];
+        if (mode === 'local_clustering_coefficient') {
+            footerNotes.push('Highly clustered nodes often signify tightly knit protein complexes.');
+        }
         const setFooterNotes = (notes) => {
             if (!footerTextEl) return;
             footerTextEl.innerHTML = '';
@@ -18666,7 +18737,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 .style('color', '#999')
                 .text('No embedding available to calculate cosine similarity');
 
-        } else if (['centrality', 'size', 'eigen', 'annotation', 'pdb_structure_count'].includes(mode)) {
+        } else if (['centrality', 'local_clustering_coefficient', 'size', 'eigen', 'annotation', 'pdb_structure_count'].includes(mode)) {
             const annotationSource = mode === 'annotation' ? resolveBuiltInColorSource('annotation', activeNodes) : null;
             const annotationLengths = mode === 'annotation'
                 ? activeNodes.map(n => getAnnotationLengthFromSource(n.id, annotationSource))
@@ -18676,11 +18747,13 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 : null;
             const range = mode === 'centrality'
                 ? cRange
-                : (mode === 'size'
+                : (mode === 'local_clustering_coefficient'
+                    ? d3.extent(activeNodes, n => n.local_clustering_coefficient || 0)
+                    : (mode === 'size'
                     ? sRange
                     : (mode === 'eigen'
                         ? eRange
-                        : (mode === 'annotation' ? d3.extent(annotationLengths) : d3.extent(pdbCounts))));
+                        : (mode === 'annotation' ? d3.extent(annotationLengths) : d3.extent(pdbCounts)))));
             const interp = mode === 'annotation'
                 ? (t => d3.interpolatePlasma(clamp01(t)))
                 : (mode === 'centrality' || mode === 'eigen'
@@ -18695,6 +18768,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             createHistogramToggle(
                 activeNodes.map(n => {
                     if (mode === 'centrality') return n.centrality || 0;
+                    if (mode === 'local_clustering_coefficient') return n.local_clustering_coefficient || 0;
                     if (mode === 'size') return getProteinSizeValue(n.id, legendSizeSource);
                     if (mode === 'annotation') return getAnnotationLengthFromSource(n.id, annotationSource);
                     if (mode === 'pdb_structure_count') return getPdbStructureCount(n.id);
@@ -19042,7 +19116,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 });
             }
 
-        } else if (['localization', 'biological_process', 'layer', 'collection', 'complex_pdbs'].includes(mode)) {
+        } else if (['characterization', 'localization', 'biological_process', 'layer', 'collection', 'complex_pdbs'].includes(mode)) {
             const builtInSource = (mode === 'annotation' || mode === 'localization')
                 ? resolveBuiltInColorSource(mode, activeNodes)
                 : null;
@@ -19050,13 +19124,15 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             activeNodes.forEach(d => {
                 let key = mode === 'layer'
                     ? (d.layer === 99 ? "Disconnected" : `Layer ${d.layer}`)
-                    : (mode === 'annotation' || mode === 'localization'
-                        ? getBuiltInColorValueFromSource(d.id, mode, builtInSource)
-                        : (mode === 'biological_process'
+                    : (mode === 'characterization'
+                        ? getCharacterizationValue(d.id)
+                        : (mode === 'annotation' || mode === 'localization'
+                            ? getBuiltInColorValueFromSource(d.id, mode, builtInSource)
+                            : (mode === 'biological_process'
                             ? getBiologicalProcessKey(d.id)
                             : (mode === 'complex_pdbs'
                                 ? getComplexPdbMemberships(d.id)
-                                : (proteinMetadata.get(d.id)?.[mode] || 'Unknown'))));
+                                : (proteinMetadata.get(d.id)?.[mode] || 'Unknown')))));
                 counts.set(key, (counts.get(key) || 0) + 1);
             });
             if (mode === 'collection') {
@@ -19202,6 +19278,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 let v;
                 if (mode === 'centrality') {
                     v = n.centrality;
+                } else if (mode === 'local_clustering_coefficient') {
+                    v = n.local_clustering_coefficient;
                 } else if (mode === 'eigen') {
                     v = Number.isFinite(n.eigen) ? n.eigen : 0;
                 } else if (mode === 'size') {
@@ -19266,6 +19344,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             }
             if (mode === 'complex_pdbs') {
                 return getComplexPdbMemberships(n.id).includes(value);
+            }
+            if (mode === 'characterization') {
+                return getCharacterizationValue(n.id) === value;
             }
             if (mode === 'annotation' || mode === 'localization') {
                 return getBuiltInColorValueFromSource(n.id, mode, builtInSource) === value;
