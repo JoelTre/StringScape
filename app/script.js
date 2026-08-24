@@ -2397,6 +2397,10 @@
             for (const vars of Object.values(accessoryVariableValues || {})) if (vars?.[key] instanceof Map && vars[key].has(id)) return vars[key].get(id);
             return proteinMetadata.get(id)?.[key] ?? node[key];
         };
+        const normalizedVariableValue = (node, key) => {
+            const value = variableValue(node, key);
+            return value === undefined || value === null || String(value).trim() === '' ? 'N/A' : String(value).trim();
+        };
         const download = (name, type, value) => { const url = URL.createObjectURL(new Blob([value], { type })); const a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); };
         const call = (method, args = {}) => {
             const animate = args.animate === true;
@@ -2460,12 +2464,14 @@
                     return values.length ? result('success', { variable_key: key, min: Math.min(...values), max: Math.max(...values) }) : result('warning', { variable_key: key, message: 'No numerical values were found.' });
                 }
                 if (method === 'get_variable_categories') {
-                    const key = String(args.variable_key ?? args.key ?? ''); const categories = [...new Set(allNodes().map(n => variableValue(n, key)).filter(v => v != null && String(v).trim() !== '').map(String))];
+                    const key = String(args.variable_key ?? args.key ?? ''); const values = allNodes().map(n => variableValue(n, key)); const categories = [...new Set(values.filter(v => v != null && String(v).trim() !== '').map(v => String(v).trim()))];
+                    if (values.some(v => v == null || String(v).trim() === '')) categories.push('N/A');
                     return result(categories.length ? 'success' : 'warning', { variable_key: key, categories });
                 }
                 if (method === 'select_by_range' || method === 'select_by_category') {
                     const key = String(args.variable_key ?? args.key ?? ''); const lower = args.min == null ? -Infinity : +args.min, upper = args.max == null ? Infinity : +args.max;
-                    const matched = allNodes().filter(node => method === 'select_by_range' ? (Number.isFinite(+variableValue(node, key)) && +variableValue(node, key) >= lower && +variableValue(node, key) <= upper) : String(variableValue(node, key)) === String(args.category));
+                    const requestedCategory = String(args.category ?? '').trim();
+                    const matched = allNodes().filter(node => method === 'select_by_range' ? (Number.isFinite(+variableValue(node, key)) && +variableValue(node, key) >= lower && +variableValue(node, key) <= upper) : normalizedVariableValue(node, key) === requestedCategory);
                     if (method === 'select_by_range') aiRecordSelectByRangeHistory(key, args.min, args.max, 'AI');
                     else aiRecordSelectByCategoryHistory(key, args.category, 'AI');
                     selectNodes(matched, false, `Python API ${method}`, null, false, { actor: 'AI' }); queueDraw(animate); return result(matched.length ? 'success' : 'warning', { variable_key: key, selected_node_ids: selected(), selected_count: selected().length });
@@ -6978,6 +6984,7 @@ self.onmessage = async (event) => {
             : null;
         const complexPdbState = mode === 'complex_pdbs' ? ensureComplexPdbColorState() : null;
         const complexPdbScale = complexPdbState?.colorScale || d3.scaleOrdinal(d3.schemeTableau10);
+        const customVariableColourContext = buildCustomVariableColourContext(mode, targetNodes);
         const proteinSizeSource = resolveProteinSizeSource(targetNodes);
         const annotationMinMax = mode === 'annotation'
             ? d3.extent(targetNodes, n => getAnnotationLengthFromSource(n.id, builtInColorSource))
@@ -7064,44 +7071,34 @@ self.onmessage = async (event) => {
                 n.col = getCategoricalNodeColor('biological_process', raw, catScale(raw));
                 colorValue = hashStringToUnit(n.col);
             } else if (mode && mode.startsWith('var::')) {
-                const modeParts = String(mode).split('::');
-                const file = modeParts[1], variable = modeParts[2];
-                const childMode = modeParts[3] === 'child' ? modeParts[4] : null;
-                const cfg = variableConfigs.find(c => c.fileName === file && c.variable === variable);
-                const valueField = childMode && cfg?.splitBase ? cfg.splitBase : variable;
-                const rawValue = accessoryVariableValues[file]?.[valueField]?.get(n.id);
-                if (!cfg || rawValue === undefined || rawValue === null) {
+                const selection = getCustomVariableSelection(mode);
+                const cfg = selection?.cfg;
+                const childMode = selection?.childMode;
+                const rawValue = customVariableColourContext?.valuesByNode.get(n.id);
+                const effectiveType = customVariableColourContext?.displayType || cfg?.type || 'Categorical - Nominal';
+                const normalizedRawValue = rawValue === undefined || rawValue === null || String(rawValue).trim() === '' ? 'N/A' : String(rawValue).trim();
+                if (!cfg || (normalizedRawValue === 'N/A' && effectiveType === 'Numerical - Continuous')) {
                     n.col = monoCol;
                     colorValue = 0.5;
                 } else {
-                    const type = cfg.type || 'Categorical - Nominal';
-                    const childCfg = childMode ? (cfg.splitChildren?.[childMode] || {}) : null;
-                    const effectiveType = childCfg?.type || type;
-                    const allValues = targetNodes.map(node => accessoryVariableValues[file]?.[valueField]?.get(node.id)).filter(v => v !== undefined && v !== null && String(v).trim() !== '');
-                    const numericValues = allValues.map(v => +v).filter(v => !isNaN(v));
-                    const uniqueValues = Array.from(new Set(allValues));
-                    const sortedValues = [...uniqueValues].sort((a, b) => {
-                        const na = +a, nb = +b;
-                        if (!isNaN(na) && !isNaN(nb)) return na - nb;
-                        return String(a).localeCompare(String(b), undefined, { numeric: true });
-                    });
-                    const valueScale = d3.scaleOrdinal(d3.schemeTableau10).domain(sortedValues);
-                    const matches = !childMode || String(rawValue).trim() === childMode;
+                    const numericValues = customVariableColourContext.numericValues;
+                    const valueScale = customVariableColourContext.valueScale;
+                    const matches = !childMode || normalizedRawValue === childMode;
                     if (!matches) {
                         n.col = monoCol;
                         colorValue = 0.5;
                     } else if (effectiveType === 'Numerical - Continuous') {
                         const minv = d3.min(numericValues) || 0;
                         const maxv = d3.max(numericValues) || 1;
-                        const normalized = isNaN(+rawValue) ? 0.5 : clamp01((+rawValue - minv) / ((maxv - minv) || 1));
-                        n.col = d3.interpolateInferno(normalized);
+                        const normalized = isNaN(+normalizedRawValue) ? 0.5 : clamp01((+normalizedRawValue - minv) / ((maxv - minv) || 1));
+                        n.col = d3.interpolateCool(normalized);
                         colorValue = normalized;
                     } else if (effectiveType === 'Numerical - Discrete' || effectiveType === 'Categorical - Ordinal') {
-                        const paletteIndex = d3.schemeTableau10.indexOf(valueScale(rawValue));
-                        n.col = valueScale(rawValue);
+                        const paletteIndex = d3.schemeTableau10.indexOf(valueScale(normalizedRawValue));
+                        n.col = getCategoricalNodeColor(mode, normalizedRawValue, valueScale(normalizedRawValue));
                         colorValue = clamp01((paletteIndex >= 0 ? paletteIndex : 0) / 9);
                     } else {
-                        const categoryValue = rawValue || 'Unknown';
+                        const categoryValue = normalizedRawValue;
                         n.col = getCategoricalNodeColor(mode, categoryValue, catScale(categoryValue));
                         colorValue = hashStringToUnit(n.col);
                     }
@@ -9749,10 +9746,14 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     function buildVariableConfigs() {
         console.log("function buildVariableConfigs()");
+        customVariableSelectionCache.clear();
+        variableConfigs = variableConfigs.filter(cfg => !isAccessoryNodeIdHeader(cfg?.variable));
+        window.variableConfigs = variableConfigs;
         // Initialize variable configs only for loaded files/headers not already tracked.
         Object.entries(accessoryDataFiles).forEach(([fileName, data]) => {
+            const idHeader = getAccessoryNodeIdHeader(data.headers);
             data.headers.forEach(header => {
-                if (header.toLowerCase() === '#string_protein_id') return;
+                if (header === idHeader) return;
                 const exists = variableConfigs.some(c => c.fileName === fileName && c.variable === header);
                 const vals = data.rows.map(r => r[header] || '');
                 const type = inferVarType(vals);
@@ -9823,7 +9824,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         });
 
         // 2. Add accessory file variables (visible ones)
-        const visibleVariableConfigs = variableConfigs.filter(cfg => !cfg.hidden);
+        const visibleVariableConfigs = variableConfigs.filter(cfg => !cfg.hidden && !isAccessoryNodeIdHeader(cfg.variable));
         
         visibleVariableConfigs.forEach(cfg => {
             const key = getVariableModeKey(cfg);
@@ -9933,8 +9934,86 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     function getVariableModeKey(cfg) {
-        console.log("function getVariableModeKey(cfg: " + cfg.variable + ")");
         return `var::${cfg.fileName}::${cfg.variable}`;
+    }
+
+    const CUSTOM_COLOUR_DEBUG = true;
+    let customColourDebugContext = null;
+    const customVariableSelectionCache = new Map();
+    const customVariableDisplayModeByKey = new Map();
+
+    function startCustomColourDebug(mode, nodeCount) {
+        if (!CUSTOM_COLOUR_DEBUG || !String(mode || '').startsWith('var::')) return null;
+        const start = performance.now();
+        const context = { start, last: start, lookups: 0 };
+        customColourDebugContext = context;
+        console.groupCollapsed(`[Custom colour timing] ${mode} (${nodeCount} nodes)`);
+        return {
+            mark(label) {
+                const now = performance.now();
+                console.log(`${label}: ${(now - context.last).toFixed(2)} ms`);
+                context.last = now;
+            },
+            end() {
+                const total = performance.now() - context.start;
+                console.log(`total: ${total.toFixed(2)} ms; value lookups: ${context.lookups}`);
+                customColourDebugContext = null;
+                console.groupEnd();
+            }
+        };
+    }
+
+    function getCustomVariableSelection(mode) {
+        const modeKey = String(mode || '');
+        if (!modeKey.startsWith('var::')) return null;
+        const cached = customVariableSelectionCache.get(modeKey);
+        if (cached && variableConfigs.includes(cached.cfg)) return cached;
+        const selection = variableConfigs
+            .map(cfg => ({ cfg, key: getVariableModeKey(cfg) }))
+            .find(item => modeKey === item.key || modeKey.startsWith(`${item.key}::child::`));
+        if (!selection) return null;
+        const childPrefix = `${selection.key}::child::`;
+        const childMode = modeKey.startsWith(childPrefix) ? modeKey.slice(childPrefix.length) : null;
+        const valueField = childMode && selection.cfg.splitBase ? selection.cfg.splitBase : selection.cfg.variable;
+        const resolved = { ...selection, childMode, valueField };
+        customVariableSelectionCache.set(modeKey, resolved);
+        return resolved;
+    }
+
+    function getCustomVariableValue(node, mode) {
+        if (customColourDebugContext) customColourDebugContext.lookups++;
+        const selection = getCustomVariableSelection(mode);
+        if (!selection || !node) return undefined;
+        return accessoryVariableValues[selection.cfg.fileName]?.[selection.valueField]?.get(node.id);
+    }
+
+    function buildCustomVariableColourContext(mode, targetNodes) {
+        if (!String(mode || '').startsWith('var::')) return null;
+        const selection = getCustomVariableSelection(mode);
+        if (!selection) return null;
+        const valuesByNode = new Map((targetNodes || []).map(node => [node.id, getCustomVariableValue(node, mode)]));
+        const allValues = Array.from(valuesByNode.values()).filter(v => v !== undefined && v !== null && String(v).trim() !== '');
+        const numericValues = allValues.map(v => +v).filter(v => !isNaN(v));
+        const uniqueValues = Array.from(new Set(allValues));
+        const numericOnly = allValues.length > 0 && numericValues.length === allValues.length;
+        const sortedValues = [...uniqueValues].sort((a, b) => {
+            const na = +a, nb = +b;
+            if (!isNaN(na) && !isNaN(nb)) return na - nb;
+            return String(a).localeCompare(String(b), undefined, { numeric: true });
+        });
+        return {
+            ...selection,
+            valuesByNode,
+            allValues,
+            numericValues,
+            numericOnly,
+            displayType: numericOnly && customVariableDisplayModeByKey.get(selection.key) === 'continuous'
+                ? 'Numerical - Continuous'
+                : (numericOnly && customVariableDisplayModeByKey.get(selection.key) === 'categorical'
+                    ? 'Categorical - Nominal'
+                    : (selection.childMode ? (selection.cfg.splitChildren?.[selection.childMode]?.type || selection.cfg.type) : selection.cfg.type)),
+            valueScale: d3.scaleOrdinal(d3.schemeTableau10).domain([...sortedValues, 'N/A'])
+        };
     }
 
     function getVariableTypeColor(type) {
@@ -9950,6 +10029,18 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         selectEl.style.background = type && type.startsWith('Categorical') ? '#ff9800' : (type && type.startsWith('Numerical') ? '#1b5f8f' : '#444');
         selectEl.style.color = (type && type.startsWith('Categorical')) ? '#000' : '#fff';
         selectEl.style.border = '1px solid #555';
+    }
+
+    function getAccessoryNodeIdHeader(headers) {
+        const idHeaders = new Set(['#string_protein_id', 'string_protein_id', 'protein_id', 'protein', 'node_id', 'node_ids', 'nodeid', 'nodeids', 'id', 'ids']);
+        return (headers || []).find(header => {
+            const normalized = String(header || '').toLowerCase().trim().replace(/^#/, '').replace(/[^a-z0-9]+/g, '_');
+            return idHeaders.has(normalized);
+        }) || null;
+    }
+
+    function isAccessoryNodeIdHeader(header) {
+        return getAccessoryNodeIdHeader([header]) !== null;
     }
 
     function updateColorModeOptions() {
@@ -9987,9 +10078,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             select.appendChild(o);
         });
 
-        const visibleVariableConfigs = variableConfigs.filter(cfg => !cfg.hidden);
+        const visibleVariableConfigs = variableConfigs.filter(cfg => !cfg.hidden && !isAccessoryNodeIdHeader(cfg.variable));
         if (visibleVariableConfigs.length) {
-            const group = document.createElement('optgroup'); group.label = 'Variables';
+            const group = document.createElement('optgroup'); group.label = 'Custom variables:';
             visibleVariableConfigs.forEach(cfg => {
                 const isSplitParent = cfg.split && cfg.splitBase && accessoryDataFiles[cfg.fileName];
                 if (!isSplitParent) {
@@ -10120,21 +10211,17 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
         if (!mode.startsWith('var::')) return null;
 
-        const modeParts = String(mode).split('::');
-        if (modeParts.length < 3) return null;
-
-        const fileName = modeParts[1];
-        const variable = modeParts[2];
-        const childMode = modeParts[3] === 'child' ? modeParts[4] : null;
-        const cfg = variableConfigs.find(c => c.fileName === fileName && c.variable === variable);
-        if (!cfg) return null;
+        const selection = getCustomVariableSelection(mode);
+        if (!selection) return null;
+        const { cfg, childMode } = selection;
+        const fileName = cfg.fileName;
+        const variable = cfg.variable;
 
         const childCfg = childMode ? (cfg.splitChildren?.[childMode] || {}) : null;
-        const effectiveType = (childCfg.type || cfg.type || 'Categorical - Nominal');
+        const effectiveType = (childCfg?.type || cfg.type || 'Categorical - Nominal');
         if (!effectiveType.startsWith('Categorical')) return null;
 
-        const valueField = childMode && cfg.splitBase ? cfg.splitBase : variable;
-        const rawValue = accessoryVariableValues[fileName]?.[valueField]?.get(node.id);
+        const rawValue = getCustomVariableValue(node, mode);
         if (childMode) {
             const childValue = (rawValue === undefined || rawValue === null || String(rawValue).trim() === '') ? 'Unknown' : String(rawValue).trim();
             if (childValue !== childMode) return `${fileName}::${variable}::__other__`;
@@ -10339,7 +10426,12 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             return;
         }
 
+        const seenConfigKeys = new Set();
         const filteredConfigs = variableConfigs.filter(cfg => {
+            if (isAccessoryNodeIdHeader(cfg?.variable)) return false;
+            const configKey = `${cfg.fileName}::${cfg.variable}`;
+            if (seenConfigKeys.has(configKey)) return false;
+            seenConfigKeys.add(configKey);
             if (!filterText) return true;
             return cfg.fileName.toLowerCase().includes(filterText) || cfg.variable.toLowerCase().includes(filterText) || cfg.label.toLowerCase().includes(filterText);
         });
@@ -10646,11 +10738,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     function parseAccessoryFile(fileName, text) {
         console.log("function parseAccessoryFile(fileName, text)")
         const delim = text.includes('\t') ? '\t' : ',';
-        const lines = text.trim().split(/\r?\n/).filter(l => l.trim());
-        if (!lines.length) return;
-        const headers = lines[0].split(delim).map(h => h.trim());
-        const rows = lines.slice(1).map(line => {
-            const cols = line.split(delim);
+        const records = parseDelimitedRecords(text, delim);
+        if (!records.length) return;
+        const headers = records[0].map(h => h.trim());
+        const rows = records.slice(1).map(cols => {
             const row = {};
             headers.forEach((h,i) => row[h] = (cols[i] || '').trim());
             return row;
@@ -10659,12 +10750,12 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
         // build map of nodes for variable values
         accessoryVariableValues[fileName] = {};
-        const idHeader = headers.find(h => h.toLowerCase() === '#string_protein_id');
+        const idHeader = getAccessoryNodeIdHeader(headers);
         rows.forEach(r => {
-            const nodeId = idHeader ? r[idHeader] : null;
+            const nodeId = idHeader ? String(r[idHeader] || '').trim() : null;
             if (!nodeId) return;
             headers.forEach(h => {
-                if (h.toLowerCase() === '#string_protein_id') return;
+                if (h === idHeader) return;
                 accessoryVariableValues[fileName][h] = accessoryVariableValues[fileName][h] || new Map();
                 accessoryVariableValues[fileName][h].set(nodeId, r[h]);
             });
@@ -10691,20 +10782,76 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         updateColorModeOptions();
     }
 
+    function parseDelimitedLine(line, delimiter) {
+        const values = [];
+        let value = '';
+        let quoted = false;
+
+        for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            if (char === '"') {
+                if (quoted && line[i + 1] === '"') {
+                    value += '"';
+                    i++;
+                } else {
+                    quoted = !quoted;
+                }
+            } else if (char === delimiter && !quoted) {
+                values.push(value);
+                value = '';
+            } else {
+                value += char;
+            }
+        }
+        values.push(value);
+        return values;
+    }
+
+    function parseDelimitedRecords(text, delimiter) {
+        const records = [];
+        let record = [];
+        let value = '';
+        let quoted = false;
+
+        for (let i = 0; i < String(text || '').length; i++) {
+            const char = text[i];
+            if (char === '"') {
+                if (quoted && text[i + 1] === '"') {
+                    value += '"';
+                    i++;
+                } else {
+                    quoted = !quoted;
+                }
+            } else if (char === delimiter && !quoted) {
+                record.push(value);
+                value = '';
+            } else if ((char === '\n' || char === '\r') && !quoted) {
+                if (char === '\r' && text[i + 1] === '\n') i++;
+                record.push(value);
+                if (record.some(cell => cell.trim() !== '')) records.push(record);
+                record = [];
+                value = '';
+            } else {
+                value += char;
+            }
+        }
+
+        record.push(value);
+        if (record.some(cell => cell.trim() !== '')) records.push(record);
+        return records;
+    }
+
     function parseDelimitedRows(text, forcedDelim = null, fileName = '') {
         const trimmed = (text || '').trim();
         if (!trimmed) return { headers: [], rows: [], delimiter: forcedDelim || '' };
         const delim = forcedDelim || detectDefaultSeparator(trimmed, fileName);
         if (delim === 'none') return { headers: [], rows: [], delimiter: delim };
-        const lines = trimmed.split(/\r?\n/).filter(l => l.trim());
-        if (!lines.length) return { headers: [], rows: [], delimiter: delim };
-        const splitRow = (line) => {
-            if (delim === '__WS__') return line.trim().split(/\s+/);
-            return line.split(delim);
-        };
-        const headers = splitRow(lines[0]).map(h => h.trim());
-        const rows = lines.slice(1).map(line => {
-            const cols = splitRow(line);
+        const records = delim === '__WS__'
+            ? trimmed.split(/\r?\n/).filter(l => l.trim()).map(line => line.trim().split(/\s+/))
+            : parseDelimitedRecords(trimmed, delim);
+        if (!records.length) return { headers: [], rows: [], delimiter: delim };
+        const headers = records[0].map(h => h.trim());
+        const rows = records.slice(1).map(cols => {
             const row = {};
             headers.forEach((h, i) => row[h] = (cols[i] || '').trim());
             return row;
@@ -17955,11 +18102,13 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const sim = currentViewId === 'base' ? simulation : activeSubData?.simulation;
         if (sim) {
             const targetNodes = currentViewId === 'base' ? nodes : (activeSubData?.nodes || []);
+            const customPhysicsTimer = startCustomColourDebug(`physics ${mode}`, targetNodes.length);
             const clusterSupported = mode === 'collection'
                 || mode === 'layer'
                 || mode === 'annotation'
                 || mode === 'localization'
                 || (mode.startsWith('var::') && !!targetNodes.find(n => getClusterVariableKey(n, mode) !== null));
+            customPhysicsTimer?.mark('cluster support check');
             const linkBlend = Math.max(0, Math.min(1, clusterByVariable));
             const clusterBlend = clusterSupported ? linkBlend : 0;
 
@@ -17988,11 +18137,13 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 sim.force("cluster-y", null);
             } else {
                 const clusterCenters = getClusterCentersForNodes(targetNodes, mode);
+                customPhysicsTimer?.mark('cluster centre calculation');
                 sim.force("cluster-x", d3.forceX(d => clusterCenters.get(d.id)?.x ?? (window.innerWidth / 2)).strength(clusterBlend));
                 sim.force("cluster-y", d3.forceY(d => clusterCenters.get(d.id)?.y ?? (window.innerHeight / 2)).strength(clusterBlend));
             }
 
             if (canPhysicsRun()) { restartActivePhysics((isBuilding || isSettling) ? 0.5 : alp); }
+            customPhysicsTimer?.end();
         }
     }
 
@@ -18011,6 +18162,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const useGlobalNodesForStyle = currentViewId === 'base' || currentViewId === 'Venn Diagram' || currentViewId === 'Scatter Plot' || currentViewId === 'Embeddings';
         const targetNodes = useGlobalNodesForStyle ? nodes : (activeSubData?.nodes || []);
         const targetLinks = useGlobalNodesForStyle ? links : (activeSubData?.links || []);
+        const customColourTimer = startCustomColourDebug(mode, targetNodes.length);
         
         if (mode === 'collection' || mode === 'complex_pdbs') {
             updateCollectionColorCycleTimer();
@@ -18043,6 +18195,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 n.centrality = targetLinks.filter(l => l.source.id === n.id || l.target.id === n.id).length;
             }
         });
+        customColourTimer?.mark('centrality and node metrics');
 
         // Determine ranges for node scaling
         const proteinSizeSource = resolveProteinSizeSource(targetNodes);
@@ -18071,6 +18224,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const pdbRange = (maxPdb - minPdb) || 1;
         const complexPdbState = mode === 'complex_pdbs' ? ensureComplexPdbColorState() : null;
         const complexPdbScale = complexPdbState?.colorScale || d3.scaleOrdinal(d3.schemeTableau10);
+        const customVariableColourContext = buildCustomVariableColourContext(mode, targetNodes);
+        customColourTimer?.mark('range and colour-scale setup');
         
         // Apply styles to nodes
         const applyStyle = (n) => {
@@ -18139,42 +18294,32 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 n.col = getCategoricalNodeColor('biological_process', processKey, catScale(processKey));
             }
             else if (mode && mode.startsWith('var::')) {
-                const modeParts = String(mode).split('::');
-                const file = modeParts[1], variable = modeParts[2];
-                const childMode = modeParts[3] === 'child' ? modeParts[4] : null;
-                const cfg = variableConfigs.find(c => c.fileName === file && c.variable === variable);
-                const valueField = childMode && cfg?.splitBase ? cfg.splitBase : variable;
-                const rawValue = accessoryVariableValues[file]?.[valueField]?.get(n.id);
+                const selection = getCustomVariableSelection(mode);
+                const cfg = selection?.cfg;
+                const childMode = selection?.childMode;
+                const rawValue = customVariableColourContext?.valuesByNode.get(n.id);
+                const effectiveType = customVariableColourContext?.displayType || cfg?.type || 'Categorical - Nominal';
+                const normalizedRawValue = rawValue === undefined || rawValue === null || String(rawValue).trim() === '' ? 'N/A' : String(rawValue).trim();
 
-                if (!cfg || rawValue === undefined || rawValue === null) {
+                if (!cfg || (normalizedRawValue === 'N/A' && effectiveType === 'Numerical - Continuous')) {
                     n.col = monoCol;
                 } else {
-                    const type = cfg.type || 'Categorical - Nominal';
-                    const childCfg = childMode ? (cfg.splitChildren?.[childMode] || {}) : null;
-                    const effectiveType = childCfg?.type || type;
+                    const numericValues = customVariableColourContext.numericValues;
+                    const valueScale = customVariableColourContext.valueScale;
 
-                    const allValues = targetNodes.map(node => accessoryVariableValues[file]?.[valueField]?.get(node.id)).filter(v => v !== undefined && v !== null && String(v).trim() !== '');
-                    const numericValues = allValues.map(v => +v).filter(v => !isNaN(v));
-                    const uniqueValues = Array.from(new Set(allValues));
-                    const sortedValues = [...uniqueValues].sort((a,b) => {
-                        const na = +a, nb = +b;
-                        if (!isNaN(na) && !isNaN(nb)) return na - nb;
-                        return String(a).localeCompare(String(b), undefined, {numeric: true});
-                    });
-                    const valueScale = d3.scaleOrdinal(d3.schemeTableau10).domain(sortedValues);
-
-                    const matches = !childMode || rawValue === childMode;
+                    const matches = !childMode || normalizedRawValue === childMode;
                     if (!matches) {
                         n.col = monoCol;
                     } else if (effectiveType === 'Numerical - Continuous') {
                         const minv = d3.min(numericValues) || 0;
                         const maxv = d3.max(numericValues) || 1;
-                        const num = +rawValue;
-                        n.col = isNaN(num) ? '#999' : d3.interpolateInferno((num - minv) / (maxv - minv || 1));
+                        const num = +normalizedRawValue;
+                        n.col = isNaN(num) ? '#999' : d3.interpolateCool((num - minv) / (maxv - minv || 1));
                     } else if (effectiveType === 'Numerical - Discrete' || effectiveType === 'Categorical - Ordinal') {
-                        n.col = valueScale(rawValue);
+                        const categoryValue = normalizedRawValue;
+                        n.col = getCategoricalNodeColor(mode, categoryValue, valueScale(categoryValue));
                     } else {
-                        const categoryValue = rawValue || 'Unknown';
+                        const categoryValue = normalizedRawValue;
                         n.col = getCategoricalNodeColor(mode, categoryValue, catScale(categoryValue));
                     }
                 }
@@ -18190,11 +18335,15 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         };
 
         targetNodes.forEach(applyStyle);
+        customColourTimer?.mark('node styling');
         uploadNodeGpuStyles(targetNodes, mode, cRange, sRange, eRange, monoCol);
+        customColourTimer?.mark('GPU style upload');
         gpuState.needsUpload = true;
         updateLegend(mode, cRange, sRange, catScale, eRange, embeddingSimilarityState);
+        customColourTimer?.mark('legend rebuild');
         refreshInfoBoxFromSelection();
         draw();
+        customColourTimer?.end();
     }
 
     // This function determines the appropriate data to use for legend calculations based on the current view, then calls updateLegend with that data
@@ -18223,6 +18372,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         legendControls.html("");
         legend.html("");
         footer.select('#layer0-update-selection-btn').remove();
+        footer.select('#custom-variable-display-toggle').remove();
         if (footerTextEl) footerTextEl.innerHTML = '';
         const activeNodes = (currentViewId === 'base' || currentViewId === 'Venn Diagram' || currentViewId === 'Scatter Plot' || currentViewId === 'Embeddings')
             ? nodes
@@ -18700,15 +18850,14 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 }
             }
         } else if (mode.startsWith('var::')) {
-            const modeParts = String(mode).split('::');
-            const file = modeParts[1], variable = modeParts[2];
-            const childMode = modeParts[3] === 'child' ? modeParts[4] : null;
-            const cfg = variableConfigs.find(c => c.fileName === file && c.variable === variable);
-            if (!cfg) return;
-            const valueField = childMode && cfg.splitBase ? cfg.splitBase : variable;
+            const selection = getCustomVariableSelection(mode);
+            const cfg = selection?.cfg;
+            const childMode = selection?.childMode;
+            if (!selection) return;
 
-            const allValues = activeNodes.map(d => accessoryVariableValues[file]?.[valueField]?.get(d.id)).filter(v => v !== undefined && v !== null && String(v).trim() !== '');
-            const numericValues = allValues.map(v => +v).filter(v => !isNaN(v));
+            const customVariableColourContext = buildCustomVariableColourContext(mode, activeNodes);
+            const allValues = customVariableColourContext.allValues;
+            const numericValues = customVariableColourContext.numericValues;
             const uniqueValues = Array.from(new Set(allValues));
             const sortedValues = [...uniqueValues].sort((a,b) => {
                 const na = +a, nb = +b;
@@ -18716,15 +18865,41 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 return String(a).localeCompare(String(b), undefined, {numeric:true});
             });
 
-            const baseType = cfg.type || 'Categorical - Nominal';
-            const childCfg = childMode ? cfg.splitChildren?.[childMode] : null;
-            const effectiveType = childCfg?.type || baseType;
+            const effectiveType = customVariableColourContext.displayType || cfg.type || 'Categorical - Nominal';
+
+            if (customVariableColourContext.numericOnly && !childMode) {
+                footer.select('#custom-variable-display-toggle').remove();
+                const selectedDisplayMode = customVariableDisplayModeByKey.get(selection.key)
+                    || (cfg.type === 'Numerical - Continuous' ? 'continuous' : 'categorical');
+                const toggleRow = footer.append('div')
+                    .attr('id', 'custom-variable-display-toggle')
+                    .style('display', 'flex')
+                    .style('align-items', 'center')
+                    .style('gap', '8px')
+                    .style('margin-bottom', '8px');
+                toggleRow.append('span').style('color', '#aaa').style('font-size', '11px').text('View as');
+                const toggle = toggleRow.append('div').attr('class', 'link-direction-toggle');
+                ['categorical', 'continuous'].forEach(displayMode => {
+                    toggle.append('button')
+                        .attr('type', 'button')
+                        .attr('class', `link-direction-option${selectedDisplayMode === displayMode ? ' active' : ''}`)
+                        .style('min-width', '104px')
+                        .style('padding-left', '12px')
+                        .style('padding-right', '12px')
+                        .text(displayMode === 'categorical' ? 'Categorical' : 'Continuous')
+                        .on('click', () => {
+                            if (customVariableDisplayModeByKey.get(selection.key) === displayMode) return;
+                            customVariableDisplayModeByKey.set(selection.key, displayMode);
+                            updateSizesAndColors();
+                        });
+                });
+            }
 
             if (childMode) {
                 const selectedLabel = childMode;
                 const counts = new Map();
                 activeNodes.forEach(d => {
-                    const v = accessoryVariableValues[file]?.[valueField]?.get(d.id) || 'Unknown';
+                    const v = String(getCustomVariableValue(d, mode) ?? '').trim() || 'N/A';
                     if (v === selectedLabel) counts.set('Selected', (counts.get('Selected') || 0) + 1);
                     else counts.set('Others', (counts.get('Others') || 0) + 1);
                 });
@@ -18745,7 +18920,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 const maxv = d3.max(numericValues) || 1;
                 createHistogramToggle(numericValues, [minv, maxv], mode);
                 const container = legendControls.append('div').attr('class', 'gradient-container');
-                container.append('div').attr('class', 'gradient-bar').style('background', `linear-gradient(to right, ${d3.range(0, 1.1, 0.1).map(t => d3.interpolateInferno(t)).join(', ')})`);
+                container.append('div').attr('class', 'gradient-bar').style('background', `linear-gradient(to right, ${d3.range(0, 1.1, 0.1).map(t => d3.interpolateCool(t)).join(', ')})`);
                 const labels = legendControls.append('div').attr('class', 'grad-labels');
                 labels.append('span').text(Math.round(minv)); labels.append('span').text(Math.round(maxv));
                 legendControls.append('div').attr('style', 'color:#ccc; font-size:11px; margin-top:6px;').text(`Continuous values: ${numericValues.length} nodes`);
@@ -18753,7 +18928,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 // Add range selection UI for continuous variables in embeddings view
                 if (currentViewId === 'Embeddings') {
                     const rangeToggle = legendControls.append("div").attr("class", "select-range-toggle").style("color", "white").text("Select range ▾");
-                    const rangeUI = legendControls.append("div").attr("id", `embedding-range-ui-${file}-${variable}`).style("display", "none");
+                    const rangeUI = legendControls.append("div").attr("id", `embedding-range-ui-${selection.cfg.fileName}-${selection.cfg.variable}`).style("display", "none");
                     const inputs = rangeUI.append("div").attr("class", "range-inputs");
                     
                     const minBox = inputs.append("div");
@@ -18771,7 +18946,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                         .attr("value", Number(maxv).toFixed(3));
 
                     const container = legendControls.append('div').attr('class', 'gradient-container-var');
-                    const bar = container.append('div').attr('class', 'gradient-bar').style('background', `linear-gradient(to right, ${d3.range(0, 1.1, 0.1).map(t => d3.interpolateInferno(t)).join(', ')})`);
+                    const bar = container.append('div').attr('class', 'gradient-bar').style('background', `linear-gradient(to right, ${d3.range(0, 1.1, 0.1).map(t => d3.interpolateCool(t)).join(', ')})`);
                     const hMin = container.append("div").attr("class", "range-handle").style("left", "0%");
                     const hMax = container.append("div").attr("class", "range-handle").style("right", "0%");
 
@@ -18826,28 +19001,44 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     
                     rangeToggle.on("click", () => { rangeUI.style("display", rangeUI.style("display") === "none" ? "block" : "none"); });
                 }
+
+                const missingCount = activeNodes.length - allValues.length;
+                if (missingCount > 0) {
+                    appendCategoricalLegendItem(legend, {
+                        mode,
+                        label: 'N/A',
+                        count: missingCount,
+                        defaultColor: '#777',
+                        onActivate: () => handleLegendHighlight(mode, 'N/A')
+                    });
+                }
             } else {
                 const counts = new Map();
                 activeNodes.forEach(d => {
-                    const k = accessoryVariableValues[file]?.[variable]?.get(d.id) || 'Unknown';
+                    const k = String(getCustomVariableValue(d, mode) ?? '').trim() || 'N/A';
                     counts.set(k, (counts.get(k) || 0) + 1);
                 });
-                const orderVals = (effectiveType === 'Categorical - Ordinal' || effectiveType === 'Numerical - Discrete')
+                const orderedValues = (effectiveType === 'Categorical - Ordinal' || effectiveType === 'Numerical - Discrete')
                     ? sortedValues
                     : Array.from(counts.entries()).sort((a,b) => b[1]-a[1]).map(([v]) => v);
-                createPieChartToggle(counts, mode, variable);
+                const orderVals = counts.has('N/A') && !orderedValues.includes('N/A')
+                    ? [...orderedValues, 'N/A']
+                    : orderedValues;
+                createPieChartToggle(counts, mode, selection.cfg.variable);
                 const valueScale = d3.scaleOrdinal(d3.schemeTableau10).domain(orderVals);
                 orderVals.slice(0,50).forEach(lbl => {
                     const cnt = counts.get(lbl) || 0;
-                    const item = legend.append('div').attr('class', 'legend-item').on('click', () => {
-                        handleLegendHighlight(mode, lbl);
-                        if (currentViewId === 'Embeddings') {
-                            handleEmbeddingLegendHighlight(mode, lbl);
+                    const color = (effectiveType === 'Categorical - Nominal') ? catScale(lbl) : valueScale(lbl);
+                    appendCategoricalLegendItem(legend, {
+                        mode,
+                        label: lbl,
+                        count: cnt,
+                        defaultColor: color,
+                        onActivate: () => {
+                            handleLegendHighlight(mode, lbl);
+                            if (currentViewId === 'Embeddings') handleEmbeddingLegendHighlight(mode, lbl);
                         }
                     });
-                    const color = (effectiveType === 'Categorical - Nominal') ? catScale(lbl) : valueScale(lbl);
-                    item.append('div').attr('class', 'color-box').style('background', color);
-                    item.append('span').text(`${lbl} (${cnt})`);
                 });
             }
 
@@ -19020,9 +19211,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 } else if (mode === 'pdb_structure_count') {
                     v = getPdbStructureCount(n.id);
                 } else if (mode?.startsWith('var::')) {
-                    const parts = mode.split('::');
-                    const file = parts[1], variable = parts[2];
-                    const raw = accessoryVariableValues[file]?.[variable]?.get(n.id);
+                    const raw = getCustomVariableValue(n, mode);
                     const parsed = +raw;
                     if (!Number.isFinite(parsed)) return false;
                     v = parsed;
@@ -19085,10 +19274,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 return getBiologicalProcessKey(n.id) === value;
             }
             if (mode?.startsWith('var::')) {
-                const parts = mode.split('::');
-                const file = parts[1], variable = parts[2];
-                const raw = accessoryVariableValues[file]?.[variable]?.get(n.id);
-                const normalized = (raw === undefined || raw === null || String(raw).trim() === '') ? 'Unknown' : String(raw).trim();
+                const raw = getCustomVariableValue(n, mode);
+                const normalized = (raw === undefined || raw === null || String(raw).trim() === '') ? 'N/A' : String(raw).trim();
                 return normalized === value;
             }
             return proteinMetadata.get(n.id)?.[mode] === value;
@@ -19139,10 +19326,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 return getBiologicalProcessKey(n.id) === value;
             }
             if (mode?.startsWith('var::')) {
-                const parts = mode.split('::');
-                const file = parts[1], variable = parts[2];
-                const raw = accessoryVariableValues[file]?.[variable]?.get(n.id);
-                const normalized = (raw === undefined || raw === null || String(raw).trim() === '') ? 'Unknown' : String(raw).trim();
+                const raw = getCustomVariableValue(n, mode);
+                const normalized = (raw === undefined || raw === null || String(raw).trim() === '') ? 'N/A' : String(raw).trim();
                 return normalized === value;
             }
             return false;
@@ -19197,9 +19382,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const matchingNodes = nodes.filter(n => {
             let v = null;
             if (mode?.startsWith('var::')) {
-                const parts = mode.split('::');
-                const file = parts[1], variable = parts[2];
-                const raw = accessoryVariableValues[file]?.[variable]?.get(n.id);
+                const raw = getCustomVariableValue(n, mode);
                 if (raw === undefined || raw === null) return false;
                 const parsed = +raw;
                 if (!Number.isFinite(parsed)) return false;
@@ -19709,7 +19892,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
                 const headers = (delim === '__WS__'
                     ? firstLine.trim().split(/\s+/)
-                    : firstLine.split(delim).map(h => h.trim().replace(/^"|"$/g, '')));
+                    : parseDelimitedLine(firstLine, delim).map(h => h.trim()));
                 const normalizedHeaders = headers.map(h => String(h || '').toLowerCase().trim());
                 let scoreIdx = normalizedHeaders.findIndex(h => h === 'combined_score' || h === 'combinedscore' || h === 'score');
                 if (scoreIdx < 0) scoreIdx = normalizedHeaders.findIndex(h => h.includes('score'));
@@ -19719,7 +19902,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 dataLines.forEach(line => {
                     const cols = (delim === '__WS__'
                         ? line.trim().split(/\s+/)
-                        : line.split(delim).map(c => c.trim().replace(/^"|"$/g, '')));
+                        : parseDelimitedLine(line, delim).map(c => c.trim()));
                     const p1 = cols[0] || '';
                     const p2 = cols[1] || '';
                     const score = cols[scoreIdx] || cols[2] || 1;
