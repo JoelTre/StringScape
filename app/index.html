@@ -37,6 +37,8 @@
     ">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>StringScape app</title>
+    <link rel="icon" type="image/jpeg" href="https://stringscape.net/images_for_website/StringScape_logo.jpg">
+
     <!-- Below are third party scripts that are imported into StringScape. The import uses a SHA-384 hash to ensure the scripts have not been tampered with, for security purposes -->
     <!-- D3.js -->
     <script src="https://d3js.org/d3.v7.min.js" integrity="sha384-CjloA8y00+1SDAUkjs099PVfnY2KmDC2BZnws9kh8D/lX1s46w6EPhpXdqMfjK6i" crossorigin="anonymous"></script>
@@ -456,7 +458,10 @@
             color: var(--text-color);
             cursor: pointer;
             white-space: nowrap;
-            position: relative;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            line-height: 1;
         }
         #ai-menu-btn:hover {
             background: var(--accent-color);
@@ -977,8 +982,14 @@
             margin-right: 4px;
             align-content: center;
         }
-        #ai-python-instructions-btn {
+        #ai-python-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
             margin-bottom: 10px;
+        }
+        #ai-python-instructions-btn {
+            margin-bottom: 0;
             background: var(--surface-color-panel);
             border: 1px solid var(--border-color-strong);
             color: var(--text-color);
@@ -990,6 +1001,42 @@
         #ai-python-instructions-btn:hover {
             background: var(--accent-color);
             border-color: var(--accent-color);
+        }
+        #ai-python-record-btn {
+            margin-bottom: 0;
+            background: var(--surface-color-panel);
+            border: 1px solid var(--border-color-strong);
+            color: var(--text-color);
+            border-radius: 999px;
+            padding: 6px 12px;
+            font-size: 0.78rem;
+            cursor: pointer;
+            transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        #ai-python-record-btn:hover {
+            background: #8a1f1f;
+            border-color: #cc3c3c;
+        }
+        #ai-python-record-btn.recording {
+            background: #b42318;
+            border-color: #e05a4f;
+            color: #fff4f2;
+            animation: ai-record-pulse 1.8s ease-in-out infinite;
+            box-shadow: 0 0 0 0 rgba(224, 90, 79, 0.45);
+        }
+        @keyframes ai-record-pulse {
+            0% {
+                filter: brightness(0.95);
+                box-shadow: 0 0 0 0 rgba(224, 90, 79, 0.45);
+            }
+            50% {
+                filter: brightness(1.06);
+                box-shadow: 0 0 0 8px rgba(224, 90, 79, 0.12);
+            }
+            100% {
+                filter: brightness(0.95);
+                box-shadow: 0 0 0 0 rgba(224, 90, 79, 0);
+            }
         }
         #ai-python-script-editor {
             width: 100%;
@@ -1160,6 +1207,7 @@
             margin: 4px 0 0 0;
             color: var(--muted-text-color);
             font-size: 0.76rem;
+            font-weight: 700;
             line-height: 1.3;
         }
         #ai-python-instructions-actions {
@@ -1179,23 +1227,11 @@
         #ai-close-python-instructions:hover {
             background: var(--button-bg-hover);
         }
-        #ai-copy-python-instructions {
+        #ai-copy-python-instructions,
+        #ai-close-python-instructions {
             border-radius: 9999px;
             padding: 5px 10px;
             font-size: 0.75rem;
-        }
-        #ai-close-python-instructions {
-            width: 34px;
-            height: 34px;
-            padding: 0;
-            border-radius: 9999px;
-            font-size: 1rem;
-            font-weight: 700;
-            line-height: 1;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            margin: 0;
         }
         #ai-python-instructions-body {
             margin: 0;
@@ -2721,7 +2757,7 @@
         .notification-toast {
             pointer-events: auto;
             width: 100%;
-            background: linear-gradient(180deg, rgba(30, 38, 50, 0.98), rgba(21, 28, 39, 0.98));
+            background: linear-gradient(180deg, var(--surface-color-panel), var(--surface-color-panel-alt));
             border: 1px solid var(--border-color-strong);
             border-radius: 24px;
             box-shadow: 0 24px 60px rgba(0, 0, 0, 0.42);
@@ -2762,7 +2798,7 @@
             border-radius: 999px;
             padding: 10px 16px;
             margin: 0;
-            color: var(--accent-contrast);
+            color: var(--text-color);
             background: var(--button-bg);
             cursor: pointer;
             font-weight: 700;
@@ -2772,7 +2808,7 @@
             min-height: 42px;
         }
         .notification-button:hover {
-            filter: brightness(1.08);
+            background: var(--button-bg-hover);
         }
         .notification-actions.stacked .notification-button {
             width: 100%;
@@ -4293,7 +4329,7 @@
             </p>
         </div>
 
-        <button class="btn-secondary" style="margin-bottom: auto; width: 100%;">About StringScape</button>
+        <button class="btn-secondary" style="margin-bottom: auto; width: 100%; color: var(--text-color);">About StringScape</button>
 
     </div>
 </div>
@@ -4351,15 +4387,14 @@
         <span class="close-modal" id="about-close-btn">&times;</span>
         <h3>About StringScape</h3>
         <p>This is the Beta 1.1 version of StringScape.</p>
-        <p>The StringScape network visualiser app was developed for viewing network data from the <a href="https://string-db.org/" target="_blank" style="color: var(--accent-color); text-decoration: none;">STRING database</a>, but can be used to view any type of network data.</p>
-        <p>This app was developed by Joel Tregurtha as part of a PhD program at the University of Canterbury, New Zealand. PhD funded by The MacDiarmid Institute.</p>
+        <p>StringScape was developed to make it easy to view and process data from the <a href="https://string-db.org/" target="_blank" style="color: var(--accent-color); text-decoration: none;">STRING database</a>. This app was developed by Joel Tregurtha as part of a PhD program at the University of Canterbury, New Zealand. PhD funded by The MacDiarmid Institute.</p>
         <p>The code was generated using AI models, including Gemini, Codex, and Claude.</p>
         <hr style="border:0; border-top:1px solid var(--border-color);">
         <p>More information on this app can be found here: <a href="https://joeltre.github.io/StringScape/" target="_blank" style="color: var(--accent-color); text-decoration: none;">StringScape Home</a></p>
         <p>Video tutorial on how to use this app: <a href="#" target="_blank" style="color: var(--accent-color); text-decoration: none;">[coming soon...]</a></p>
         <p>This is an open-source project. The source code is available here: <a href="https://github.com/JoelTre/StringScape/tree/main" target="_blank" rel="noopener noreferrer" style="color: var(--accent-color); text-decoration: none;">https://github.com/JoelTre/StringScape/tree/main</a></p>
         <hr style="border:0; border-top:1px solid var(--border-color);">
-            <p>I'd love to hear from you! Send feedback, suggested additional features or bugs found to <a href="mailto:joel.tregurtha@pg.canterbury.ac.nz" style="color: var(--accent-color); text-decoration: none;">joel.tregurtha@pg.canterbury.ac.nz</a></p>
+            <p>I'd love to hear from you! Send feedback, suggested additional features or bugs found here: <a href="https://stringscape.net/contact/" style="color: var(--accent-color); text-decoration: none;">stringscape.net/contact</a></p>
         <div style="display:flex; gap:8px; margin-top:10px;">
             <button id="copyErrorLogsBtn" class="btn-secondary" style="width:100%;">Copy Error Logs</button>
         </div>
@@ -4515,7 +4550,10 @@
 
     <div id="ai-python-console">
         <div class="ai-python-intro">Write and run python scripts to analyse your data or perform actions in the app.</div>
-        <button id="ai-python-instructions-btn" type="button">Instructions for writing python scripts.</button>
+        <div id="ai-python-controls">
+            <button id="ai-python-instructions-btn" type="button">Python Guide</button>
+            <button id="ai-python-record-btn" type="button" aria-pressed="false">Record</button>
+        </div>
         <div id="ai-current-script-title">Current Script: Untitled Script</div>
         <div id="ai-python-script-editor-shell">
             <pre id="ai-python-script-highlight" aria-hidden="true"></pre>
@@ -4535,7 +4573,7 @@
     <div id="ai-python-instructions-box">
         <div id="ai-python-instructions-header">
             <div>
-                <h3 id="ai-python-instructions-title">Instructions for writing python scripts.</h3>
+                <h3 id="ai-python-instructions-title">Instructions for writing StringScape python scripts</h3>
                 <p id="ai-python-instructions-subtitle">These instructions can be given to any AI along with a description of what you want the script to do.</p>
             </div>
             <div id="ai-python-instructions-actions">
@@ -4693,20 +4731,37 @@
     <div class="modal-content" style="max-width:560px;">
         <span class="close-modal">&times;</span>
         <h3 style="margin-bottom:8px;">Select which session files to download</h3>
-        <div style="display:flex; flex-direction:column; gap:10px; max-height:60vh; overflow:auto; padding-right:4px;">
-            <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" id="downloadSessionSelectAll"> Select All</label>
-            <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" class="download-session-option" id="downloadSessionUploadedFiles"> Uploaded files</label>
-            <!-- <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" class="download-session-option" id="downloadSessionNodePositions"> Current node positions <span style="color:#bbb;">[a JSON file of the node positions in the Full Network]</span></label> -->
-            <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" class="download-session-option" id="downloadSessionCollections"> Collections <span style="color:#bbb;">[a collections.txt text file listing the name of each collection and listing the nodes in each collection]</span></label>
-            <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" class="download-session-option" id="downloadSessionSelectedNodes"> Currently selected nodes <span style="color:#bbb;">[a currently_selected_nodes.txt text file with a list of the currently selected nodes]</span></label>
-            <!-- <label style="display:flex; align-items:center; gap:8px;"><input type="checkbox" class="download-session-option" id="downloadSessionChangedSettings"> Changed settings <span style="color:#bbb;">[a changed_settings.txt file listing any changes made to the default settings]</span></label> -->
+        <div style="all: unset; display: grid; grid-template-columns: auto 1fr; gap: 10px 12px; max-height: 60vh; overflow-y: auto; padding-right: 8px; width: 100%; box-sizing: border-box; text-align: left;">
+            
+            <input type="checkbox" id="downloadSessionSelectAll" style="margin-top: 3px; grid-column: 1;">
+            <label for="downloadSessionSelectAll" style="grid-column: 2; cursor: pointer; text-align: left; white-space: normal; line-height: 1.4;">
+                Select All
+            </label>
+
+            <input type="checkbox" class="download-session-option" id="downloadSessionUploadedFiles" style="margin-top: 3px; grid-column: 1;">
+            <label for="downloadSessionUploadedFiles" style="grid-column: 2; cursor: pointer; text-align: left; white-space: normal; line-height: 1.4;">
+                Uploaded files
+            </label>
+
+            <input type="checkbox" class="download-session-option" id="downloadSessionCollections" style="margin-top: 3px; grid-column: 1;">
+            <label for="downloadSessionCollections" style="grid-column: 2; cursor: pointer; text-align: left; white-space: normal; line-height: 1.4;">
+                Collections 
+                <span style="color: var(--muted-text-color); font-size: 0.85em; display: inline;">[a collections.txt text file listing the name of each collection and listing the nodes in each collection]</span>
+            </label>
+
+            <input type="checkbox" class="download-session-option" id="downloadSessionSelectedNodes" style="margin-top: 3px; grid-column: 1;">
+            <label for="downloadSessionSelectedNodes" style="grid-column: 2; cursor: pointer; text-align: left; white-space: normal; line-height: 1.4;">
+                Currently selected nodes 
+                <span style="color: var(--muted-text-color); font-size: 0.85em; display: inline;">[a currently_selected_nodes.txt text file with a list of the currently selected nodes]</span>
+            </label>
+
         </div>
         <div style="margin-top:14px; display:flex; flex-direction:column; gap:8px;">
-            <label style="display:flex; flex-direction:column; gap:6px; color:#ddd; font-size:13px;">
-                Folder name
-                <input type="text" id="downloadSessionFolderName" style="padding:8px 10px; border-radius:8px; border:1px solid #666; background:#222; color:#fff;" />
+            <label style="display:flex; flex-direction:column; gap:6px; font-size:13px;">
+                Downloaded folder name
+                <input type="text" id="downloadSessionFolderName" style="padding:8px 10px; border-radius:8px; border:1px solid var(--muted-text-color); background:var(--surface-color); color:var(--muted-text-color);" />
             </label>
-            <button id="downloadSessionDownloadBtn" class="btn-secondary" style="width:100%;">Download</button>
+            <button id="downloadSessionDownloadBtn" class="btn-secondary" style="width:100%; background-color: var(--accent-color);">Download</button>
         </div>
     </div>
 </div>
