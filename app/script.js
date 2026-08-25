@@ -445,7 +445,7 @@
     const AI_CHAT_HISTORY_STORAGE_KEY = 'stringscape_ai_chat_history_v1';
     const AI_SCRIPT_HISTORY_STORAGE_KEY = 'stringscape_ai_script_history_v1';
     const AI_PYTHON_CONSOLE_SYSTEM_PROMPT = 'You are a Python script generator for StringScape. Return only Python code that can run in Pyodide. Do not include markdown code fences. app_data and ss are already injected. For app actions use ss.search_and_select(), ss.add_to_collection(), ss.set_view(), ss.set_node_colouring(), ss.select(), and ss.set_node_color(); every method returns a structured status dictionary. Use with ss.batch_update(): for many mutations. Keep scripts concise and safe.';
-    const AI_PYTHON_SCRIPT_INSTRUCTIONS_TEXT = `You can write Python scripts that run inside StringScape using Pyodide.
+    const AI_PYTHON_SCRIPT_INSTRUCTIONS_TEXT = `You can write Python scripts that run inside StringScape using Pyodide. These scripts can perfom actions in the app and analyze uploaded data.
 
         Available data:
         - app_data["nodes"]: list of node objects
@@ -509,6 +509,8 @@
         - ss.focus_on(node_ids) -> Returns {"status", "node_ids", "message"}
         - ss.set_as_layer_zero(node_ids) -> Returns {"status": "success", "node_ids"}
         - ss.set_mono_node_color(color='#ff0055') -> Returns {"status", "color", "message"}
+        - ss.set_frame(top_left_x, top_left_y, bottom_right_x, bottom_right_y, enable=True, animate=False) -> Returns {"status", "frame", "enabled", "animate", "message"}
+        - ss.download_frame(target_resolution=None) -> Returns {"status", "frame", "target_resolution", "message"}
         - ss.get_node_data(node_id, attribute=None) -> Returns {"status", "node_id", "data", "message"}
         - ss.build_network(score_threshold=0) -> Returns {"status", "score_threshold", "message"}
         - ss.message_ai(system='', prompt='') -> Returns {"status", "reply", "message"}
@@ -544,6 +546,7 @@
     const aiChatManualTitleIds = new Set();
     const AI_ACTION_HISTORY_STORAGE_KEY = 'stringscape.actionHistoryScript';
     let aiActionHistoryLines = [];
+    let aiPythonActionRecordingEnabled = false;
 
     function aiLoadActionHistory() {
         try {
@@ -676,6 +679,41 @@
         aiCloseHistoryMenu();
     }
 
+    function aiRefreshPythonRecordButton() {
+        const btn = document.getElementById('ai-python-record-btn');
+        if (!btn) return;
+        btn.classList.toggle('recording', aiPythonActionRecordingEnabled);
+        btn.setAttribute('aria-pressed', aiPythonActionRecordingEnabled ? 'true' : 'false');
+        btn.textContent = aiPythonActionRecordingEnabled ? 'Recording actions' : 'Record';
+        btn.title = aiPythonActionRecordingEnabled
+            ? 'Recording manual app actions into the Python script.'
+            : 'Append manual app actions to the Python script.';
+    }
+
+    function togglePythonActionRecording() {
+        aiPythonActionRecordingEnabled = !aiPythonActionRecordingEnabled;
+        aiRefreshPythonRecordButton();
+    }
+
+    function aiAppendManualActionToPythonScript(actionText, pythonLines) {
+        const editor = document.getElementById('ai-python-script-editor');
+        if (!editor) return;
+
+        const cleanedLines = Array.isArray(pythonLines)
+            ? pythonLines.map(line => String(line)).filter(Boolean)
+            : [];
+        if (!cleanedLines.length) return;
+
+        const nextBlock = [`# Human: ${String(actionText)}`, ...cleanedLines].join('\n');
+        const existing = String(editor.value || '');
+        const trimmedEnd = existing.replace(/\s*$/, '');
+        editor.value = trimmedEnd.length
+            ? `${trimmedEnd}\n\n${nextBlock}\n`
+            : `${nextBlock}\n`;
+        editor.scrollTop = editor.scrollHeight;
+        aiRenderPythonScriptEditorHighlight();
+    }
+
     function aiAppendActionHistory(actor, actionText, pythonLines) {
         const cleanedLines = Array.isArray(pythonLines) ? pythonLines.map(line => String(line)).filter(Boolean) : [];
         if (!cleanedLines.length) return;
@@ -683,6 +721,9 @@
         aiActionHistoryLines.push(`# ${actor}: ${actionText}`, ...cleanedLines);
         aiPersistActionHistory();
         aiRenderActionHistoryPanel();
+        if (aiPythonActionRecordingEnabled && String(actor) === 'Human') {
+            aiAppendManualActionToPythonScript(actionText, cleanedLines);
+        }
     }
 
     function aiRecordSearchHistory(query, scope = 'all', actor = 'Human') {
@@ -880,6 +921,34 @@
         ]);
     }
 
+    function getFrameWorldBoundsForHistory() {
+        if (!exportFrame) return null;
+        const left = Math.min(exportFrame.x, exportFrame.x + exportFrame.w);
+        const right = Math.max(exportFrame.x, exportFrame.x + exportFrame.w);
+        const top = Math.min(exportFrame.y, exportFrame.y + exportFrame.h);
+        const bottom = Math.max(exportFrame.y, exportFrame.y + exportFrame.h);
+        if (![left, right, top, bottom].every(Number.isFinite)) return null;
+        if ((right - left) < 1e-9 || (bottom - top) < 1e-9) return null;
+        return { left, top, right, bottom };
+    }
+
+    function aiRecordSetFrameHistory(left, top, right, bottom, actor = 'Human') {
+        const l = Number(left);
+        const t = Number(top);
+        const r = Number(right);
+        const b = Number(bottom);
+        if (![l, t, r, b].every(Number.isFinite)) return;
+        aiAppendActionHistory(actor, `Set frame from (${l.toFixed(2)}, ${t.toFixed(2)}) to (${r.toFixed(2)}, ${b.toFixed(2)})`, [
+            `ss.set_frame(top_left_x=${l}, top_left_y=${t}, bottom_right_x=${r}, bottom_right_y=${b})`
+        ]);
+    }
+
+    function aiRecordDownloadFrameHistory(actor = 'Human') {
+        aiAppendActionHistory(actor, `Downloaded frame at ${Number(targetResolution)} px`, [
+            `ss.download_frame(target_resolution=${Number(targetResolution)})`
+        ]);
+    }
+
     aiLoadActionHistory();
 
     // This function toggles the visibility of the AI panel and updates the UI accordingly. It also triggers a redraw of the canvas and updates controls based on the current view to ensure everything is positioned correctly with the new panel state.
@@ -1056,6 +1125,7 @@
         aiRenderExamplePanel();
         aiRenderActionHistoryPanel();
         if (isPython) aiRenderPythonScriptEditorHighlight();
+        aiRefreshPythonRecordButton();
         if (historyMenuWrap && !isHistory) aiCloseHistoryMenu();
         if (!isHistory) aiCloseHistoryMenu();
 
@@ -1158,7 +1228,7 @@
 
     function aiBuildPythonInstructionsText() {
         const lines = [];
-        lines.push('You can write Python scripts that run inside StringScape using Pyodide.');
+        lines.push('You can write Python scripts that run inside StringScape using Pyodide. These scripts can perfom actions in the app and analyze uploaded data.');
         lines.push('');
         lines.push('These instructions can be given to any AI along with a description of what you want the script to do.');
         lines.push('');
@@ -1224,6 +1294,8 @@
         lines.push('- ss.focus_on(node_ids) -> Returns {"status", "node_ids", "message"}');
         lines.push('- ss.set_as_layer_zero(node_ids) -> Returns {"status": "success", "node_ids"}');
         lines.push('- ss.set_mono_node_color(color="#ff0055") -> Returns {"status", "color", "message"}');
+        lines.push('- ss.set_frame(top_left_x, top_left_y, bottom_right_x, bottom_right_y, enable=True, animate=False) -> Returns {"status", "frame", "enabled", "animate", "message"}');
+        lines.push('- ss.download_frame(target_resolution=None) -> Returns {"status", "frame", "target_resolution", "message"}');
         lines.push('- ss.get_node_data(node_id, attribute=None) -> Returns {"status", "node_id", "data", "message"}');
         lines.push('- ss.build_network(score_threshold=0) -> Returns {"status", "score_threshold", "message"}');
         lines.push('- ss.message_ai(system="", prompt="") -> Returns {"status", "reply", "message"}');
@@ -1255,7 +1327,11 @@
     function aiRefreshAskAiButton() {
         const button = document.getElementById('ask-ai-btn');
         if (!button) return;
-        if (!document.body.classList.contains('ai-panel-open')) {
+
+        const panelOpen = document.body.classList.contains('ai-panel-open');
+        const isAgentMode = aiPanelMode === 'agent';
+
+        if (!panelOpen) {
             button.textContent = 'Ask AI';
             button.onclick = () => {
                 toggleAiPanel(true);
@@ -1264,7 +1340,10 @@
             };
             return;
         }
-        if (aiPanelMode === 'python') {
+
+        // If panel is open in Python or History mode, keep this as an "Ask AI"
+        // action that switches to Agent mode instead of closing the whole panel.
+        if (!isAgentMode) {
             button.textContent = 'Ask AI';
             button.onclick = () => {
                 setAiPanelMode('agent');
@@ -2392,6 +2471,7 @@
         const variableValue = (node, key) => {
             const id = String(node.id);
             if (key === 'centrality' || key === 'eigen' || key === 'layer' || key === 'local_clustering_coefficient') return node[key];
+            if (key === 'pdb_structure_count') return getPdbStructureCount(id);
             if (key === 'size') return getProteinSizeValue?.(id, resolveBuiltInColorSource?.('size')) ?? proteinMetadata.get(id)?.size;
             if (key === 'annotation') return (getProteinInfoAnnotation?.(id) || '').length;
             if (key === 'characterization') return getCharacterizationValue(id);
@@ -2515,6 +2595,68 @@
                 if (method === 'set_app_background_colour') { const color = String(args.color || ''); if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return result('warning', { message: 'color must be a hex colour.' }); const input = document.getElementById('bgColor'); input.value = color; input.dispatchEvent(new Event('input')); aiRecordSetAppBackgroundColourHistory(color, 'AI'); return result('success', { color }); }
                 if (method === 'set_app_background_by') { const mode = normal(args.mode); if (!['mono','voronoi'].includes(mode)) return result('warning', { message: 'mode must be mono or voronoi.' }); backgroundMode = mode; document.getElementById('bgMode').value = mode; updateBackgroundControlsUI(); aiRecordSetAppBackgroundByHistory(mode, 'AI'); queueDraw(animate); return result('success', { mode }); }
                 if (method === 'set_physics') { const physics = normal(args.physics); if (!['on','off'].includes(physics)) return result('warning', { message: 'physics must be on or off.' }); if (args.alpha != null) { const alpha = +args.alpha; if (!Number.isFinite(alpha)) return result('warning', { message: 'alpha must be numerical.' }); document.getElementById('alphaSlider').value = alpha; } togglePhysics(physics === 'on'); if (args.alpha != null) updatePhysicsForce(); return result('success', { physics, alpha: args.alpha ?? null }); }
+                if (method === 'set_frame') {
+                    const left = +args.top_left_x;
+                    const top = +args.top_left_y;
+                    const right = +args.bottom_right_x;
+                    const bottom = +args.bottom_right_y;
+                    if (![left, top, right, bottom].every(Number.isFinite)) {
+                        return result('warning', { message: 'top_left_x, top_left_y, bottom_right_x, and bottom_right_y must be numerical.' });
+                    }
+                    if (right <= left || bottom <= top) {
+                        return result('warning', { message: 'bottom-right coordinates must be greater than top-left coordinates.' });
+                    }
+                    exportFrame = {
+                        x: left,
+                        y: top,
+                        w: right - left,
+                        h: bottom - top
+                    };
+
+                    const enabled = args.enable == null ? true : !!args.enable;
+                    isFrameMode = enabled;
+                    document.getElementById('drawFrameBtn')?.classList.toggle('active', isFrameMode);
+                    document.body.classList.toggle('drawing-frame', isFrameMode);
+                    const frameControls = document.getElementById('frame-controls');
+                    if (frameControls) frameControls.style.display = isFrameMode ? 'block' : 'none';
+                    updateCanvasCursor();
+
+                    const signature = `${left.toFixed(6)},${top.toFixed(6)},${right.toFixed(6)},${bottom.toFixed(6)}`;
+                    if (signature !== lastRecordedFrameHistorySignature) {
+                        aiRecordSetFrameHistory(left, top, right, bottom, 'AI');
+                        lastRecordedFrameHistorySignature = signature;
+                    }
+
+                    queueDraw(animate);
+                    return result('success', {
+                        enabled: isFrameMode,
+                        animate,
+                        frame: { top_left_x: left, top_left_y: top, bottom_right_x: right, bottom_right_y: bottom }
+                    });
+                }
+                if (method === 'download_frame') {
+                    if (!exportFrame) {
+                        return result('warning', { message: 'No frame is set. Use set_frame first.' });
+                    }
+                    if (args.target_resolution != null) {
+                        const requestedResolution = Math.round(+args.target_resolution);
+                        if (!Number.isFinite(requestedResolution) || requestedResolution <= 0) {
+                            return result('warning', { message: 'target_resolution must be a positive number.' });
+                        }
+                        targetResolution = requestedResolution;
+                    }
+                    captureFrame('download', { actor: 'AI' });
+                    const bounds = getFrameWorldBoundsForHistory();
+                    return result('success', {
+                        target_resolution: targetResolution,
+                        frame: bounds ? {
+                            top_left_x: bounds.left,
+                            top_left_y: bounds.top,
+                            bottom_right_x: bounds.right,
+                            bottom_right_y: bounds.bottom
+                        } : null
+                    });
+                }
                 if (method === 'export_selection') { const format = normal(args.format); if (!['csv','json'].includes(format)) return result('warning', { message: 'format must be csv or json.' }); const rows = selected().map(id => ({ id, ...(proteinMetadata.get(id) || {}) })); if (format === 'json') download('stringscape_selection.json', 'application/json', JSON.stringify(rows, null, 2)); else { const keys = [...new Set(rows.flatMap(Object.keys))]; download('stringscape_selection.csv', 'text/csv;charset=utf-8', [keys.join(','), ...rows.map(row => keys.map(key => JSON.stringify(row[key] ?? '')).join(','))].join('\n')); } return result('success', { format, exported_count: rows.length }); }
                 if (method === 'reset_visuals') { allNodes().forEach(n => { delete n._ssSize; delete n._ssGlow; delete n._ssVisible; delete n._ssLabelVisible; delete n._ssLabelKey; delete n._ssColor; }); links.forEach(l => ['_ssColor','_ssWidth','_ssOpacity','_ssLabelVisible','_ssLabelKey','_ssArrowVisible'].forEach(k => delete l[k])); updateSizesAndColors(); queueDraw(animate); return result('success'); }
                 if (method === 'focus_on') { const ids = new Set((Array.isArray(args.node_ids) ? args.node_ids : [args.node_ids]).filter(Boolean).map(String)); const targets = activeNodes().filter(n => ids.has(String(n.id))); if (!targets.length) return result('warning', { message: 'No target nodes were found.' }); const targetTransform = fitNodesInView(targets); d3.select(canvas).transition().duration(350).call(zoomBehavior.transform, targetTransform); return result('success', { node_ids: targets.map(n => n.id) }); }
@@ -3298,6 +3440,8 @@ class _StringScapeAPI:
     def set_app_background_colour(self, color='#171c24'): return self._call('set_app_background_colour', color=color)
     def set_app_background_by(self, mode='mono'): return self._call('set_app_background_by', mode=mode)
     def set_physics(self, physics='on', alpha=None): return self._call('set_physics', physics=physics, alpha=alpha)
+    def set_frame(self, top_left_x, top_left_y, bottom_right_x, bottom_right_y, enable=True, animate=False): return self._call('set_frame', top_left_x=top_left_x, top_left_y=top_left_y, bottom_right_x=bottom_right_x, bottom_right_y=bottom_right_y, enable=enable, animate=animate)
+    def download_frame(self, target_resolution=None): return self._call('download_frame', target_resolution=target_resolution)
     def export_selection(self, format='csv'): return self._call('export_selection', format=format)
     def reset_visuals(self, animate=False): return self._call('reset_visuals', animate=animate)
     def focus_on(self, node_ids): return self._call('focus_on', node_ids=node_ids)
@@ -4326,6 +4470,7 @@ sys.modules['stringscape'] = _stringscape_module
     let bgVoronoiCache = { canvas: null, signature: '', lastBuildMs: 0 };
     const APP_THEME_STORAGE_KEY = 'stringscape.appTheme';
     const APP_MODE_STORAGE_KEY = 'stringscape.appMode';
+    // Theme colours
     const APP_THEME_PRESETS = {
         grey: {
             dark: {
@@ -4356,7 +4501,7 @@ sys.modules['stringscape'] = _stringscape_module
                 surfaceStrong: '#ffffff', surfacePanel: '#e8f2fb', surfacePanelAlt: '#dbeaf7',
                 border: '#bfd2e6', borderStrong: '#a9c3df', text: '#12324a', muted: '#274a66',
                 accent: '#3498db', accentSoft: '#49aef1', accentStrong: '#1c5b86', accentContrast: '#ffffff',
-                button: '#77a1bd', buttonHover: '#86aec9', inputBg: '#f9fbfd', inputBorder: '#b7cde2', shadow: 'rgba(9,30,66,0.14)'
+                button: '#98c0db', buttonHover: '#b6d9f0', inputBg: '#f9fbfd', inputBorder: '#b7cde2', shadow: 'rgba(9,30,66,0.14)'
             }
         },
         pink: {
@@ -4388,6 +4533,7 @@ sys.modules['stringscape'] = _stringscape_module
     let isResizingFrame = false;
     let isMovingFrame = false;
     let frameDragOffset = { x: 0, y: 0 };
+    let lastRecordedFrameHistorySignature = null;
 
     let lastHoveredBar = null; // Global scope variable to track the last hovered histogram bar
     let currentHistogramBins = []; // This will store your binData globally
@@ -6741,8 +6887,53 @@ self.onmessage = async (event) => {
         return (k - zoomStart) / (zoomEnd - zoomStart);
     }
 
+    function computeLinkRenderStyle(link, options = {}) {
+        const {
+            isPath = false,
+            isHigh = false,
+            isSearching = false,
+            visibilityMode = 'all',
+            linkMode = 'score',
+            linkBaseColor = '#999999',
+            linkWidthMultiplier = 1
+        } = options;
+
+        if (isPath) {
+            return {
+                alpha: 1,
+                color: '#ff4444',
+                width: 4
+            };
+        }
+
+        let alpha = (isHigh || visibilityMode === 'all')
+            ? linkOpacity
+            : (isSearching ? linkOpacity * 0.05 : linkOpacity);
+        if (isGeneGeneLink(link)) alpha *= geneLinkOpacity;
+
+        let color;
+        let width;
+        if (linkMode === 'score') {
+            color = getScoreLinkGreyColor(link.value);
+            width = (Math.sqrt(link.value) / 8) * (isHigh ? 2 : 1);
+        } else {
+            color = linkBaseColor;
+            width = 1 * (isHigh ? 2 : 1);
+        }
+
+        if (link._ssColor) color = link._ssColor;
+        if (Number.isFinite(link._ssOpacity)) alpha *= link._ssOpacity;
+        width = Number.isFinite(link._ssWidth) ? link._ssWidth : width * linkWidthMultiplier;
+
+        return {
+            alpha: Math.max(0, Math.min(1, alpha)),
+            color,
+            width: Number.isFinite(width) && width > 0 ? width : 1
+        };
+    }
+
     // This function captures the current view of the network within the defined export frame and either downloads it as a PNG image or copies it to the clipboard, depending on the specified type. It creates an offscreen canvas, applies the necessary transformations to align with the export frame, renders the network data at a high resolution, and then executes the desired action based on the type parameter.
-    async function captureFrame(type) {
+    async function captureFrame(type, historyMeta = null) {
         console.log("function captureFrame(type: " + type + ")");
         if (!exportFrame) {
             alert("Please draw a frame first.");
@@ -6782,35 +6973,63 @@ self.onmessage = async (event) => {
         // 5. Render Network Data (Reusing your high-res logic)
         const threshold = +document.getElementById('thresholdInput').value;
         const linkMode = document.getElementById('linkMode').value;
+        const linkBaseCol = document.getElementById('linkColor').value;
+        const visibilityMode = document.getElementById('linkVisibilityMode').value;
         const linkWidthMultiplier = +document.getElementById('linkWidthSlider')?.value || 1;
-        const isSearching = selectedNodes.size > 0;
+        const effectiveSelection = getEffectiveSelectedNodesSet();
+        const isSearching = effectiveSelection.size > 0;
         const drawNodes = currentViewId === 'base' ? nodes : activeSubData?.nodes || [];
         const drawLinks = currentViewId === 'base' ? links : activeSubData?.links || [];
 
         // Draw Links
-        drawLinks.filter(l => l.value >= threshold).forEach(l => {
-            const isHigh = isSearching && (selectedNodes.has(l.source.id) || selectedNodes.has(l.target.id));
+        let activeLinks = drawLinks.filter(l => l.value >= threshold);
+        if (isSearching && visibilityMode !== 'all') {
+            if (visibilityMode === 'from_selected') {
+                activeLinks = activeLinks.filter(l => {
+                    const edgeKey = getUndirectedEdgeKey(l.source.id, l.target.id);
+                    return (effectiveSelection.has(l.source.id) || effectiveSelection.has(l.target.id)) || pathEdges.has(edgeKey);
+                });
+            } else if (visibilityMode === 'between_selected') {
+                activeLinks = activeLinks.filter(l => {
+                    const edgeKey = getUndirectedEdgeKey(l.source.id, l.target.id);
+                    return (effectiveSelection.has(l.source.id) && effectiveSelection.has(l.target.id)) || pathEdges.has(edgeKey);
+                });
+            }
+        }
+
+        activeLinks.forEach(l => {
+            const isPath = pathEdges.has(getUndirectedEdgeKey(l.source.id, l.target.id));
+            const isHigh = isSearching && (effectiveSelection.has(l.source.id) || effectiveSelection.has(l.target.id));
+            const style = computeLinkRenderStyle(l, {
+                isPath,
+                isHigh,
+                isSearching,
+                visibilityMode,
+                linkMode,
+                linkBaseColor: linkBaseCol,
+                linkWidthMultiplier
+            });
             octx.beginPath(); 
             octx.moveTo(l.source.x, l.source.y); 
             octx.lineTo(l.target.x, l.target.y);
-            let alpha = isSearching ? (isHigh ? linkOpacity : linkOpacity * 0.05) : linkOpacity;
-            if (isGeneGeneLink(l)) alpha *= geneLinkOpacity;
-            octx.globalAlpha = alpha;
-            octx.strokeStyle = linkMode === 'score' ? d3.interpolateGreys((l.value - 200) / 800) : document.getElementById('linkColor').value;
-            octx.lineWidth = ((linkMode === 'score' ? Math.sqrt(l.value) / 8 : 1) * (isHigh ? 2 : 1)) * linkWidthMultiplier;
+            octx.globalAlpha = style.alpha;
+            octx.strokeStyle = style.color;
+            octx.lineWidth = style.width;
             octx.stroke();
+            if (l._ssArrowVisible !== 'hide') drawLinkDirectionArrow(octx, l.source, l.target, style.color, style.width);
         });
 
         // Draw Nodes
         drawNodes.forEach(n => {
-            const isHigh = isSearching && selectedNodes.has(n.id);
-            octx.globalAlpha = isHigh ? 1 : (isSearching ? 0.1 : 1);
+            const isPath = pathNodes.has(n.id);
+            const isHigh = isSearching && effectiveSelection.has(n.id);
+            octx.globalAlpha = (isHigh || isPath) ? 1 : (isSearching ? 0.1 : 1);
             octx.beginPath(); 
             octx.arc(n.x, n.y, n.r, 0, 2 * Math.PI); 
             octx.fillStyle = n.col; 
             octx.fill();
-            octx.strokeStyle = d3.color(n.col).brighter(1); 
-            octx.lineWidth = 1; 
+            octx.strokeStyle = isPath ? '#ff4444' : d3.color(n.col).brighter(1); 
+            octx.lineWidth = isPath ? 4 : 1; 
             octx.stroke();
         });
 
@@ -6827,8 +7046,9 @@ self.onmessage = async (event) => {
             drawNodes.forEach(n => {
                 const label = getNodeLabelText(n);
                 if (!label) return;
-                const isHigh = isSearching && selectedNodes.has(n.id);
-                const nodeAlpha = isHigh ? 1 : (isSearching ? 0.1 : 1);
+                const isPath = pathNodes.has(n.id);
+                const isHigh = isSearching && effectiveSelection.has(n.id);
+                const nodeAlpha = (isHigh || isPath) ? 1 : (isSearching ? 0.1 : 1);
                 octx.globalAlpha = nodeAlpha * labelZoomAlpha;
                 octx.fillText(label, n.x, n.y);
             });
@@ -6847,6 +7067,9 @@ self.onmessage = async (event) => {
             link.download = `StringScape_Frame_${Date.now()}.png`;
             link.href = offscreen.toDataURL('image/png', 1.0);
             link.click();
+            if (historyMeta?.actor) {
+                aiRecordDownloadFrameHistory(historyMeta.actor);
+            }
         } else if (type === 'copy') {
             offscreen.toBlob(async (blob) => {
                 try {
@@ -11108,7 +11331,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 'Annotation': getProteinInfoAnnotation(id) || '',
                 'KEGG Product': getKeggProductText(id) || '',
                 'Collection(s)': getNodeCollectionMemberships(id).join('; '),
-                'Protein Size': getProteinSizeValue(id, sizeSource) || '',
+                'Protein Size (aa)': getProteinSizeValue(id, sizeSource) || '',
                 'UniProt': linkData.uniprotUrl || '',
                 'NCBI': [linkData.ncbiProteinUrl, linkData.ncbiGeneUrl].filter(Boolean).join(' '),
                 'Pubmed': linkData.pubmedUrl || '',
@@ -12193,7 +12416,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         updateNodeInfoTableModalChrome('Node Info Table', false);
         calculateEigenvectorCentrality();
         const { rows, extraColumns } = getSelectedNodeInfoRows();
-        const baseColumns = ['Protein ID', 'Preferred Name', 'Gene ID', 'Description', 'Annotation', 'KEGG Product', 'Collection(s)', 'Localisation', 'Protein Size', 'UniProt', 'NCBI', 'Pubmed', 'IntAct', 'STRING', 'Protein Data Bank', 'Aliases',  'Layer', 'Centrality', 'Eigen', 'Sequence'];
+        const baseColumns = ['Protein ID', 'Preferred Name', 'Gene ID', 'Description', 'Annotation', 'KEGG Product', 'Collection(s)', 'Localisation', 'Protein Size (aa)', 'UniProt', 'NCBI', 'Pubmed', 'IntAct', 'STRING', 'Protein Data Bank', 'Aliases',  'Layer', 'Centrality', 'Eigen', 'Sequence'];
         const columns = [...baseColumns, ...extraColumns.map(c => c.label)];
         nodeInfoTableState = { columns, rows, filteredRows: rows, searchQuery: '', mode: 'protein' };
         renderNodeInfoTable();
@@ -12440,7 +12663,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const defaultWidths = {
             'Protein ID': 120,
             'Preferred Name': 120,
-            'Protein Size': 75,
+            'Protein Size (aa)': 95,
             'Description': 180,
             'UniProt': 100,
             'NCBI': 170,
@@ -14853,6 +15076,24 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         if (isVariableSettingsOpen) return;
         const key = e.key.toLowerCase();
 
+        // While drawing/exporting a frame, lock selection state so keyboard shortcuts
+        // cannot select, invert, expand, or clear node selections.
+        if (isFrameMode) {
+            const isSelectionShortcut =
+                key === 'a'
+                || key === 'i'
+                || (e.ctrlKey && key === 'a')
+                || (e.ctrlKey && key === 'd')
+                || e.key === 'Escape'
+                || key === '+'
+                || key === '='
+                || key === '-';
+            if (isSelectionShortcut) {
+                e.preventDefault();
+                return;
+            }
+        }
+
         if (key === 'a' || (e.ctrlKey && key === 'a')) {
             e.preventDefault();
             if (currentViewId === 'histogram') {
@@ -15456,6 +15697,15 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             // Clear frame if it's too small (accidental click)
             if (Math.abs(exportFrame.w) < 5 || Math.abs(exportFrame.h) < 5) {
                 exportFrame = null;
+            } else {
+                const bounds = getFrameWorldBoundsForHistory();
+                if (bounds) {
+                    const signature = `${bounds.left.toFixed(6)},${bounds.top.toFixed(6)},${bounds.right.toFixed(6)},${bounds.bottom.toFixed(6)}`;
+                    if (signature !== lastRecordedFrameHistorySignature) {
+                        aiRecordSetFrameHistory(bounds.left, bounds.top, bounds.right, bounds.bottom, 'Human');
+                        lastRecordedFrameHistorySignature = signature;
+                    }
+                }
             }
             draw();
             return;
@@ -15520,6 +15770,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     });
 
     canvas.addEventListener("click", (e) => {
+        if (isFrameMode) {
+            return;
+        }
+
         if (suppressNextChartClick) {
             suppressNextChartClick = false;
             return;
@@ -17141,24 +17395,22 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             activeLinks.forEach(l => {
                 const isPath = pathEdges.has(getUndirectedEdgeKey(l.source.id, l.target.id));
                 const isHigh = isSearching && (effectiveSelection.has(l.source.id) || effectiveSelection.has(l.target.id));
-                let linkStrokeColor = "#ff4444";
-                let linkStrokeWidth = 4;
+                const style = computeLinkRenderStyle(l, {
+                    isPath,
+                    isHigh,
+                    isSearching,
+                    visibilityMode,
+                    linkMode,
+                    linkBaseColor: linkBaseCol,
+                    linkWidthMultiplier
+                });
                 ctx.beginPath(); ctx.moveTo(l.source.x, l.source.y); ctx.lineTo(l.target.x, l.target.y);
-                if (isPath) { ctx.globalAlpha = 1.0; linkStrokeColor = "#ff4444"; linkStrokeWidth = 4; }
-                else {
-                    let alpha = (isHigh || visibilityMode === 'all') ? linkOpacity : (isSearching ? linkOpacity * 0.05 : linkOpacity);
-                    if (isGeneGeneLink(l)) alpha *= geneLinkOpacity;
-                    ctx.globalAlpha = alpha;
-                    if (linkMode === 'score') { linkStrokeColor = getScoreLinkGreyColor(l.value); linkStrokeWidth = (Math.sqrt(l.value) / 8) * (isHigh ? 2 : 1); }
-                    else { linkStrokeColor = d3.color(linkBaseCol).brighter(1.5); linkStrokeWidth = 1 * (isHigh ? 2 : 1); }
-                }
-                if (l._ssColor) linkStrokeColor = l._ssColor;
-                if (Number.isFinite(l._ssOpacity)) ctx.globalAlpha *= l._ssOpacity;
-                ctx.strokeStyle = linkStrokeColor;
-                const scaledLinkWidth = Number.isFinite(l._ssWidth) ? l._ssWidth : linkStrokeWidth * linkWidthMultiplier;
+                ctx.globalAlpha = style.alpha;
+                ctx.strokeStyle = style.color;
+                const scaledLinkWidth = style.width;
                 ctx.lineWidth = scaledLinkWidth;
                 ctx.stroke();
-                if (l._ssArrowVisible !== 'hide') drawLinkDirectionArrow(ctx, l.source, l.target, linkStrokeColor, scaledLinkWidth);
+                if (l._ssArrowVisible !== 'hide') drawLinkDirectionArrow(ctx, l.source, l.target, style.color, scaledLinkWidth);
 
                 if ((l._ssLabelVisible || linkLabelToggle) === 'show' && ctx.globalAlpha > 0) {
                     const label = l._ssLabelKey ? String(l[l._ssLabelKey] ?? interactionLinkLabelValues.get(getUndirectedEdgeKey(l.source.id, l.target.id))?.[l._ssLabelKey] ?? '') : getLinkLabelForLink(l);
@@ -17396,9 +17648,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         console.log("async function exportCanvas(type)");
         const threshold = +document.getElementById('thresholdInput').value;
         const linkMode = document.getElementById('linkMode').value;
+        const linkBaseCol = document.getElementById('linkColor').value;
         const visibilityMode = document.getElementById('linkVisibilityMode').value;
         const linkWidthMultiplier = +document.getElementById('linkWidthSlider')?.value || 1;
-        const isSearching = selectedNodes.size > 0;
+        const effectiveSelection = getEffectiveSelectedNodesSet();
+        const isSearching = effectiveSelection.size > 0;
         let drawNodes = nodes, drawLinks = links;
         if (currentViewId !== 'base' && activeSubData) { drawNodes = activeSubData.nodes; drawLinks = activeSubData.links; }
 
@@ -17424,38 +17678,40 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             if (isSearching && visibilityMode !== 'all' && currentViewId === 'base') {
                 if (visibilityMode === 'from_selected') activeLinks = activeLinks.filter(l => {
                     const edgeKey = getUndirectedEdgeKey(l.source.id, l.target.id);
-                    return (selectedNodes.has(l.source.id) || selectedNodes.has(l.target.id)) || pathEdges.has(edgeKey);
+                    return (effectiveSelection.has(l.source.id) || effectiveSelection.has(l.target.id)) || pathEdges.has(edgeKey);
                 });
                 else if (visibilityMode === 'between_selected') activeLinks = activeLinks.filter(l => {
                     const edgeKey = getUndirectedEdgeKey(l.source.id, l.target.id);
-                    return (selectedNodes.has(l.source.id) && selectedNodes.has(l.target.id)) || pathEdges.has(edgeKey);
+                    return (effectiveSelection.has(l.source.id) && effectiveSelection.has(l.target.id)) || pathEdges.has(edgeKey);
                 });
             }
 
             activeLinks.forEach(l => {
                 const isPath = pathEdges.has(getUndirectedEdgeKey(l.source.id, l.target.id));
-                const isHigh = isSearching && (selectedNodes.has(l.source.id) || selectedNodes.has(l.target.id));
-                let linkStrokeColor = "#ff4444";
-                let linkStrokeWidth = 4;
+                const isHigh = isSearching && (effectiveSelection.has(l.source.id) || effectiveSelection.has(l.target.id));
+                const style = computeLinkRenderStyle(l, {
+                    isPath,
+                    isHigh,
+                    isSearching,
+                    visibilityMode,
+                    linkMode,
+                    linkBaseColor: linkBaseCol,
+                    linkWidthMultiplier
+                });
                 octx.beginPath(); octx.moveTo(l.source.x, l.source.y); octx.lineTo(l.target.x, l.target.y);
-                if (isPath) { octx.globalAlpha = 1.0; linkStrokeColor = "#ff4444"; linkStrokeWidth = 4; } else {
-                    let alpha = (isHigh || visibilityMode === 'all') ? linkOpacity : (isSearching ? linkOpacity * 0.05 : linkOpacity);
-                    octx.globalAlpha = alpha;
-                    if (linkMode === 'score') { linkStrokeColor = getScoreLinkGreyColor(l.value); linkStrokeWidth = (Math.sqrt(l.value) / 8) * (isHigh ? 2 : 1); } 
-                    else { linkStrokeColor = d3.color(document.getElementById('linkColor').value).brighter(1.5); linkStrokeWidth = 1 * (isHigh ? 2 : 1); }
-                }
-                octx.strokeStyle = linkStrokeColor;
-                const scaledLinkWidth = linkStrokeWidth * linkWidthMultiplier;
+                octx.globalAlpha = style.alpha;
+                octx.strokeStyle = style.color;
+                const scaledLinkWidth = style.width;
                 octx.lineWidth = scaledLinkWidth;
                 octx.stroke();
-                drawLinkDirectionArrow(octx, l.source, l.target, linkStrokeColor, scaledLinkWidth);
+                if (l._ssArrowVisible !== 'hide') drawLinkDirectionArrow(octx, l.source, l.target, style.color, scaledLinkWidth);
             });
 
             if (nodeVisibilityToggle === 'show') {
                 const currentNodeColorMode = document.getElementById('colorMode')?.value || 'layer';
                 const nowMs = Date.now();
                 drawNodes.forEach(n => {
-                    const isPath = pathNodes.has(n.id), isHigh = isSearching && selectedNodes.has(n.id);
+                    const isPath = pathNodes.has(n.id), isHigh = isSearching && effectiveSelection.has(n.id);
                     const nodeColor = currentNodeColorMode === 'collection'
                         ? getCollectionColorForNode(n.id, nowMs)
                         : (currentNodeColorMode === 'complex_pdbs' ? getComplexPdbColorForNode(n.id, nowMs) : n.col);
@@ -17487,7 +17743,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                         const label = getNodeLabelText(n);
                         if (!label) return;
                         const isPath = pathNodes.has(n.id);
-                        const isHigh = isSearching && selectedNodes.has(n.id);
+                        const isHigh = isSearching && effectiveSelection.has(n.id);
                         const nodeAlpha = (isHigh || isPath) ? 1 : (isSearching ? 0.08 : 1);
                         octx.globalAlpha = nodeAlpha * labelZoomAlpha;
                         octx.fillText(label, n.x, n.y);
@@ -20638,7 +20894,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     // Action Buttons
     document.getElementById('copyFrameBtn').onclick = () => captureFrame('copy');
-    document.getElementById('downloadFrameBtn').onclick = () => captureFrame('download');
+    document.getElementById('downloadFrameBtn').onclick = () => captureFrame('download', { actor: 'Human' });
 
     function bindStaticUiEventListeners() {
         const bindClick = (element, handler) => {
@@ -20730,6 +20986,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             aiServerUrlInput.addEventListener('input', () => aiToggleConnectColor(aiServerUrlInput));
         }
         bindClick(document.getElementById('ai-python-instructions-btn'), () => togglePythonInstructionsBox(true));
+        bindClick(document.getElementById('ai-python-record-btn'), () => togglePythonActionRecording());
         bindClick(document.getElementById('ai-run-script-btn'), () => runpythonpanelScript());
         bindClick(document.getElementById('ai-run-line-btn'), () => runpythonpanelLine());
         bindClick(document.getElementById('ai-copy-python-instructions'), () => copyPythonInstructions());
@@ -20749,7 +21006,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         if (aiFileInput) {
             aiFileInput.addEventListener('change', () => aiHandleFile(aiFileInput));
         }
-        bindClick(document.getElementById('ask-ai-btn'), () => toggleAiPanel());
+        // ask-ai-btn behavior is managed by aiRefreshAskAiButton() so it can
+        // switch between Ask AI and Close AI based on the active panel mode.
         bindClick(document.getElementById('ai-python-console-btn'), () => togglepythonpanelMode());
         bindClick(document.getElementById('collection-cycle-toggle-btn'), () => toggleCollectionColorCycle());
         bindClick(document.getElementById('downloadSessionDownloadBtn'), () => downloadSessionFiles());
