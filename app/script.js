@@ -354,6 +354,25 @@
         { type: 'function', function: { name: 'get_current_time', description: 'Get system time.' } },
         { type: 'function', function: { name: 'calculate_math', description: 'Solve math.', parameters: { type: 'object', properties: { eq: { type: 'string' } } } } },
         { type: 'function', function: { name: 'Search_and_select', description: 'Searches for and selects nodes. Put terms in quote marks (e.g. "lipid synthesis")', parameters: { type: 'object', properties: { query: { type: 'string' }, scope: { type: 'string', description: 'all|layer|centrality|annotation|localization|size or var::<file>::<variable>' } }, required: ['query'] } } },
+        { type: 'function', function: { name: 'Select_nodes', description: 'Selects specific nodes by ID.', parameters: { type: 'object', properties: { node_ids: { type: 'array', items: { type: 'string' }, description: 'List of node IDs to select.' }, mode: { type: 'string', description: 'replace|add|subtract|intersect|invert' }, animate: { type: 'boolean' } }, required: ['node_ids'] } } },
+        { type: 'function', function: { name: 'Select_neighbours', description: 'Expands from the currently selected nodes to include connected neighbours (same behavior as pressing the + hotkey).', parameters: { type: 'object', properties: { depth: { type: 'number', description: 'How many expansion steps to apply (default 1).' }, animate: { type: 'boolean' } } } } },
+        { type: 'function', function: { name: 'Get_variable_range', description: 'Gets the numerical range for a variable key.', parameters: { type: 'object', properties: { variable_key: { type: 'string' } }, required: ['variable_key'] } } },
+        { type: 'function', function: { name: 'Get_variable_categories', description: 'Gets all categories for a variable key.', parameters: { type: 'object', properties: { variable_key: { type: 'string' } }, required: ['variable_key'] } } },
+        { type: 'function', function: { name: 'Select_by_range', description: 'Selects nodes whose variable values fall within a min/max range. The mode controls how matches are combined with the current selection: replace starts a new selection, add includes matches, subtract removes matches, and intersect keeps only matches already selected.', parameters: { type: 'object', properties: { variable_key: { type: 'string' }, min: { type: 'number' }, max: { type: 'number' }, mode: { type: 'string', enum: ['replace', 'add', 'subtract', 'intersect'], description: 'Boolean selection mode: replace, add, subtract, or intersect. Defaults to replace.' }, animate: { type: 'boolean' } }, required: ['variable_key'] } } },
+        { type: 'function', function: { name: 'Select_by_category', description: 'Selects nodes that match a variable category. The mode controls how matches are combined with the current selection: replace starts a new selection, add includes matches, subtract removes matches, and intersect keeps only matches already selected.', parameters: { type: 'object', properties: { variable_key: { type: 'string' }, category: { type: 'string' }, mode: { type: 'string', enum: ['replace', 'add', 'subtract', 'intersect'], description: 'Boolean selection mode: replace, add, subtract, or intersect. Defaults to replace.' }, animate: { type: 'boolean' } }, required: ['variable_key', 'category'] } } },
+        { type: 'function', function: { name: 'Set_node_size', description: 'Sets the size of nodes. By default affects all nodes; pass node IDs in nodes to target specific nodes.', parameters: { type: 'object', properties: { nodes: { type: 'array', items: { type: 'string' }, description: 'Node IDs to affect, or omit to affect all nodes.' }, size: { type: 'number', description: 'Non-negative node size.' }, animate: { type: 'boolean' } }, required: ['size'] } } },
+        { type: 'function', function: { name: 'Set_node_glow', description: 'Sets the glow magnitude of nodes. By default affects all nodes; pass node IDs in nodes to target specific nodes.', parameters: { type: 'object', properties: { nodes: { type: 'array', items: { type: 'string' }, description: 'Node IDs to affect, or omit to affect all nodes.' }, magnitude: { type: 'number', description: 'Glow magnitude from 0 to 500.' }, animate: { type: 'boolean' } }, required: ['magnitude'] } } },
+        { type: 'function', function: { name: 'Set_node_visibility', description: 'Shows or hides nodes. By default affects all nodes; pass node IDs in nodes to target specific nodes.', parameters: { type: 'object', properties: { nodes: { type: 'array', items: { type: 'string' }, description: 'Node IDs to affect, or omit to affect all nodes.' }, visibility: { type: 'string', enum: ['show', 'hide'], description: 'Whether the targeted nodes should be shown or hidden.' }, animate: { type: 'boolean' } }, required: ['visibility'] } } },
+        { type: 'function', function: { name: 'Set_node_label_visibility', description: 'Shows or hides node labels. By default affects all nodes; pass node IDs in nodes to target specific nodes.', parameters: { type: 'object', properties: { nodes: { type: 'array', items: { type: 'string' }, description: 'Node IDs to affect, or omit to affect all nodes.' }, visibility: { type: 'string', enum: ['show', 'hide'], description: 'Whether labels for the targeted nodes should be shown or hidden.' }, animate: { type: 'boolean' } }, required: ['visibility'] } } },
+        { type: 'function', function: { name: 'View_node_label_options', description: 'Lists the available node label fields that can be displayed.' } },
+        { type: 'function', function: { name: 'Set_node_label', description: 'Sets the node label field. With the default all-node target, this also updates the manual node-label field control.', parameters: { type: 'object', properties: { nodes: { type: 'array', items: { type: 'string' }, description: 'Node IDs to target, or omit to set the global manual label field.' }, label_key: { type: 'string', description: 'Exact node label option value.' }, animate: { type: 'boolean' } }, required: ['label_key'] } } },
+        { type: 'function', function: { name: 'Set_node_size_by_variable', description: 'Scales node sizes using a numerical variable and magnitude.', parameters: { type: 'object', properties: { key: { type: 'string', description: 'Numerical variable key.' }, magnitude: { type: 'number', description: 'Scaling magnitude from 0 to 1.' }, animate: { type: 'boolean' } }, required: ['key', 'magnitude'] } } },
+        { type: 'function', function: { name: 'View_colour_links_by_options', description: 'Lists the available variables for colouring links.' } },
+        { type: 'function', function: { name: 'Color_links_by', description: 'Sets the link colouring variable and updates the manual link-colour control.', parameters: { type: 'object', properties: { link_variable_key: { type: 'string', description: 'Exact link colouring option value.' }, animate: { type: 'boolean' } }, required: ['link_variable_key'] } } },
+        { type: 'function', function: { name: 'Set_link_color', description: 'Sets the colour of links. By default affects all links; pass link IDs in links to target specific links.', parameters: { type: 'object', properties: { links: { type: 'array', items: { type: 'string' }, description: 'Link IDs to affect, or omit to affect all links.' }, color: { type: 'string', description: 'Six-digit hexadecimal colour.' }, animate: { type: 'boolean' } }, required: ['color'] } } },
+        { type: 'function', function: { name: 'Set_link_label_visibility', description: 'Shows or hides link labels and updates the manual link-label visibility control.', parameters: { type: 'object', properties: { links: { type: 'array', items: { type: 'string' }, description: 'Link IDs to target, or omit to set the global manual control.' }, visibility: { type: 'string', enum: ['show', 'hide'] }, animate: { type: 'boolean' } }, required: ['visibility'] } } },
+        { type: 'function', function: { name: 'View_link_label_options', description: 'Lists the available fields that can be used as link labels.' } },
+        { type: 'function', function: { name: 'Set_link_label', description: 'Sets the link label field and updates the manual link-label field control.', parameters: { type: 'object', properties: { links: { type: 'array', items: { type: 'string' }, description: 'Link IDs to target, or omit to set the global manual label field.' }, label_key: { type: 'string', description: 'Exact link label field value.' }, animate: { type: 'boolean' } }, required: ['label_key'] } } },
         { type: 'function', function: { name: 'View_node_IDs', description: 'Views IDs of selected nodes.' } },
         { type: 'function', function: { name: 'View_preferred_name', description: 'Views preferred names of selected nodes.' } },
         { type: 'function', function: { name: 'View_annotation_data', description: 'Views annotation data of selected nodes. This is the more important protein information to view.' } },
@@ -430,7 +449,7 @@
         }
     ];
     const aiChatHistory = [];
-    const AI_MAIN_SYSTEM_PROMPT = 'You are an AI agent inside the StringScape app. StringScape is an app for visualising protein-protein interaction networks from the STRING database. Use multiple tool calls sequentially to gather information before answering questions. Most questions will require at least one tool call. You can also use tool calls to do things in the app that the user asks you to do. DO NOT include \"message:\" at the start of your content messages. The user is in no rush so use as many tool calls as you need until you find the answer. When you use Run_python_logic, `app_data` already contains Python-ready variable arrays in `app_data["python_variables"]`. For variable stats, always use this pattern: `vals = app_data["python_variables"].get("size", [])` or `vals = app_data["python_variables"].get(variable_name, [])`; then clean values with `clean = [float(v) for v in vals if v is not None and str(v).strip() != ""]`. Do not loop over `app_data["nodes"]` to find these variables because it may be empty. Do not write "import app_data" in Python — `app_data` is already injected as a global variable; reference it directly. These are some of the avalible python_variables: layer, centrality, eigen, pdb_structure_count, embeddings, collection, annotation, localization, size, and there are many more (use print(app_data["python_variables"].keys()) to see them all). Important: Always end each reply with a message reponce, very brefily saying what you have done.';
+    const AI_MAIN_SYSTEM_PROMPT = 'You are an AI agent inside the StringScape app. StringScape is an app for visualising protein-protein interaction networks from the STRING database. Use multiple tool calls sequentially to gather information before answering questions. Most questions will require at least one tool call. You can also use tool calls to do things in the app that the user asks you to do. DO NOT include \"message:\" at the start of your content messages. The user is in no rush so use as many tool calls as you need until you find the answer. When you use Run_python_logic, `app_data` already contains Python-ready variable arrays in `app_data["python_variables"]`. For variable stats, always use this pattern: `vals = app_data["python_variables"].get("size", [])` or `vals = app_data["python_variables"].get(variable_name, [])`; then clean values with `clean = [float(v) for v in vals if v is not None and str(v).strip() != ""]`. Do not loop over `app_data["nodes"]` to find these variables because it may be empty. Do not write "import app_data" in Python — `app_data` is already injected as a global variable; reference it directly. These are some of the available python_variables: layer, centrality, eigen, pdb_structure_count, embeddings, collection, annotation, localization, size, and there are many more (use print(app_data["python_variables"].keys()) to see them all). Important: Always end each reply with a message response, very breifly saying what you have done.';
     const AI_FILE_SUMMARY_PROMPT = "Summarize the key things in this file fragment that are related to the users question. Be concise.";
     const aiChatTranscript = [];
     let aiAttachedItems = [];
@@ -488,8 +507,8 @@
         - ss.list_variables() -> Returns {"status": "success", "variables": [{key, label, type}]}
         - ss.get_variable_range(variable_key) -> Returns {"status", "variable_key", "min", "max", "message"}
         - ss.get_variable_categories(variable_key) -> Returns {"status", "variable_key", "categories", "message"}
-        - ss.select_by_range(variable_key, min=None, max=None, animate=False) -> Returns {"status", "variable_key", "selected_node_ids", "selected_count"}
-        - ss.select_by_category(variable_key, category, animate=False) -> Returns {"status", "variable_key", "selected_node_ids", "selected_count"}
+        - ss.select_by_range(variable_key, min=None, max=None, animate=False, mode='replace') -> Returns {"status", "variable_key", "mode", "selected_node_ids", "selected_count"}; mode combines matches with the current selection: replace starts a new selection, add includes matches, subtract removes matches, and intersect keeps only matches already selected.
+        - ss.select_by_category(variable_key, category, animate=False, mode='replace') -> Returns {"status", "variable_key", "mode", "selected_node_ids", "selected_count"}; mode combines matches with the current selection: replace starts a new selection, add includes matches, subtract removes matches, and intersect keeps only matches already selected.
         - ss.set_node_size(nodes='all', size=10), ss.set_node_glow(nodes='all', magnitude=0) -> Returns {"status", "affected_count", "message"}
         - ss.set_node_visibility(nodes='all', visibility='show'), ss.set_node_label_visibility(nodes='all', visibility='show') -> Returns {"status", "affected_count", "message"}
         - ss.set_node_label(nodes='all', label_key='') -> Returns {"status", "affected_count"}
@@ -755,15 +774,42 @@
         ]);
     }
 
-    function aiRecordSelectByRangeHistory(variableKey, minValue, maxValue, actor = 'Human') {
+    function aiRecordSelectByRangeHistory(variableKey, minValue, maxValue, actor = 'Human', mode = 'replace') {
+        const selectionMode = ['replace', 'add', 'subtract', 'intersect'].includes(mode) ? mode : 'replace';
         aiAppendActionHistory(actor, `Selects nodes with ${variableKey === 'centrality' ? 'Centrality' : variableKey} between ${minValue} and ${maxValue}`, [
-            `ss.select_by_range(${aiFormatPythonSingleQuotedString(variableKey)}, min=${minValue}, max=${maxValue})`
+            `ss.select_by_range(${aiFormatPythonSingleQuotedString(variableKey)}, min=${minValue}, max=${maxValue}, mode=${aiFormatPythonSingleQuotedString(selectionMode)})`
         ]);
     }
 
-    function aiRecordSelectByCategoryHistory(variableKey, category, actor = 'Human') {
+    function aiRecordSelectByCategoryHistory(variableKey, category, actor = 'Human', mode = 'replace') {
+        const selectionMode = ['replace', 'add', 'subtract', 'intersect'].includes(mode) ? mode : 'replace';
         aiAppendActionHistory(actor, `Selected nodes in ${variableKey === 'localization' ? 'protein localisation' : variableKey} category ${category}`, [
-            `ss.select_by_category(${aiFormatPythonSingleQuotedString(variableKey)}, ${aiFormatPythonSingleQuotedString(category)})`
+            `ss.select_by_category(${aiFormatPythonSingleQuotedString(variableKey)}, ${aiFormatPythonSingleQuotedString(category)}, mode=${aiFormatPythonSingleQuotedString(selectionMode)})`
+        ]);
+    }
+
+    function aiRecordSelectNeighboursHistory(nodeId, depth, actor = 'Human') {
+        const cleanNodeId = String(nodeId || '').trim();
+        const cleanDepth = Math.max(1, Math.floor(Number(depth) || 1));
+        if (!cleanNodeId) return;
+        aiAppendActionHistory(actor, `Selected neighbours of ${cleanNodeId} (depth ${cleanDepth})`, [
+            `ss.select_neighbors(${aiFormatPythonSingleQuotedString(cleanNodeId)}, depth=${cleanDepth})`
+        ]);
+    }
+
+    function aiRecordGetVariableRangeHistory(variableKey, actor = 'Human') {
+        const cleanKey = String(variableKey || '').trim();
+        if (!cleanKey) return;
+        aiAppendActionHistory(actor, `Viewed range for ${cleanKey}`, [
+            `ss.get_variable_range(${aiFormatPythonSingleQuotedString(cleanKey)})`
+        ]);
+    }
+
+    function aiRecordGetVariableCategoriesHistory(variableKey, actor = 'Human') {
+        const cleanKey = String(variableKey || '').trim();
+        if (!cleanKey) return;
+        aiAppendActionHistory(actor, `Viewed categories for ${cleanKey}`, [
+            `ss.get_variable_categories(${aiFormatPythonSingleQuotedString(cleanKey)})`
         ]);
     }
 
@@ -1273,8 +1319,8 @@
         lines.push('- ss.list_variables() -> Returns {"status": "success", "variables": [{key, label, type}]}');
         lines.push('- ss.get_variable_range(variable_key) -> Returns {"status", "variable_key", "min", "max", "message"}');
         lines.push('- ss.get_variable_categories(variable_key) -> Returns {"status", "variable_key", "categories", "message"}');
-        lines.push('- ss.select_by_range(variable_key, min=None, max=None, animate=False) -> Returns {"status", "variable_key", "selected_node_ids", "selected_count"}');
-        lines.push('- ss.select_by_category(variable_key, category, animate=False) -> Returns {"status", "variable_key", "selected_node_ids", "selected_count"}');
+        lines.push('- ss.select_by_range(variable_key, min=None, max=None, animate=False, mode="replace") -> Returns {"status", "variable_key", "mode", "selected_node_ids", "selected_count"}; mode is replace, add, subtract, or intersect and controls how matches combine with the current selection.');
+        lines.push('- ss.select_by_category(variable_key, category, animate=False, mode="replace") -> Returns {"status", "variable_key", "mode", "selected_node_ids", "selected_count"}; mode is replace, add, subtract, or intersect and controls how matches combine with the current selection.');
         lines.push('- ss.set_node_size(nodes="all", size=10), ss.set_node_glow(nodes="all", magnitude=0) -> Returns {"status", "affected_count", "message"}');
         lines.push('- ss.set_node_visibility(nodes="all", visibility="show"), ss.set_node_label_visibility(nodes="all", visibility="show") -> Returns {"status", "affected_count", "message"}');
         lines.push('- ss.set_node_label(nodes="all", label_key="") -> Returns {"status", "affected_count"}');
@@ -2477,6 +2523,12 @@
             if (key === 'characterization') return getCharacterizationValue(id);
             if (key === 'localization') return proteinMetadata.get(id)?.localization;
             if (key === 'biological_process') return proteinMetadata.get(id)?.biological_process;
+            if (key === 'collection') {
+                const memberships = [...collections.entries()]
+                    .filter(([, collection]) => collection?.nodeIds?.has(id))
+                    .map(([name]) => name);
+                return memberships.length ? memberships.join(', ') : 'No Collection';
+            }
             const entry = variableEntry(key); const parts = String(entry?.key || key).split('::');
             if (parts.length >= 3) return accessoryVariableValues?.[parts[1]]?.[parts.slice(2).join('::')]?.get(id);
             for (const vars of Object.values(accessoryVariableValues || {})) if (vars?.[key] instanceof Map && vars[key].has(id)) return vars[key].get(id);
@@ -2540,34 +2592,122 @@
                     links.forEach(link => { const a = String(link.source?.id ?? link.source), b = String(link.target?.id ?? link.target); if (adjacent.has(a) && adjacent.has(b)) { adjacent.get(a).add(b); adjacent.get(b).add(a); } });
                     const seen = new Set([nodeId]); let frontier = new Set([nodeId]);
                     for (let step = 0; step < depth; step++) { const next = new Set(); frontier.forEach(id => (adjacent.get(id) || []).forEach(neighbor => { if (!seen.has(neighbor)) { seen.add(neighbor); next.add(neighbor); } })); frontier = next; if (!frontier.size) break; }
+                    aiRecordSelectNeighboursHistory(nodeId, depth, 'AI');
                     const neighborIds = [...seen].filter(id => id !== nodeId); selectNodes(activeNodes().filter(node => seen.has(String(node.id))), false, 'Python API neighbor selection', null, false, { actor: 'AI' }); queueDraw(animate);
                     return result('success', { node_id: nodeId, depth, neighbor_node_ids: neighborIds, selected_node_ids: selected() });
                 }
                 if (method === 'list_variables') return result('success', { variables: (getVisibleColorModeVariableEntries?.() || []).map(({ key, label, type }) => ({ key, label, type })) });
                 if (method === 'get_variable_range') {
-                    const key = String(args.variable_key ?? args.key ?? ''); const values = allNodes().map(n => +variableValue(n, key)).filter(Number.isFinite);
+                    const key = String(args.variable_key ?? args.key ?? '').trim();
+                    const entries = getVisibleColorModeVariableEntries?.() || [];
+                    const availableKeys = entries.map(entry => entry.key);
+                    if (!entries.some(entry => entry.key === key)) {
+                        aiRecordGetVariableRangeHistory(key, 'AI');
+                        return result('warning', { variable_key: key, available_variable_keys: availableKeys, message: `Variable key "${key}" was not found. Available variable keys: ${availableKeys.join(', ')}` });
+                    }
+                    const values = allNodes().map(n => +variableValue(n, key)).filter(Number.isFinite);
+                    aiRecordGetVariableRangeHistory(key, 'AI');
                     return values.length ? result('success', { variable_key: key, min: Math.min(...values), max: Math.max(...values) }) : result('warning', { variable_key: key, message: 'No numerical values were found.' });
                 }
                 if (method === 'get_variable_categories') {
-                    const key = String(args.variable_key ?? args.key ?? ''); const values = allNodes().map(n => variableValue(n, key)); const categories = [...new Set(values.filter(v => v != null && String(v).trim() !== '').map(v => String(v).trim()))];
-                    if (values.some(v => v == null || String(v).trim() === '')) categories.push('N/A');
+                    const key = String(args.variable_key ?? args.key ?? '').trim();
+                    const entries = getVisibleColorModeVariableEntries?.() || [];
+                    const availableKeys = entries.map(entry => entry.key);
+                    if (!entries.some(entry => entry.key === key)) {
+                        aiRecordGetVariableCategoriesHistory(key, 'AI');
+                        return result('warning', { variable_key: key, available_variable_keys: availableKeys, message: `Variable key "${key}" was not found. Available variable keys: ${availableKeys.join(', ')}` });
+                    }
+                    let categories;
+                    if (key === 'collection') {
+                        categories = [...collections.keys()];
+                        if (allNodes().some(node => ![...collections.values()].some(collection => collection?.nodeIds?.has(String(node.id))))) {
+                            categories.push('No Collection');
+                        }
+                    } else {
+                        const values = allNodes().map(n => variableValue(n, key));
+                        categories = [...new Set(values.filter(v => v != null && String(v).trim() !== '').map(v => String(v).trim()))];
+                        if (values.some(v => v == null || String(v).trim() === '')) categories.push('N/A');
+                    }
+                    aiRecordGetVariableCategoriesHistory(key, 'AI');
                     return result(categories.length ? 'success' : 'warning', { variable_key: key, categories });
                 }
                 if (method === 'select_by_range' || method === 'select_by_category') {
-                    const key = String(args.variable_key ?? args.key ?? ''); const lower = args.min == null ? -Infinity : +args.min, upper = args.max == null ? Infinity : +args.max;
+                    const key = String(args.variable_key ?? args.key ?? '');
+                    const mode = normal(args.mode || 'replace');
+                    if (!['replace', 'add', 'subtract', 'intersect'].includes(mode)) return result('warning', { variable_key: key, mode, message: 'mode must be replace, add, subtract, or intersect.' });
+                    const lower = args.min == null ? -Infinity : +args.min, upper = args.max == null ? Infinity : +args.max;
                     const requestedCategory = String(args.category ?? '').trim();
                     const matched = allNodes().filter(node => method === 'select_by_range' ? (Number.isFinite(+variableValue(node, key)) && +variableValue(node, key) >= lower && +variableValue(node, key) <= upper) : normalizedVariableValue(node, key) === requestedCategory);
-                    if (method === 'select_by_range') aiRecordSelectByRangeHistory(key, args.min, args.max, 'AI');
-                    else aiRecordSelectByCategoryHistory(key, args.category, 'AI');
-                    selectNodes(matched, false, `Python API ${method}`, null, false, { actor: 'AI' }); queueDraw(animate); return result(matched.length ? 'success' : 'warning', { variable_key: key, selected_node_ids: selected(), selected_count: selected().length });
+                    if (method === 'select_by_range') aiRecordSelectByRangeHistory(key, args.min, args.max, 'AI', mode);
+                    else aiRecordSelectByCategoryHistory(key, args.category, 'AI', mode);
+                    const matchedIds = new Set(matched.map(node => String(node.id)));
+                    const currentIds = new Set(selected().map(String));
+                    const nextIds = mode === 'replace' ? matchedIds
+                        : mode === 'add' ? new Set([...currentIds, ...matchedIds])
+                        : mode === 'subtract' ? new Set([...currentIds].filter(id => !matchedIds.has(id)))
+                        : new Set([...currentIds].filter(id => matchedIds.has(id)));
+                    selectNodes(allNodes().filter(node => nextIds.has(String(node.id))), false, `Python API ${method}`, null, false, { actor: 'AI' });
+                    queueDraw(animate);
+                    return result(matched.length ? 'success' : 'warning', { variable_key: key, mode, selected_node_ids: selected(), selected_count: selected().length });
                 }
                 if (method === 'set_node_size' || method === 'set_node_glow' || method === 'set_node_visibility' || method === 'set_node_label_visibility' || method === 'set_node_label') {
                     const target = args.nodes ?? 'all'; const targets = targeted(allNodes(), target, n => String(n.id));
-                    if (method === 'set_node_size') { const size = +args.size; if (!Number.isFinite(size) || size < 0) return result('warning', { message: 'size must be a non-negative number.' }); targets.forEach(n => n._ssSize = size); aiRecordSetNodeSizeHistory(size, 'AI'); }
+                    if (method === 'set_node_size') {
+                        const size = +args.size;
+                        if (!Number.isFinite(size) || size < 0) return result('warning', { message: 'size must be a non-negative number.' });
+                        targets.forEach(n => n._ssSize = size * 6);
+                        const sizeSlider = document.getElementById('nodeSizeSlider');
+                        if (sizeSlider) {
+                            const min = Number(sizeSlider.min);
+                            const max = Number(sizeSlider.max);
+                            sizeSlider.value = String(Math.min(Number.isFinite(max) ? max : size, Math.max(Number.isFinite(min) ? min : 0, size)));
+                            const sizeValue = document.getElementById('val-nsiz');
+                            if (sizeValue) sizeValue.innerText = sizeSlider.value;
+                        }
+                        aiRecordSetNodeSizeHistory(size, 'AI');
+                    }
                     if (method === 'set_node_glow') { const magnitude = +args.magnitude; if (!(magnitude >= 0 && magnitude <= 500)) return result('warning', { message: 'magnitude must be between 0 and 500.' }); targets.forEach(n => n._ssGlow = magnitude); aiRecordSetNodeGlowHistory(magnitude, 'AI'); }
-                    if (method === 'set_node_visibility') { if (!['show','hide'].includes(args.visibility)) return result('warning', { message: 'visibility must be show or hide.' }); targets.forEach(n => n._ssVisible = args.visibility); aiRecordSetNodeVisibilityHistory(args.visibility, 'AI'); }
-                    if (method === 'set_node_label_visibility') { if (!['show','hide'].includes(args.visibility)) return result('warning', { message: 'visibility must be show or hide.' }); targets.forEach(n => n._ssLabelVisible = args.visibility); aiRecordSetNodeLabelVisibilityHistory(args.visibility, 'AI'); }
-                    if (method === 'set_node_label') { const key = String(args.label_key ?? args.key ?? ''); targets.forEach(n => n._ssLabelKey = key); aiRecordSetNodeLabelHistory(key, 'AI'); }
+                    if (method === 'set_node_visibility') {
+                        if (!['show','hide'].includes(args.visibility)) return result('warning', { message: 'visibility must be show or hide.' });
+                        const appliesToAll = target === 'all' || target == null;
+                        if (appliesToAll) {
+                            allNodes().forEach(n => delete n._ssVisible);
+                            nodeVisibilityToggle = args.visibility;
+                            document.getElementById('nodeShow')?.classList.toggle('active', args.visibility === 'show');
+                            document.getElementById('nodeHide')?.classList.toggle('active', args.visibility === 'hide');
+                        } else {
+                            targets.forEach(n => n._ssVisible = args.visibility);
+                        }
+                        aiRecordSetNodeVisibilityHistory(args.visibility, 'AI');
+                    }
+                    if (method === 'set_node_label_visibility') {
+                        if (!['show','hide'].includes(args.visibility)) return result('warning', { message: 'visibility must be show or hide.' });
+                        const appliesToAll = target === 'all' || target == null;
+                        if (appliesToAll) {
+                            allNodes().forEach(n => delete n._ssLabelVisible);
+                            nodeLabelToggle = args.visibility;
+                            document.getElementById('nodeLabelShow')?.classList.toggle('active', args.visibility === 'show');
+                            document.getElementById('nodeLabelHide')?.classList.toggle('active', args.visibility === 'hide');
+                            const labelContainer = document.getElementById('nodeLabelFieldContainer');
+                            if (labelContainer) labelContainer.style.display = args.visibility === 'show' ? 'block' : 'none';
+                        } else {
+                            targets.forEach(n => n._ssLabelVisible = args.visibility);
+                        }
+                        aiRecordSetNodeLabelVisibilityHistory(args.visibility, 'AI');
+                    }
+                    if (method === 'set_node_label') {
+                        const key = String(args.label_key ?? args.key ?? '').trim();
+                        const appliesToAll = target === 'all' || target == null;
+                        if (appliesToAll) {
+                            allNodes().forEach(n => delete n._ssLabelKey);
+                            nodeLabelField = key;
+                            const labelField = document.getElementById('nodeLabelField');
+                            if (labelField && [...labelField.options].some(option => option.value === key)) labelField.value = key;
+                        } else {
+                            targets.forEach(n => n._ssLabelKey = key);
+                        }
+                        aiRecordSetNodeLabelHistory(key, 'AI');
+                    }
                     queueDraw(animate); return result('success', { affected_count: targets.length });
                 }
                 if (method === 'set_node_size_by_variable') {
@@ -2575,12 +2715,58 @@
                     const vals = allNodes().map(n => +variableValue(n, key)).filter(Number.isFinite); if (!vals.length) return result('warning', { key, message: 'No numerical values were found.' }); const min = Math.min(...vals), max = Math.max(...vals);
                     allNodes().forEach(n => { const v = +variableValue(n, key); if (Number.isFinite(v)) n._ssSize = Math.max(1, 5 + ((v - min) / (max - min || 1)) * magnitude * 30); }); aiRecordSetNodeSizeByVariableHistory(key, magnitude, 'AI'); queueDraw(animate); return result('success', { key, magnitude });
                 }
-                if (method === 'color_links_by') { const key = String(args.link_variable_key ?? args.key ?? ''); const select = document.getElementById('linkMode'); if (select && [...select.options].some(o => o.value === key)) select.value = key; aiRecordColorLinksByHistory(key, 'AI'); queueDraw(animate); return result('success', { link_variable_key: key }); }
+                if (method === 'color_links_by') {
+                    const key = String(args.link_variable_key ?? args.key ?? '').trim();
+                    const select = document.getElementById('linkMode');
+                    if (!select || ![...select.options].some(option => option.value === key)) return result('warning', { link_variable_key: key, message: 'Link colouring option was not found.' });
+                    select.value = key;
+                    aiRecordColorLinksByHistory(key, 'AI');
+                    queueDraw(animate);
+                    return result('success', { link_variable_key: key });
+                }
                 if (method.startsWith('set_link_')) {
                     const target = args.links ?? 'all'; const targets = targeted(links, target, linkId);
-                    if (method === 'set_link_color') { const color = String(args.color || ''); if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return result('warning', { message: 'color must be a hex colour.' }); targets.forEach(l => l._ssColor = color); aiRecordSetLinkColorHistory(color, 'AI'); }
-                    if (method === 'set_link_label_visibility' || method === 'set_link_direction_arrow_visibility') { if (!['show','hide'].includes(args.visibility)) return result('warning', { message: 'visibility must be show or hide.' }); targets.forEach(l => l[method === 'set_link_label_visibility' ? '_ssLabelVisible' : '_ssArrowVisible'] = args.visibility); if (method === 'set_link_label_visibility') aiRecordSetLinkLabelVisibilityHistory(args.visibility, 'AI'); else aiRecordSetLinkDirectionArrowVisibilityHistory(args.visibility, 'AI'); }
-                    if (method === 'set_link_label') { const key = String(args.label_key ?? args.key ?? ''); targets.forEach(l => l._ssLabelKey = key); aiRecordSetLinkLabelHistory(key, 'AI'); }
+                    if (method === 'set_link_color') {
+                        const color = String(args.color || '').trim();
+                        if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return result('warning', { message: 'color must be a hex colour.' });
+                        const appliesToAll = target === 'all' || target == null;
+                        if (appliesToAll) {
+                            links.forEach(link => delete link._ssColor);
+                            const colorInput = document.getElementById('linkColor');
+                            if (colorInput) colorInput.value = color;
+                        } else {
+                            targets.forEach(l => l._ssColor = color);
+                        }
+                        aiRecordSetLinkColorHistory(color, 'AI');
+                    }
+                    if (method === 'set_link_label_visibility' || method === 'set_link_direction_arrow_visibility') {
+                        if (!['show','hide'].includes(args.visibility)) return result('warning', { message: 'visibility must be show or hide.' });
+                        const appliesToAll = target === 'all' || target == null;
+                        if (method === 'set_link_label_visibility' && appliesToAll) {
+                            links.forEach(link => delete link._ssLabelVisible);
+                            linkLabelToggle = args.visibility;
+                            document.getElementById('linkLabelShow')?.classList.toggle('active', args.visibility === 'show');
+                            document.getElementById('linkLabelHide')?.classList.toggle('active', args.visibility === 'hide');
+                            const labelContainer = document.getElementById('linkLabelFieldContainer');
+                            if (labelContainer) labelContainer.style.display = args.visibility === 'show' ? 'block' : 'none';
+                        } else {
+                            targets.forEach(l => l[method === 'set_link_label_visibility' ? '_ssLabelVisible' : '_ssArrowVisible'] = args.visibility);
+                        }
+                        if (method === 'set_link_label_visibility') aiRecordSetLinkLabelVisibilityHistory(args.visibility, 'AI'); else aiRecordSetLinkDirectionArrowVisibilityHistory(args.visibility, 'AI');
+                    }
+                    if (method === 'set_link_label') {
+                        const key = String(args.label_key ?? args.key ?? '').trim();
+                        const appliesToAll = target === 'all' || target == null;
+                        if (appliesToAll) {
+                            links.forEach(link => delete link._ssLabelKey);
+                            linkLabelField = key;
+                            const labelField = document.getElementById('linkLabelField');
+                            if (labelField && [...labelField.options].some(option => option.value === key)) labelField.value = key;
+                        } else {
+                            targets.forEach(l => l._ssLabelKey = key);
+                        }
+                        aiRecordSetLinkLabelHistory(key, 'AI');
+                    }
                     if (method === 'set_link_width') { const magnitude = +args.magnitude; if (!(magnitude >= 0 && magnitude <= 5)) return result('warning', { message: 'magnitude must be between 0 and 5.' }); targets.forEach(l => l._ssWidth = magnitude); aiRecordSetLinkWidthHistory(magnitude, 'AI'); }
                     if (method === 'set_link_opacity') { const opacity = +args.opacity; if (!(opacity >= 0 && opacity <= 1)) return result('warning', { message: 'opacity must be between 0 and 1.' }); targets.forEach(l => l._ssOpacity = opacity); aiRecordSetLinkOpacityHistory(opacity, 'AI'); }
                     queueDraw(animate); return result('success', { affected_count: targets.length });
@@ -2955,6 +3141,157 @@
             }
         }
         if (toolName === 'Search_and_select') return aiSearchAndSelect(args.query, args.scope || 'all', { actor: 'AI' });
+        if (toolName === 'Select_nodes') {
+            const rawNodeIds = args.node_ids ?? args.nodes ?? args.ids ?? args.node_id ?? args.id;
+            const nodeIds = Array.isArray(rawNodeIds)
+                ? rawNodeIds.map(id => String(id).trim()).filter(Boolean)
+                : String(rawNodeIds || '').split(/[\s,]+/).map(id => id.trim()).filter(Boolean);
+            return JSON.parse(stringScapePythonBridge.call_json('select', {
+                node_ids: nodeIds,
+                mode: String(args.mode || 'replace').trim() || 'replace',
+                animate: args.animate === true
+            }));
+        }
+        if (toolName === 'Select_neighbours') {
+            try {
+                const previousSelection = new Set(getEffectiveSelectedNodesSet());
+                if (!previousSelection.size) {
+                    return { status: 'warning', previous_count: 0, selected_count: 0, selected_node_ids: [], message: 'No nodes are currently selected.' };
+                }
+
+                const depth = Math.max(1, Math.floor(+args.depth || 1));
+                let expanded = new Set(previousSelection);
+                for (let i = 0; i < depth; i++) {
+                    expanded = modifySelection(1, { actor: 'AI' });
+                }
+
+                selectedNodes = expanded;
+                aiLastSentSelectedNodes = new Set(expanded);
+                draw();
+                aiRecordExpandHistory('AI');
+                return {
+                    status: 'success',
+                    depth,
+                    previous_count: previousSelection.size,
+                    selected_count: expanded.size,
+                    selected_node_ids: Array.from(expanded),
+                    message: `Expanded selection from ${previousSelection.size} to ${expanded.size} nodes.`
+                };
+            } catch (e) {
+                return { status: 'error', message: `Error expanding selection: ${e.message}` };
+            }
+        }
+        if (toolName === 'Get_variable_range') {
+            return JSON.parse(stringScapePythonBridge.call_json('get_variable_range', {
+                variable_key: String(args.variable_key ?? args.key ?? '').trim()
+            }));
+        }
+        if (toolName === 'Get_variable_categories') {
+            return JSON.parse(stringScapePythonBridge.call_json('get_variable_categories', {
+                variable_key: String(args.variable_key ?? args.key ?? '').trim()
+            }));
+        }
+        if (toolName === 'Select_by_range') {
+            return JSON.parse(stringScapePythonBridge.call_json('select_by_range', {
+                variable_key: String(args.variable_key ?? args.key ?? '').trim(),
+                min: args.min,
+                max: args.max,
+                mode: String(args.mode || 'replace').trim() || 'replace',
+                animate: args.animate === true
+            }));
+        }
+        if (toolName === 'Select_by_category') {
+            return JSON.parse(stringScapePythonBridge.call_json('select_by_category', {
+                variable_key: String(args.variable_key ?? args.key ?? '').trim(),
+                category: String(args.category ?? '').trim(),
+                mode: String(args.mode || 'replace').trim() || 'replace',
+                animate: args.animate === true
+            }));
+        }
+        if (toolName === 'Set_node_size') {
+            return JSON.parse(stringScapePythonBridge.call_json('set_node_size', {
+                nodes: args.nodes ?? 'all',
+                size: args.size,
+                animate: args.animate === true
+            }));
+        }
+        if (toolName === 'Set_node_glow') {
+            return JSON.parse(stringScapePythonBridge.call_json('set_node_glow', {
+                nodes: args.nodes ?? 'all',
+                magnitude: args.magnitude,
+                animate: args.animate === true
+            }));
+        }
+        if (toolName === 'Set_node_visibility') {
+            return JSON.parse(stringScapePythonBridge.call_json('set_node_visibility', {
+                nodes: args.nodes ?? 'all',
+                visibility: String(args.visibility || '').trim().toLowerCase(),
+                animate: args.animate === true
+            }));
+        }
+        if (toolName === 'Set_node_label_visibility') {
+            return JSON.parse(stringScapePythonBridge.call_json('set_node_label_visibility', {
+                nodes: args.nodes ?? 'all',
+                visibility: String(args.visibility || '').trim().toLowerCase(),
+                animate: args.animate === true
+            }));
+        }
+        if (toolName === 'View_node_label_options') {
+            const options = Array.from(document.getElementById('nodeLabelField')?.options || [])
+                .map(option => ({ value: option.value, label: option.textContent }));
+            return options.length ? { status: 'success', options } : { status: 'warning', options: [], message: 'No node label options are available.' };
+        }
+        if (toolName === 'Set_node_label') {
+            return JSON.parse(stringScapePythonBridge.call_json('set_node_label', {
+                nodes: args.nodes ?? 'all',
+                label_key: String(args.label_key ?? args.key ?? '').trim(),
+                animate: args.animate === true
+            }));
+        }
+        if (toolName === 'Set_node_size_by_variable') {
+            return JSON.parse(stringScapePythonBridge.call_json('set_node_size_by_variable', {
+                key: String(args.key ?? args.variable_key ?? '').trim(),
+                magnitude: args.magnitude,
+                animate: args.animate === true
+            }));
+        }
+        if (toolName === 'View_colour_links_by_options') {
+            const options = Array.from(document.getElementById('linkMode')?.options || [])
+                .map(option => ({ value: option.value, label: option.textContent }));
+            return options.length ? { status: 'success', options } : { status: 'warning', options: [], message: 'No link colouring options are available.' };
+        }
+        if (toolName === 'Color_links_by') {
+            return JSON.parse(stringScapePythonBridge.call_json('color_links_by', {
+                link_variable_key: String(args.link_variable_key ?? args.key ?? '').trim(),
+                animate: args.animate === true
+            }));
+        }
+        if (toolName === 'Set_link_color') {
+            return JSON.parse(stringScapePythonBridge.call_json('set_link_color', {
+                links: args.links ?? 'all',
+                color: String(args.color || '').trim(),
+                animate: args.animate === true
+            }));
+        }
+        if (toolName === 'Set_link_label_visibility') {
+            return JSON.parse(stringScapePythonBridge.call_json('set_link_label_visibility', {
+                links: args.links ?? 'all',
+                visibility: String(args.visibility || '').trim().toLowerCase(),
+                animate: args.animate === true
+            }));
+        }
+        if (toolName === 'View_link_label_options') {
+            const options = Array.from(document.getElementById('linkLabelField')?.options || [])
+                .map(option => ({ value: option.value, label: option.textContent }));
+            return options.length ? { status: 'success', options } : { status: 'warning', options: [], message: 'No link label options are available.' };
+        }
+        if (toolName === 'Set_link_label') {
+            return JSON.parse(stringScapePythonBridge.call_json('set_link_label', {
+                links: args.links ?? 'all',
+                label_key: String(args.label_key ?? args.key ?? '').trim(),
+                animate: args.animate === true
+            }));
+        }
         if (toolName === 'View_node_IDs') return aiBuildSelectedTable(node => node.id);
         if (toolName === 'View_preferred_name') return aiBuildSelectedTable(node => {
             return getPreferredProteinName(node.id) || 'Unknown';
@@ -3011,9 +3348,10 @@
                 const entries = getVisibleColorModeVariableEntries();
                 if (!entries || !entries.length) return 'No variables available.';
                 const lines = entries.map(e => {
-                    if (e.min !== null && e.max !== null) return `${e.label} (numeric, range: ${e.min} to ${e.max})`;
-                    if (e.categories !== null) return `${e.label} (categorical, ${e.categories} categories)`;
-                    return `${e.label}`;
+                    const type = e.type || 'Unknown type';
+                    if (e.min !== null && e.max !== null) return `${e.key}: ${e.label} (${type}, range: ${e.min} to ${e.max})`;
+                    if (e.categories !== null) return `${e.key}: ${e.label} (${type}, ${e.categories} categories)`;
+                    return `${e.key}: ${e.label} (${type})`;
                 }).join('\n');
                 return `Available variables:\n${lines}`;
             } catch (e) { return 'Error viewing variables: ' + e.message; }
@@ -3420,8 +3758,8 @@ class _StringScapeAPI:
     def list_variables(self): return self._call('list_variables')
     def get_variable_range(self, variable_key): return self._call('get_variable_range', variable_key=variable_key)
     def get_variable_categories(self, variable_key): return self._call('get_variable_categories', variable_key=variable_key)
-    def select_by_range(self, variable_key, min=None, max=None, animate=False): return self._call('select_by_range', variable_key=variable_key, min=min, max=max, animate=animate)
-    def select_by_category(self, variable_key, category, animate=False): return self._call('select_by_category', variable_key=variable_key, category=category, animate=animate)
+    def select_by_range(self, variable_key, min=None, max=None, animate=False, mode='replace'): return self._call('select_by_range', variable_key=variable_key, min=min, max=max, mode=mode, animate=animate)
+    def select_by_category(self, variable_key, category, animate=False, mode='replace'): return self._call('select_by_category', variable_key=variable_key, category=category, mode=mode, animate=animate)
     def set_node_size(self, nodes='all', size=5, animate=False): return self._call('set_node_size', nodes=nodes, size=size, animate=animate)
     def set_node_size_by_variable(self, key, magnitude, animate=False): return self._call('set_node_size_by_variable', key=key, magnitude=magnitude, animate=animate)
     def set_node_glow(self, nodes='all', magnitude=0, animate=False): return self._call('set_node_glow', nodes=nodes, magnitude=magnitude, animate=animate)
@@ -4300,6 +4638,25 @@ sys.modules['stringscape'] = _stringscape_module
                         // 2. Map tool names to informative message to display in the chat log as a bullet point (AI tool bullet points)
                         const toolDescriptions = {
                             'Search_and_select': `Searching for "${logArgs.query}"`,
+                            'Select_nodes': `Selecting ${Array.isArray(logArgs.node_ids) ? logArgs.node_ids.length : 0} node(s)`,
+                            'Select_neighbours': "Expanding selection to neighbours of currently selected nodes",
+                            'Get_variable_range': `Getting variable range for ${logArgs.variable_key}`,
+                            'Get_variable_categories': `Getting variable categories for ${logArgs.variable_key}`,
+                            'Select_by_range': `Selecting by range on ${logArgs.variable_key}`,
+                            'Select_by_category': `Selecting by category on ${logArgs.variable_key}`,
+                            'Set_node_size': `Setting node size to ${logArgs.size}`,
+                            'Set_node_glow': `Setting node glow to ${logArgs.magnitude}`,
+                            'Set_node_visibility': `${logArgs.visibility === 'hide' ? 'Hiding' : 'Showing'} nodes`,
+                            'Set_node_label_visibility': `${logArgs.visibility === 'hide' ? 'Hiding' : 'Showing'} node labels`,
+                            'View_node_label_options': "Viewing node label options",
+                            'Set_node_label': `Setting node label to ${logArgs.label_key || logArgs.key}`,
+                            'Set_node_size_by_variable': `Setting node size by ${logArgs.key || logArgs.variable_key}`,
+                            'View_colour_links_by_options': "Viewing link colouring options",
+                            'Color_links_by': `Colouring links by ${logArgs.link_variable_key || logArgs.key}`,
+                            'Set_link_color': `Setting link colour to ${logArgs.color}`,
+                            'Set_link_label_visibility': `${logArgs.visibility === 'hide' ? 'Hiding' : 'Showing'} link labels`,
+                            'View_link_label_options': "Viewing link label options",
+                            'Set_link_label': `Setting link label to ${logArgs.label_key || logArgs.key}`,
                             'View_node_IDs': "Viewing node IDs",
                             'Save_to_collection': `Adding to a collection named "${logArgs.collection_name || logArgs.name || 'new collection'}"`,
                             'Change_node_colouring': `Setting node colouring to ${logArgs.variable_name}`,
@@ -4360,8 +4717,11 @@ sys.modules['stringscape'] = _stringscape_module
                                 ]
                             });
                         } else {
-                            aiChatHistory.push({ role: "tool", tool_call_id: call.id, content: String(res) });
-                            aiRecordTranscript({ kind: 'tool', name: call.function.name, content: String(res) });
+                            const toolResponseText = (res && typeof res === 'object')
+                                ? JSON.stringify(res, null, 2)
+                                : String(res);
+                            aiChatHistory.push({ role: "tool", tool_call_id: call.id, content: toolResponseText });
+                            aiRecordTranscript({ kind: 'tool', name: call.function.name, content: toolResponseText });
                         }
                     }
                 } else {
@@ -19767,8 +20127,34 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     function applySearchLogic(matches, queryStr, searchSummary = null) {
         console.log(`function applySearchLogic(matches: ${matches.length}, queryStr: ${queryStr})`);
-        const matchIds = new Set(matches.map(m => m.id)); let finalSet = new Set(getEffectiveSelectedNodesSet());
-        if (isSubtractMode) matchIds.forEach(id => finalSet.delete(id)); else if (isIntersectMode) { const inter = new Set(); matchIds.forEach(id => { if (finalSet.has(id)) inter.add(id); }); finalSet = inter; } else if (isAdditiveMode) matchIds.forEach(id => finalSet.add(id)); else finalSet = matchIds;
+        const matchIds = new Set(matches.map(m => m.id));
+        const currentSelection = new Set(getEffectiveSelectedNodesSet());
+        let finalSet = new Set(currentSelection);
+        const hasCurrentSelection = currentSelection.size > 0;
+
+        if ((isSubtractMode || isIntersectMode) && !hasCurrentSelection) {
+            const modeLabel = isSubtractMode ? 'subtract mode was' : 'intersect mode is';
+            displayStringScapeNotification({
+                text: `Search ${modeLabel} active. See Selection Tools in right panel.`,
+                button1_text: 'Close',
+                auto_close: true,
+                default_button_index: 0,
+                auto_close_ms: 5600
+            });
+            finalSet = new Set();
+        } else if (isSubtractMode) {
+            matchIds.forEach(id => finalSet.delete(id));
+        } else if (isIntersectMode) {
+            const inter = new Set();
+            matchIds.forEach(id => {
+                if (finalSet.has(id)) inter.add(id);
+            });
+            finalSet = inter;
+        } else if (isAdditiveMode) {
+            matchIds.forEach(id => finalSet.add(id));
+        } else {
+            finalSet = matchIds;
+        }
         const useGlobalNodes = currentViewId === 'base' || currentViewId === 'Venn Diagram' || currentViewId === 'Scatter Plot';
         const activeNodes = useGlobalNodes ? nodes : (activeSubData?.nodes || []);
         const finalSummary = searchSummary ? { ...searchSummary, total: finalSet.size } : null;
@@ -20632,7 +21018,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     document.getElementById('colorMode').onchange = function() {
         handleColorModeChange(this.value, { actor: 'Human' });
     };
-    document.getElementById('nodeSizeSlider').oninput = updateSizesAndColors;
+    document.getElementById('nodeSizeSlider').oninput = () => {
+        nodes.forEach(node => delete node._ssSize);
+        updateSizesAndColors();
+    };
     document.getElementById('nodeSizeSlider').onchange = (e) => aiRecordSetNodeSizeHistory(e.target.value, 'Human');
     const nodeMonoColorEl = document.getElementById('nodeMonoColor');
     if (nodeMonoColorEl) {
@@ -20658,6 +21047,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     const nodeHideBtn = document.getElementById('nodeHide');
 
     const setNodeVisibilityMode = (mode, historyMeta = null) => {
+        nodes.forEach(node => delete node._ssVisible);
         nodeVisibilityToggle = mode;
         if (nodeShowBtn && nodeHideBtn) {
             nodeShowBtn.classList.toggle('active', mode === 'show');
@@ -20673,6 +21063,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     const setNodeLabelMode = (mode, historyMeta = null) => {
+        nodes.forEach(node => delete node._ssLabelVisible);
         nodeLabelToggle = mode;
         if (nodeLabelShowBtn && nodeLabelHideBtn) {
             nodeLabelShowBtn.classList.toggle('active', mode === 'show');
@@ -20690,6 +21081,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     if (nodeLabelFieldEl) {
         nodeLabelFieldEl.onchange = (e) => {
+            nodes.forEach(node => delete node._ssLabelKey);
             nodeLabelField = e.target.value;
             aiRecordSetNodeLabelHistory(nodeLabelField, 'Human');
             draw();
@@ -20698,6 +21090,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     const setLinkLabelMode = (mode, historyMeta = null) => {
+        links.forEach(link => delete link._ssLabelVisible);
         linkLabelToggle = mode;
         if (linkLabelShowBtn && linkLabelHideBtn) {
             linkLabelShowBtn.classList.toggle('active', mode === 'show');
@@ -20716,6 +21109,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     if (linkLabelFieldEl) {
         linkLabelFieldEl.onchange = (e) => {
+            links.forEach(link => delete link._ssLabelKey);
             linkLabelField = e.target.value;
             aiRecordSetLinkLabelHistory(linkLabelField, 'Human');
             draw();
@@ -20758,6 +21152,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     const linkColorEl = document.getElementById('linkColor');
     if (linkColorEl) {
         linkColorEl.onchange = (e) => {
+            links.forEach(link => delete link._ssColor);
             aiRecordSetLinkColorHistory(e.target.value, 'Human');
             draw();
         };
