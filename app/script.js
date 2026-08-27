@@ -488,7 +488,6 @@
                     { key: 'size', label: 'Protein size', type: 'Numerical - Continuous' },
                     { key: 'random', label: 'Random', type: 'Categorical - Nominal' },
                     { key: 'mono', label: 'Mono', type: 'Categorical - Nominal' }
-                ];
 
         You can also use python_variables['nodes'] (lists 'id', 'layer', 'x', 'y', 'centrality', 'randColor', 'r', 'col', 'gpuColorValue', 'renderAlpha', 'gpuIsPath', 'gpuIsHigh', 'index', 'vy', and 'vx'), python_variables['node_ids'] (lists ids), and python_variables['links'] (lists 'source' 'target' and 'value').
 
@@ -547,10 +546,12 @@
         - App state updates immediately. Set animate=True only when a visual transition is wanted.`;
 
     const AI_EXAMPLE_SCRIPTS = [
-        `# Summary of selected nodes by centrality\nvals = app_data["python_variables"].get("centrality", [])\nclean = [float(v) for v in vals if v is not None and str(v).strip() != ""]\nprint("Selected centrality values:", len(clean))\nif clean:\n    print("Mean:", sum(clean) / len(clean))`,
-        `# Change the app state with the injected StringScape API\nprint(ss.set_view("selected"))\nprint(ss.set_node_colouring("centrality"))`,
-        `# Top values from protein size\nvals = app_data["python_variables"].get("size", [])\nclean = [float(v) for v in vals if v is not None and str(v).strip() != ""]\nclean.sort(reverse=True)\nprint("Top 10 sizes:")\nfor v in clean[:10]:\n    print(v)`
-    ];
+    `# Summary of selected nodes by centrality\nvals = app_data["python_variables"].get("centrality", [])\nclean = [float(v) for v in vals if v is not None and str(v).strip() != ""]\nprint("Selected centrality values:", len(clean))\nif clean:\n    print("Mean:", sum(clean) / len(clean))`,
+
+    `# Colour and size by clustering coefficient\nwith ss.batch_update():\n    ss.set_node_colouring("local_clustering_coefficient")\n    ss.set_node_size_by_variable("local_clustering_coefficient", magnitude=0.8)\n\nawait ss.display_notification(\n    text="Nodes are now sized and coloured by Local Clustering Coefficient. Larger, brighter nodes indicate dense local connectivity (hubs in tightly connected clusters), while smaller nodes sit on the periphery of network modules.",\n    button1_text="Got it"\n)`,
+
+    `# Filter collections & switch to Venn view\nwith ss.batch_update():\n    ss.select_by_range("size", min=700, max=5000, mode="replace")\n    ss.add_to_collection("Size 700-5000")\n    ss.select_by_range("centrality", min=100, max=1000, mode="replace")\n    ss.add_to_collection("Centrality 100-1000")\n    ss.set_view("venn")\n    ss.set_node_colouring('centrality')`
+];
     let aiChatHistoryRecords = [];
     let aiScriptHistoryRecords = [];
     let aiActiveChatId = null;
@@ -15645,19 +15646,28 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     });
 
     window.addEventListener('keyup', (e) => {
-        if (document.activeElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
-        if (!isPointerOverMainCanvas) return;
         const wasAddHeld = additiveKeyHeld;
         const wasSubtractHeld = subtractKeyHeld;
         const wasIntersectHeld = intersectKeyHeld;
 
-        if (!e.shiftKey) additiveKeyHeld = false;
-        if (!e.ctrlKey) subtractKeyHeld = false;
-        if (!e.altKey) intersectKeyHeld = false;
+        // A modifier may be released after the pointer has moved to a control, or
+        // after focus moved to an input. Always process its keyup so the temporary
+        // selection mode cannot remain latched.
+        if (e.key === 'Shift') additiveKeyHeld = false;
+        if (e.key === 'Control') subtractKeyHeld = false;
+        if (e.key === 'Alt') intersectKeyHeld = false;
 
         if (additiveKeyHeld !== wasAddHeld || subtractKeyHeld !== wasSubtractHeld || intersectKeyHeld !== wasIntersectHeld) {
             refreshSelectionModeState();
         }
+    });
+
+    window.addEventListener('blur', () => {
+        if (!additiveKeyHeld && !subtractKeyHeld && !intersectKeyHeld) return;
+        additiveKeyHeld = false;
+        subtractKeyHeld = false;
+        intersectKeyHeld = false;
+        refreshSelectionModeState();
     });
 
     window.addEventListener('click', (e) => {
