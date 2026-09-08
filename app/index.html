@@ -806,6 +806,66 @@
             position: relative;
             background: var(--surface-color-strong);
         }
+        #ai-chat-region {
+            position: relative;
+            flex: 1 1 auto;
+            min-height: 0;
+            display: flex;
+        }
+        #ai-context-usage {
+            position: absolute;
+            right: 12px;
+            bottom: 12px;
+            width: 28px;
+            height: 28px;
+            padding: 0;
+            border: 1px solid var(--border-color-strong);
+            border-radius: 50%;
+            background: conic-gradient(var(--accent-color-soft) var(--context-used, 0%), var(--surface-color-panel) 0%);
+            box-shadow: 0 2px 8px var(--shadow-color);
+            cursor: help;
+            transition: width 0.2s ease, height 0.2s ease, background 0.2s ease;
+            z-index: 2;
+        }
+        #ai-context-usage::after {
+            content: '';
+            position: absolute;
+            inset: 4px;
+            border-radius: 50%;
+            background: var(--surface-color-strong);
+        }
+        #ai-context-usage::before {
+            content: attr(data-title);
+            position: absolute;
+            right: 0;
+            bottom: calc(100% + 8px);
+            padding: 5px 8px;
+            border: 1px solid var(--tooltip-border);
+            border-radius: 5px;
+            background: var(--tooltip-bg);
+            color: var(--text-color);
+            font-size: 0.72rem;
+            font-weight: 400;
+            line-height: 1.2;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transform: translateY(3px);
+            transition: opacity 0.15s ease, transform 0.15s ease;
+        }
+        #ai-context-usage:hover,
+        #ai-context-usage:focus-visible {
+            width: 34px;
+            height: 34px;
+        }
+        #ai-context-usage:hover::before,
+        #ai-context-usage:focus-visible::before {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        #ai-context-usage.context-warning {
+            background: conic-gradient(#e74c3c var(--context-used, 0%), var(--surface-color-panel) 0%);
+        }
         #ai-python-console {
             display: none;
             flex: 1;
@@ -4499,6 +4559,7 @@
                 <button id="ai-menu-btn" type="button" title="Menu">⋮</button>
                 <div id="ai-menu-dropdown">
                     <button id="ai-download-menu-btn">Download Chat</button>
+                    <button id="ai-download-raw-json-btn">Download raw JSON</button>
                 </div>
             </div>
             <div id="ai-history-menu-wrap" style="position: relative; display:none;">
@@ -4596,11 +4657,14 @@
         </div>
     </div>
 
-    <div id="ai-chat-scroll">
-        <div id="ai-status-overlay"><div id="ai-status-pill" class="status-pill status-disconnected">Disconnected</div></div>
-        <div id="ai-chatbox" style="flex: 1;">
-            <div class="ai-chat-disclaimer">As you well know, AI can make mistakes. Please verify its claims for anything important, especially if writing a research paper.</div>
+    <div id="ai-chat-region">
+        <div id="ai-chat-scroll">
+            <div id="ai-status-overlay"><div id="ai-status-pill" class="status-pill status-disconnected">Disconnected</div></div>
+            <div id="ai-chatbox" style="flex: 1;">
+                <div class="ai-chat-disclaimer">As you well know, AI can make mistakes. Please verify its claims for anything important, especially if writing a research paper.</div>
+            </div>
         </div>
+        <button id="ai-context-usage" type="button" ></button>
     </div>
 
     <div id="ai-input-area" class="relative">
