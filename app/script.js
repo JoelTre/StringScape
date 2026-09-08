@@ -370,6 +370,11 @@
         { type: 'function', function: { name: 'View_colour_links_by_options', description: 'Lists the available variables for colouring links.' } },
         { type: 'function', function: { name: 'Color_links_by', description: 'Sets the link colouring variable and updates the manual link-colour control.', parameters: { type: 'object', properties: { link_variable_key: { type: 'string', description: 'Exact link colouring option value.' }, animate: { type: 'boolean' } }, required: ['link_variable_key'] } } },
         { type: 'function', function: { name: 'Set_link_color', description: 'Sets the colour of links. By default affects all links; pass link IDs in links to target specific links.', parameters: { type: 'object', properties: { links: { type: 'array', items: { type: 'string' }, description: 'Link IDs to affect, or omit to affect all links.' }, color: { type: 'string', description: 'Six-digit hexadecimal colour.' }, animate: { type: 'boolean' } }, required: ['color'] } } },
+        { type: 'function', function: { name: 'Set_link_direction_arrow_visibility', description: 'Shows or hides direction arrows on links. By default affects all links; pass link IDs to target specific links.', parameters: { type: 'object', properties: { links: { type: 'array', items: { type: 'string' }, description: 'Link IDs to affect, or omit to affect all links.' }, visibility: { type: 'string', enum: ['show', 'hide'] }, animate: { type: 'boolean' } }, required: ['visibility'] } } },
+        { type: 'function', function: { name: 'View_link_width', description: 'Returns the current link width setting.' } },
+        { type: 'function', function: { name: 'Set_link_width', description: 'Sets link width. By default affects all links; pass link IDs to target specific links.', parameters: { type: 'object', properties: { links: { type: 'array', items: { type: 'string' }, description: 'Link IDs to affect, or omit to affect all links.' }, magnitude: { type: 'number', description: 'Link width from 0.2 to 5.' }, animate: { type: 'boolean' } }, required: ['magnitude'] } } },
+        { type: 'function', function: { name: 'View_link_opacity', description: 'Returns the current link opacity setting.' } },
+        { type: 'function', function: { name: 'Set_link_opacity', description: 'Sets link opacity. By default affects all links; pass link IDs to target specific links.', parameters: { type: 'object', properties: { links: { type: 'array', items: { type: 'string' }, description: 'Link IDs to affect, or omit to affect all links.' }, opacity: { type: 'number', description: 'Link opacity from 0 to 1.' }, animate: { type: 'boolean' } }, required: ['opacity'] } } },
         { type: 'function', function: { name: 'Set_link_label_visibility', description: 'Shows or hides link labels and updates the manual link-label visibility control.', parameters: { type: 'object', properties: { links: { type: 'array', items: { type: 'string' }, description: 'Link IDs to target, or omit to set the global manual control.' }, visibility: { type: 'string', enum: ['show', 'hide'] }, animate: { type: 'boolean' } }, required: ['visibility'] } } },
         { type: 'function', function: { name: 'View_link_label_options', description: 'Lists the available fields that can be used as link labels.' } },
         { type: 'function', function: { name: 'Set_link_label', description: 'Sets the link label field and updates the manual link-label field control.', parameters: { type: 'object', properties: { links: { type: 'array', items: { type: 'string' }, description: 'Link IDs to target, or omit to set the global manual label field.' }, label_key: { type: 'string', description: 'Exact link label field value.' }, animate: { type: 'boolean' } }, required: ['label_key'] } } },
@@ -391,6 +396,7 @@
         { type: 'function', function: { name: 'Change_node_colouring', description: 'Changes the Colour Nodes By variable to the one named when this tool is used. Use View_variables first to see available variables.', parameters: { type: 'object', properties: { variable_name: { type: 'string' } }, required: ['variable_name'] } } },
         { type: 'function', function: { name: 'View_last_console_logs', description: 'Returns the last N console logs.', parameters: { type: 'object', properties: { count: { type: 'number', description: 'Number of logs to return (e.g. 30).' } } } } },
         { type: 'function', function: { name: 'View_error_logs', description: 'Returns all captured error and debug logs.' } },
+        { type: 'function', function: { name: 'View_action_history', description: 'Returns a record of actions performed in StringScape.' } },
         { type: 'function', function: { name: 'See_view_options', description: 'Returns a list of all available network views and collections.' } },
         { type: 'function', function: { name: 'Change_view', description: 'Changes the active view.', parameters: { type: 'object', properties: { view_name: { type: 'string', description: 'The exact name or ID of the view.' } }, required: ['view_name'] } } },
         { 
@@ -449,6 +455,7 @@
         }
     ];
     const aiChatHistory = [];
+    const aiRawExchangeLog = [];
     const AI_MAIN_SYSTEM_PROMPT = 'You are an AI agent inside the StringScape app. StringScape is an app for visualising protein-protein interaction networks from the STRING database. Use multiple tool calls sequentially to gather information before answering questions. Most questions will require at least one tool call. You can also use tool calls to do things in the app that the user asks you to do. DO NOT include \"message:\" at the start of your content messages. The user is in no rush so use as many tool calls as you need until you find the answer. When you use Run_python_logic, `app_data` already contains Python-ready variable arrays in `app_data["python_variables"]`. For variable stats, always use this pattern: `vals = app_data["python_variables"].get("size", [])` or `vals = app_data["python_variables"].get(variable_name, [])`; then clean values with `clean = [float(v) for v in vals if v is not None and str(v).strip() != ""]`. Do not loop over `app_data["nodes"]` to find these variables because it may be empty. Do not write "import app_data" in Python — `app_data` is already injected as a global variable; reference it directly. These are some of the available python_variables: layer, centrality, eigen, pdb_structure_count, embeddings, collection, annotation, localization, size, and there are many more (use print(app_data["python_variables"].keys()) to see them all). Important: Always end each reply with a message response, very breifly saying what you have done.';
     const AI_FILE_SUMMARY_PROMPT = "Summarize the key things in this file fragment that are related to the users question. Be concise.";
     const aiChatTranscript = [];
@@ -459,6 +466,8 @@
     let aiIsProcessing = false;
     let aiProcessingAbortController = null;
     let aiStopMessagePending = false;
+    let aiContextWindowSize = 32768;
+    let aiContextUsageTokens = 0;
     let aiSetupPanelOpen = true;
     let aiPromptsPanelOpen = false;
     const AI_CHAT_HISTORY_STORAGE_KEY = 'stringscape_ai_chat_history_v1';
@@ -503,6 +512,7 @@
         - ss.select_neighbors(node_id, depth=1, animate=False) -> Returns {"status", "node_id", "depth", "neighbor_node_ids", "selected_node_ids", "message"}
         - ss.expand_to_connected() -> Returns {"status", "previous_count", "selected_count", "selected_node_ids", "message"}
         - ss.get_selected_nodes() -> Returns {"status": "success", "selected_count", "selected_node_ids"}
+        - ss.get_action_history() -> Returns {"status": "success", "script", "line_count"} for the recorded action-history Python script
         - ss.list_variables() -> Returns {"status": "success", "variables": [{key, label, type}]}
         - ss.get_variable_range(variable_key) -> Returns {"status", "variable_key", "min", "max", "message"}
         - ss.get_variable_categories(variable_key) -> Returns {"status", "variable_key", "categories", "message"}
@@ -516,7 +526,8 @@
         - ss.set_link_color(links='all', color='#ff0055') -> Returns {"status", "affected_count", "message"}
         - ss.set_link_label_visibility(links='all', visibility='show'), ss.set_link_label(links='all', label_key='') -> Returns {"status", "affected_count", "message"}
         - ss.set_link_direction_arrow_visibility(links='all', visibility='show') -> Returns {"status", "affected_count", "message"}
-        - ss.set_link_width(links='all', magnitude=1), ss.set_link_opacity(links='all', opacity=1) -> Returns {"status", "affected_count", "message"}
+        - ss.set_link_width(links='all', magnitude=1) -> Returns {"status", "affected_count", "message"}; magnitude is 0.2 to 5. With links='all' this updates the global link-width control, while a link ID list targets individual links.
+        - ss.set_link_opacity(links='all', opacity=1) -> Returns {"status", "affected_count", "message"}
         - ss.when_nodes_are_selected_display(mode='all links') -> Returns {"status", "mode", "message"}
         - ss.set_app_style(color_theme='blue', mode='dark') -> Returns {"status", "color_theme", "mode", "message"}
         - ss.set_app_background_colour(color='#171c24') -> Returns {"status", "color", "message"}
@@ -599,6 +610,11 @@
 
     function aiFormatPythonStringList(values) {
         return `[${values.map(value => aiFormatPythonString(value)).join(', ')}]`;
+    }
+
+    function aiGetHistoryTime() {
+        const now = new Date();
+        return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     }
 
     function aiEscapeHtml(value) {
@@ -724,7 +740,7 @@
             : [];
         if (!cleanedLines.length) return;
 
-        const nextBlock = [`# Human: ${String(actionText)}`, ...cleanedLines].join('\n');
+        const nextBlock = [`# Human: ${String(actionText)} (${aiGetHistoryTime()})`, ...cleanedLines].join('\n');
         const existing = String(editor.value || '');
         const trimmedEnd = existing.replace(/\s*$/, '');
         editor.value = trimmedEnd.length
@@ -738,12 +754,22 @@
         const cleanedLines = Array.isArray(pythonLines) ? pythonLines.map(line => String(line)).filter(Boolean) : [];
         if (!cleanedLines.length) return;
         if (aiActionHistoryLines.length) aiActionHistoryLines.push('');
-        aiActionHistoryLines.push(`# ${actor}: ${actionText}`, ...cleanedLines);
+        aiActionHistoryLines.push(`# ${actor}: ${actionText} (${aiGetHistoryTime()})`, ...cleanedLines);
         aiPersistActionHistory();
         aiRenderActionHistoryPanel();
         if (aiPythonActionRecordingEnabled && String(actor) === 'Human') {
             aiAppendManualActionToPythonScript(actionText, cleanedLines);
         }
+    }
+
+    function aiAppendChatMessageToActionHistory(actor, content) {
+        const messageText = String(content || '');
+        if (!messageText.trim()) return;
+        const messageLines = messageText.split(/\r?\n/).map(line => `# ${line}`);
+        if (aiActionHistoryLines.length) aiActionHistoryLines.push('');
+        aiActionHistoryLines.push(`# ${actor}: ${actor === 'Human' ? 'messaged AI' : 'messaged human'} (${aiGetHistoryTime()})`, ...messageLines);
+        aiPersistActionHistory();
+        aiRenderActionHistoryPanel();
     }
 
     function aiRecordSearchHistory(query, scope = 'all', actor = 'Human') {
@@ -925,6 +951,18 @@
     function aiRecordSetLinkOpacityHistory(opacity, actor = 'Human') {
         aiAppendActionHistory(actor, `Set link opacity to ${opacity}`, [
             `ss.set_link_opacity(links="all", opacity=${Number(opacity)})`
+        ]);
+    }
+
+    function aiRecordViewLinkWidthHistory(width, actor = 'Human') {
+        aiAppendActionHistory(actor, `Viewed link width (${width})`, [
+            `print("Link width: ${Number(width)}")`
+        ]);
+    }
+
+    function aiRecordViewLinkOpacityHistory(opacity, actor = 'Human') {
+        aiAppendActionHistory(actor, `Viewed link opacity (${opacity})`, [
+            `print("Link opacity: ${Number(opacity)}")`
         ]);
     }
 
@@ -1129,6 +1167,7 @@
         const fileBtn = document.getElementById('ai-file-btn');
         const preview = document.getElementById('ai-preview-area');
         const chatScroll = document.getElementById('ai-chat-scroll');
+        const chatRegion = document.getElementById('ai-chat-region');
         const pythonpanel = document.getElementById('ai-python-console');
         const topTools = document.getElementById('ai-top-tools');
         const actionHistoryPanel = document.getElementById('ai-action-history-panel');
@@ -1155,6 +1194,7 @@
         if (actionHistoryPanel) actionHistoryPanel.style.display = isHistory ? 'flex' : 'none';
         if (pythonpanel) pythonpanel.style.display = isPython ? 'block' : 'none';
         if (pythonInstructions && !isPython) pythonInstructions.classList.remove('open');
+        if (chatRegion) chatRegion.style.display = (!isPython && !isHistory) ? 'flex' : 'none';
         if (chatScroll) chatScroll.style.display = isHistory ? 'none' : (isPython ? 'none' : 'flex');
         if (preview) preview.style.display = isHistory ? 'none' : (isPython ? 'none' : 'flex');
         if (inputArea) inputArea.style.display = isHistory ? 'none' : 'block';
@@ -1317,6 +1357,7 @@
         lines.push('- ss.select_neighbors(node_id, depth=1, animate=False) -> Returns {"status", "node_id", "depth", "neighbor_node_ids", "selected_node_ids", "message"}');
         lines.push('- ss.expand_to_connected() -> Returns {"status", "previous_count", "selected_count", "selected_node_ids", "message"}');
         lines.push('- ss.get_selected_nodes() -> Returns {"status": "success", "selected_count", "selected_node_ids"}');
+        lines.push('- ss.get_action_history() -> Returns {"status": "success", "script", "line_count"} for the recorded action-history Python script');
         lines.push('- ss.list_variables() -> Returns {"status": "success", "variables": [{key, label, type}]}');
         lines.push('- ss.get_variable_range(variable_key) -> Returns {"status", "variable_key", "min", "max", "message"}');
         lines.push('- ss.get_variable_categories(variable_key) -> Returns {"status", "variable_key", "categories", "message"}');
@@ -1330,7 +1371,8 @@
         lines.push('- ss.set_link_color(links="all", color="#ff0055") -> Returns {"status", "affected_count", "message"}');
         lines.push('- ss.set_link_label_visibility(links="all", visibility="show"), ss.set_link_label(links="all", label_key="") -> Returns {"status", "affected_count", "message"}');
         lines.push('- ss.set_link_direction_arrow_visibility(links="all", visibility="show") -> Returns {"status", "affected_count", "message"}');
-        lines.push('- ss.set_link_width(links="all", magnitude=1), ss.set_link_opacity(links="all", opacity=1) -> Returns {"status", "affected_count", "message"}');
+        lines.push('- ss.set_link_width(links="all", magnitude=1) -> Returns {"status", "affected_count", "message"}; magnitude is 0.2 to 5. With links="all" this updates the global link-width control, while a link ID list targets individual links.');
+        lines.push('- ss.set_link_opacity(links="all", opacity=1) -> Returns {"status", "affected_count", "message"}');
         lines.push('- ss.when_nodes_are_selected_display(mode="all links") -> Returns {"status", "mode", "message"}');
         lines.push('- ss.set_app_style(color_theme="blue", mode="dark") -> Returns {"status", "color_theme", "mode", "message"}');
         lines.push('- ss.set_app_background_colour(color="#171c24") -> Returns {"status", "color", "message"}');
@@ -1809,7 +1851,6 @@
                         }
                     ],
                     temperature: 0.2,
-                    max_tokens: 20
                 })
             });
             if (!response.ok) return;
@@ -2080,6 +2121,10 @@
             if (!response.ok) throw new Error(`AI server responded with ${response.status}`);
             const data = await response.json();
             if (!Array.isArray(data?.data)) throw new Error('AI server did not return a model list');
+            const model = data.data[0] || {};
+            const reportedContext = Number(model.max_context_length || model.context_length || model.max_model_len || model.n_ctx);
+            if (Number.isFinite(reportedContext) && reportedContext > 0) aiContextWindowSize = reportedContext;
+            aiUpdateContextUsage();
             const pill = document.getElementById('ai-status-pill');
             pill.textContent = "Connected";
             pill.className = "status-pill status-connected";
@@ -2272,6 +2317,23 @@
         const link = document.createElement('a');
         link.href = url;
         link.download = `StringScape_AI_Chat_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.txt`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    function downloadAiRawJson() {
+        const exportData = {
+            exportedAt: new Date().toISOString(),
+            contextWindow: aiContextWindowSize,
+            exchanges: aiRawExchangeLog.map(entry => aiSafeClone(entry))
+        };
+        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `StringScape_AI_Raw_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.json`;
         document.body.appendChild(link);
         link.click();
         link.remove();
@@ -2638,7 +2700,8 @@
                     if (!['replace', 'add', 'subtract', 'intersect'].includes(mode)) return result('warning', { variable_key: key, mode, message: 'mode must be replace, add, subtract, or intersect.' });
                     const lower = args.min == null ? -Infinity : +args.min, upper = args.max == null ? Infinity : +args.max;
                     const requestedCategory = String(args.category ?? '').trim();
-                    const matched = allNodes().filter(node => method === 'select_by_range' ? (Number.isFinite(+variableValue(node, key)) && +variableValue(node, key) >= lower && +variableValue(node, key) <= upper) : normalizedVariableValue(node, key) === requestedCategory);
+                    const normalizedCategory = requestedCategory.toLowerCase();
+                    const matched = allNodes().filter(node => method === 'select_by_range' ? (Number.isFinite(+variableValue(node, key)) && +variableValue(node, key) >= lower && +variableValue(node, key) <= upper) : normalizedVariableValue(node, key).toLowerCase() === normalizedCategory);
                     if (method === 'select_by_range') aiRecordSelectByRangeHistory(key, args.min, args.max, 'AI', mode);
                     else aiRecordSelectByCategoryHistory(key, args.category, 'AI', mode);
                     const matchedIds = new Set(matched.map(node => String(node.id)));
@@ -2647,7 +2710,8 @@
                         : mode === 'add' ? new Set([...currentIds, ...matchedIds])
                         : mode === 'subtract' ? new Set([...currentIds].filter(id => !matchedIds.has(id)))
                         : new Set([...currentIds].filter(id => matchedIds.has(id)));
-                    selectNodes(allNodes().filter(node => nextIds.has(String(node.id))), false, `Python API ${method}`, null, false, { actor: 'AI' });
+                    const selectionHistoryMeta = method === 'select_by_category' ? null : { actor: 'AI' };
+                    selectNodes(allNodes().filter(node => nextIds.has(String(node.id))), false, `Python API ${method}`, null, false, selectionHistoryMeta);
                     queueDraw(animate);
                     return result(matched.length ? 'success' : 'warning', { variable_key: key, mode, selected_node_ids: selected(), selected_count: selected().length });
                 }
@@ -2728,7 +2792,8 @@
                 if (method.startsWith('set_link_')) {
                     const target = args.links ?? 'all'; const targets = targeted(links, target, linkId);
                     if (method === 'set_link_color') {
-                        const color = String(args.color || '').trim();
+                        const rawColor = String(args.color || '').trim();
+                        const color = rawColor.startsWith('#') ? rawColor : `#${rawColor}`;
                         if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return result('warning', { message: 'color must be a hex colour.' });
                         const appliesToAll = target === 'all' || target == null;
                         if (appliesToAll) {
@@ -2743,6 +2808,11 @@
                     if (method === 'set_link_label_visibility' || method === 'set_link_direction_arrow_visibility') {
                         if (!['show','hide'].includes(args.visibility)) return result('warning', { message: 'visibility must be show or hide.' });
                         const appliesToAll = target === 'all' || target == null;
+                        if (method === 'set_link_direction_arrow_visibility' && appliesToAll) {
+                            linkDirectionEnabled = args.visibility === 'show';
+                            document.getElementById('linkDirectionOn')?.classList.toggle('active', linkDirectionEnabled);
+                            document.getElementById('linkDirectionOff')?.classList.toggle('active', !linkDirectionEnabled);
+                        }
                         if (method === 'set_link_label_visibility' && appliesToAll) {
                             links.forEach(link => delete link._ssLabelVisible);
                             linkLabelToggle = args.visibility;
@@ -2768,8 +2838,37 @@
                         }
                         aiRecordSetLinkLabelHistory(key, 'AI');
                     }
-                    if (method === 'set_link_width') { const magnitude = +args.magnitude; if (!(magnitude >= 0 && magnitude <= 5)) return result('warning', { message: 'magnitude must be between 0 and 5.' }); targets.forEach(l => l._ssWidth = magnitude); aiRecordSetLinkWidthHistory(magnitude, 'AI'); }
-                    if (method === 'set_link_opacity') { const opacity = +args.opacity; if (!(opacity >= 0 && opacity <= 1)) return result('warning', { message: 'opacity must be between 0 and 1.' }); targets.forEach(l => l._ssOpacity = opacity); aiRecordSetLinkOpacityHistory(opacity, 'AI'); }
+                    if (method === 'set_link_width') {
+                        const magnitude = +args.magnitude;
+                        if (!(magnitude >= 0.2 && magnitude <= 5)) return result('warning', { message: 'magnitude must be between 0.2 and 5.' });
+                        const appliesToAll = target === 'all' || target == null;
+                        if (appliesToAll) {
+                            links.forEach(link => delete link._ssWidth);
+                            const widthSlider = document.getElementById('linkWidthSlider');
+                            if (widthSlider) widthSlider.value = String(magnitude);
+                            const widthValue = document.getElementById('val-linkw');
+                            if (widthValue) widthValue.innerText = String(magnitude);
+                        } else {
+                            targets.forEach(link => link._ssWidth = magnitude);
+                        }
+                        aiRecordSetLinkWidthHistory(magnitude, 'AI');
+                    }
+                    if (method === 'set_link_opacity') {
+                        const opacity = +args.opacity;
+                        if (!(opacity >= 0 && opacity <= 1)) return result('warning', { message: 'opacity must be between 0 and 1.' });
+                        const appliesToAll = target === 'all' || target == null;
+                        if (appliesToAll) {
+                            links.forEach(link => delete link._ssOpacity);
+                            linkOpacity = linkOpacityFromSliderValue(opacity);
+                            const opacitySlider = document.getElementById('brightnessSlider');
+                            if (opacitySlider) opacitySlider.value = String(opacity);
+                            const opacityValue = document.getElementById('val-bri');
+                            if (opacityValue) opacityValue.innerText = String(opacity);
+                        } else {
+                            targets.forEach(l => l._ssOpacity = linkOpacityFromSliderValue(opacity));
+                        }
+                        aiRecordSetLinkOpacityHistory(opacity, 'AI');
+                    }
                     queueDraw(animate); return result('success', { affected_count: targets.length });
                 }
                 if (method === 'when_nodes_are_selected_display') {
@@ -2921,6 +3020,7 @@
                     return result('warning', { message: 'display_notification must be called asynchronously.' });
                 }
                 if (method === 'get_selected_nodes') return result('success', { selected_count: selected().length, selected_node_ids: selected() });
+                if (method === 'get_action_history') return result('success', { script: aiGetActionHistoryText(), line_count: aiActionHistoryLines.length });
                 if (method === 'list_collections') return result('success', { collections: [...collections.entries()].map(([name, c]) => ({ name, node_count: c.nodeIds?.size || 0 })) });
                 if (method === 'list_views') return result('success', { current_view: currentViewId, views: ['base','selected','Scatter Plot','Venn Diagram','histogram','pie_chart','Mind Map','Embeddings', ...[...collections.keys()].map(name => `coll_${name}`)] });
                 if (method === 'begin_batch') { batchDepth++; return result('success', { batch_depth: batchDepth }); }
@@ -3169,7 +3269,6 @@
                 selectedNodes = expanded;
                 aiLastSentSelectedNodes = new Set(expanded);
                 draw();
-                aiRecordExpandHistory('AI');
                 return {
                     status: 'success',
                     depth,
@@ -3274,6 +3373,41 @@
                 animate: args.animate === true
             }));
         }
+        if (toolName === 'Set_link_direction_arrow_visibility') {
+            return JSON.parse(stringScapePythonBridge.call_json('set_link_direction_arrow_visibility', {
+                links: args.links ?? 'all',
+                visibility: String(args.visibility || '').trim().toLowerCase(),
+                animate: args.animate === true
+            }));
+        }
+        if (toolName === 'View_link_width') {
+            const width = Number(document.getElementById('linkWidthSlider')?.value);
+            aiRecordViewLinkWidthHistory(width, 'AI');
+            return Number.isFinite(width)
+                ? { status: 'success', magnitude: width }
+                : { status: 'warning', message: 'Link width control is unavailable.' };
+        }
+        if (toolName === 'Set_link_width') {
+            return JSON.parse(stringScapePythonBridge.call_json('set_link_width', {
+                links: args.links ?? 'all',
+                magnitude: args.magnitude,
+                animate: args.animate === true
+            }));
+        }
+        if (toolName === 'View_link_opacity') {
+            const opacity = Number(document.getElementById('brightnessSlider')?.value);
+            aiRecordViewLinkOpacityHistory(opacity, 'AI');
+            return Number.isFinite(opacity)
+                ? { status: 'success', opacity }
+                : { status: 'warning', message: 'Link opacity control is unavailable.' };
+        }
+        if (toolName === 'Set_link_opacity') {
+            return JSON.parse(stringScapePythonBridge.call_json('set_link_opacity', {
+                links: args.links ?? 'all',
+                opacity: args.opacity,
+                animate: args.animate === true
+            }));
+        }
         if (toolName === 'Set_link_label_visibility') {
             return JSON.parse(stringScapePythonBridge.call_json('set_link_label_visibility', {
                 links: args.links ?? 'all',
@@ -3340,7 +3474,6 @@
                 selectedNodes = expanded;
                 aiLastSentSelectedNodes = new Set(expanded);
                 draw();
-                aiRecordExpandHistory('AI');
                 return `Expanded selection from ${originalSelection.size} to ${expanded.size} nodes.`;
             } catch (e) { return 'Error expanding selection: ' + e.message; }
         }
@@ -3428,6 +3561,9 @@
         if (toolName === 'View_error_logs') {
             const errors = aiLogHistory.filter(l => l.type === 'ERROR' || l.type === 'DEBUG');
             return errors.length ? errors.map(l => `[${l.timestamp}] [${l.type}] ${l.message}`).join('\n') : "No error or debug logs found.";
+        }
+        if (toolName === 'View_action_history') {
+            return aiGetActionHistoryText() || 'No actions recorded yet.';
         }
         if (toolName === 'See_view_options') {
             const coreViews = ["Full Network (ID: base)", "Selected Nodes (ID: selected)", "Scatter Plot", "Venn Diagram", "Histogram", "Pie Chart", "Mind Map", "Embeddings"];
@@ -3797,6 +3933,7 @@ class _StringScapeAPI:
     def set_view(self, view, animate=False): return self._call('set_view', view=view, animate=animate)
     def set_node_colouring(self, variable, animate=False): return self._call('set_node_colouring', variable=variable, animate=animate)
     def set_node_color(self, node_id, color, animate=False): return self._call('set_node_color', node_id=node_id, color=color, animate=animate)
+    def get_action_history(self): return self._call('get_action_history')
     async def display_notification(self, text, button1_text='Close', button2_text=None, auto_close=False, default_button_index=0, auto_close_ms=5000): return await self._call_async('display_notification', text=text, button1_text=button1_text, button2_text=button2_text, auto_close=auto_close, default_button_index=default_button_index, auto_close_ms=auto_close_ms)
     def get_selected_nodes(self): return self._call('get_selected_nodes')
     def list_collections(self): return self._call('list_collections')
@@ -3877,6 +4014,65 @@ sys.modules['stringscape'] = _stringscape_module
         const safeSeconds = Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
         const rounded = Math.round(safeSeconds * 10) / 10;
         return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+    }
+
+    function aiUpdateContextUsage(usage) {
+        const promptTokens = Number(usage?.prompt_tokens);
+        const completionTokens = Number(usage?.completion_tokens);
+        const totalTokens = Number(usage?.total_tokens);
+        if (Number.isFinite(totalTokens)) {
+            aiContextUsageTokens = totalTokens;
+        } else if (Number.isFinite(promptTokens)) {
+            aiContextUsageTokens = promptTokens + (Number.isFinite(completionTokens) ? completionTokens : 0);
+        }
+        const indicator = document.getElementById('ai-context-usage');
+        if (!indicator) return;
+        const percent = Math.min(100, Math.max(0, Math.round((aiContextUsageTokens / aiContextWindowSize) * 100)));
+        indicator.style.setProperty('--context-used', `${percent}%`);
+        indicator.classList.toggle('context-warning', percent > 90);
+        indicator.dataset.title = `${percent}% of the context window used`;
+        indicator.setAttribute('aria-label', `${percent}% of the context window used`);
+    }
+
+    function aiUpdateContextFromErrorMessage(message) {
+        const contextMatch = String(message).match(/request\s*\((\d+)\s*tokens?\).*?(?:available context size|n_ctx)\s*[:=]?\s*\(?([\d]+)/i);
+        if (contextMatch) {
+            aiContextUsageTokens = Number(contextMatch[1]);
+            aiContextWindowSize = Number(contextMatch[2]);
+            aiUpdateContextUsage();
+        }
+    }
+
+    function aiHandleServerErrorPayload(payload) {
+        const error = payload?.error;
+        const message = typeof error === 'string' ? error : error?.message || payload?.message;
+        if (!message) return;
+        aiUpdateContextFromErrorMessage(message);
+        throw new Error(String(message));
+    }
+
+    async function aiReadResponseError(response) {
+        const raw = await response.text().catch(() => '');
+        try {
+            const parsed = JSON.parse(raw);
+            const message = parsed?.error?.message || parsed?.message || `HTTP ${response.status}`;
+            aiUpdateContextFromErrorMessage(message);
+            return message;
+        } catch {
+            const message = raw.trim() || `HTTP ${response.status}`;
+            aiUpdateContextFromErrorMessage(message);
+            return message;
+        }
+    }
+
+    function aiRecordRawExchange(direction, endpoint, payload, extra = {}) {
+        aiRawExchangeLog.push({
+            timestamp: new Date().toISOString(),
+            direction,
+            endpoint,
+            ...extra,
+            payload: aiSafeClone(payload)
+        });
     }
 
     function aiCreateBubbleElement(content, role, items = []) {
@@ -4299,7 +4495,6 @@ sys.modules['stringscape'] = _stringscape_module
         let url = document.getElementById('ai-server-url').value.trim() || document.getElementById('ai-server-url').placeholder.trim();
         const output = document.getElementById('ai-python-run-output');
         if (!text || !url) return;
-
         if (input) {
             input.value = '';
             input.style.height = 'auto';
@@ -4314,21 +4509,28 @@ sys.modules['stringscape'] = _stringscape_module
         try {
             aiPythonPromptHistory.push({ role: 'user', content: text });
             const endpoint = url.replace(/\/$/, '') + '/v1/chat/completions';
+            const requestPayload = {
+                messages: [
+                    { role: 'system', content: AI_PYTHON_CONSOLE_SYSTEM_PROMPT },
+                    { role: 'system', content: AI_PYTHON_SCRIPT_INSTRUCTIONS_TEXT },
+                    ...aiPythonPromptHistory
+                ],
+                temperature: 0.2
+            };
+            aiRecordRawExchange('request', endpoint, requestPayload, { mode: 'python' });
             const response = await fetch(endpoint, {
                 method: 'POST',
                 signal: aiProcessingAbortController.signal,
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    messages: [
-                        { role: 'system', content: AI_PYTHON_CONSOLE_SYSTEM_PROMPT },
-                        { role: 'system', content: AI_PYTHON_SCRIPT_INSTRUCTIONS_TEXT },
-                        ...aiPythonPromptHistory
-                    ],
-                    temperature: 0.2
-                })
+                body: JSON.stringify(requestPayload)
             });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            if (!response.ok) {
+                const errorMessage = await aiReadResponseError(response);
+                aiRecordRawExchange('response-error', endpoint, { status: response.status, message: errorMessage }, { mode: 'python' });
+                throw new Error(errorMessage);
+            }
             const data = await response.json();
+            aiRecordRawExchange('response', endpoint, data, { mode: 'python' });
             const content = aiStripCodeFence(data?.choices?.[0]?.message?.content || '');
             aiPythonPromptHistory.push({ role: 'assistant', content });
 
@@ -4449,18 +4651,27 @@ sys.modules['stringscape'] = _stringscape_module
                         aiRecordTranscript({ kind: 'attached_files', items: [{ ...aiCloneAttachment(item), name: `${item.name} (Part ${i + 1}/${chunks.length})`, data: chunks[i] }] });
                         
                         const chunkRequestStartedAt = Date.now();
-                        const chunkRes = await fetch(url.replace(/\/$/, '') + '/v1/chat/completions', {
+                        const chunkEndpoint = url.replace(/\/$/, '') + '/v1/chat/completions';
+                        const chunkRequestPayload = {
+                            messages: [
+                                { role: "system", content: AI_FILE_SUMMARY_PROMPT },
+                                { role: "user", content: chunks[i] }
+                            ]
+                        };
+                        aiRecordRawExchange('request', chunkEndpoint, chunkRequestPayload, { mode: 'file-summary', file: item.name, part: i + 1 });
+                        const chunkRes = await fetch(chunkEndpoint, {
                             method: 'POST',
                             signal: aiProcessingAbortController.signal,
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                messages: [
-                                    { role: "system", content: AI_FILE_SUMMARY_PROMPT },
-                                    { role: "user", content: chunks[i] }
-                                ]
-                            })
+                            body: JSON.stringify(chunkRequestPayload)
                         });
+                        if (!chunkRes.ok) {
+                            const errorMessage = await aiReadResponseError(chunkRes);
+                            aiRecordRawExchange('response-error', chunkEndpoint, { status: chunkRes.status, message: errorMessage }, { mode: 'file-summary', file: item.name, part: i + 1 });
+                            throw new Error(errorMessage);
+                        }
                         const chunkData = await chunkRes.json();
+                        aiRecordRawExchange('response', chunkEndpoint, chunkData, { mode: 'file-summary', file: item.name, part: i + 1 });
                         const chunkMsg = chunkData?.choices?.[0]?.message || {};
                         if (chunkMsg.reasoning_content) {
                             aiRecordTranscript({ kind: 'ai_thoughts', seconds: (Date.now() - chunkRequestStartedAt) / 1000, content: chunkMsg.reasoning_content });
@@ -4483,6 +4694,7 @@ sys.modules['stringscape'] = _stringscape_module
             aiRecordTranscript({ kind: 'attached_files', items: displayItems.map(aiCloneAttachment) });
         }
         aiRecordTranscript({ kind: 'user', content: text });
+        aiAppendChatMessageToActionHistory('Human', text);
 
         aiChatHistory.push({ role: "user", content: userContent });
         
@@ -4495,20 +4707,28 @@ sys.modules['stringscape'] = _stringscape_module
             while (aiIsProcessing && !aiProcessingAbortController.signal.aborted) {
                 const requestStartedAt = Date.now();
                 aiRecordTranscript({ kind: 'stringscape', content: AI_MAIN_SYSTEM_PROMPT });
+                const requestPayload = {
+                    messages: [
+                        { role: "system", content: AI_MAIN_SYSTEM_PROMPT },
+                        ...aiChatHistory
+                    ],
+                    tools: aiTools,
+                    tool_choice: "auto",
+                    stream: true,
+                    stream_options: { include_usage: true }
+                };
+                aiRecordRawExchange('request', endpoint, requestPayload, { mode: 'agent' });
                 const response = await fetch(endpoint, {
                     method: 'POST',
                     signal: aiProcessingAbortController.signal,
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        messages: [
-                            { role: "system", content: AI_MAIN_SYSTEM_PROMPT },
-                            ...aiChatHistory
-                        ],
-                        tools: aiTools,
-                        tool_choice: "auto",
-                        stream: true
-                    })
+                    body: JSON.stringify(requestPayload)
                 });
+                if (!response.ok) {
+                    const errorMessage = await aiReadResponseError(response);
+                    aiRecordRawExchange('response-error', endpoint, { status: response.status, message: errorMessage }, { mode: 'agent' });
+                    throw new Error(errorMessage);
+                }
                 const responseContentType = response.headers.get('content-type') || '';
                 const supportsStreaming = Boolean(response.body) && !responseContentType.includes('application/json');
                 let msg = null;
@@ -4558,6 +4778,9 @@ sys.modules['stringscape'] = _stringscape_module
                     const trimmed = String(payload || '').trim();
                     if (!trimmed || trimmed === '[DONE]') return false;
                     const chunkData = JSON.parse(trimmed);
+                    aiRecordRawExchange('response-chunk', endpoint, chunkData, { mode: 'agent' });
+                    aiHandleServerErrorPayload(chunkData);
+                    aiUpdateContextUsage(chunkData?.usage);
                     const choice = chunkData?.choices?.[0] || {};
                     const delta = choice.delta || {};
                     if (typeof delta.content === 'string' && delta.content.length > 0) {
@@ -4606,6 +4829,9 @@ sys.modules['stringscape'] = _stringscape_module
                     if (!msg) finalizeStreamedMessage();
                 } else {
                     const data = await response.json();
+                    aiRecordRawExchange('response', endpoint, data, { mode: 'agent' });
+                    aiHandleServerErrorPayload(data);
+                    aiUpdateContextUsage(data?.usage);
                     msg = data.choices[0].message;
                 }
                 const elapsedSeconds = (Date.now() - requestStartedAt) / 1000;
@@ -4626,6 +4852,7 @@ sys.modules['stringscape'] = _stringscape_module
                     });
                     if (msg.content && msg.content.trim() !== '') {
                         aiRecordTranscript({ kind: 'ai', content: msg.content });
+                        aiAppendChatMessageToActionHistory('AI', msg.content);
                     }
 
                     for (let call of msg.tool_calls) {
@@ -4655,6 +4882,11 @@ sys.modules['stringscape'] = _stringscape_module
                             'View_colour_links_by_options': "Viewing link colouring options",
                             'Color_links_by': `Colouring links by ${logArgs.link_variable_key || logArgs.key}`,
                             'Set_link_color': `Setting link colour to ${logArgs.color}`,
+                            'Set_link_direction_arrow_visibility': `${logArgs.visibility === 'hide' ? 'Hiding' : 'Showing'} link direction arrows`,
+                            'View_link_width': 'Viewing link width',
+                            'Set_link_width': `Setting link width to ${logArgs.magnitude}`,
+                            'View_link_opacity': 'Viewing link opacity',
+                            'Set_link_opacity': `Setting link opacity to ${logArgs.opacity}`,
                             'Set_link_label_visibility': `${logArgs.visibility === 'hide' ? 'Hiding' : 'Showing'} link labels`,
                             'View_link_label_options': "Viewing link label options",
                             'Set_link_label': `Setting link label to ${logArgs.label_key || logArgs.key}`,
@@ -4672,6 +4904,7 @@ sys.modules['stringscape'] = _stringscape_module
                             'Change_view': `Changing view to ${logArgs.view_name}`,
                             'View_error_logs': "Viewing error and debug logs",
                             'View_last_console_logs': `Viewing last ${logArgs.count || 20} logs`,
+                            'View_action_history': "Viewing action history",
                             'View_preferred_name': "Viewing preferred names",
                             'View_sequence_data': "Viewing sequence data",
                             'create_guide': "Created interactive guide",
@@ -4738,6 +4971,7 @@ sys.modules['stringscape'] = _stringscape_module
                         }
                         aiChatHistory.push({ role: "assistant", content: msg.content });
                         aiRecordTranscript({ kind: 'ai', content: msg.content });
+                        aiAppendChatMessageToActionHistory('AI', msg.content);
                     }
                 }
             }
@@ -4749,7 +4983,7 @@ sys.modules['stringscape'] = _stringscape_module
                 aiAppendMessage("You stopped the AI", 'ai');
                 aiStopMessagePending = false;
             } else if (!(aiProcessingAbortController && aiProcessingAbortController.signal.aborted)) {
-                aiAppendMessage("An error occurred: Check the developer logs in LM Studio and check that CORS is enabled in the LM Studio server settings.", 'ai');
+                aiAppendMessage(`An error occurred: Check the developer logs in LM Studio and check that CORS is enabled in the LM Studio server settings. Error message: ${e?.message || 'The AI request failed.'}`, 'ai');
             }
         } finally {
             aiIsProcessing = false;
@@ -4767,6 +5001,7 @@ sys.modules['stringscape'] = _stringscape_module
         const connectBtn = document.getElementById('ai-connect-btn');
         const examplePanel = document.getElementById('ai-example-panel-content');
         if (examplePanel && !aiExamplePanelAgentHtml) aiExamplePanelAgentHtml = examplePanel.innerHTML;
+        aiUpdateContextUsage();
         
         if (input) {
             input.addEventListener('input', () => aiAutoExpand(input));
@@ -10641,7 +10876,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     function getAccessoryNodeIdHeader(headers) {
-        const idHeaders = new Set(['#string_protein_id', 'string_protein_id', 'protein_id', 'protein', 'node_id', 'node_ids', 'nodeid', 'nodeids', 'id', 'ids']);
+        const idHeaders = new Set(['#string_protein_id', 'string_protein_id', 'protein_id', 'protein id', 'protein', 'node_id', 'node_ids', 'nodeid', 'nodeids', 'id', 'ids']);
         return (headers || []).find(header => {
             const normalized = String(header || '').toLowerCase().trim().replace(/^#/, '').replace(/[^a-z0-9]+/g, '_');
             return idHeaders.has(normalized);
@@ -10650,6 +10885,85 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     function isAccessoryNodeIdHeader(header) {
         return getAccessoryNodeIdHeader([header]) !== null;
+    }
+
+    // Custom node-information files may identify a protein by either its STRING
+    // protein ID or its preferred name.  Normalise both forms to the network ID
+    // before creating the value maps used by the colour and chart views.
+    function buildAccessoryNodeIdResolver() {
+        const directIds = new Map();
+        const preferredIds = new Map();
+        const ambiguousPreferredIds = new Set();
+        const addDirectId = (value, nodeId) => {
+            const key = String(value ?? '').trim();
+            if (!key || !nodeId) return;
+            directIds.set(key, nodeId);
+            directIds.set(key.toLowerCase(), nodeId);
+        };
+        const addPreferredId = (value, nodeId) => {
+            const key = String(value ?? '').trim().toLowerCase();
+            if (!key || !nodeId || ambiguousPreferredIds.has(key)) return;
+            const existing = preferredIds.get(key);
+            if (existing && existing !== nodeId) {
+                preferredIds.delete(key);
+                ambiguousPreferredIds.add(key);
+                return;
+            }
+            preferredIds.set(key, nodeId);
+        };
+
+        const knownIds = new Set([
+            ...(allIDs || []),
+            ...(nodes || []).map(node => node.id),
+            ...Array.from(nodeMap?.keys?.() || []),
+            ...Array.from(proteinMetadata?.keys?.() || [])
+        ]);
+        knownIds.forEach(id => addDirectId(id, id));
+
+        proteinMetadata.forEach((metadata, nodeId) => {
+            addPreferredId(metadata?.preferred_name, nodeId);
+            addPreferredId(metadata?.preferredName, nodeId);
+            addPreferredId(metadata?.geneId, nodeId);
+            addPreferredId(metadata?.gene, nodeId);
+        });
+
+        // STRING protein-info files can provide preferred names before their
+        // metadata has been normalised, so index those rows directly as well.
+        Object.values(accessoryDataFiles || {}).forEach(data => {
+            const idHeader = getAccessoryNodeIdHeader(data?.headers);
+            const preferredHeader = (data?.headers || []).find(header => normalizeVariableKey(header) === 'preferredname');
+            if (!idHeader || !preferredHeader) return;
+            (data.rows || []).forEach(row => {
+                const rawId = String(row[idHeader] || '').trim();
+                const nodeId = directIds.get(rawId) || directIds.get(rawId.toLowerCase());
+                if (nodeId) addPreferredId(row[preferredHeader], nodeId);
+            });
+        });
+
+        return rawId => {
+            const value = String(rawId ?? '').trim();
+            if (!value) return null;
+            return directIds.get(value) || directIds.get(value.toLowerCase()) || preferredIds.get(value.toLowerCase()) || null;
+        };
+    }
+
+    function rebuildAccessoryVariableValueIndexes() {
+        const resolveNodeId = buildAccessoryNodeIdResolver();
+        Object.entries(accessoryDataFiles).forEach(([fileName, data]) => {
+            const valuesByVariable = {};
+            const idHeader = getAccessoryNodeIdHeader(data.headers);
+            (data.rows || []).forEach(row => {
+                const nodeId = idHeader ? resolveNodeId(row[idHeader]) : null;
+                if (!nodeId) return;
+                data.headers.forEach(header => {
+                    if (header === idHeader) return;
+                    valuesByVariable[header] = valuesByVariable[header] || new Map();
+                    valuesByVariable[header].set(nodeId, row[header]);
+                });
+            });
+            accessoryVariableValues[fileName] = valuesByVariable;
+        });
+        customVariableSelectionCache.clear();
     }
 
     function updateColorModeOptions() {
@@ -11363,18 +11677,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         });
         accessoryDataFiles[fileName] = { headers, rows, text };
 
-        // build map of nodes for variable values
-        accessoryVariableValues[fileName] = {};
-        const idHeader = getAccessoryNodeIdHeader(headers);
-        rows.forEach(r => {
-            const nodeId = idHeader ? String(r[idHeader] || '').trim() : null;
-            if (!nodeId) return;
-            headers.forEach(h => {
-                if (h === idHeader) return;
-                accessoryVariableValues[fileName][h] = accessoryVariableValues[fileName][h] || new Map();
-                accessoryVariableValues[fileName][h].set(nodeId, r[h]);
-            });
-        });
+        rebuildAccessoryVariableValueIndexes();
 
         buildVariableConfigs();
 
@@ -11661,6 +11964,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
             proteinMetadata.set(id, existing);
         });
+
+        // Metadata may have supplied preferred names after a custom variable
+        // file was parsed, so resolve all custom-file IDs again now.
+        rebuildAccessoryVariableValueIndexes();
     }
 
     function getNodeInfoExtraColumns() {
@@ -18746,10 +19053,15 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         div.style.display = div.style.display === 'block' ? 'none' : 'block'; 
     }
 
+    function linkOpacityFromSliderValue(val) {
+        const numericValue = Math.max(0, Math.min(1, Number(val)));
+        return numericValue === 0 ? 0 : Math.pow(2, (numericValue - 1) / 0.1);
+    }
+
     function setLinkBrightness(val) { 
         console.log(`function setLinkBrightness(val: ${val})`);
         document.getElementById('val-bri').innerText = val; 
-        linkOpacity = val === 0 ? 0 : Math.pow(2, (val - 1) / 0.1); draw(); 
+        linkOpacity = linkOpacityFromSliderValue(val); draw(); 
     }
     setLinkBrightness(0.6);
 
@@ -21379,6 +21691,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         bindClick(document.getElementById('ai-menu-btn'), () => toggleAiMenu());
         bindClick(document.getElementById('ai-download-menu-btn'), () => {
             downloadAiChat();
+            toggleAiMenu();
+        });
+        bindClick(document.getElementById('ai-download-raw-json-btn'), () => {
+            downloadAiRawJson();
             toggleAiMenu();
         });
         bindClick(document.getElementById('ai-close-panel-btn'), () => toggleAiPanel(false));
