@@ -355,6 +355,7 @@
         { type: 'function', function: { name: 'calculate_math', description: 'Solve math.', parameters: { type: 'object', properties: { eq: { type: 'string' } } } } },
         { type: 'function', function: { name: 'Search_and_select', description: 'Searches for and selects nodes. Put terms in quote marks (e.g. "lipid synthesis")', parameters: { type: 'object', properties: { query: { type: 'string' }, scope: { type: 'string', description: 'all|layer|centrality|annotation|localization|size or var::<file>::<variable>' } }, required: ['query'] } } },
         { type: 'function', function: { name: 'Select_nodes', description: 'Selects specific nodes by ID.', parameters: { type: 'object', properties: { node_ids: { type: 'array', items: { type: 'string' }, description: 'List of node IDs to select.' }, mode: { type: 'string', description: 'replace|add|subtract|intersect|invert' }, animate: { type: 'boolean' } }, required: ['node_ids'] } } },
+        { type: 'function', function: { name: 'Invert_selection', description: 'Inverts the current node selection: selected nodes become deselected and deselected active nodes become selected.' } },
         { type: 'function', function: { name: 'Select_neighbours', description: 'Expands from the currently selected nodes to include connected neighbours (same behavior as pressing the + hotkey).', parameters: { type: 'object', properties: { depth: { type: 'number', description: 'How many expansion steps to apply (default 1).' }, animate: { type: 'boolean' } } } } },
         { type: 'function', function: { name: 'Get_variable_range', description: 'Gets the numerical range for a variable key.', parameters: { type: 'object', properties: { variable_key: { type: 'string' } }, required: ['variable_key'] } } },
         { type: 'function', function: { name: 'Get_variable_categories', description: 'Gets all categories for a variable key.', parameters: { type: 'object', properties: { variable_key: { type: 'string' } }, required: ['variable_key'] } } },
@@ -378,6 +379,21 @@
         { type: 'function', function: { name: 'Set_link_label_visibility', description: 'Shows or hides link labels and updates the manual link-label visibility control.', parameters: { type: 'object', properties: { links: { type: 'array', items: { type: 'string' }, description: 'Link IDs to target, or omit to set the global manual control.' }, visibility: { type: 'string', enum: ['show', 'hide'] }, animate: { type: 'boolean' } }, required: ['visibility'] } } },
         { type: 'function', function: { name: 'View_link_label_options', description: 'Lists the available fields that can be used as link labels.' } },
         { type: 'function', function: { name: 'Set_link_label', description: 'Sets the link label field and updates the manual link-label field control.', parameters: { type: 'object', properties: { links: { type: 'array', items: { type: 'string' }, description: 'Link IDs to target, or omit to set the global manual label field.' }, label_key: { type: 'string', description: 'Exact link label field value.' }, animate: { type: 'boolean' } }, required: ['label_key'] } } },
+        { type: 'function', function: { name: 'Set_when_nodes_are_selected_display', description: 'Sets which links remain visible when nodes are selected. Options: all links, links from selected nodes, or links between selected nodes.', parameters: { type: 'object', properties: { mode: { type: 'string', enum: ['all links', 'links from selected nodes', 'links between selected nodes'] }, animate: { type: 'boolean' } }, required: ['mode'] } } },
+        { type: 'function', function: { name: 'View_app_style', description: 'Returns the current app colour theme and light/dark mode, plus the available theme and mode options.' } },
+        { type: 'function', function: { name: 'Set_app_style', description: 'Sets the app colour theme and light/dark mode. Themes: grey, blue, or pink. Modes: dark or light.', parameters: { type: 'object', properties: { color_theme: { type: 'string', enum: ['grey', 'blue', 'pink'] }, mode: { type: 'string', enum: ['dark', 'light'] } }, required: ['color_theme', 'mode'] } } },
+        { type: 'function', function: { name: 'View_app_background_colour', description: 'Returns the current app background colour and background rendering mode.' } },
+        { type: 'function', function: { name: 'Set_app_background_colour', description: 'Sets the app background colour using a six-digit hexadecimal colour, for example #171c24.', parameters: { type: 'object', properties: { color: { type: 'string', description: 'Six-digit hexadecimal colour, optionally with an alpha pair.' } }, required: ['color'] } } },
+        { type: 'function', function: { name: 'Set_app_background_by', description: 'Sets how the app background is rendered. Options: mono or voronoi.', parameters: { type: 'object', properties: { mode: { type: 'string', enum: ['mono', 'voronoi'] }, animate: { type: 'boolean' } }, required: ['mode'] } } },
+        { type: 'function', function: { name: 'Reset_visuals', description: 'Resets node and link visual overrides to their defaults.', parameters: { type: 'object', properties: { animate: { type: 'boolean' } } } } },
+        { type: 'function', function: { name: 'Focus_on_selected_nodes', description: 'Zooms the network view to fit the currently selected nodes.' } },
+        { type: 'function', function: { name: 'Set_selection_as_layer_zero', description: 'Sets the currently selected nodes to layer zero.' } },
+        { type: 'function', function: { name: 'Set_node_color', description: 'Sets the colour of one or more nodes using a six-digit hexadecimal colour. Use node IDs or preferred protein names; if nodes are omitted, the currently selected nodes are coloured. If the nodes are already selected, just leave empty so that it used the selected nodes.', parameters: { type: 'object', properties: { node_id: { type: 'string', description: 'A node ID or preferred protein name.' }, nodes: { type: 'array', items: { type: 'string' }, description: 'Node IDs or preferred protein names to colour. Omit to use the current selection.' }, color: { type: 'string', description: 'Six-digit hexadecimal colour.' }, animate: { type: 'boolean' } }, required: ['color'] } } },
+        { type: 'function', function: { name: 'Set_mono_node_color', description: 'Sets the default colour used for mono-coloured nodes.', parameters: { type: 'object', properties: { color: { type: 'string', description: 'Six-digit hexadecimal colour.' } }, required: ['color'] } } },
+        { type: 'function', function: { name: 'Build_network', description: 'Builds the network using the specified minimum interaction score threshold.', parameters: { type: 'object', properties: { score_threshold: { type: 'number' } }, required: ['score_threshold'] } } },
+        { type: 'function', function: { name: 'Delete_collection', description: 'Deletes a named collection.', parameters: { type: 'object', properties: { name: { type: 'string' }, animate: { type: 'boolean' } }, required: ['name'] } } },
+        { type: 'function', function: { name: 'Rename_collection', description: 'Renames an existing collection.', parameters: { type: 'object', properties: { name: { type: 'string' }, new_name: { type: 'string' }, animate: { type: 'boolean' } }, required: ['name', 'new_name'] } } },
+        { type: 'function', function: { name: 'List_collections', description: 'Lists all collections and their node counts.' } },
         { type: 'function', function: { name: 'View_node_IDs', description: 'Views IDs of selected nodes.' } },
         { type: 'function', function: { name: 'View_preferred_name', description: 'Views preferred names of selected nodes.' } },
         { type: 'function', function: { name: 'View_annotation_data', description: 'Views annotation data of selected nodes. This is the more important protein information to view.' } },
@@ -397,6 +413,7 @@
         { type: 'function', function: { name: 'View_last_console_logs', description: 'Returns the last N console logs.', parameters: { type: 'object', properties: { count: { type: 'number', description: 'Number of logs to return (e.g. 30).' } } } } },
         { type: 'function', function: { name: 'View_error_logs', description: 'Returns all captured error and debug logs.' } },
         { type: 'function', function: { name: 'View_action_history', description: 'Returns a record of actions performed in StringScape.' } },
+        { type: 'function', function: { name: 'View_Stringscape_app_info', description: 'View information about the StringScape app, which is also a brief guide on how to use the app. Use this if the user asks any questions about StringScape.' } },
         { type: 'function', function: { name: 'See_view_options', description: 'Returns a list of all available network views and collections.' } },
         { type: 'function', function: { name: 'Change_view', description: 'Changes the active view.', parameters: { type: 'object', properties: { view_name: { type: 'string', description: 'The exact name or ID of the view.' } }, required: ['view_name'] } } },
         { 
@@ -508,6 +525,7 @@
         StringScape API (ss is already available; import stringscape as ss is also supported). Every method returns a dictionary containing at least {"status": "success" | "warning" | "error"}:
         - ss.search_and_select(query, scope='all', animate=False) -> Returns {"status", "query", "scope", "matched_count", "selected_node_ids", "message"}
         - ss.select(node_ids, mode='replace', animate=False) -> Returns {"status", "mode", "requested_node_ids", "selected_node_ids", "selected_count", "missing_node_ids", "message"} (modes: replace, add, subtract, intersect, invert)
+        - ss.invert_selection(animate=False) -> Returns {"status", "selected_node_ids", "selected_count", "message"}
         - ss.deselect_all() -> Returns {"status": "success", "selected_count": 0, "selected_node_ids": []}
         - ss.select_neighbors(node_id, depth=1, animate=False) -> Returns {"status", "node_id", "depth", "neighbor_node_ids", "selected_node_ids", "message"}
         - ss.expand_to_connected() -> Returns {"status", "previous_count", "selected_count", "selected_node_ids", "message"}
@@ -550,7 +568,7 @@
         - ss.list_views() -> Returns {"status": "success", "current_view", "views"}
         - ss.set_view(view) -> Returns {"status", "view", "animate", "message"}
         - ss.set_node_colouring(variable) -> Returns {"status", "variable", "animate", "message"}
-        - ss.set_node_color(node_id, '#ff0055') -> Returns {"status", "node_id", "color", "message"}
+        - ss.set_node_color(node_id=None, color='#ff0055', nodes=None) -> Returns {"status", "node_ids", "requested_nodes", "color", "affected_count"}; accepts node IDs or preferred names, and defaults to the current selection when node_id/nodes is omitted.
         - await ss.display_notification(text, button1_text='Close', button2_text=None, auto_close=False, default_button_index=0, auto_close_ms=5000) -> Returns {"status", "button_index", "button_text", "auto_closed"}
         - ss.begin_batch(), ss.end_batch() -> Returns {"status": "success", "batch_depth"}
         - Use with ss.batch_update(): around large edit loops; it renders once when the block exits.
@@ -792,6 +810,12 @@
     function aiRecordDeselectHistory(actor = 'Human') {
         aiAppendActionHistory(actor, 'Deselected all nodes', [
             'ss.deselect_all()'
+        ]);
+    }
+
+    function aiRecordInvertSelectionHistory(actor = 'Human') {
+        aiAppendActionHistory(actor, 'Inverted node selection', [
+            'ss.invert_selection()'
         ]);
     }
 
@@ -1353,6 +1377,7 @@
         lines.push('StringScape API (ss is already injected; import stringscape as ss is also supported). Every method returns a dictionary containing at least {"status": "success" | "warning" | "error"}:');
         lines.push('- ss.search_and_select(query, scope="all", animate=False) -> Returns {"status", "query", "scope", "matched_count", "selected_node_ids", "message"}');
         lines.push('- ss.select(node_ids, mode="replace", animate=False) -> Returns {"status", "mode", "requested_node_ids", "selected_node_ids", "selected_count", "missing_node_ids", "message"} (modes: replace, add, subtract, intersect, invert)');
+        lines.push('- ss.invert_selection(animate=False) -> Returns {"status", "selected_node_ids", "selected_count", "message"}');
         lines.push('- ss.deselect_all() -> Returns {"status": "success", "selected_count": 0, "selected_node_ids": []}');
         lines.push('- ss.select_neighbors(node_id, depth=1, animate=False) -> Returns {"status", "node_id", "depth", "neighbor_node_ids", "selected_node_ids", "message"}');
         lines.push('- ss.expand_to_connected() -> Returns {"status", "previous_count", "selected_count", "selected_node_ids", "message"}');
@@ -1395,7 +1420,7 @@
         lines.push('- ss.list_views() -> Returns {"status": "success", "current_view", "views"}');
         lines.push('- ss.set_view(view) -> Returns {"status", "view", "animate", "message"}');
         lines.push('- ss.set_node_colouring(variable) -> Returns {"status", "variable", "animate", "message"}');
-        lines.push('- ss.set_node_color(node_id, "#ff0055") -> Returns {"status", "node_id", "color", "message"}');
+        lines.push('- ss.set_node_color(node_id=None, color="#ff0055", nodes=None) -> Returns {"status", "node_ids", "requested_nodes", "color", "affected_count"}; accepts node IDs or preferred names and defaults to the current selection when omitted.');
         lines.push('- await ss.display_notification(text, button1_text="Close", button2_text=None, auto_close=False, default_button_index=0, auto_close_ms=5000) -> Returns {"status", "button_index", "button_text", "auto_closed"}');
         lines.push('- ss.begin_batch(), ss.end_batch() -> Returns {"status": "success", "batch_depth"}');
         lines.push('- For large edits: with ss.batch_update(): ...  This produces one render on exit.');
@@ -2648,6 +2673,7 @@
                     selectNodes(next, false, 'Python API selection', null, false, { actor: 'AI' }); queueDraw(animate);
                     return result(found.length || mode === 'invert' ? 'success' : 'warning', { mode, requested_node_ids: ids, selected_node_ids: selected(), selected_count: selected().length, missing_node_ids: ids.filter(id => !foundIds.has(id)) });
                 }
+                if (method === 'invert_selection') return invertSelection('AI', animate);
                 if (method === 'select_neighbors') {
                     const nodeId = String(args.node_id ?? args.id ?? ''); const depth = Math.max(1, Math.floor(+args.depth || 1));
                     if (!nodeMap.has(nodeId)) return result('warning', { node_id: nodeId, neighbor_node_ids: [], message: 'Node was not found.' });
@@ -2944,7 +2970,17 @@
                     });
                 }
                 if (method === 'export_selection') { const format = normal(args.format); if (!['csv','json'].includes(format)) return result('warning', { message: 'format must be csv or json.' }); const rows = selected().map(id => ({ id, ...(proteinMetadata.get(id) || {}) })); if (format === 'json') download('stringscape_selection.json', 'application/json', JSON.stringify(rows, null, 2)); else { const keys = [...new Set(rows.flatMap(Object.keys))]; download('stringscape_selection.csv', 'text/csv;charset=utf-8', [keys.join(','), ...rows.map(row => keys.map(key => JSON.stringify(row[key] ?? '')).join(','))].join('\n')); } return result('success', { format, exported_count: rows.length }); }
-                if (method === 'reset_visuals') { allNodes().forEach(n => { delete n._ssSize; delete n._ssGlow; delete n._ssVisible; delete n._ssLabelVisible; delete n._ssLabelKey; delete n._ssColor; }); links.forEach(l => ['_ssColor','_ssWidth','_ssOpacity','_ssLabelVisible','_ssLabelKey','_ssArrowVisible'].forEach(k => delete l[k])); updateSizesAndColors(); queueDraw(animate); return result('success'); }
+                if (method === 'reset_visuals') {
+                    allNodes().forEach(n => { delete n._ssSize; delete n._ssGlow; delete n._ssVisible; delete n._ssLabelVisible; delete n._ssLabelKey; delete n._ssColor; });
+                    links.forEach(l => ['_ssColor','_ssWidth','_ssOpacity','_ssLabelVisible','_ssLabelKey','_ssArrowVisible'].forEach(k => delete l[k]));
+                    const nodeMonoColor = document.getElementById('nodeMonoColor');
+                    const linkColor = document.getElementById('linkColor');
+                    if (nodeMonoColor) nodeMonoColor.value = '#4caf50';
+                    if (linkColor) linkColor.value = '#999999';
+                    updateSizesAndColors();
+                    queueDraw(animate);
+                    return result('success', { node_mono_color: nodeMonoColor?.value || '#4caf50', link_color: linkColor?.value || '#999999' });
+                }
                 if (method === 'focus_on') { const ids = new Set((Array.isArray(args.node_ids) ? args.node_ids : [args.node_ids]).filter(Boolean).map(String)); const targets = activeNodes().filter(n => ids.has(String(n.id))); if (!targets.length) return result('warning', { message: 'No target nodes were found.' }); const targetTransform = fitNodesInView(targets); d3.select(canvas).transition().duration(350).call(zoomBehavior.transform, targetTransform); return result('success', { node_ids: targets.map(n => n.id) }); }
                 if (method === 'set_as_layer_zero') { const ids = new Set((Array.isArray(args.node_ids) ? args.node_ids : [args.node_ids]).filter(Boolean).map(String)); allNodes().forEach(n => { if (ids.has(String(n.id))) n.layer = 0; }); updateSizesAndColors(); queueDraw(animate); return result('success', { node_ids: [...ids] }); }
                 if (method === 'set_mono_node_color') { const color = String(args.color || ''); if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return result('warning', { message: 'color must be a hex colour.' }); document.getElementById('nodeMonoColor').value = color; aiRecordSetMonoNodeColorHistory(color, 'AI'); updateSizesAndColors(); return result('success', { color }); }
@@ -2982,6 +3018,21 @@
                     const nodeCount = collections.get(name).nodeIds?.size || 0; collections.delete(name); aiRecordDeleteCollectionHistory(name, 'AI'); updateViewMenu(); refreshLegendIfCollectionMode(); queueDraw(animate);
                     return result('success', { collection: name, deleted: true, removed_node_count: nodeCount });
                 }
+                if (method === 'rename_collection') {
+                    const name = String(args.name || '').trim();
+                    const newName = String(args.new_name || args.newName || '').trim();
+                    if (!collections.has(name)) return result('warning', { collection: name, renamed: false, message: 'Collection was not found.' });
+                    if (!newName) return result('warning', { collection: name, renamed: false, message: 'A new collection name is required.' });
+                    if (name === newName) return result('warning', { collection: name, renamed: false, message: 'The new collection name must be different.' });
+                    if (collections.has(newName)) return result('warning', { collection: name, renamed: false, message: 'A collection with the new name already exists.' });
+                    const collection = collections.get(name);
+                    collections.set(newName, collection);
+                    renameCategoryLegendItemState('collection', name, newName);
+                    collections.delete(name);
+                    if (currentViewId === `coll_${name}`) currentViewId = `coll_${newName}`;
+                    updateViewMenu(); refreshLegendIfCollectionMode(); queueDraw(animate);
+                    return result('success', { collection: newName, previous_collection: name, renamed: true });
+                }
                 if (method === 'add_to_collection') {
                     let name = String(args.name || args.collection_name || '').trim(); const ids = selected();
                     if (!ids.length) return result('warning', { collection: name, added_count: 0, message: 'No nodes are selected.' });
@@ -3012,9 +3063,26 @@
                     select.value = mode; handleColorModeChange(mode, { actor: 'AI' }); queueDraw(animate); return result('success', { variable: mode, animate });
                 }
                 if (method === 'set_node_color') {
-                    const nodeId = String(args.node_id ?? args.id ?? ''), color = String(args.color || ''), node = nodeMap.get(nodeId);
-                    if (!node || !/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return result('warning', { node_id: nodeId, color, message: 'Node or colour was invalid.' });
-                    node.col = color; queueDraw(animate); return result('success', { node_id: nodeId, color });
+                    const rawIds = args.nodes ?? args.node_ids ?? args.node_id ?? args.id;
+                    const requestedNames = rawIds == null || (Array.isArray(rawIds) && !rawIds.length)
+                        ? selected()
+                        : (Array.isArray(rawIds) ? rawIds : [rawIds]).filter(Boolean).map(value => String(value).trim()).filter(Boolean);
+                    const color = String(args.color || '');
+                    if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return result('warning', { node_ids: requestedNames, color, message: 'Colour must be a hex colour.' });
+                    const preferredNameLookup = new Map();
+                    allNodes().forEach(node => {
+                        const preferredName = getPreferredProteinName(node.id);
+                        if (preferredName) preferredNameLookup.set(String(preferredName).trim().toLowerCase(), node);
+                    });
+                    const resolvedTargets = requestedNames.map(value => {
+                        const exactNode = nodeMap.get(String(value));
+                        return exactNode || preferredNameLookup.get(String(value).toLowerCase()) || null;
+                    }).filter(Boolean);
+                    const targets = Array.from(new Map(resolvedTargets.map(node => [String(node.id), node])).values());
+                    if (!targets.length) return result('warning', { node_ids: requestedNames, color, message: 'No target nodes or preferred names were found.' });
+                    targets.forEach(node => { node.col = color; });
+                    queueDraw(animate);
+                    return result('success', { node_ids: targets.map(node => String(node.id)), requested_nodes: requestedNames, color, affected_count: targets.length });
                 }
                 if (method === 'display_notification') {
                     return result('warning', { message: 'display_notification must be called asynchronously.' });
@@ -3253,6 +3321,11 @@
                 animate: args.animate === true
             }));
         }
+        if (toolName === 'Invert_selection') {
+            return JSON.parse(stringScapePythonBridge.call_json('invert_selection', {
+                animate: args.animate === true
+            }));
+        }
         if (toolName === 'Select_neighbours') {
             try {
                 const previousSelection = new Set(getEffectiveSelectedNodesSet());
@@ -3427,6 +3500,90 @@
                 animate: args.animate === true
             }));
         }
+        if (toolName === 'Set_when_nodes_are_selected_display') {
+            return JSON.parse(stringScapePythonBridge.call_json('when_nodes_are_selected_display', {
+                mode: String(args.mode || '').trim().toLowerCase(),
+                animate: args.animate === true
+            }));
+        }
+        if (toolName === 'View_app_style') {
+            return {
+                status: 'success',
+                color_theme: currentColorTheme,
+                mode: currentUiMode,
+                color_themes: Object.keys(APP_THEME_PRESETS),
+                modes: ['dark', 'light']
+            };
+        }
+        if (toolName === 'Set_app_style') {
+            return JSON.parse(stringScapePythonBridge.call_json('set_app_style', {
+                color_theme: String(args.color_theme || '').trim().toLowerCase(),
+                mode: String(args.mode || '').trim().toLowerCase()
+            }));
+        }
+        if (toolName === 'View_app_background_colour') {
+            return {
+                status: 'success',
+                color: document.getElementById('bgColor')?.value || '#1a1a1a',
+                mode: backgroundMode,
+                modes: ['mono', 'voronoi']
+            };
+        }
+        if (toolName === 'Set_app_background_colour') {
+            return JSON.parse(stringScapePythonBridge.call_json('set_app_background_colour', {
+                color: String(args.color || '').trim()
+            }));
+        }
+        if (toolName === 'Set_app_background_by') {
+            return JSON.parse(stringScapePythonBridge.call_json('set_app_background_by', {
+                mode: String(args.mode || '').trim().toLowerCase(),
+                animate: args.animate === true
+            }));
+        }
+        if (toolName === 'Reset_visuals') {
+            return JSON.parse(stringScapePythonBridge.call_json('reset_visuals', { animate: args.animate === true }));
+        }
+        if (toolName === 'Focus_on_selected_nodes') {
+            const nodeIds = Array.from(getEffectiveSelectedNodesSet() || []).map(String);
+            if (!nodeIds.length) return { status: 'warning', node_ids: [], message: 'No nodes are currently selected.' };
+            return JSON.parse(stringScapePythonBridge.call_json('focus_on', { node_ids: nodeIds }));
+        }
+        if (toolName === 'Set_selection_as_layer_zero') {
+            const nodeIds = Array.from(getEffectiveSelectedNodesSet() || []).map(String);
+            if (!nodeIds.length) return { status: 'warning', node_ids: [], message: 'No nodes are currently selected.' };
+            return JSON.parse(stringScapePythonBridge.call_json('set_as_layer_zero', { node_ids: nodeIds, animate: args.animate === true }));
+        }
+        if (toolName === 'Set_node_color') {
+            return JSON.parse(stringScapePythonBridge.call_json('set_node_color', {
+                nodes: args.nodes ?? args.node_ids ?? (args.node_id ?? args.id),
+                color: String(args.color || '').trim(),
+                animate: args.animate === true
+            }));
+        }
+        if (toolName === 'Set_mono_node_color') {
+            return JSON.parse(stringScapePythonBridge.call_json('set_mono_node_color', {
+                color: String(args.color || '').trim()
+            }));
+        }
+        if (toolName === 'Build_network') {
+            return JSON.parse(stringScapePythonBridge.call_json('build_network', { score_threshold: args.score_threshold }));
+        }
+        if (toolName === 'Delete_collection') {
+            return JSON.parse(stringScapePythonBridge.call_json('delete_collection', {
+                name: String(args.name || args.collection || '').trim(),
+                animate: args.animate === true
+            }));
+        }
+        if (toolName === 'Rename_collection') {
+            return JSON.parse(stringScapePythonBridge.call_json('rename_collection', {
+                name: String(args.name || args.collection || '').trim(),
+                new_name: String(args.new_name || args.newName || '').trim(),
+                animate: args.animate === true
+            }));
+        }
+        if (toolName === 'List_collections') {
+            return JSON.parse(stringScapePythonBridge.call_json('list_collections'));
+        }
         if (toolName === 'View_node_IDs') return aiBuildSelectedTable(node => node.id);
         if (toolName === 'View_preferred_name') return aiBuildSelectedTable(node => {
             return getPreferredProteinName(node.id) || 'Unknown';
@@ -3564,6 +3721,25 @@
         }
         if (toolName === 'View_action_history') {
             return aiGetActionHistoryText() || 'No actions recorded yet.';
+        }
+        if (toolName === 'View_Stringscape_app_info') {
+            return `StringScape is an open-source, high-performance web app for exploring protein-protein interaction networks from the STRING database.
+
+Basic workflow:
+1. Upload an interaction file and any accessory data files using the upload controls.
+2. Enter seed protein IDs if required, set the interaction score threshold, and build the network.
+3. Click nodes to select them. Use Shift/Ctrl or the selection controls to add, subtract, or intersect selections. Press A to select all and I to invert the selection.
+4. Use the search box to find proteins by ID, name, annotation, localisation, size, centrality, or uploaded variables.
+5. Use the view selector to switch between the full network, selected nodes, collections, scatter plot, Venn diagram, histogram, pie chart, mind map, and embeddings views.
+6. Use Colour Nodes By to colour nodes by a variable. Use node and link controls to adjust size, glow, visibility, labels, link colour, width, opacity, and direction arrows.
+7. Save selections to collections to compare or revisit groups of proteins. Collections can also be viewed in the Venn, histogram, pie, and network views.
+8. Select nodes to inspect their preferred name, annotation, localisation, description, sequence, protein size, centrality, and eigenvector data in the information panel.
+
+AI assistance:
+- The AI Agent can answer questions and operate the app through its tools.
+- The Python panel can run Pyodide scripts with app_data and the StringScape API object ss already available.
+- Use ss.select(), ss.search_and_select(), ss.set_node_colouring(), ss.set_node_color(), ss.add_to_collection(), and ss.set_view() for common scripted workflows.
+- Use View_variables before working with an uploaded variable, and use View_action_history to inspect the generated action script.`;
         }
         if (toolName === 'See_view_options') {
             const coreViews = ["Full Network (ID: base)", "Selected Nodes (ID: selected)", "Scatter Plot", "Venn Diagram", "Histogram", "Pie Chart", "Mind Map", "Embeddings"];
@@ -3891,6 +4067,7 @@ class _StringScapeAPI:
     def search_and_select(self, query, scope='all', animate=False): return self._call('search_and_select', query=query, scope=scope, animate=animate)
     def select(self, node_ids, mode='replace', animate=False):
         return self._call('select', node_ids=[node_ids] if isinstance(node_ids, str) else list(node_ids), mode=mode, animate=animate)
+    def invert_selection(self, animate=False): return self._call('invert_selection', animate=animate)
     def select_neighbors(self, node_id, depth=1, animate=False): return self._call('select_neighbors', node_id=node_id, depth=depth, animate=animate)
     def list_variables(self): return self._call('list_variables')
     def get_variable_range(self, variable_key): return self._call('get_variable_range', variable_key=variable_key)
@@ -3929,10 +4106,11 @@ class _StringScapeAPI:
     def expand_to_connected(self, animate=False): return self._call('expand_to_connected', animate=animate)
     def create_collection(self, name, animate=False): return self._call('create_collection', name=name, animate=animate)
     def delete_collection(self, name, animate=False): return self._call('delete_collection', name=name, animate=animate)
+    def rename_collection(self, name, new_name, animate=False): return self._call('rename_collection', name=name, new_name=new_name, animate=animate)
     def add_to_collection(self, name, animate=False): return self._call('add_to_collection', name=name, animate=animate)
     def set_view(self, view, animate=False): return self._call('set_view', view=view, animate=animate)
     def set_node_colouring(self, variable, animate=False): return self._call('set_node_colouring', variable=variable, animate=animate)
-    def set_node_color(self, node_id, color, animate=False): return self._call('set_node_color', node_id=node_id, color=color, animate=animate)
+    def set_node_color(self, node_id=None, color='#ff0055', nodes=None, animate=False): return self._call('set_node_color', node_id=node_id, nodes=nodes, color=color, animate=animate)
     def get_action_history(self): return self._call('get_action_history')
     async def display_notification(self, text, button1_text='Close', button2_text=None, auto_close=False, default_button_index=0, auto_close_ms=5000): return await self._call_async('display_notification', text=text, button1_text=button1_text, button2_text=button2_text, auto_close=auto_close, default_button_index=default_button_index, auto_close_ms=auto_close_ms)
     def get_selected_nodes(self): return self._call('get_selected_nodes')
@@ -15800,18 +15978,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         }
         if (key === 'i') {
             e.preventDefault();
-            if (currentViewId === 'Venn Diagram') {
-                const ids = getVennActiveNodeIds();
-                const inverted = new Set();
-                ids.forEach(id => { if (!vennSelectedNodes.has(id)) inverted.add(id); });
-                vennSelectedNodes = inverted;
-                draw();
-                return;
-            }
-            const activeNodes = currentViewId === 'base' ? nodes : (activeSubData?.nodes || []);
-            const inverted = activeNodes.filter(n => !selectedNodes.has(n.id));
-            selectNodes(inverted, false, "Invert Selection");
-            draw();
+            invertSelection('Human');
             return;
         }
         if (key === 's') {
@@ -19045,6 +19212,26 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 return new Set();
             }
         }
+    }
+
+    function invertSelection(actor = null, animate = false) {
+        if (currentViewId === 'Venn Diagram') {
+            const ids = getVennActiveNodeIds();
+            const inverted = new Set([...ids].filter(id => !vennSelectedNodes.has(id)));
+            vennSelectedNodes = inverted;
+            if (actor) aiRecordInvertSelectionHistory(actor);
+            draw();
+            return { status: 'success', selected_node_ids: [...inverted], selected_count: inverted.size, message: 'Selection inverted.' };
+        }
+
+        const active = currentViewId === 'base' ? nodes : (activeSubData?.nodes || []);
+        const current = getEffectiveSelectedNodesSet() || new Set();
+        const inverted = active.filter(node => !current.has(node.id));
+        selectNodes(inverted, false, 'Invert Selection', null, false, null);
+        if (actor) aiRecordInvertSelectionHistory(actor);
+        if (animate) queueMicrotask(() => draw());
+        else draw();
+        return { status: 'success', selected_node_ids: inverted.map(node => String(node.id)), selected_count: inverted.length, message: 'Selection inverted.' };
     }
 
     function toggleDropdown(id) { 
