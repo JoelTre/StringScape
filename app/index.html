@@ -2915,6 +2915,10 @@
         .info-controls button { width: 31px; height: 31px; padding: 0; margin: 0; font-size: 14px; line-height: 24px; background: var(--button-bg-hover); color: var(--text-color); }
 
         label { display: block; font-size: 13px; margin-top: 10px; color: var(--muted-text-color); }
+        #nodes-drop > label,
+        #links-drop > label,
+        #bg-drop > label,
+        #physics-drop > label { font-size: 15px; color: var(--accent-color-soft); font-weight: 600; }
         .slider-val { float: right; color: var(--accent-color); font-weight: bold; }
         input, select, button { width: 100%; padding: 8px; margin: 5px 0; border-radius: 4px; border: 1px solid var(--input-border); background: var(--input-bg); color: var(--text-color); box-sizing: border-box; }
         input[type="range"] { padding: 0; cursor: pointer; }
@@ -4174,6 +4178,7 @@
 
         <span class="dropdown-toggle">Nodes ▾</span>
         <div id="nodes-drop" class="dropdown-content">
+            <h4 class="node-settings-subheading">Node Colour:</h4>
             <label>Colour Nodes By</label>
             <select id="colorMode">
                 <option value="layer">Degrees of separation</option>
@@ -4192,19 +4197,35 @@
             </select>
             <label>Mono Node Colour</label>
             <input type="color" id="nodeMonoColor" value="#4caf50">
+
+            <label>Colour Node Border By</label>
+            <select id="nodeBorderColorMode">
+                <option value="same_as_color" selected>Same as Colour Nodes By variable</option>
+            </select>
+
+            <h4 class="node-settings-subheading">Node Size:</h4>
             
             <label>Node Size <span id="val-nsiz" class="slider-val">1</span></label>
             <input type="range" id="nodeSizeSlider" min="0.1" max="5" step="0.1" value="1">
 
-            <label>Size by Centrality <span id="val-siz" class="slider-val">0</span></label>
-            <input type="range" id="sizeSlider" min="0" max="1" step="0.01" value="0">
+            <label>Size by variable</label>
+            <select id="nodeSizeVariable">
+                <option value="none" selected>None</option>
+            </select>
+            <label>Size by variable magnitude <span id="val-node-size-by" class="slider-val">0.2</span></label>
+            <input type="range" id="nodeSizeBySlider" min="0" max="1" step="0.01" value="0.2">
 
-            <label>Size by Eigenvector Centrality<span id="val-esiz" class="slider-val">0</span></label>
-            <input type="range" id="eigenSlider" min="0" max="1" step="0.1" value="0">
+            <h4 class="node-settings-subheading">Node Border Width:</h4>
+            <label>Node Border Width <span id="val-node-border-width" class="slider-val">1</span></label>
+            <input type="range" id="nodeBorderWidthSlider" min="0" max="5" step="0.1" value="1">
+            <label>Node Border Width By</label>
+            <select id="nodeBorderWidthMode">
+                <option value="none" selected>None</option>
+            </select>
+            <label>Node Border Width By magnitude <span id="val-node-border-width-by" class="slider-val">4</span></label>
+            <input type="range" id="nodeBorderWidthBySlider" min="0" max="20" step="0.1" value="4">
 
-            <label>Size by Protein Size <span id="val-psiz" class="slider-val">0</span></label>
-            <input type="range" id="proteinSizeSlider" min="0" max="1" step="0.1" value="0">
-
+            <h4 class="node-settings-subheading">Other:</h4>
             <label>Node Glow <span id="val-glw" class="slider-val">0</span></label>
             <input type="range" id="glowSlider" min="0" max="500" step="1" value="0">
 
@@ -4264,8 +4285,8 @@
             <label>Link Opacity <span id="val-bri" class="slider-val">0.6</span></label>
             <input type="range" id="brightnessSlider" min="0" max="1" step="0.01" value="0.6">
 
-            <label>Gene Link Opacity <span id="val-gene-bri" class="slider-val">0.9</span></label>
-            <input type="range" id="geneBrightnessSlider" min="0" max="1" step="0.01" value="0.9">
+            <!-- <label>Gene Link Opacity <span id="val-gene-bri" class="slider-val">0.9</span></label> -->
+            <!-- <input type="range" id="geneBrightnessSlider" min="0" max="1" step="0.01" value="0.9"> -->
         </div>
 
         <span class="dropdown-toggle">Variables ▾</span>
