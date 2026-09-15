@@ -594,21 +594,43 @@
     let aiPythonOutputCopyFeedbackTimer = null;
     const aiChatManualTitleIds = new Set();
     const AI_ACTION_HISTORY_STORAGE_KEY = 'stringscape.actionHistoryScript';
+    const AI_ACTION_HISTORY_FILTER_STORAGE_KEY = 'stringscape.actionHistoryFilters';
+    const AI_ACTION_HISTORY_HEADER = '# This is a record of all actions performed in StringScape.';
+    const AI_ACTION_HISTORY_DEFAULT_FILTERS = { actions: true, toolResponses: true, chat: true, thoughts: false };
     let aiActionHistoryLines = [];
+    let aiActionHistoryFilters = { ...AI_ACTION_HISTORY_DEFAULT_FILTERS };
+    let aiActionHistorySearch = '';
+    let aiActionHistoryMatchIndex = -1;
     let aiPythonActionRecordingEnabled = false;
 
     function aiLoadActionHistory() {
         try {
             const raw = localStorage.getItem(AI_ACTION_HISTORY_STORAGE_KEY);
             if (!raw) {
-                aiActionHistoryLines = [];
+                aiActionHistoryLines = [AI_ACTION_HISTORY_HEADER];
                 return;
             }
             const parsed = JSON.parse(raw);
             aiActionHistoryLines = Array.isArray(parsed) ? parsed.map(line => String(line)) : [];
+            if (!aiActionHistoryLines.includes(AI_ACTION_HISTORY_HEADER)) {
+                aiActionHistoryLines.unshift(AI_ACTION_HISTORY_HEADER, '');
+            }
         } catch {
-            aiActionHistoryLines = [];
+            aiActionHistoryLines = [AI_ACTION_HISTORY_HEADER];
         }
+    }
+
+    function aiLoadActionHistoryFilters() {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(AI_ACTION_HISTORY_FILTER_STORAGE_KEY) || '{}');
+            aiActionHistoryFilters = { ...AI_ACTION_HISTORY_DEFAULT_FILTERS, ...parsed };
+        } catch {
+            aiActionHistoryFilters = { ...AI_ACTION_HISTORY_DEFAULT_FILTERS };
+        }
+    }
+
+    function aiPersistActionHistoryFilters() {
+        try { localStorage.setItem(AI_ACTION_HISTORY_FILTER_STORAGE_KEY, JSON.stringify(aiActionHistoryFilters)); } catch {}
     }
 
     function aiPersistActionHistory() {
@@ -633,6 +655,26 @@
     function aiGetHistoryTime() {
         const now = new Date();
         return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    }
+
+    function aiGetHistoryDate() {
+        const now = new Date();
+        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    }
+
+    function aiGetLastHistoryDate() {
+        for (let index = aiActionHistoryLines.length - 1; index >= 0; index--) {
+            const match = String(aiActionHistoryLines[index]).match(/^# Date: (\d{4}-\d{2}-\d{2})$/);
+            if (match) return match[1];
+        }
+        return null;
+    }
+
+    function aiAppendHistoryDateIfNeeded() {
+        const currentDate = aiGetHistoryDate();
+        if (aiGetLastHistoryDate() !== currentDate) {
+            aiActionHistoryLines.push(`# Date: ${currentDate}`);
+        }
     }
 
     function aiEscapeHtml(value) {
@@ -677,7 +719,49 @@
     function aiRenderActionHistoryPanel() {
         const script = document.getElementById('ai-action-history-script');
         if (!script) return;
-        aiRenderPythonSyntaxIntoElement(script, aiActionHistoryLines.join('\n'), 'No actions recorded yet.');
+        const text = aiGetActionHistoryText();
+        if (!text.trim()) {
+            aiRenderPythonSyntaxIntoElement(script, text, 'No actions recorded yet.');
+            aiUpdateActionHistorySearchNavigation();
+            return;
+        }
+        script.innerHTML = aiHighlightActionHistoryText(text);
+        aiUpdateActionHistorySearchNavigation();
+    }
+
+    function aiHighlightActionHistoryText(text) {
+        const highlightedPython = aiHighlightPythonText(text);
+        const query = String(aiActionHistorySearch || '').trim();
+        if (!query) return highlightedPython;
+        const escapedQuery = aiEscapeHtml(query).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const matcher = new RegExp(escapedQuery, 'gi');
+        return highlightedPython.split(/(<[^>]+>)/g).map(part => {
+            if (part.startsWith('<')) return part;
+            return part.replace(matcher, match => `<mark class="ai-history-search-match">${match}</mark>`);
+        }).join('');
+    }
+
+    function aiUpdateActionHistorySearchNavigation() {
+        const script = document.getElementById('ai-action-history-script');
+        const count = document.getElementById('ai-action-history-search-count');
+        const matches = script ? Array.from(script.querySelectorAll('.ai-history-search-match')) : [];
+        if (!matches.length) {
+            aiActionHistoryMatchIndex = -1;
+            if (count) count.textContent = '0/0';
+            return;
+        }
+        aiActionHistoryMatchIndex = Math.min(Math.max(aiActionHistoryMatchIndex, 0), matches.length - 1);
+        matches.forEach((match, index) => match.classList.toggle('active', index === aiActionHistoryMatchIndex));
+        if (count) count.textContent = `${aiActionHistoryMatchIndex + 1}/${matches.length}`;
+    }
+
+    function aiMoveActionHistoryMatch(step) {
+        const script = document.getElementById('ai-action-history-script');
+        const matches = script ? Array.from(script.querySelectorAll('.ai-history-search-match')) : [];
+        if (!matches.length) return;
+        aiActionHistoryMatchIndex = (aiActionHistoryMatchIndex + step + matches.length) % matches.length;
+        aiUpdateActionHistorySearchNavigation();
+        matches[aiActionHistoryMatchIndex]?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
 
     function aiRenderPythonScriptEditorHighlight() {
@@ -690,7 +774,22 @@
     }
 
     function aiGetActionHistoryText() {
-        return aiActionHistoryLines.length ? aiActionHistoryLines.join('\n') : '';
+        const blocks = aiActionHistoryLines.join('\n').split(/\n\s*\n/).filter(Boolean);
+        const visibleBlocks = blocks.filter(block => {
+            const categoryLine = block.split('\n').find(line => /^# \[[^\]]+\]/.test(line)) || '';
+            const category = categoryLine.match(/^# \[([^\]]+)\]/)?.[1] || 'Actions';
+            const visible = category === 'AI thoughts' ? aiActionHistoryFilters.thoughts
+                : category === 'Tool call responses' ? aiActionHistoryFilters.toolResponses
+                    : category === 'Chat messages' ? aiActionHistoryFilters.chat : aiActionHistoryFilters.actions;
+            return visible;
+        });
+        return visibleBlocks.join('\n\n');
+    }
+
+    function aiSetActionHistoryFilter(filterName, enabled) {
+        aiActionHistoryFilters[filterName] = Boolean(enabled);
+        aiPersistActionHistoryFilters();
+        aiRenderActionHistoryPanel();
     }
 
     function aiCloseHistoryMenu() {
@@ -705,7 +804,7 @@
     }
 
     function aiClearActionHistory() {
-        aiActionHistoryLines = [];
+        aiActionHistoryLines = [AI_ACTION_HISTORY_HEADER];
         aiPersistActionHistory();
         aiRenderActionHistoryPanel();
         aiCloseHistoryMenu();
@@ -768,11 +867,13 @@
         aiRenderPythonScriptEditorHighlight();
     }
 
-    function aiAppendActionHistory(actor, actionText, pythonLines) {
+    function aiAppendActionHistory(actor, actionText, pythonLines, category = 'Actions') {
         const cleanedLines = Array.isArray(pythonLines) ? pythonLines.map(line => String(line)).filter(Boolean) : [];
         if (!cleanedLines.length) return;
         if (aiActionHistoryLines.length) aiActionHistoryLines.push('');
-        aiActionHistoryLines.push(`# ${actor}: ${actionText} (${aiGetHistoryTime()})`, ...cleanedLines);
+        if (!aiActionHistoryLines.length) aiActionHistoryLines.push(AI_ACTION_HISTORY_HEADER);
+        aiAppendHistoryDateIfNeeded();
+        aiActionHistoryLines.push(`# [${category}] ${actor}: ${actionText} (${aiGetHistoryTime()})`, ...cleanedLines);
         aiPersistActionHistory();
         aiRenderActionHistoryPanel();
         if (aiPythonActionRecordingEnabled && String(actor) === 'Human') {
@@ -780,12 +881,19 @@
         }
     }
 
+    function aiAppendHistoryCommentBlock(category, title, content) {
+        const lines = String(content || '').split(/\r?\n/).map(line => `# ${line}`);
+        aiAppendActionHistory('AI', title, lines, category);
+    }
+
     function aiAppendChatMessageToActionHistory(actor, content) {
         const messageText = String(content || '');
         if (!messageText.trim()) return;
         const messageLines = messageText.split(/\r?\n/).map(line => `# ${line}`);
         if (aiActionHistoryLines.length) aiActionHistoryLines.push('');
-        aiActionHistoryLines.push(`# ${actor}: ${actor === 'Human' ? 'messaged AI' : 'messaged human'} (${aiGetHistoryTime()})`, ...messageLines);
+        if (!aiActionHistoryLines.length) aiActionHistoryLines.push(AI_ACTION_HISTORY_HEADER);
+        aiAppendHistoryDateIfNeeded();
+        aiActionHistoryLines.push(`# [Chat messages] ${actor}: ${actor === 'Human' ? 'messaged AI' : 'messaged human'} (${aiGetHistoryTime()})`, ...messageLines);
         aiPersistActionHistory();
         aiRenderActionHistoryPanel();
     }
@@ -1059,6 +1167,20 @@
     }
 
     aiLoadActionHistory();
+    aiLoadActionHistoryFilters();
+
+    function aiAskAboutActionHistory() {
+        const historyText = aiActionHistoryLines.join('\n').trim();
+        setAiPanelMode('agent');
+        aiNewChat();
+        const attachmentId = `action-history-${Date.now()}`;
+        const item = { id: attachmentId, type: 'file', name: 'Action_History.txt', data: historyText };
+        aiAttachedItems.push(item);
+        const preview = document.getElementById('ai-preview-area');
+        if (preview) preview.appendChild(aiCreateAttachmentPreviewChip(item.name, attachmentId));
+        toggleAiPanel(true);
+        document.getElementById('ai-user-input')?.focus();
+    }
 
     // This function toggles the visibility of the AI panel and updates the UI accordingly. It also triggers a redraw of the canvas and updates controls based on the current view to ensure everything is positioned correctly with the new panel state.
     function toggleAiPanel(forceState) {
@@ -1209,7 +1331,7 @@
         const isPython = aiPanelMode === 'python';
         const isHistory = aiPanelMode === 'history';
 
-        if (title) title.textContent = isHistory ? 'History ▾' : (isPython ? 'Python Scripts ▾' : 'AI Agent ▾');
+        if (title) title.textContent = isHistory ? 'Action History ▾' : (isPython ? 'Python Scripts ▾' : 'AI Chat ▾');
         if (newBtn) newBtn.style.display = isHistory ? 'none' : 'inline-flex';
         if (downloadBtn) downloadBtn.style.display = isHistory ? 'none' : 'inline-flex';
         if (historyBtn) historyBtn.textContent = isPython ? 'Script History' : 'Chat History';
@@ -5016,6 +5138,7 @@ sys.modules['stringscape'] = _stringscape_module
 
                 if (msg && msg.reasoning_content) {
                     aiRecordTranscript({ kind: 'ai_thoughts', seconds: elapsedSeconds, content: msg.reasoning_content });
+                    aiAppendHistoryCommentBlock('AI thoughts', 'AI thought', msg.reasoning_content);
                     if (!String(msg.content || '').trim()) {
                         if (thinking) thinking.remove();
                         aiAddThoughtLog(elapsedSeconds, msg.reasoning_content);
@@ -5134,6 +5257,7 @@ sys.modules['stringscape'] = _stringscape_module
                                 : String(res);
                             aiChatHistory.push({ role: "tool", tool_call_id: call.id, content: toolResponseText });
                             aiRecordTranscript({ kind: 'tool', name: call.function.name, content: toolResponseText });
+                            aiAppendHistoryCommentBlock('Tool call responses', `Tool call response from ${call.function.name}`, toolResponseText);
                         }
                     }
                 } else {
@@ -21391,6 +21515,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             const text = await file.text();
             uploadedFileViewerData[file.name] = { text };
             uploadedInteractionFiles[file.name] = text;
+            aiAppendActionHistory('Human', `Uploaded interaction file`, [
+                `# Uploaded file: ${file.name}`
+            ]);
             if (progressBar) progressBar.style.width = `${Math.round(((i + 1) / targetFiles.length) * 100)}%`;
         }
 
@@ -21433,6 +21560,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 uploadedFileViewerData[file.name] = { text };
                 uploadedAccessoryFiles[file.name] = text;
             }
+
+            aiAppendActionHistory('Human', `Uploaded accessory file`, [
+                `# Uploaded file: ${file.name}`
+            ]);
 
             processed++;
             const pct = Math.round((processed / targetFiles.length) * 100);
@@ -22013,6 +22144,28 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         bindClick(document.getElementById('ai-clear-history-menu-btn'), () => aiClearActionHistory());
         bindClick(document.getElementById('ai-copy-history-menu-btn'), () => aiCopyActionHistory());
         bindClick(document.getElementById('ai-download-history-menu-btn'), () => aiDownloadActionHistory());
+        bindClick(document.getElementById('ai-action-history-ask-btn'), () => aiAskAboutActionHistory());
+        const actionHistorySearch = document.getElementById('ai-action-history-search');
+        if (actionHistorySearch) {
+            actionHistorySearch.addEventListener('input', () => {
+                aiActionHistorySearch = actionHistorySearch.value;
+                aiActionHistoryMatchIndex = 0;
+                aiRenderActionHistoryPanel();
+            });
+        }
+        bindClick(document.getElementById('ai-action-history-prev-btn'), () => aiMoveActionHistoryMatch(-1));
+        bindClick(document.getElementById('ai-action-history-next-btn'), () => aiMoveActionHistoryMatch(1));
+        [
+            ['ai-history-filter-actions', 'actions'],
+            ['ai-history-filter-tool-responses', 'toolResponses'],
+            ['ai-history-filter-chat', 'chat'],
+            ['ai-history-filter-thoughts', 'thoughts']
+        ].forEach(([id, filterName]) => {
+            const checkbox = document.getElementById(id);
+            if (!checkbox) return;
+            checkbox.checked = aiActionHistoryFilters[filterName];
+            checkbox.addEventListener('change', () => aiSetActionHistoryFilter(filterName, checkbox.checked));
+        });
         bindClick(document.getElementById('ai-history-launch-btn'), () => {
             toggleAiPanel(true);
             setAiPanelMode('history');
