@@ -896,6 +896,71 @@
             flex-direction: column;
             gap: 4px;
             min-width: 0;
+            flex: 1;
+        }
+        #ai-action-history-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+        }
+        #ai-action-history-search {
+            flex: 1 1 auto;
+            min-width: 220px;
+            height: 32px;
+            box-sizing: border-box;
+            padding: 7px 10px;
+            border: 1px solid var(--border-color-strong);
+            border-radius: 8px;
+            background: var(--surface-color-panel);
+            color: var(--text-color);
+            font: inherit;
+            font-size: 0.8rem;
+        }
+        #ai-action-history-search:focus {
+            outline: none;
+            border-color: var(--accent-color);
+        }
+        #ai-action-history-ask-btn {
+            flex: 0 0 62px;
+            width: 62px;
+            height: 32px;
+            box-sizing: border-box;
+            padding: 7px 6px;
+            border: 1px solid var(--accent-color);
+            border-radius: 8px;
+            background: var(--accent-color);
+            color: #fff;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        #ai-action-history-search-nav {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            flex: 0 0 auto;
+            height: 32px;
+        }
+        #ai-action-history-search-nav button {
+            width: 25px;
+            height: 32px;
+            box-sizing: border-box;
+            padding: 0;
+            border: 1px solid var(--border-color-strong);
+            border-radius: 5px;
+            background: var(--surface-color-panel);
+            color: var(--text-color);
+            cursor: pointer;
+            line-height: 1;
+        }
+        #ai-action-history-search-nav button:hover {
+            background: var(--button-bg);
+        }
+        #ai-action-history-search-count {
+            min-width: 38px;
+            color: var(--muted-text-color);
+            font-size: 0.72rem;
+            text-align: center;
         }
         #ai-action-history-title {
             margin: 0;
@@ -987,6 +1052,31 @@
         #ai-history-menu-dropdown button:hover {
             background: var(--button-bg);
         }
+        #ai-history-menu-dropdown .ai-history-filter {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 14px;
+            width: 100%;
+            box-sizing: border-box;
+            color: var(--muted-text-color);
+            text-align: left;
+            cursor: pointer;
+        }
+        #ai-history-menu-dropdown .ai-history-display-heading {
+            padding: 7px 14px 3px;
+            color: var(--text-color);
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-align: left;
+        }
+        #ai-history-menu-dropdown .ai-history-filter input {
+            margin: 0;
+        }
+        #ai-history-menu-dropdown .ai-history-menu-divider {
+            border-top: 1px solid var(--border-color-strong);
+            margin: 4px 0;
+        }
         #ai-history-menu-dropdown button:first-child {
             border-radius: 8px 8px 0 0;
         }
@@ -1010,6 +1100,15 @@
             font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
             font-size: 0.82rem;
             line-height: 1.5;
+        }
+        #ai-action-history-script .ai-history-search-match {
+            background: rgba(255, 214, 64, 0.45);
+            color: inherit;
+            border-radius: 2px;
+        }
+        #ai-action-history-script .ai-history-search-match.active {
+            background: #ffd640;
+            color: #151515;
         }
         .ai-script-empty-state {
             color: var(--muted-text-color);
@@ -4568,11 +4667,11 @@
     <div id="ai-panel-header">
         <button id="ai-new-chat-btn">+ New Chat</button>
         <div id="ai-header-center">
-            <h1 id="ai-header-title">AI Agent ▾</h1>
+            <h1 id="ai-header-title">AI Chat ▾</h1>
             <div id="ai-mode-dropdown">
-                <button id="ai-mode-agent-option" class="active" type="button">AI Agent</button>
+                <button id="ai-mode-agent-option" class="active" type="button">AI Chat</button>
                 <button id="ai-mode-python-option" type="button">Python Scripts</button>
-                <button id="ai-mode-history-option" type="button">History</button>
+                <button id="ai-mode-history-option" type="button">Action History</button>
             </div>
         </div>
         <div id="ai-header-actions">
@@ -4589,6 +4688,12 @@
                     <button id="ai-clear-history-menu-btn" type="button">Clear History</button>
                     <button id="ai-copy-history-menu-btn" type="button">Copy History</button>
                     <button id="ai-download-history-menu-btn" type="button">Download History</button>
+                    <div class="ai-history-menu-divider"></div>
+                    <div class="ai-history-display-heading">Display:</div>
+                    <label class="ai-history-filter"><input id="ai-history-filter-actions" type="checkbox" checked> Actions</label>
+                    <label class="ai-history-filter"><input id="ai-history-filter-tool-responses" type="checkbox" checked> Tool call responses</label>
+                    <label class="ai-history-filter"><input id="ai-history-filter-chat" type="checkbox" checked> Chat messages</label>
+                    <label class="ai-history-filter"><input id="ai-history-filter-thoughts" type="checkbox"> AI thoughts</label>
                 </div>
             </div>
             <button id="ai-close-panel-btn" type="button" aria-label="Close AI panel">&times;</button>
@@ -4669,8 +4774,16 @@
     <div id="ai-action-history-panel">
         <div id="ai-action-history-header">
             <div id="ai-action-history-header-text">
-                <h3 id="ai-action-history-title">Action History</h3>
-                <p id="ai-action-history-subtitle">A running Python script of the actions performed in StringScape.</p>
+                <div id="ai-action-history-toolbar">
+                    <!-- <h3 id="ai-action-history-title">Action History</h3> -->
+                    <input id="ai-action-history-search" type="search" placeholder="Search script..." aria-label="Search action history script">
+                    <div id="ai-action-history-search-nav" aria-label="Search result navigation">
+                        <button id="ai-action-history-prev-btn" type="button" title="Previous match" aria-label="Previous match">&#9650;</button>
+                        <span id="ai-action-history-search-count" aria-live="polite">0/0</span>
+                        <button id="ai-action-history-next-btn" type="button" title="Next match" aria-label="Next match">&#9660;</button>
+                    </div>
+                    <button id="ai-action-history-ask-btn" type="button">Ask AI</button>
+                </div>
             </div>
         </div>
         <div id="ai-action-history-box">
