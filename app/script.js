@@ -602,6 +602,302 @@
     let aiActionHistorySearch = '';
     let aiActionHistoryMatchIndex = -1;
     let aiPythonActionRecordingEnabled = false;
+    const undoActionStack = [];
+    const redoActionStack = [];
+    let undoPendingAction = null;
+    let undoApplying = false;
+
+    function undoCloneState(state) {
+        if (!state) return state;
+        if (state.ids) return { ...state, ids: [...state.ids] };
+        if (state.layers instanceof Map) return { ...state, layers: new Map(state.layers) };
+        if (state.nodeIds) return { ...state, nodeIds: [...state.nodeIds], collection: state.collection ? { ...state.collection } : null };
+        return { ...state };
+    }
+
+    function undoCurrentState(type, state) {
+        if (type === 'selection') return { ids: Array.from(getEffectiveSelectedNodesSet() || []) };
+        if (type === 'view') return { view: currentViewId };
+        if (type === 'collection') {
+            const collection = collections.get(state.name);
+            return { name: state.name, existed: !!collection, nodeIds: collection ? Array.from(collection.nodeIds || []) : [], collection: collection ? { ...collection } : null };
+        }
+        if (type === 'layer-zero') return { layers: new Map(allNodes().map(node => [String(node.id), node.layer])) };
+        if (type === 'control') {
+            if (state.toggleKey === 'physicsEnabled') return { ...state, value: physicsEnabled };
+            if (state.toggleKey === 'isPhysicsStopped') return { ...state, value: isPhysicsStopped };
+            if (state.toggleGroup) {
+                return {
+                    ...state,
+                    targetId: state.toggleGroup.find(id => document.getElementById(id)?.classList.contains('active')) || state.toggleGroup[0]
+                };
+            }
+            const element = document.getElementById(state.id);
+            return { ...state, value: element?.value ?? state.value, checked: element?.checked, active: element?.classList?.contains('active'), pressed: element?.getAttribute?.('aria-pressed') };
+        }
+        return state;
+    }
+
+    function undoBegin(type, state) {
+        if (undoApplying) return;
+        undoPendingAction = { type, state };
+    }
+
+    function undoRecordUnsupportedAction() {
+        if (undoApplying) return;
+        undoActionStack.push({ type: null });
+    }
+
+    function undoCommitActionHistory() {
+        if (undoApplying) return;
+        const action = undoPendingAction || { type: null };
+        action.after = undoCurrentState(action.type, action.state);
+        undoActionStack.push(action);
+        redoActionStack.length = 0;
+        undoPendingAction = null;
+    }
+
+    function undoCommitDirect() {
+        if (undoApplying || !undoPendingAction) return;
+        undoPendingAction.after = undoCurrentState(undoPendingAction.type, undoPendingAction.state);
+        undoActionStack.push({ ...undoPendingAction, hasHistory: false });
+        redoActionStack.length = 0;
+        undoPendingAction = null;
+    }
+
+    function aiRemoveLastActionHistoryBlock() {
+        for (let index = aiActionHistoryLines.length - 1; index >= 0; index--) {
+            if (!String(aiActionHistoryLines[index]).startsWith('# [')) continue;
+            let start = index;
+            while (start > 0 && aiActionHistoryLines[start - 1] !== '') start--;
+            let end = index + 1;
+            while (end < aiActionHistoryLines.length && aiActionHistoryLines[end] !== '') end++;
+            const block = aiActionHistoryLines.splice(start, end - start);
+            while (aiActionHistoryLines.length > 1 && aiActionHistoryLines[aiActionHistoryLines.length - 1] === '') aiActionHistoryLines.pop();
+            aiPersistActionHistory();
+            aiRenderActionHistoryPanel();
+            return block;
+        }
+        return [];
+    }
+
+    function aiRestoreActionHistoryBlock(block) {
+        if (!Array.isArray(block) || !block.length) return;
+        if (aiActionHistoryLines.length) aiActionHistoryLines.push('');
+        aiActionHistoryLines.push(...block);
+        aiPersistActionHistory();
+        aiRenderActionHistoryPanel();
+    }
+
+    function undoRestoreSelection(ids) {
+        const restored = new Set(ids || []);
+        if (currentViewId === 'selected') selectedNodesDraft = restored;
+        else if (currentViewId === 'Venn Diagram') vennSelectedNodes = restored;
+        else if (currentViewId === 'Mind Map') mindMapSelectedNodes = restored;
+        else selectedNodes = restored;
+        refreshInfoBoxFromSelection();
+        aiSyncSelectedNodesAttachment();
+        updateVennControls();
+        draw();
+    }
+
+    function undoRestoreAction(action) {
+        const { type, state } = action || {};
+        if (type === 'selection') undoRestoreSelection(state.ids);
+        else if (type === 'view') switchView(state.view, { skipUndo: true });
+        else if (type === 'collection') {
+            if (!state.existed) collections.delete(state.name);
+            else {
+                const restored = { ...state.collection, nodeIds: new Set(state.nodeIds) };
+                restored.nodes = nodes.filter(node => restored.nodeIds.has(node.id));
+                collections.set(state.name, restored);
+            }
+            if (currentViewId === `coll_${state.name}` && !collections.has(state.name)) switchView('base', { skipUndo: true });
+            updateViewMenu();
+            refreshLegendIfCollectionMode();
+            draw();
+        } else if (type === 'layer-zero') {
+            state.layers.forEach((layer, id) => { const node = nodeMap.get(id); if (node) node.layer = layer; });
+            updateSizesAndColors();
+            draw();
+        } else if (type === 'control') {
+            if (state.toggleKey) {
+                const currentValue = state.toggleKey === 'physicsEnabled' ? physicsEnabled : isPhysicsStopped;
+                const element = document.getElementById(state.id);
+                if (element && currentValue !== state.value) element.click();
+                return true;
+            }
+            const element = state.toggleGroup
+                ? document.getElementById(state.targetId)
+                : document.getElementById(state.id);
+            if (element) {
+                if (state.toggleGroup) {
+                    if (!element.classList.contains('active')) element.click();
+                    return true;
+                }
+                const shouldClick = (typeof state.active === 'boolean' && element.classList.contains('active') !== state.active)
+                    || (state.pressed !== undefined && state.pressed !== null && element.getAttribute('aria-pressed') !== state.pressed);
+                if (shouldClick && element.matches('button')) {
+                    element.click();
+                    return true;
+                }
+                if (typeof state.checked === 'boolean') element.checked = state.checked;
+                if (state.value !== undefined) element.value = state.value;
+                if (state.pressed !== undefined && state.pressed !== null) element.setAttribute('aria-pressed', state.pressed);
+                element.dispatchEvent(new Event('input', { bubbles: true }));
+                element.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        } else return false;
+        return true;
+    }
+
+    function undoCaptureCollection(name) {
+        const collection = collections.get(name);
+        undoBegin('collection', {
+            name,
+            existed: !!collection,
+            nodeIds: collection ? Array.from(collection.nodeIds || []) : [],
+            collection: collection ? { ...collection } : null
+        });
+    }
+
+    function undoLastAction() {
+        if (undoApplying) return;
+        if (!undoActionStack.length) {
+            displayStringScapeNotification({
+                text: 'That action cannot be undone',
+                button1_text: 'Request feature',
+                button2_text: 'Close',
+                auto_close: true,
+                auto_close_ms: 3000,
+                default_button_index: 1
+            }).then(result => {
+                if (result?.button_index === 0) window.open('https://stringscape.net/contact/', '_blank', 'noopener');
+            });
+            return;
+        }
+        const action = undoActionStack.pop();
+        if (!action?.type) {
+            undoActionStack.push(action);
+            displayStringScapeNotification({
+                text: 'That action cannot be undone',
+                button1_text: 'Request feature',
+                button2_text: 'Close',
+                auto_close: true,
+                auto_close_ms: 3000,
+                default_button_index: 1
+            }).then(result => {
+                if (result?.button_index === 0) window.open('https://stringscape.net/contact/', '_blank', 'noopener');
+            });
+            return;
+        }
+        undoApplying = true;
+        try {
+            if (!undoRestoreAction(action)) {
+                undoActionStack.push(action);
+                return;
+            }
+            redoActionStack.push({ ...action, state: undoCloneState(action.after), after: undoCloneState(action.state) });
+            if (action.hasHistory !== false) action.historyBlock = aiRemoveLastActionHistoryBlock();
+        } finally {
+            undoApplying = false;
+        }
+    }
+
+    function redoLastAction() {
+        if (undoApplying || !redoActionStack.length) return;
+        const action = redoActionStack.pop();
+        undoApplying = true;
+        try {
+            if (!undoRestoreAction(action)) {
+                redoActionStack.push(action);
+                return;
+            }
+            if (action.hasHistory !== false) aiRestoreActionHistoryBlock(action.historyBlock);
+            undoActionStack.push({ ...action, state: undoCloneState(action.after), after: undoCloneState(action.state) });
+        } finally {
+            undoApplying = false;
+        }
+    }
+
+    const undoTrackedControlIds = new Set([
+        'nodeSizeSlider', 'nodeMonoColor', 'glowSlider', 'nodeSizeBySlider',
+        'linkWidthSlider', 'brightnessSlider', 'linkColor', 'bgColor',
+        'bgVoronoiOpacitySlider', 'bgVoronoiBlurSlider'
+    ]);
+    function isUndoTrackedControl(element) {
+        return !!element && (undoTrackedControlIds.has(element.id)
+            || element.matches?.('select, input[type="range"], input[type="color"], input[type="checkbox"]'));
+    }
+    document.addEventListener('focusin', event => {
+        const element = event.target;
+        if (isUndoTrackedControl(element)) element._undoPreviousValue = element.value;
+    }, true);
+    document.addEventListener('input', event => {
+        const element = event.target;
+        if (isUndoTrackedControl(element) && element._undoPreviousValue === undefined) {
+            element._undoPreviousValue = element.value;
+        }
+    }, true);
+    document.addEventListener('pointerdown', event => {
+        const element = event.target;
+        if (isUndoTrackedControl(element) && element.matches?.('input[type="range"]')) {
+            element._undoPreviousValue = element.value;
+        }
+    }, true);
+    document.addEventListener('change', event => {
+        const element = event.target;
+        if (!isUndoTrackedControl(element)) return;
+        const previousValue = element._undoPreviousValue;
+        if (previousValue !== undefined && previousValue !== element.value) {
+            undoBegin('control', { id: element.id, value: previousValue });
+        }
+        element._undoPreviousValue = element.value;
+    }, true);
+    document.addEventListener('change', event => {
+        if (isUndoTrackedControl(event.target)) undoCommitDirect();
+    });
+    const undoTrackedButtonIds = new Set([
+        'nodeShow', 'nodeHide', 'nodeLabelShow', 'nodeLabelHide',
+        'linkLabelShow', 'linkLabelHide', 'linkDirectionOn', 'linkDirectionOff',
+        'darkModeToggle', 'mindMapClusterSizeToggle', 'physBtn', 'stopPhysBtn'
+    ]);
+    const undoToggleGroups = [
+        ['nodeShow', 'nodeHide'],
+        ['nodeLabelShow', 'nodeLabelHide'],
+        ['linkLabelShow', 'linkLabelHide'],
+        ['linkDirectionOn', 'linkDirectionOff']
+    ];
+    document.addEventListener('click', event => {
+        const element = event.target?.closest?.('button');
+        if (!element || !undoTrackedButtonIds.has(element.id)) return;
+        const toggleGroup = undoToggleGroups.find(group => group.includes(element.id));
+        if (toggleGroup) {
+            undoBegin('control', {
+                id: 'toggle-group',
+                toggleGroup,
+                targetId: toggleGroup.find(id => document.getElementById(id)?.classList.contains('active')) || toggleGroup[0]
+            });
+            return;
+        }
+        if (element.id === 'physBtn' || element.id === 'stopPhysBtn') {
+            undoBegin('control', {
+                id: element.id,
+                toggleKey: element.id === 'physBtn' ? 'physicsEnabled' : 'isPhysicsStopped',
+                value: element.id === 'physBtn' ? physicsEnabled : isPhysicsStopped
+            });
+            return;
+        }
+        undoBegin('control', {
+            id: element.id,
+            active: element.classList.contains('active'),
+            pressed: element.getAttribute('aria-pressed')
+        });
+    }, true);
+    document.addEventListener('click', event => {
+        const element = event.target?.closest?.('button');
+        if (element && undoTrackedButtonIds.has(element.id)) undoCommitDirect();
+    });
 
     function aiLoadActionHistory() {
         try {
@@ -868,6 +1164,7 @@
     }
 
     function aiAppendActionHistory(actor, actionText, pythonLines, category = 'Actions') {
+        if (undoApplying) return;
         const cleanedLines = Array.isArray(pythonLines) ? pythonLines.map(line => String(line)).filter(Boolean) : [];
         if (!cleanedLines.length) return;
         if (aiActionHistoryLines.length) aiActionHistoryLines.push('');
@@ -876,6 +1173,7 @@
         aiActionHistoryLines.push(`# [${category}] ${actor}: ${actionText} (${aiGetHistoryTime()})`, ...cleanedLines);
         aiPersistActionHistory();
         aiRenderActionHistoryPanel();
+        undoCommitActionHistory();
         if (aiPythonActionRecordingEnabled && String(actor) === 'Human') {
             aiAppendManualActionToPythonScript(actionText, cleanedLines);
         }
@@ -2868,6 +3166,7 @@
                     if (method === 'set_node_size') {
                         const size = +args.size;
                         if (!Number.isFinite(size) || size < 0) return result('warning', { message: 'size must be a non-negative number.' });
+                        undoBegin('control', { id: 'nodeSizeSlider', value: document.getElementById('nodeSizeSlider')?.value || '' });
                         targets.forEach(n => n._ssSize = size * 6);
                         const sizeSlider = document.getElementById('nodeSizeSlider');
                         if (sizeSlider) {
@@ -2945,6 +3244,7 @@
                         if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return result('warning', { message: 'color must be a hex colour.' });
                         const appliesToAll = target === 'all' || target == null;
                         if (appliesToAll) {
+                            undoBegin('control', { id: 'linkColor', value: document.getElementById('linkColor')?.value || '' });
                             links.forEach(link => delete link._ssColor);
                             const colorInput = document.getElementById('linkColor');
                             if (colorInput) colorInput.value = color;
@@ -2991,6 +3291,7 @@
                         if (!(magnitude >= 0.2 && magnitude <= 5)) return result('warning', { message: 'magnitude must be between 0.2 and 5.' });
                         const appliesToAll = target === 'all' || target == null;
                         if (appliesToAll) {
+                            undoBegin('control', { id: 'linkWidthSlider', value: document.getElementById('linkWidthSlider')?.value || '' });
                             links.forEach(link => delete link._ssWidth);
                             const widthSlider = document.getElementById('linkWidthSlider');
                             if (widthSlider) widthSlider.value = String(magnitude);
@@ -3006,6 +3307,7 @@
                         if (!(opacity >= 0 && opacity <= 1)) return result('warning', { message: 'opacity must be between 0 and 1.' });
                         const appliesToAll = target === 'all' || target == null;
                         if (appliesToAll) {
+                            undoBegin('control', { id: 'brightnessSlider', value: document.getElementById('brightnessSlider')?.value || '' });
                             links.forEach(link => delete link._ssOpacity);
                             linkOpacity = linkOpacityFromSliderValue(opacity);
                             const opacitySlider = document.getElementById('brightnessSlider');
@@ -3026,7 +3328,7 @@
                 if (method === 'set_app_style') {
                     const theme = normal(args.color_theme), mode = normal(args.mode); if (!APP_THEME_PRESETS[theme] || !APP_THEME_PRESETS[theme][mode]) return result('warning', { message: 'Invalid theme or mode.' }); applyTheme(theme, mode); aiRecordSetAppStyleHistory(theme, mode, 'AI'); return result('success', { color_theme: theme, mode });
                 }
-                if (method === 'set_app_background_colour') { const color = String(args.color || ''); if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return result('warning', { message: 'color must be a hex colour.' }); const input = document.getElementById('bgColor'); input.value = color; input.dispatchEvent(new Event('input')); aiRecordSetAppBackgroundColourHistory(color, 'AI'); return result('success', { color }); }
+                if (method === 'set_app_background_colour') { const color = String(args.color || ''); if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return result('warning', { message: 'color must be a hex colour.' }); const input = document.getElementById('bgColor'); undoBegin('control', { id: 'bgColor', value: input?.value || '' }); input.value = color; input.dispatchEvent(new Event('input')); aiRecordSetAppBackgroundColourHistory(color, 'AI'); return result('success', { color }); }
                 if (method === 'set_app_background_by') { const mode = normal(args.mode); if (!['mono','voronoi'].includes(mode)) return result('warning', { message: 'mode must be mono or voronoi.' }); backgroundMode = mode; document.getElementById('bgMode').value = mode; updateBackgroundControlsUI(); aiRecordSetAppBackgroundByHistory(mode, 'AI'); queueDraw(animate); return result('success', { mode }); }
                 if (method === 'set_physics') { const physics = normal(args.physics); if (!['on','off'].includes(physics)) return result('warning', { message: 'physics must be on or off.' }); if (args.alpha != null) { const alpha = +args.alpha; if (!Number.isFinite(alpha)) return result('warning', { message: 'alpha must be numerical.' }); document.getElementById('alphaSlider').value = alpha; } togglePhysics(physics === 'on'); if (args.alpha != null) updatePhysicsForce(); return result('success', { physics, alpha: args.alpha ?? null }); }
                 if (method === 'set_frame') {
@@ -3104,8 +3406,8 @@
                     return result('success', { node_mono_color: nodeMonoColor?.value || '#4caf50', link_color: linkColor?.value || '#999999' });
                 }
                 if (method === 'focus_on') { const ids = new Set((Array.isArray(args.node_ids) ? args.node_ids : [args.node_ids]).filter(Boolean).map(String)); const targets = activeNodes().filter(n => ids.has(String(n.id))); if (!targets.length) return result('warning', { message: 'No target nodes were found.' }); const targetTransform = fitNodesInView(targets); d3.select(canvas).transition().duration(350).call(zoomBehavior.transform, targetTransform); return result('success', { node_ids: targets.map(n => n.id) }); }
-                if (method === 'set_as_layer_zero') { const ids = new Set((Array.isArray(args.node_ids) ? args.node_ids : [args.node_ids]).filter(Boolean).map(String)); allNodes().forEach(n => { if (ids.has(String(n.id))) n.layer = 0; }); updateSizesAndColors(); queueDraw(animate); return result('success', { node_ids: [...ids] }); }
-                if (method === 'set_mono_node_color') { const color = String(args.color || ''); if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return result('warning', { message: 'color must be a hex colour.' }); document.getElementById('nodeMonoColor').value = color; aiRecordSetMonoNodeColorHistory(color, 'AI'); updateSizesAndColors(); return result('success', { color }); }
+                if (method === 'set_as_layer_zero') { const ids = new Set((Array.isArray(args.node_ids) ? args.node_ids : [args.node_ids]).filter(Boolean).map(String)); undoBegin('layer-zero', { layers: new Map(allNodes().map(n => [String(n.id), n.layer])) }); allNodes().forEach(n => { if (ids.has(String(n.id))) n.layer = 0; }); aiAppendActionHistory('AI', 'Set selection as layer zero', [`ss.set_as_layer_zero(${aiFormatPythonStringList([...ids])})`]); updateSizesAndColors(); queueDraw(animate); return result('success', { node_ids: [...ids] }); }
+                if (method === 'set_mono_node_color') { const color = String(args.color || ''); if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return result('warning', { message: 'color must be a hex colour.' }); undoBegin('control', { id: 'nodeMonoColor', value: document.getElementById('nodeMonoColor')?.value || '' }); document.getElementById('nodeMonoColor').value = color; aiRecordSetMonoNodeColorHistory(color, 'AI'); updateSizesAndColors(); return result('success', { color }); }
                 if (method === 'get_node_data') { const id = String(args.node_id ?? args.id ?? ''); const node = nodeMap.get(id); if (!node) return result('warning', { node_id: id, message: 'Node was not found.' }); const data = { ...node, ...(proteinMetadata.get(id) || {}) }; const attribute = args.attribute; return result('success', { node_id: id, data: attribute == null ? data : data[attribute] }); }
                 if (method === 'build_network') { const threshold = +args.score_threshold; if (!Number.isFinite(threshold)) return result('warning', { message: 'score_threshold must be numerical.' }); aiRecordBuildNetworkHistory(threshold, 'AI'); window.__stringscapeSuppressNextBuildHistory = true; const input = document.getElementById('thresholdInput'); input.value = threshold; input.dispatchEvent(new Event('change')); document.getElementById('startBtn')?.click(); return result('success', { score_threshold: threshold }); }
                 if (method === 'message_ai') {
@@ -3136,8 +3438,12 @@
                 if (method === 'delete_collection') {
                     const name = String(args.name || '').trim();
                     if (!collections.has(name)) return result('warning', { collection: name, deleted: false, message: 'Collection was not found.' });
+                    undoCaptureCollection(name);
                     deleteCategoryLegendItemState('collection', name);
-                    const nodeCount = collections.get(name).nodeIds?.size || 0; collections.delete(name); aiRecordDeleteCollectionHistory(name, 'AI'); updateViewMenu(); refreshLegendIfCollectionMode(); queueDraw(animate);
+                    const nodeCount = collections.get(name).nodeIds?.size || 0;
+                    if (currentViewId === `coll_${name}`) switchView('base', { skipUndo: true });
+                    collections.delete(name);
+                    aiRecordDeleteCollectionHistory(name, 'AI'); updateViewMenu(); refreshLegendIfCollectionMode(); queueDraw(animate);
                     return result('success', { collection: name, deleted: true, removed_node_count: nodeCount });
                 }
                 if (method === 'rename_collection') {
@@ -3159,7 +3465,7 @@
                     let name = String(args.name || args.collection_name || '').trim(); const ids = selected();
                     if (!ids.length) return result('warning', { collection: name, added_count: 0, message: 'No nodes are selected.' });
                     if (!name) name = `Python Collection ${collections.size + 1}`;
-                    const created = !collections.has(name); if (created) { collections.set(name, { nodeIds: new Set(), nodes: [], links: [] }); aiRecordCreateCollectionHistory(name, 'AI'); }
+                    const created = !collections.has(name); undoCaptureCollection(name); if (created) { collections.set(name, { nodeIds: new Set(), nodes: [], links: [] }); aiRecordCreateCollectionHistory(name, 'AI'); }
                     const collection = collections.get(name), before = collection.nodeIds.size;
                     ids.forEach(id => collection.nodeIds.add(id)); collection.nodes = nodes.filter(node => collection.nodeIds.has(node.id)); aiRecordAddToCollectionHistory(name, 'AI');
                     refreshLegendIfCollectionMode(); updateViewMenu(); queueDraw(animate);
@@ -14548,6 +14854,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     e.stopPropagation();
                     const coll = collections.get(name);
                     if (!coll) return;
+                    undoCaptureCollection(name);
                     effectiveSelection.forEach(id => coll.nodeIds.add(id));
                     aiRecordAddToCollectionHistory(name, 'Human');
                     refreshLegendIfCollectionMode();
@@ -14616,6 +14923,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     alert('Collection already exists');
                     return;
                 }
+                undoCaptureCollection(name);
                 collections.set(name, { nodeIds: new Set(), nodes: [], links: [] });
                 selectedNodes.forEach(id => collections.get(name).nodeIds.add(id));
                 aiRecordCreateCollectionHistory(name, 'Human');
@@ -15579,7 +15887,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     });
                     btnGroup.append("button").attr("class", "btn-delete-final").text("Delete").on("click", (e) => {
                         e.stopPropagation();
+                        undoCaptureCollection(opt.name);
                         deleteCategoryLegendItemState('collection', opt.name);
+                        if (currentViewId === `coll_${opt.name}`) switchView('base', { skipUndo: true });
                         collections.delete(opt.name);
                         aiRecordDeleteCollectionHistory(opt.name, 'Human');
                         if (currentViewId === `coll_${opt.name}`) switchView('base');
@@ -15647,7 +15957,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const fromViewId = currentViewId;
         const historyActor = historyMeta?.actor || 'Human';
         if (viewId !== fromViewId) {
-            aiRecordSetViewHistory(viewId, historyActor);
+            if (!historyMeta?.skipUndo) undoBegin('view', { view: fromViewId });
+            if (!historyMeta?.skipUndo) aiRecordSetViewHistory(viewId, historyActor);
             previousViewId = fromViewId;
         }
 
@@ -16116,6 +16427,16 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     window.addEventListener('keydown', (e) => {
+        if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'z') {
+            e.preventDefault();
+            undoLastAction();
+            return;
+        }
+        if (e.ctrlKey && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) {
+            e.preventDefault();
+            redoLastAction();
+            return;
+        }
         if (e.key === 'Escape' && document.getElementById('protein-complex-structure-overlay')?.style.display === 'flex') {
             closeProteinComplexStructureOverlay();
             return;
@@ -18831,6 +19152,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     function selectNodes(targets, isLegendClick = false, query = "", searchSummary = null, preserveProteinInfoHistory = false, historyMeta = null) {
         console.log(`function selectNodes(targets: [not displaying to save console space], isLegendClick: ${isLegendClick}, query: ${query})`);
         const previousSelection = new Set(getEffectiveSelectedNodesSet() || new Set());
+        undoBegin('selection', { ids: Array.from(previousSelection) });
         const nextSelection = new Set(targets.map(n => n.id));
         if (isAdditiveMode && nextSelection.size === 1) {
             const nextId = nextSelection.values().next().value;
@@ -18855,6 +19177,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const effectiveSelection = useDraft ? selectedNodesDraft : selectedNodes;
         selectionHistory.push({ ids: new Set(effectiveSelection), query: query, summary: searchSummary });
         if (selectionHistory.length > 15) selectionHistory.shift();
+        if (!historyMeta?.actor && !historyMeta?.undoOnly) undoCommitDirect();
 
         if (!preserveProteinInfoHistory) {
             clearProteinInfoHistory();
@@ -18913,9 +19236,12 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     if (target === 'NEW') {
                         target = nameInput.property("value").trim();
                         if (!target || collections.has(target)) return;
+                        undoCaptureCollection(target);
                         collections.set(target, { nodeIds: new Set(), nodes: [], links: [] });
                         aiRecordCreateCollectionHistory(target, 'Human');
                         refreshLegendIfCollectionMode();
+                    } else {
+                        undoCaptureCollection(target);
                     }
                     effectiveSelection.forEach(id => collections.get(target).nodeIds.add(id));
                     aiRecordAddToCollectionHistory(target, 'Human');
@@ -18947,7 +19273,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                             const name = currentViewId.replace('coll_', '');
                             const coll = collections.get(name);
                             if (!coll) return;
+                            undoCaptureCollection(name);
                             removeIds.forEach(id => coll.nodeIds.delete(id));
+                            aiAppendActionHistory('Human', 'Removed selected nodes from a collection', [
+                                `ss.remove_from_collection(${aiFormatPythonSingleQuotedString(name)})`
+                            ]);
                             const remaining = Array.from(coll.nodeIds);
                             deselectNodes();
                             initSubNetworkView(currentViewId, remaining);
@@ -19383,6 +19713,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     function modifySelection(dir, historyMeta = null) {
         console.log(`function modifySelection(dir: ${dir})`);
         const effectiveSelection = getEffectiveSelectedNodesSet();
+        if (effectiveSelection.size || dir < 0) {
+            undoBegin('selection', { ids: Array.from(effectiveSelection) });
+        }
         if (dir === 1) {
             if (effectiveSelection.size === 0) {
                 draw();
@@ -19396,9 +19729,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 });
             });
             const activeNodes = currentViewId === 'base' ? nodes : (activeSubData?.nodes || []);
-            selectNodes(activeNodes.filter(n => newSet.has(n.id)), false, "Expanded Selection");
+            selectNodes(activeNodes.filter(n => newSet.has(n.id)), false, "Expanded Selection", null, false, { undoOnly: true });
             if (historyMeta?.actor) {
                 aiRecordExpandHistory(historyMeta.actor);
+            } else {
+                undoCommitDirect();
             }
             draw();
             return newSet;
@@ -20540,6 +20875,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             footer.append("button").attr("id", "layer0-update-selection-btn").text("Update Selection as Layer 0").attr("class", "action-btn").style("width", "100%").on("click", () => { 
                 const selectedIds = Array.from(getEffectiveSelectedNodesSet());
                 if (!selectedIds.length) return;
+                undoBegin('layer-zero', { layers: new Map(allNodes().map(n => [String(n.id), n.layer])) });
 
             if (mode === 'layer') footerNotes.push('Select one or more nodes to set as layer 0');
                 currentSeeds = selectedIds;
@@ -20594,6 +20930,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 if (currentViewId === 'Embeddings') {
                     markEmbeddingsDirty(true);
                 }
+                aiAppendActionHistory('Human', 'Set selection as layer zero', [`ss.set_as_layer_zero(${aiFormatPythonStringList(selectedIds)})`]);
                 updateSizesAndColors();
             });
         }
@@ -20718,7 +21055,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             return proteinMetadata.get(n.id)?.[mode] === value;
         });
         if (matches.length > 0) {
-            applySearchLogic(matches, value);
+            applySearchLogic(matches, value, null, { undoOnly: true });
             aiRecordSelectByCategoryHistory(mode, value, 'Human');
         }
         
@@ -20865,7 +21202,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         aiRecordSelectByRangeHistory(mode, minV, maxV, 'Human');
     }
 
-    function applySearchLogic(matches, queryStr, searchSummary = null) {
+    function applySearchLogic(matches, queryStr, searchSummary = null, historyMeta = null) {
         console.log(`function applySearchLogic(matches: ${matches.length}, queryStr: ${queryStr})`);
         const matchIds = new Set(matches.map(m => m.id));
         const currentSelection = new Set(getEffectiveSelectedNodesSet());
@@ -20898,7 +21235,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const useGlobalNodes = currentViewId === 'base' || currentViewId === 'Venn Diagram' || currentViewId === 'Scatter Plot';
         const activeNodes = useGlobalNodes ? nodes : (activeSubData?.nodes || []);
         const finalSummary = searchSummary ? { ...searchSummary, total: finalSet.size } : null;
-        selectNodes(activeNodes.filter(n => finalSet.has(n.id)), false, queryStr, finalSummary);
+        selectNodes(activeNodes.filter(n => finalSet.has(n.id)), false, queryStr, finalSummary, false, historyMeta);
     }
 
     function tokenizeSearchQuery(rawInput) {
@@ -21735,6 +22072,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         console.log("function deselectNodes()");
         if (currentViewId === 'Embeddings' && !embeddingSelectionClearIntent) return;
         const hadSelection = getEffectiveSelectedNodesSet().size > 0;
+        if (hadSelection) undoBegin('selection', { ids: Array.from(getEffectiveSelectedNodesSet()) });
         if (currentViewId === 'selected') {
             selectedNodesDraft = new Set();
         } else {
@@ -21759,6 +22097,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         checkOffscreenNodes(); 
         if (historyMeta?.actor && hadSelection) {
             aiRecordDeselectHistory(historyMeta.actor);
+        } else if (hadSelection) {
+            undoCommitDirect();
         }
     }
 
