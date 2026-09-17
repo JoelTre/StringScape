@@ -8641,21 +8641,33 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
   }
 
-    vel = vel * 0.6;
-    
     let center = vec2<f32>(params.screen.x * 0.5, params.screen.y * 0.5);
-    let toCenter = center - pos;
-    let distToCenter = length(toCenter);
-    
+    let boundaryMargin = min(400.0, max(120.0, drift * 0.15));
+    let innerRadius = max(0.0, drift - boundaryMargin);
+    let radial = pos - center;
+    let distance = length(radial);
+    if (distance > innerRadius) {
+        let inward = radial / max(distance, 1.0);
+        let normalizedDistance = clamp((distance - innerRadius) / boundaryMargin, 0.0, 1.0);
+        let boundaryPressure = (exp(normalizedDistance * 3.5) - 1.0) / (exp(3.5) - 1.0);
+        let outwardVelocity = dot(vel, inward);
+        if (outwardVelocity > 0.0) {
+            vel = vel - inward * outwardVelocity * boundaryPressure * 0.35;
+        }
+        vel = vel - inward * boundaryPressure * 2.5 * alpha;
+    }
+    vel = vel * 0.6;
     pos = pos + vel;
 
-    if (abs(pos.x - center.x) > drift) {
-        pos.x = center.x + sign(pos.x - center.x) * drift;
-        vel.x = 0.0;
-    }
-    if (abs(pos.y - center.y) > drift) {
-        pos.y = center.y + sign(pos.y - center.y) * drift;
-        vel.y = 0.0;
+    let finalRadial = pos - center;
+    let finalDistance = length(finalRadial);
+    if (finalDistance > drift) {
+        let finalOutward = finalRadial / max(finalDistance, 1.0);
+        pos = center + finalOutward * drift;
+        let finalOutwardVelocity = dot(vel, finalOutward);
+        if (finalOutwardVelocity > 0.0) {
+            vel = vel - finalOutward * finalOutwardVelocity;
+        }
     }
 
     node.posVel = vec4<f32>(pos, vel);
@@ -8937,6 +8949,17 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
                 }
             }
 
+            if (enforceCircularDriftLimit(targetNodes)) {
+                targetNodes.forEach((node, index) => {
+                    const base = index * 16;
+                    copy[base + 0] = node.x;
+                    copy[base + 1] = node.y;
+                    copy[base + 8] = Number.isFinite(node.fx) ? node.fx : 0;
+                    copy[base + 9] = Number.isFinite(node.fy) ? node.fy : 0;
+                });
+                gpuState.device.queue.writeBuffer(writeNodeBuffer, 0, copy.buffer, copy.byteOffset, copy.byteLength);
+            }
+
             if (invalidCount > 0) {
             }
             gpuState.nodeBuffer = writeNodeBuffer;
@@ -8971,21 +8994,71 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         requestAnimationFrame(tick);
     }
 
+    function createSoftCanvasBoundaryForce() {
+        let targetNodes = [];
+        const force = () => {
+            const drift = Math.max(100, +document.getElementById('driftSlider')?.value || 8000);
+            const margin = Math.min(400, Math.max(120, drift * 0.15));
+            const innerRadius = Math.max(0, drift - margin);
+            const strength = 2.5;
+            targetNodes.forEach(node => {
+                const dx = node.x - window.innerWidth / 2;
+                const dy = node.y - window.innerHeight / 2;
+                const distance = Math.hypot(dx, dy);
+                if (distance <= innerRadius) return;
+                const normalizedDistance = Math.min(1, (distance - innerRadius) / margin);
+                const pressure = (Math.exp(normalizedDistance * 3.5) - 1) / (Math.exp(3.5) - 1);
+                const inwardX = dx / Math.max(distance, 1);
+                const inwardY = dy / Math.max(distance, 1);
+                const outwardVelocity = node.vx * inwardX + node.vy * inwardY;
+                if (outwardVelocity > 0) {
+                    node.vx -= inwardX * outwardVelocity * pressure * 0.35;
+                    node.vy -= inwardY * outwardVelocity * pressure * 0.35;
+                }
+                node.vx -= inwardX * pressure * strength;
+                node.vy -= inwardY * pressure * strength;
+            });
+        };
+        force.initialize = nodes => { targetNodes = nodes; };
+        return force;
+    }
+
+    function enforceCircularDriftLimit(targetNodes) {
+        const drift = Math.max(100, +document.getElementById('driftSlider')?.value || 8000);
+        const centerX = window.innerWidth / 2;
+        const centerY = window.innerHeight / 2;
+        let changed = false;
+        targetNodes.forEach(node => {
+            const dx = node.x - centerX;
+            const dy = node.y - centerY;
+            const distance = Math.hypot(dx, dy);
+            if (distance <= drift) return;
+            const normalX = dx / Math.max(distance, 1);
+            const normalY = dy / Math.max(distance, 1);
+            node.x = centerX + normalX * drift;
+            node.y = centerY + normalY * drift;
+            if (Number.isFinite(node.fx)) node.fx = node.x;
+            if (Number.isFinite(node.fy)) node.fy = node.y;
+            const outwardVelocity = node.vx * normalX + node.vy * normalY;
+            if (outwardVelocity > 0) {
+                node.vx -= normalX * outwardVelocity;
+                node.vy -= normalY * outwardVelocity;
+            }
+            changed = true;
+        });
+        return changed;
+    }
+
     simulation = d3.forceSimulation()
         .force("link", d3.forceLink().id(d => d.id).distance(70))
         .force("charge", d3.forceManyBody().strength(-150))
         .force("x", d3.forceX(window.innerWidth / 2).strength(0))
         .force("y", d3.forceY(window.innerHeight / 2).strength(0))
         .force("center", d3.forceCenter(window.innerWidth / 2, window.innerHeight / 2))
+        .force("soft-boundary", createSoftCanvasBoundaryForce())
         .on("tick", () => {
             if (isSettling && simulation.alpha() < 0.05) isSettling = false;
-            const limit = +document.getElementById('driftSlider').value;
-            const cx = window.innerWidth / 2, cy = window.innerHeight / 2;
-            const targetNodes = currentViewId === 'base' ? nodes : activeSubData?.nodes || [];
-            targetNodes.forEach(n => {
-                if (Math.abs(n.x - cx) > limit) { n.x = n.x > cx ? cx + limit : cx - limit; n.vx = 0; }
-                if (Math.abs(n.y - cy) > limit) { n.y = n.y > cy ? cy + limit : cy - limit; n.vy = 0; }
-            });
+            enforceCircularDriftLimit(nodes);
             draw();
         });
 
@@ -16173,17 +16246,13 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 target: subNodeMap.get(l.target.id)
             }));
 
-        const subSim = d3.forceSimulation(subNodes)
+            const subSim = d3.forceSimulation(subNodes)
             .force("link", d3.forceLink(subLinks).id(d => d.id).distance(70))
             .force("charge", d3.forceManyBody().strength(-150))
             .force("center", d3.forceCenter(window.innerWidth / 2, window.innerHeight / 2))
+                .force("soft-boundary", createSoftCanvasBoundaryForce())
             .on("tick", () => {
-                const limit = +document.getElementById('driftSlider').value;
-                const cx = window.innerWidth / 2, cy = window.innerHeight / 2;
-                subNodes.forEach(n => {
-                    if (Math.abs(n.x - cx) > limit) { n.x = n.x > cx ? cx + limit : cx - limit; n.vx = 0; }
-                    if (Math.abs(n.y - cy) > limit) { n.y = n.y > cy ? cy + limit : cy - limit; n.vy = 0; }
-                });
+                enforceCircularDriftLimit(subNodes);
                 if (physicsAutoPlayFromPause && subSim.alpha() < 0.005) {
                     subSim.stop();
                     physicsAutoPlayFromPause = false;
@@ -21919,6 +21988,39 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         }
     }
 
+    function loadAccessoryNodesAfterBuild() {
+        const accessoryNodeIds = new Set();
+        Object.values(accessoryDataFiles || {}).forEach(data => {
+            const idHeader = getAccessoryNodeIdHeader(data?.headers);
+            if (!idHeader) return;
+            (data.rows || []).forEach(row => {
+                String(row[idHeader] ?? '')
+                    .split(/[\s,;|]+/)
+                    .map(value => value.trim())
+                    .filter(Boolean)
+                    .forEach(id => accessoryNodeIds.add(id));
+            });
+        });
+
+        accessoryNodeIds.forEach(id => {
+            if (nodeMap.has(id)) return;
+            const node = {
+                id,
+                layer: 99,
+                x: window.innerWidth / 2 + (Math.random() - 0.5) * 1050,
+                y: window.innerHeight / 2 + (Math.random() - 0.5) * 1050,
+                centrality: 0,
+                randColor: d3.interpolateRainbow(Math.random())
+            };
+            nodes.push(node);
+            nodeMap.set(id, node);
+            if (!fullAdjacency.has(id)) {
+                fullAdjacency.set(id, []);
+                allIDs.push(id);
+            }
+        });
+    }
+
     window.processInteractionFiles = processInteractionFiles;
     window.processAccessoryFiles = processAccessoryFiles;
 
@@ -22059,6 +22161,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 }
             };
             await buildFromQueue(seeds, 0); let remaining = allIDs.filter(id => !nodeMap.has(id)); while (remaining.length > 0) { await buildFromQueue([remaining[0]], 0); remaining = allIDs.filter(id => !nodeMap.has(id)); }
+            loadAccessoryNodesAfterBuild();
             isBuilding = false; isSettling = true; updateBuildStats(processedLinks.size, totalUniqueLinks, startTime, true); syncSimulation();
             try { await applyUploadedSessionFiles(); } catch (e) { console.warn('applyUploadedSessionFiles after build failed', e); }
             const sBtn = document.getElementById('startBtn'); sBtn.innerText = "Build complete"; sBtn.disabled = true; sBtn.style.display = 'block'; document.getElementById('pauseBtn').style.display = 'none';
