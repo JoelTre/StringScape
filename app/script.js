@@ -141,7 +141,7 @@
     window.fullAdjacency = fullAdjacency;
     window.proteinMetadata = proteinMetadata;
     window.aliasData = aliasData;
-    let isPaused = false, physicsEnabled = true, isPhysicsStopped = false, selectedNodes = new Set(), selectedWedges = new Set(), selectedHistogramBins = new Set(), hoverBin = null;
+    let isPaused = false, physicsEnabled = true, isPhysicsStopped = false, mergedPhysicsResumeAlphaPending = false, selectedNodes = new Set(), selectedWedges = new Set(), selectedHistogramBins = new Set(), hoverBin = null;
     let selectionHistory = [], pathNodes = new Set(), pathEdges = new Set();
     let shortestPathDisplayMode = 'none';
     let shortestPathGroupsToolOpen = false;
@@ -182,6 +182,10 @@
     let nodeVisibilityToggle = 'show';
     let nodeLabelToggle = 'hide';
     let nodeLabelField = '#string_protein_id'; // Will be updated to preferred_name if available after init
+    let mergedNetworkState = { active: false, taxa: [], originalNodes: [], originalLinks: [], nodeById: new Map(), linkCounts: null };
+    let mergedNodeFilter = 'or';
+    let mergedLinkFilter = 'or';
+    let mergedHiddenNodesAffectPhysics = true;
     let eigenScope = 'local';
     let hoveredNode = null;
     let isTooltipHovered = false;
@@ -391,6 +395,9 @@
         { type: 'function', function: { name: 'Set_node_color', description: 'Sets the colour of one or more nodes using a six-digit hexadecimal colour. Use node IDs or preferred protein names; if nodes are omitted, the currently selected nodes are coloured. If the nodes are already selected, just leave empty so that it used the selected nodes.', parameters: { type: 'object', properties: { node_id: { type: 'string', description: 'A node ID or preferred protein name.' }, nodes: { type: 'array', items: { type: 'string' }, description: 'Node IDs or preferred protein names to colour. Omit to use the current selection.' }, color: { type: 'string', description: 'Six-digit hexadecimal colour.' }, animate: { type: 'boolean' } }, required: ['color'] } } },
         { type: 'function', function: { name: 'Set_mono_node_color', description: 'Sets the default colour used for mono-coloured nodes.', parameters: { type: 'object', properties: { color: { type: 'string', description: 'Six-digit hexadecimal colour.' } }, required: ['color'] } } },
         { type: 'function', function: { name: 'Build_network', description: 'Builds the network using the specified minimum interaction score threshold.', parameters: { type: 'object', properties: { score_threshold: { type: 'number' } }, required: ['score_threshold'] } } },
+        { type: 'function', function: { name: 'Merge_networks', description: 'Merges the two uploaded species networks, or splits them if they are already merged.' } },
+        { type: 'function', function: { name: 'Set_show_nodes_from', description: 'Sets which species presence category is visible in a merged network.', parameters: { type: 'object', properties: { selection: { type: 'string', enum: ['first', 'second', 'first-only', 'second-only', 'and', 'or'] } }, required: ['selection'] } } },
+        { type: 'function', function: { name: 'Set_show_links_from', description: 'Sets which species presence category is visible in a merged network.', parameters: { type: 'object', properties: { selection: { type: 'string', enum: ['first', 'second', 'first-only', 'second-only', 'and', 'or'] } }, required: ['selection'] } } },
         { type: 'function', function: { name: 'Delete_collection', description: 'Deletes a named collection.', parameters: { type: 'object', properties: { name: { type: 'string' }, animate: { type: 'boolean' } }, required: ['name'] } } },
         { type: 'function', function: { name: 'Rename_collection', description: 'Renames an existing collection.', parameters: { type: 'object', properties: { name: { type: 'string' }, new_name: { type: 'string' }, animate: { type: 'boolean' } }, required: ['name', 'new_name'] } } },
         { type: 'function', function: { name: 'List_collections', description: 'Lists all collections and their node counts.' } },
@@ -541,6 +548,9 @@
         - ss.set_node_label(nodes='all', label_key='') -> Returns {"status", "affected_count"}
         - ss.set_node_size_by_variable(key, magnitude=0.5) -> Returns {"status", "key", "magnitude", "message"}
         - ss.color_links_by(link_variable_key) -> Returns {"status": "success", "link_variable_key"}
+        - ss.merge_networks() -> Merges the two uploaded species networks, or splits them if already merged.
+        - ss.set_show_nodes_from(selection) -> Sets merged-network node filtering to first, second, first-only, second-only, and, or.
+        - ss.set_show_links_from(selection) -> Sets merged-network link filtering to first, second, first-only, second-only, and, or.
         - ss.set_link_color(links='all', color='#ff0055') -> Returns {"status", "affected_count", "message"}
         - ss.set_link_label_visibility(links='all', visibility='show'), ss.set_link_label(links='all', label_key='') -> Returns {"status", "affected_count", "message"}
         - ss.set_link_direction_arrow_visibility(links='all', visibility='show') -> Returns {"status", "affected_count", "message"}
@@ -1231,6 +1241,18 @@
         ]);
     }
 
+    function aiRecordMergeNetworksHistory(actor = 'Human') {
+        aiAppendActionHistory(actor, 'Merged or split species networks', ['ss.merge_networks()']);
+    }
+
+    function aiRecordShowNodesFromHistory(selection, actor = 'Human') {
+        aiAppendActionHistory(actor, `Set Show Nodes From to ${selection}`, [`ss.set_show_nodes_from(${aiFormatPythonSingleQuotedString(selection)})`]);
+    }
+
+    function aiRecordShowLinksFromHistory(selection, actor = 'Human') {
+        aiAppendActionHistory(actor, `Set Show Links From to ${selection}`, [`ss.set_show_links_from(${aiFormatPythonSingleQuotedString(selection)})`]);
+    }
+
     function aiRecordSelectByRangeHistory(variableKey, minValue, maxValue, actor = 'Human', mode = 'replace') {
         const selectionMode = ['replace', 'add', 'subtract', 'intersect'].includes(mode) ? mode : 'replace';
         aiAppendActionHistory(actor, `Selects nodes with ${variableKey === 'centrality' ? 'Centrality' : variableKey} between ${minValue} and ${maxValue}`, [
@@ -1813,6 +1835,9 @@
         lines.push('- ss.set_node_label(nodes="all", label_key="") -> Returns {"status", "affected_count"}');
         lines.push('- ss.set_node_size_by_variable(key, magnitude=0.5) -> Returns {"status", "key", "magnitude", "message"}');
         lines.push('- ss.color_links_by(link_variable_key) -> Returns {"status": "success", "link_variable_key"}');
+        lines.push('- ss.merge_networks() -> Merges the two uploaded species networks, or splits them if already merged.');
+        lines.push('- ss.set_show_nodes_from(selection) -> Sets merged-network node filtering to first, second, first-only, second-only, and, or.');
+        lines.push('- ss.set_show_links_from(selection) -> Sets merged-network link filtering to first, second, first-only, second-only, and, or.');
         lines.push('- ss.set_link_color(links="all", color="#ff0055") -> Returns {"status", "affected_count", "message"}');
         lines.push('- ss.set_link_label_visibility(links="all", visibility="show"), ss.set_link_label(links="all", label_key="") -> Returns {"status", "affected_count", "message"}');
         lines.push('- ss.set_link_direction_arrow_visibility(links="all", visibility="show") -> Returns {"status", "affected_count", "message"}');
@@ -3331,6 +3356,25 @@
                 if (method === 'set_app_background_colour') { const color = String(args.color || ''); if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return result('warning', { message: 'color must be a hex colour.' }); const input = document.getElementById('bgColor'); undoBegin('control', { id: 'bgColor', value: input?.value || '' }); input.value = color; input.dispatchEvent(new Event('input')); aiRecordSetAppBackgroundColourHistory(color, 'AI'); return result('success', { color }); }
                 if (method === 'set_app_background_by') { const mode = normal(args.mode); if (!['mono','voronoi'].includes(mode)) return result('warning', { message: 'mode must be mono or voronoi.' }); backgroundMode = mode; document.getElementById('bgMode').value = mode; updateBackgroundControlsUI(); aiRecordSetAppBackgroundByHistory(mode, 'AI'); queueDraw(animate); return result('success', { mode }); }
                 if (method === 'set_physics') { const physics = normal(args.physics); if (!['on','off'].includes(physics)) return result('warning', { message: 'physics must be on or off.' }); if (args.alpha != null) { const alpha = +args.alpha; if (!Number.isFinite(alpha)) return result('warning', { message: 'alpha must be numerical.' }); document.getElementById('alphaSlider').value = alpha; } togglePhysics(physics === 'on'); if (args.alpha != null) updatePhysicsForce(); return result('success', { physics, alpha: args.alpha ?? null }); }
+                if (method === 'merge_networks') {
+                    const taxa = getUploadedInteractionTaxa();
+                    if (taxa.length !== 2) return result('warning', { message: 'Exactly two taxon networks must be uploaded.' });
+                    if (mergedNetworkState.active) splitMergedNetwork('AI'); else buildMergedNetwork('AI');
+                    queueDraw(animate);
+                    return result('success', { merged: mergedNetworkState.active, taxa });
+                }
+                if (method === 'set_show_nodes_from') {
+                    const selection = String(args.selection || args.value || '').trim().toLowerCase();
+                    if (!mergedNetworkState.active) return result('warning', { message: 'Networks must be merged before setting Show Nodes From.' });
+                    if (!setMergedNodeFilter(selection, 'AI')) return result('warning', { message: 'Invalid Show Nodes From selection.' });
+                    return result('success', { selection });
+                }
+                if (method === 'set_show_links_from') {
+                    const selection = String(args.selection || args.value || '').trim().toLowerCase();
+                    if (!mergedNetworkState.active) return result('warning', { message: 'Networks must be merged before setting Show Links From.' });
+                    if (!setMergedLinkFilter(selection, 'AI')) return result('warning', { message: 'Invalid Show Links From selection.' });
+                    return result('success', { selection });
+                }
                 if (method === 'set_frame') {
                     const left = +args.top_left_x;
                     const top = +args.top_left_y;
@@ -3864,6 +3908,21 @@
         if (toolName === 'Color_links_by') {
             return JSON.parse(stringScapePythonBridge.call_json('color_links_by', {
                 link_variable_key: String(args.link_variable_key ?? args.key ?? '').trim(),
+                animate: args.animate === true
+            }));
+        }
+        if (toolName === 'Merge_networks') {
+            return JSON.parse(stringScapePythonBridge.call_json('merge_networks', { animate: args.animate === true }));
+        }
+        if (toolName === 'Set_show_nodes_from') {
+            return JSON.parse(stringScapePythonBridge.call_json('set_show_nodes_from', {
+                selection: String(args.selection || args.value || '').trim().toLowerCase(),
+                animate: args.animate === true
+            }));
+        }
+        if (toolName === 'Set_show_links_from') {
+            return JSON.parse(stringScapePythonBridge.call_json('set_show_links_from', {
+                selection: String(args.selection || args.value || '').trim().toLowerCase(),
                 animate: args.animate === true
             }));
         }
@@ -4509,6 +4568,9 @@ class _StringScapeAPI:
     def set_node_label_visibility(self, nodes='all', visibility='show', animate=False): return self._call('set_node_label_visibility', nodes=nodes, visibility=visibility, animate=animate)
     def set_node_label(self, nodes='all', label_key='', animate=False): return self._call('set_node_label', nodes=nodes, label_key=label_key, animate=animate)
     def color_links_by(self, link_variable_key, animate=False): return self._call('color_links_by', link_variable_key=link_variable_key, animate=animate)
+    def merge_networks(self, animate=False): return self._call('merge_networks', animate=animate)
+    def set_show_nodes_from(self, selection, animate=False): return self._call('set_show_nodes_from', selection=selection, animate=animate)
+    def set_show_links_from(self, selection, animate=False): return self._call('set_show_links_from', selection=selection, animate=animate)
     def set_link_color(self, links='all', color='#ff0055', animate=False): return self._call('set_link_color', links=links, color=color, animate=animate)
     def when_nodes_are_selected_display(self, mode, animate=False): return self._call('when_nodes_are_selected_display', mode=mode, animate=animate)
     def set_link_label_visibility(self, links='all', visibility='show', animate=False): return self._call('set_link_label_visibility', links=links, visibility=visibility, animate=animate)
@@ -5488,6 +5550,9 @@ sys.modules['stringscape'] = _stringscape_module
                             'Set_node_size_by_variable': `Setting node size by ${logArgs.key || logArgs.variable_key}`,
                             'View_colour_links_by_options': "Viewing link colouring options",
                             'Color_links_by': `Colouring links by ${logArgs.link_variable_key || logArgs.key}`,
+                            'Merge_networks': 'Merging or splitting species networks',
+                            'Set_show_nodes_from': `Showing nodes from ${logArgs.selection}`,
+                            'Set_show_links_from': `Showing links from ${logArgs.selection}`,
                             'Set_link_color': `Setting link colour to ${logArgs.color}`,
                             'Set_link_direction_arrow_visibility': `${logArgs.visibility === 'hide' ? 'Hiding' : 'Showing'} link direction arrows`,
                             'View_link_width': 'Viewing link width',
@@ -8117,7 +8182,10 @@ self.onmessage = async (event) => {
 
         let color;
         let width;
-        if (linkMode === 'score') {
+        if (linkMode === 'species' && mergedNetworkState.active) {
+            color = getMergedSpeciesColor(link._speciesPresence);
+            width = 1 * (isHigh ? 2 : 1);
+        } else if (linkMode === 'score') {
             color = getScoreLinkGreyColor(link.value);
             width = (Math.sqrt(link.value) / 8) * (isHigh ? 2 : 1);
         } else {
@@ -8420,6 +8488,7 @@ self.onmessage = async (event) => {
         const complexPdbState = mode === 'complex_pdbs' ? ensureComplexPdbColorState() : null;
         const complexPdbScale = complexPdbState?.colorScale || d3.scaleOrdinal(d3.schemeTableau10);
         const customVariableColourContext = buildCustomVariableColourContext(mode, targetNodes);
+        const speciesPresenceMap = mode === 'species' ? getSpeciesPresenceMap(targetNodes) : null;
         const proteinSizeSource = resolveProteinSizeSource(targetNodes);
         const annotationMinMax = mode === 'annotation'
             ? d3.extent(targetNodes, n => getAnnotationLengthFromSource(n.id, builtInColorSource))
@@ -8438,7 +8507,8 @@ self.onmessage = async (event) => {
             const eigenVal = Number.isFinite(n.eigen) ? n.eigen : 0;
             const proteinSizeVal = getProteinSizeValue(n.id, proteinSizeSource);
             let colorValue = 0.5;
-            if (mode === 'layer') {
+            if (mode === 'species') n.col = getMergedSpeciesColor(getSpeciesPresenceForNode(n, speciesPresenceMap));
+            else if (mode === 'layer') {
                 const layerLabel = n.layer === 99 ? 'Disconnected' : `Layer ${n.layer}`;
                 const defaultColor = (n.layer === 99) ? '#888' : d3.interpolateViridis(1 - ((n.layer || 0) / 10));
                 n.col = getCategoricalNodeColor('layer', layerLabel, defaultColor);
@@ -11747,7 +11817,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             {value:'biological_process', text:'Biological process (mind-map most specific)', color:'#ccc'},
             {value:'size', text:'Protein size', color:'#93c5fd'},
             {value:'random', text:'Random', color:'#ffffff'},
-            {value:'mono', text:'Mono', color:'#ffffff'}
+            {value:'mono', text:'Mono', color:'#ffffff'},
+            {value:'species', text:'Species', color:'#ffffff'}
         ];
 
         const variableTypeOptions = [
@@ -11761,6 +11832,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             if (opt.color) o.style.color = opt.color;
             select.appendChild(o);
         });
+        const speciesOption = Array.from(select.options).find(option => option.value === 'species');
+        if (speciesOption) speciesOption.style.display = getUploadedInteractionTaxa().length === 2 ? '' : 'none';
 
         const visibleVariableConfigs = variableConfigs.filter(cfg => !cfg.hidden && !isAccessoryNodeIdHeader(cfg.variable));
         if (visibleVariableConfigs.length) {
@@ -11803,7 +11876,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         if (Array.from(select.options).some(o => o.value === currentValue)) {
             select.value = currentValue;
         } else {
-            select.value = 'layer';
+            select.value = getUploadedInteractionTaxa().length === 2 && currentValue === 'species' ? 'species' : 'layer';
         }
 
         syncColorModeSelects(select.value);
@@ -12052,6 +12125,221 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             }
         });
         return prefixes;
+    }
+
+    function getTaxonIdFromFileName(fileName) {
+        const match = String(fileName || '').match(/^(\d+)\./);
+        return match ? match[1] : '';
+    }
+
+    function getUploadedInteractionTaxa() {
+        return Array.from(new Set(Object.keys(uploadedInteractionFiles || {})
+            .map(getTaxonIdFromFileName).filter(Boolean))).slice(0, 2);
+    }
+
+    function getSpeciesFilterOptions(taxa, kind = 'nodes') {
+        const [first, second] = taxa;
+        return [
+            ['first', first], ['second', second],
+            ['first-only', `${first} minus ${second}`], ['second-only', `${second} minus ${first}`],
+            ['and', `${first} AND ${second}`], ['or', `${first} OR ${second}`]
+        ];
+    }
+
+    function updateMergeControls() {
+        const taxa = getUploadedInteractionTaxa();
+        const controls = document.getElementById('network-merge-controls');
+        const linkControls = document.getElementById('mergedLinkFilterContainer');
+        const button = document.getElementById('mergeNetworksBtn');
+        const help = document.getElementById('mergeNetworksHelp');
+        const nodeFilter = document.getElementById('mergedNodeFilter');
+        const linkFilter = document.getElementById('mergedLinkFilter');
+        const available = taxa.length === 2;
+        if (controls) controls.style.display = available ? 'block' : 'none';
+        if (linkControls) linkControls.style.display = mergedNetworkState.active ? 'block' : 'none';
+        if (!available) return;
+        if (button) button.textContent = mergedNetworkState.active ? 'Split Networks' : 'Merge Networks';
+        const speciesLinkMode = document.querySelector('#linkMode option[value="species"]');
+        if (speciesLinkMode) speciesLinkMode.style.display = mergedNetworkState.active ? '' : 'none';
+        const speciesNodeMode = document.querySelector('#colorMode option[value="species"]');
+        if (speciesNodeMode) speciesNodeMode.style.display = available ? '' : 'none';
+        if (help) help.textContent = `This will merge equivalent nodes between species ${taxa[0]} and ${taxa[1]}.`;
+        const fill = (select, kind) => {
+            if (!select) return;
+            const current = select.value || 'or';
+            const kindLabel = kind === 'links' ? 'links' : 'nodes';
+            select.innerHTML = getSpeciesFilterOptions(taxa, kindLabel).map(([value, label]) => `<option value="${value}">${label}${value === 'or' ? ` (i.e., in either/all ${kindLabel})` : ''}</option>`).join('');
+            select.value = Array.from(select.options).some(option => option.value === current) ? current : 'or';
+        };
+        fill(nodeFilter, 'nodes'); fill(linkFilter, 'links');
+        const hiddenPhysicsSelect = document.getElementById('mergedHiddenNodesPhysics');
+        if (hiddenPhysicsSelect) hiddenPhysicsSelect.value = mergedHiddenNodesAffectPhysics ? 'yes' : 'no';
+        if (mergedNetworkState.active) {
+            const nodeMode = document.getElementById('colorMode');
+            const linkMode = document.getElementById('linkMode');
+            if (nodeMode) nodeMode.value = 'species';
+            if (linkMode) linkMode.value = 'species';
+        }
+    }
+
+    function getMergedPresenceMatch(presence, filter) {
+        const [first, second] = mergedNetworkState.taxa;
+        const hasFirst = presence?.has(first), hasSecond = presence?.has(second);
+        if (filter === 'first') return hasFirst;
+        if (filter === 'second') return hasSecond;
+        if (filter === 'first-only') return hasFirst && !hasSecond;
+        if (filter === 'second-only') return hasSecond && !hasFirst;
+        if (filter === 'and') return hasFirst && hasSecond;
+        return hasFirst || hasSecond;
+    }
+
+    function getPhysicsNodesAndLinks(targetNodes, targetLinks) {
+        if (!mergedNetworkState.active || mergedHiddenNodesAffectPhysics) {
+            return { nodes: targetNodes, links: targetLinks };
+        }
+        const shownIds = new Set((targetNodes || [])
+            .filter(node => getMergedPresenceMatch(node._speciesPresence, mergedNodeFilter))
+            .map(node => node.id));
+        return {
+            nodes: (targetNodes || []).filter(node => shownIds.has(node.id)),
+            links: (targetLinks || []).filter(link => shownIds.has(link.source?.id || link.source) && shownIds.has(link.target?.id || link.target))
+        };
+    }
+
+    function getMergedSpeciesColor(presence) {
+        const [first, second] = getUploadedInteractionTaxa();
+        if (presence?.has(first) && presence?.has(second)) return '#a855f7';
+        return presence?.has(first) ? '#3498db' : '#ef4444';
+    }
+
+    function setMergedNetworkPhysicsAfterMerge() {
+        mergedPhysicsResumeAlphaPending = true;
+        if (isPhysicsStopped) return;
+        if (!physicsEnabled) physicsEnabled = true;
+        updatePhysicsControlButtons();
+        updatePhysicsRuntimeLabel();
+        restartActivePhysics(Math.max(0.5, +document.getElementById('alphaSlider')?.value || 0.5));
+    }
+
+    function setMergedNodeFilter(selection, actor = 'Human') {
+        const valid = ['first', 'second', 'first-only', 'second-only', 'and', 'or'];
+        if (!valid.includes(selection)) return false;
+        mergedNodeFilter = selection;
+        const select = document.getElementById('mergedNodeFilter');
+        if (select) select.value = selection;
+        aiRecordShowNodesFromHistory(selection, actor);
+        updatePhysicsForce();
+        draw();
+        return true;
+    }
+
+    function setMergedLinkFilter(selection, actor = 'Human') {
+        const valid = ['first', 'second', 'first-only', 'second-only', 'and', 'or'];
+        if (!valid.includes(selection)) return false;
+        mergedLinkFilter = selection;
+        const select = document.getElementById('mergedLinkFilter');
+        if (select) select.value = selection;
+        aiRecordShowLinksFromHistory(selection, actor);
+        draw();
+        return true;
+    }
+
+    function getSpeciesPresenceMap(targetNodes = nodes) {
+        const taxa = getUploadedInteractionTaxa();
+        const presenceByKey = new Map();
+        (targetNodes || []).forEach(node => {
+            const preferred = getPreferredProteinName(node.id);
+            const key = preferred && preferred !== node.id ? `name:${preferred.toLowerCase()}` : `id:${node.id}`;
+            if (!presenceByKey.has(key)) presenceByKey.set(key, new Set());
+            const taxon = String(node.id).split('.')[0];
+            if (taxa.includes(taxon)) presenceByKey.get(key).add(taxon);
+        });
+        return new Map((targetNodes || []).map(node => {
+            const preferred = getPreferredProteinName(node.id);
+            const key = preferred && preferred !== node.id ? `name:${preferred.toLowerCase()}` : `id:${node.id}`;
+            return [node.id, presenceByKey.get(key) || new Set()];
+        }));
+    }
+
+    function getSpeciesPresenceForNode(node, presenceMap = null) {
+        if (node?._speciesPresence) return node._speciesPresence;
+        return (presenceMap || getSpeciesPresenceMap()).get(node?.id) || new Set();
+    }
+
+    function buildMergedNetwork(actor = 'Human') {
+        const taxa = getUploadedInteractionTaxa();
+        if (taxa.length !== 2 || !nodes.length) return;
+        const [first, second] = taxa;
+        const originalNodes = nodes.slice();
+        const originalLinks = links.slice();
+        const groups = new Map();
+        originalNodes.forEach(node => {
+            const taxon = String(node.id).split('.')[0];
+            if (!taxa.includes(taxon)) return;
+            const preferred = getPreferredProteinName(node.id);
+            const key = preferred && preferred !== node.id ? `name:${preferred.toLowerCase()}` : `id:${node.id}`;
+            if (!groups.has(key)) groups.set(key, { preferred, nodes: [] });
+            groups.get(key).nodes.push(node);
+        });
+        const idMap = new Map();
+        const mergedNodes = [];
+        groups.forEach(group => {
+            const sourceIds = group.nodes.map(node => node.id);
+            const presence = new Set(group.nodes.map(node => String(node.id).split('.')[0]));
+            const merged = { ...group.nodes[0], id: group.preferred || sourceIds[0], _speciesIds: sourceIds, _speciesPresence: presence };
+            mergedNodes.push(merged);
+            sourceIds.forEach(id => idMap.set(id, merged));
+        });
+        const mergedLinks = [];
+        const linkMap = new Map();
+        originalLinks.forEach(link => {
+            const sourceId = link.source?.id || link.source;
+            const targetId = link.target?.id || link.target;
+            const source = idMap.get(sourceId), target = idMap.get(targetId);
+            if (!source || !target || source === target) return;
+            const key = [source.id, target.id].sort().join('-');
+            let mergedLink = linkMap.get(key);
+            if (!mergedLink) {
+                mergedLink = { ...link, source, target, _speciesPresence: new Set() };
+                linkMap.set(key, mergedLink); mergedLinks.push(mergedLink);
+            }
+            const taxon = String(sourceId).split('.')[0];
+            if (taxa.includes(taxon)) mergedLink._speciesPresence.add(taxon);
+            mergedLink.value = Math.max(mergedLink.value || 0, link.value || 0);
+        });
+        mergedNetworkState = { active: true, taxa, originalNodes, originalLinks, nodeById: idMap, linkCounts: null };
+        nodes = mergedNodes; links = mergedLinks; window.nodes = nodes; window.links = links;
+        nodeMap = new Map(nodes.map(node => [node.id, node]));
+        simulation.nodes(nodes); simulation.force('link').links(links);
+        if (gpuState) gpuState.needsUpload = true;
+        selectedNodes.clear();
+        const nodeCounts = { first: 0, second: 0, both: 0 }, linkCounts = { first: 0, second: 0, both: 0 };
+        nodes.forEach(node => node._speciesPresence.size === 2 ? nodeCounts.both++ : node._speciesPresence.has(first) ? nodeCounts.first++ : nodeCounts.second++);
+        links.forEach(link => {
+            if (link._speciesPresence.size === 2) linkCounts.both++;
+            else if (link._speciesPresence.has(first)) linkCounts.first++;
+            else linkCounts.second++;
+        });
+        mergedNetworkState.linkCounts = linkCounts;
+        setMergedNetworkPhysicsAfterMerge();
+        aiRecordMergeNetworksHistory(actor);
+        updateMergeControls();
+        updatePhysicsForce();
+        const notification = `Networks of ${first} and ${second} merged. ${nodeCounts.first} nodes unique to ${first}, ${nodeCounts.second} nodes unique to ${second}, and ${nodeCounts.both} in both. ${linkCounts.first} links unique to ${first}, ${linkCounts.second} links unique to ${second}, and ${linkCounts.both} in both.`;
+        displayStringScapeNotification({ text: notification, autoClose: true, autoCloseMs: 9000 });
+        updateSizesAndColors(); draw();
+    }
+
+    function splitMergedNetwork(actor = null) {
+        if (!mergedNetworkState.active) return;
+        nodes = mergedNetworkState.originalNodes; links = mergedNetworkState.originalLinks; window.nodes = nodes; window.links = links;
+        nodeMap = new Map(nodes.map(node => [node.id, node]));
+        mergedNetworkState = { active: false, taxa: mergedNetworkState.taxa, originalNodes: [], originalLinks: [], nodeById: new Map(), linkCounts: null };
+        simulation.nodes(nodes).force('link').links(links);
+        if (document.getElementById('colorMode')?.value === 'species') document.getElementById('colorMode').value = 'layer';
+        if (document.getElementById('linkMode')?.value === 'species') document.getElementById('linkMode').value = 'score';
+        if (actor) aiRecordMergeNetworksHistory(actor);
+        updateMergeControls(); updateSizesAndColors(); updatePhysicsForce(); draw();
     }
 
     function getNodeLabelText(node) {
@@ -12747,6 +13035,23 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     function getSelectedNodeInfoRows() {
         const selectedIds = Array.from(getEffectiveSelectedNodesSet());
         const extraColumns = getNodeInfoExtraColumns();
+        if (mergedNetworkState.active) {
+            const rows = selectedIds.map(id => {
+                const mergedNode = nodeMap.get(id);
+                const row = {};
+                mergedNetworkState.taxa.forEach(taxon => {
+                    const sourceId = mergedNode?._speciesIds?.find(source => String(source).startsWith(`${taxon}.`));
+                    const suffix = ` ${taxon}`;
+                    const meta = sourceId ? (proteinMetadata.get(sourceId) || {}) : {};
+                    row[`Protein ID${suffix}`] = sourceId || '';
+                    row[`Preferred Name${suffix}`] = sourceId ? getPreferredProteinName(sourceId) : '';
+                    row[`Gene ID${suffix}`] = meta.geneId || '';
+                    row[`Description${suffix}`] = sourceId ? getProteinInfoDescription(sourceId) : '';
+                });
+                return row;
+            });
+            return { rows, extraColumns, merged: true };
+        }
         const sizeSource = resolveProteinSizeSource(selectedIds.map(id => getNodeForInfo(id)).filter(Boolean));
         const rows = selectedIds.map(id => {
             const node = getNodeForInfo(id);
@@ -13844,9 +14149,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         updateCanvasCursor();
         updateNodeInfoTableModalChrome('Node Info Table', false);
         calculateEigenvectorCentrality();
-        const { rows, extraColumns } = getSelectedNodeInfoRows();
+        const { rows, extraColumns, merged } = getSelectedNodeInfoRows();
         const baseColumns = ['Protein ID', 'Preferred Name', 'Gene ID', 'Description', 'Annotation', 'KEGG Product', 'Collection(s)', 'Localisation', 'Protein Size (aa)', 'UniProt', 'NCBI', 'Pubmed', 'IntAct', 'STRING', 'Protein Data Bank', 'Aliases',  'Layer', 'Centrality', 'Eigen', 'Sequence'];
-        const columns = [...baseColumns, ...extraColumns.map(c => c.label)];
+        const columns = merged
+            ? ['Protein ID', 'Preferred Name', 'Gene ID', 'Description'].flatMap(label => mergedNetworkState.taxa.map(taxon => `${label} ${taxon}`))
+            : [...baseColumns, ...extraColumns.map(c => c.label)];
         nodeInfoTableState = { columns, rows, filteredRows: rows, searchQuery: '', mode: 'protein' };
         renderNodeInfoTable();
         openModal('nodeInfoTableModal');
@@ -16382,7 +16689,13 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         updatePhysicsControlButtons();
         updatePhysicsRuntimeLabel();
         const sim = currentViewId === 'base' ? simulation : activeSubData?.simulation;
-        if (canPhysicsRun() && sim) { restartActivePhysics((isBuilding || isSettling) ? 0.5 : +document.getElementById('alphaSlider').value); }
+        if (canPhysicsRun() && sim) {
+            const restartAlpha = mergedPhysicsResumeAlphaPending
+                ? Math.max(0.5, +document.getElementById('alphaSlider')?.value || 0.5)
+                : ((isBuilding || isSettling) ? 0.5 : +document.getElementById('alphaSlider').value);
+            restartActivePhysics(restartAlpha);
+            mergedPhysicsResumeAlphaPending = false;
+        }
         else if (sim) sim.stop();
     }
 
@@ -18784,6 +19097,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
         let drawNodes = nodes, drawLinks = links;
         if (currentViewId !== 'base' && activeSubData) { drawNodes = activeSubData.nodes; drawLinks = activeSubData.links; }
+        if (mergedNetworkState.active && currentViewId === 'base') {
+            drawNodes = drawNodes.filter(node => getMergedPresenceMatch(node._speciesPresence, mergedNodeFilter));
+            drawLinks = drawLinks.filter(link => getMergedPresenceMatch(link._speciesPresence, mergedLinkFilter));
+        }
 
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -19793,8 +20110,15 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             let newSet = new Set(effectiveSelection);
             const threshold = +document.getElementById('thresholdInput').value;
             effectiveSelection.forEach(id => {
-                (fullAdjacency.get(id) || []).forEach(edge => {
-                    if (edge.score >= threshold && nodeMap.has(edge.target)) newSet.add(edge.target);
+                const selectedNode = nodeMap.get(id);
+                const sourceIds = selectedNode?._speciesIds?.length ? selectedNode._speciesIds : [id];
+                sourceIds.forEach(sourceId => {
+                    (fullAdjacency.get(sourceId) || []).forEach(edge => {
+                        if (edge.score < threshold) return;
+                        const targetNode = nodeMap.get(edge.target)
+                            || nodes.find(node => node._speciesIds?.includes(edge.target));
+                        if (targetNode) newSet.add(targetNode.id);
+                    });
                 });
             });
             const activeNodes = currentViewId === 'base' ? nodes : (activeSubData?.nodes || []);
@@ -19871,6 +20195,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const sim = currentViewId === 'base' ? simulation : activeSubData?.simulation;
         if (sim) {
             const targetNodes = currentViewId === 'base' ? nodes : (activeSubData?.nodes || []);
+            const targetLinks = currentViewId === 'base' ? links : (activeSubData?.links || []);
+            const physicsData = getPhysicsNodesAndLinks(targetNodes, targetLinks);
+            sim.nodes(physicsData.nodes);
             const customPhysicsTimer = startCustomColourDebug(`physics ${mode}`, targetNodes.length);
             const clusterSupported = mode === 'collection'
                 || mode === 'layer'
@@ -19885,6 +20212,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             sim.force("charge").strength(-rep);
             const linkForce = sim.force("link");
             if (linkForce) {
+                linkForce.links(physicsData.links);
                 if (!linkForce.__baseStrengthAccessor) {
                     linkForce.__baseStrengthAccessor = linkForce.strength();
                 }
@@ -19968,6 +20296,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const useGlobalNodesForStyle = currentViewId === 'base' || currentViewId === 'Venn Diagram' || currentViewId === 'Scatter Plot' || currentViewId === 'Embeddings';
         const targetNodes = useGlobalNodesForStyle ? nodes : (activeSubData?.nodes || []);
         const targetLinks = useGlobalNodesForStyle ? links : (activeSubData?.links || []);
+        const speciesPresenceMap = mode === 'species' ? getSpeciesPresenceMap(targetNodes) : null;
         const customColourTimer = startCustomColourDebug(mode, targetNodes.length);
         calculateLocalClusteringCoefficients(targetNodes, targetLinks);
         
@@ -20059,7 +20388,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             const borderColorNormalized = clamp01((borderColorValue - (borderColorRange[0] || 0)) / borderColorSpan);
             n.r = (6 * nSizeBase) + (sizeNormalized * 60 * sizeByMagnitude);
             n.borderWidth = borderWidth * (1 + (borderWidthMode === 'none' ? 0 : borderNormalized * borderWidthByMagnitude));
-            if (mode === 'layer') {
+            if (mode === 'species') n.col = getMergedSpeciesColor(getSpeciesPresenceForNode(n, speciesPresenceMap));
+            else if (mode === 'layer') {
                 const layerLabel = n.layer === 99 ? 'Disconnected' : `Layer ${n.layer}`;
                 const defaultColor = n.layer === 99 ? '#888' : d3.interpolateViridis(1 - (n.layer / 10));
                 n.col = getCategoricalNodeColor('layer', layerLabel, defaultColor);
@@ -20876,6 +21206,31 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 });
             }
 
+        } else if (mode === 'species') {
+            const [firstTaxon, secondTaxon] = getUploadedInteractionTaxa();
+            const speciesPresenceMap = getSpeciesPresenceMap(activeNodes);
+            const speciesCategories = [
+                { label: `Unique to ${firstTaxon}`, presence: new Set([firstTaxon]), color: '#3498db' },
+                { label: `Unique to ${secondTaxon}`, presence: new Set([secondTaxon]), color: '#ef4444' },
+                { label: 'Present in both', presence: new Set([firstTaxon, secondTaxon]), color: '#a855f7' }
+            ];
+            const categoryCounts = speciesCategories.map(category => ({
+                ...category,
+                count: activeNodes.filter(node => {
+                    const presence = getSpeciesPresenceForNode(node, speciesPresenceMap);
+                    return presence.size === category.presence.size && Array.from(category.presence).every(taxon => presence.has(taxon));
+                }).length
+            }));
+            createPieChartToggle(new Map(categoryCounts.map(category => [category.label, category.count])), mode, 'Species');
+            categoryCounts.forEach(category => {
+                appendCategoricalLegendItem(legend, {
+                    mode,
+                    label: category.label,
+                    count: category.count,
+                    defaultColor: category.color,
+                    onActivate: () => handleLegendHighlight(mode, category.label)
+                });
+            });
         } else if (['characterization', 'localization', 'biological_process', 'layer', 'collection', 'complex_pdbs'].includes(mode)) {
             const builtInSource = (mode === 'annotation' || mode === 'localization')
                 ? resolveBuiltInColorSource(mode, activeNodes)
@@ -21099,6 +21454,14 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             ? resolveBuiltInColorSource(mode, activeNodes)
             : null;
         const matches = activeNodes.filter(n => {
+            if (mode === 'species' && mergedNetworkState.active) {
+                const [firstTaxon, secondTaxon] = getUploadedInteractionTaxa();
+                const resolvedPresence = getSpeciesPresenceForNode(n);
+                if (value === `Unique to ${firstTaxon}`) return resolvedPresence.has(firstTaxon) && !resolvedPresence.has(secondTaxon);
+                if (value === `Unique to ${secondTaxon}`) return resolvedPresence.has(secondTaxon) && !resolvedPresence.has(firstTaxon);
+                if (value === 'Present in both') return resolvedPresence.has(firstTaxon) && resolvedPresence.has(secondTaxon);
+                return false;
+            }
             if (mode === 'layer') return value === "Disconnected" ? n.layer === 99 : `Layer ${n.layer}` === value;
             if (mode === 'collection') {
                 if (value === 'No Collection') return getNodeCollectionMemberships(n.id).length === 0;
@@ -21715,6 +22078,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     function rebuildInteractionDataFromUploads() {
+        if (mergedNetworkState.active) splitMergedNetwork();
         fullAdjacency.clear();
         allIDs = [];
         totalUniqueLinks = 0;
@@ -21815,6 +22179,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         document.getElementById('startBtn').disabled = interactionCount === 0;
         updateLinkLabelFieldOptions();
         updateUploadedListsUI();
+        updateMergeControls();
     }
 
     function rebuildAccessoryDataFromUploads() {
@@ -22166,6 +22531,14 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             try { await applyUploadedSessionFiles(); } catch (e) { console.warn('applyUploadedSessionFiles after build failed', e); }
             const sBtn = document.getElementById('startBtn'); sBtn.innerText = "Build complete"; sBtn.disabled = true; sBtn.style.display = 'block'; document.getElementById('pauseBtn').style.display = 'none';
             scheduleFullNetworkPostBuildCooldown();
+            if (getUploadedInteractionTaxa().length === 2) {
+                const mergePrompt = await displayStringScapeNotification({
+                    text: 'The uploaded data contains networks from two species. Do you wish to merge these into one network, with equvalent nodes between the two species merged?',
+                    button1_text: 'No',
+                    button2_text: 'Yes, merge'
+                });
+                if (mergePrompt?.button_index === 1) buildMergedNetwork();
+            }
         } catch (error) {
             throw error;
         }
@@ -22208,6 +22581,22 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     document.getElementById('colorMode').onchange = function() {
         handleColorModeChange(this.value, { actor: 'Human' });
     };
+    const mergeNetworksBtn = document.getElementById('mergeNetworksBtn');
+    if (mergeNetworksBtn) mergeNetworksBtn.onclick = () => {
+        if (mergedNetworkState.active) splitMergedNetwork('Human');
+        else buildMergedNetwork();
+    };
+    document.getElementById('mergedNodeFilter')?.addEventListener('change', event => {
+        setMergedNodeFilter(event.target.value, 'Human');
+    });
+    document.getElementById('mergedHiddenNodesPhysics')?.addEventListener('change', event => {
+        mergedHiddenNodesAffectPhysics = event.target.value === 'yes';
+        updatePhysicsForce();
+        restartActivePhysics(+document.getElementById('alphaSlider')?.value || 0.5);
+    });
+    document.getElementById('mergedLinkFilter')?.addEventListener('change', event => {
+        setMergedLinkFilter(event.target.value, 'Human');
+    });
     document.getElementById('nodeSizeSlider').oninput = () => {
         nodes.forEach(node => delete node._ssSize);
         updateSizesAndColors();
