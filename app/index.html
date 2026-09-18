@@ -4277,6 +4277,17 @@
 
         <span class="dropdown-toggle">Nodes ▾</span>
         <div id="nodes-drop" class="dropdown-content">
+            <div id="network-merge-controls" style="display:none; margin-bottom:12px;">
+                <button type="button" id="mergeNetworksBtn" class="action-btn" style="width:100%; text-align:center; justify-content:center;">Merge Networks</button>
+                <div id="mergeNetworksHelp" style="font-size:11px; color:#aaa; margin-top:5px;"></div>
+                <label style="margin-top:8px;">Show Nodes From</label>
+                <select id="mergedNodeFilter"></select>
+                <label style="margin-top:8px;">Should hidden nodes affect the physics of shown nodes?</label>
+                <select id="mergedHiddenNodesPhysics">
+                    <option value="no">No</option>
+                    <option value="yes" selected>Yes</option>
+                </select>
+            </div>
             <h4 class="node-settings-subheading">Node Colour:</h4>
             <label>Colour Nodes By</label>
             <select id="colorMode">
@@ -4293,6 +4304,7 @@
                 <option value="pdb_structure_count">PDB structure count</option>
                 <option value="random">Random</option>
                 <option value="mono">Mono</option>
+                <option value="species" style="display:none;">Species</option>
             </select>
             <label>Mono Node Colour</label>
             <input type="color" id="nodeMonoColor" value="#4caf50">
@@ -4347,10 +4359,15 @@
 
         <span class="dropdown-toggle">Links (edges) ▾</span>
         <div id="links-drop" class="dropdown-content">
+            <div id="mergedLinkFilterContainer" style="display:none; margin-bottom:12px;">
+                <label>Show Links From</label>
+                <select id="mergedLinkFilter"></select>
+            </div>
             <label>Colour Links By</label>
             <select id="linkMode">
                 <option value="score" selected>Combined Score</option>
                 <option value="mono">Mono</option>
+                <option value="species" style="display:none;">Species</option>
             </select>
             <label>Mono Link Colour</label>
             <input type="color" id="linkColor" value="#999999">
