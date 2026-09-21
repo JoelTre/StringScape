@@ -3275,7 +3275,15 @@
         .upload-progress { display: none; margin-top: 6px; }
         .upload-progress-track { width: 100%; height: 8px; background: var(--surface-color-panel); border-radius: 4px; overflow: hidden; }
         .upload-progress-bar { width: 0; height: 100%; background: var(--accent-color); transition: width 0.2s; }
+        .upload-progress.is-loading .upload-progress-bar {
+            width: 35%;
+            animation: uploadProgressIndeterminate 1.1s ease-in-out infinite;
+        }
         .upload-progress-text { margin-top: 6px; font-size: 11px; color: var(--accent-color); font-weight: bold; }
+        @keyframes uploadProgressIndeterminate {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(300%); }
+        }
         .uploaded-file-list {
             margin-top: 6px;
             min-height: 30px;
@@ -3329,6 +3337,106 @@
             transform: translateY(-2px);
             z-index: 11;
         }
+        .open-files-menu {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            right: 0;
+            z-index: 30;
+            display: none;
+            padding: 4px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--surface-color-panel);
+            box-shadow: 0 4px 12px var(--shadow-color);
+        }
+        .open-files-trigger {
+            position: relative;
+        }
+        .open-files-menu.open {
+            display: block;
+        }
+        .open-files-menu button {
+            width: 100%;
+            margin: 0;
+            padding: 9px 9px; 
+            border: 0;
+            border-radius: 5px;
+            background: transparent;
+            color: var(--text-color);
+            text-align: left;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .open-files-menu button:hover {
+            background: var(--button-bg-hover);
+        }
+        .open-files-menu-item.safe-open > button {
+            background: var(--button-bg-hover);
+        }
+        .open-files-menu-item {
+            position: relative;
+        }
+        .open-files-submenu {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 270px;
+            display: none;
+            z-index: 32;
+            padding: 7px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--surface-color-panel);
+            box-shadow: 0 4px 12px var(--shadow-color);
+            color: var(--text-color);
+            font-size: 11px;
+        }
+        .open-files-menu-item:hover > .open-files-submenu,
+        .open-files-menu-item.safe-open > .open-files-submenu,
+        .open-files-submenu.safe-open,
+        .open-files-submenu:hover {
+            display: block;
+        }
+        .open-files-safe-triangle {
+            position: fixed;
+            inset: 0;
+            z-index: 31;
+            pointer-events: none;
+            overflow: visible;
+        }
+        .open-files-safe-triangle polygon {
+            fill: rgba(255, 193, 7, 0.00);
+            stroke: rgba(255, 193, 7, 0.00);
+            stroke-width: 2;
+            stroke-dasharray: 6 4;
+            pointer-events: all;
+        }
+        .open-files-submenu p {
+            margin: 5px 4px 8px;
+            line-height: 1.35;
+            font-size: 15px;
+        }
+        .open-files-submenu .open-files-folder-row {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            margin: 3px 0;
+            padding: 3px 4px;
+        }
+        .open-files-submenu .open-files-folder-row span {
+            min-width: 0;
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .open-files-submenu .open-files-small-btn {
+            width: auto;
+            padding: 3px 6px;
+            font-size: 10px;
+            white-space: nowrap;
+        }
         .uploaded-file-items {
             display: flex;
             flex-wrap: wrap;
@@ -3381,6 +3489,25 @@
         }
         .uploaded-file-chip:hover .uploaded-file-chip-remove {
             opacity: 1;
+        }
+        .uploaded-file-chip.is-loading {
+            animation: uploadedFileLoadingPulse 1.15s ease-in-out infinite;
+        }
+        .uploaded-file-chip.is-loading .uploaded-file-chip-remove {
+            display: none;
+        }
+        .uploaded-file-group-heading {
+            flex: 0 0 100%;
+            color: var(--muted-text-color);
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.35px;
+            text-transform: uppercase;
+            margin-top: 2px;
+        }
+        @keyframes uploadedFileLoadingPulse {
+            0%, 100% { filter: brightness(0.85); }
+            50% { filter: brightness(1.55); }
         }
         #more-toggle {
             display: block;
@@ -4222,30 +4349,15 @@
         <div style="font-size:0.9em; color:#ccc; margin-bottom:10px;"></div>
         
         <button id="pill-blue-btn" type="button" style="width: 100%; margin-bottom:15px;">Open Start Guide</button>
-        <button id="pill-blue-btn" style="width: 100%; margin-bottom:15px;">Open Previous Session</button>
         <input type="file" id="sessionFolderInput" webkitdirectory directory multiple style="display:none;">
 
-        <label style="font-size:14px;">1. Load Interaction Data (Links/Edges)</label>
-        <input type="file" id="fileInput" accept=".gz,.txt,.csv,.tsv" style="display:none;">
-        <div id="fileInputList" class="uploaded-file-list">
-            <button type="button" 
-                    class="upload-inline-open-btn" 
-                Open File
-            </button>
-            <div class="uploaded-file-items"><span class="uploaded-file-list-empty">No files loaded</span></div>
+        <!-- <label style="font-size:14px;">Open Files</label> -->
+        <input type="file" id="openFilesInput" accept=".gz,.txt,.csv,.tsv,.fa,.fasta,.faa,.fna,.h5" multiple style="display:none;">
+        <div id="openFilesList" class="uploaded-file-list">
+            <button type="button" class="upload-inline-open-btn">Open ▾</button>
+            <div class="uploaded-file-items"><span class="uploaded-file-list-empty">No files uploaded</span></div>
         </div>
-        <div class="upload-progress" id="fileInputProgress"><div class="upload-progress-track"><div class="upload-progress-bar" id="fileInputProgressBar"></div></div><div class="upload-progress-text">Loading...</div></div>
-
-        <label style="font-size:14px;">2. Load Accessory Data (Node Info Files)</label>
-        <input type="file" id="infoInput" accept=".gz,.txt,.csv,.tsv,.fa,.fasta,.faa,.fna,.h5" multiple style="display:none;">
-        <div id="infoInputList" class="uploaded-file-list">
-            <button type="button" 
-                    class="upload-inline-open-btn" 
-                Open Files
-            </button>
-            <div class="uploaded-file-items"><span class="uploaded-file-list-empty">No files loaded</span></div>
-        </div>
-        <div class="upload-progress" id="infoInputProgress"><div class="upload-progress-track"><div class="upload-progress-bar" id="infoInputProgressBar"></div></div><div class="upload-progress-text">Loading...</div></div>
+        <div class="upload-progress" id="openFilesProgress"><div class="upload-progress-track"><div class="upload-progress-bar" id="openFilesProgressBar"></div></div><div class="upload-progress-text">Loading...</div></div>
 
         <span id="more-toggle" class="dropdown-toggle">Advanced ▾</span>
         <div id="more-drop" class="dropdown-content">
@@ -4482,7 +4594,7 @@
 
         <span class="dropdown-toggle">Download ▾</span>
         <div id="download-drop" class="dropdown-content">
-            <button id="pill-blue-btn" data-download-action="session" style="width:100%;">Download Session</button>
+            <button id="pill-blue-btn" data-download-action="session" style="width:100%;">Save Session...</button>
             <button id="pill-blue-btn" data-download-action="svg" style="width:100%;">Full Canvas (SVG)</button>
             <button id="pill-blue-btn" data-download-action="png-8k" style="width:100%;">Full Canvas (PNG 8k)</button>
             <div style="display:flex; align-items:center; gap:8px; margin:10px 0 8px 0; color:#ddd; font-size:0.92em;">
@@ -4973,10 +5085,33 @@
         </div>
         <div style="margin-top:14px; display:flex; flex-direction:column; gap:8px;">
             <label style="display:flex; flex-direction:column; gap:6px; font-size:13px;">
-                Downloaded folder name
+                <span style="color: var(--text-color); font-size: 1.35em; font-weight: 800; display: inline;">Session folder name</span>
                 <input type="text" id="downloadSessionFolderName" style="padding:8px 10px; border-radius:8px; border:1px solid var(--muted-text-color); background:var(--surface-color); color:var(--muted-text-color);" />
             </label>
-            <button id="downloadSessionDownloadBtn" class="btn-secondary" style="width:100%; background-color: var(--accent-color);">Download</button>
+            <button id="downloadSessionDownloadBtn" class="btn-secondary" style="width:100%; background-color: var(--accent-color);">Save</button>
+        </div>
+    </div>
+</div>
+
+<div id="sessionNameModal" class="modal">
+    <div class="modal-content" style="max-width:420px;">
+        <span class="close-modal">&times;</span>
+        <label style="display:flex; flex-direction:column; gap:6px; font-size:13px; text-align:left;">
+            <span style="color: var(--text-color); font-size: 1.35em; font-weight: 800; display: inline;">Name this session</span>
+            <input type="text" id="sessionNameInput" style="padding:8px 10px; border-radius:8px; border:1px solid var(--muted-text-color); background:var(--surface-color); color:var(--muted-text-color);" />
+        </label>
+        <button id="sessionNameSaveBtn" class="btn-secondary" style="width:100%; margin-top:12px; background-color:var(--accent-color);">Save</button>
+    </div>
+</div>
+
+<div id="recentSessionConfirmModal" class="modal">
+    <div class="modal-content" style="max-width:460px;">
+        <span class="close-modal">&times;</span>
+        <div id="recentSessionConfirmText" style="font-size:15px; line-height:1.4; margin-bottom:16px;"></div>
+        <div style="display:flex; gap:8px; justify-content:flex-end;">
+            <button id="recentSessionCancelBtn" class="btn-secondary">Cancel</button>
+            <button id="recentSessionNoBtn" class="btn-secondary">No</button>
+            <button id="recentSessionSaveBtn" class="btn-secondary" style="background-color:var(--accent-color);">Yes, save</button>
         </div>
     </div>
 </div>
