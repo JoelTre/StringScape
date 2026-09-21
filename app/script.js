@@ -6,6 +6,7 @@
                 window.loadedAccessoryFileNames = window.loadedAccessoryFileNames || [];
                 window.uploadedInteractionFiles = window.uploadedInteractionFiles || {};
                 window.uploadedAccessoryFiles = window.uploadedAccessoryFiles || {};
+                window.pendingUploadedFileNames = window.pendingUploadedFileNames || new Set();
                 window.uploadedEmbeddingFiles = window.uploadedEmbeddingFiles || {};
                 window.accessoryDataFiles = window.accessoryDataFiles || {};
                 window.accessoryVariableValues = window.accessoryVariableValues || {};
@@ -59,8 +60,10 @@
 
                 const interactionInput = document.getElementById('fileInput');
                 const accessoryInput = document.getElementById('infoInput');
+                const openFilesInput = document.getElementById('openFilesInput');
                 if (interactionInput) interactionInput.onchange = window.handleInteractionUploadChange;
                 if (accessoryInput) accessoryInput.onchange = window.handleAccessoryUploadChange;
+                if (openFilesInput) openFilesInput.onchange = window.handleOpenFilesUploadChange;
             })();
 
     console.log("Hello, welcome to the colsole! Below you will see console logs of function calls (except for some functions, such as draw and checkOffscreenNodes). This is useful for debugging and understanding what the code is doing.");
@@ -10850,12 +10853,97 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
     window.uploadedInteractionFiles = uploadedInteractionFiles;
     var uploadedAccessoryFiles = window.uploadedAccessoryFiles || {}; // filename -> text
     window.uploadedAccessoryFiles = uploadedAccessoryFiles;
+    var pendingUploadedFileNames = window.pendingUploadedFileNames || new Set();
+    window.pendingUploadedFileNames = pendingUploadedFileNames;
     var uploadedEmbeddingFiles = window.uploadedEmbeddingFiles || {}; // filename -> { kind, summary }
     window.uploadedEmbeddingFiles = uploadedEmbeddingFiles;
+    var connectedSessionFolders = window.connectedSessionFolders || [];
+    window.connectedSessionFolders = connectedSessionFolders;
+    var activeSessionFolderName = window.activeSessionFolderName || '';
+    window.activeSessionFolderName = activeSessionFolderName;
+    var sessionNamePromptPending = false;
+    var pendingRecentSessionAfterSave = null;
+    var pendingRecentSessionConfirmation = null;
     var sessionSettingDefaults = window.sessionSettingDefaults || new Map();
     window.sessionSettingDefaults = sessionSettingDefaults;
     var pendingSessionRestore = false;
     var sessionRestoreAppliedSignature = '';
+
+    const SESSION_FOLDER_DB_NAME = 'StringScapeSessionFolders';
+    const SESSION_FOLDER_DB_STORE = 'handles';
+
+    function openSessionFolderDb() {
+        return new Promise((resolve, reject) => {
+            if (!window.indexedDB) return resolve(null);
+            const request = indexedDB.open(SESSION_FOLDER_DB_NAME, 1);
+            request.onupgradeneeded = () => request.result.createObjectStore(SESSION_FOLDER_DB_STORE);
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    async function loadConnectedSessionFolders() {
+        try {
+            const db = await openSessionFolderDb();
+            if (!db) return;
+            const records = await new Promise((resolve, reject) => {
+                const request = db.transaction(SESSION_FOLDER_DB_STORE, 'readonly').objectStore(SESSION_FOLDER_DB_STORE).getAll();
+                request.onsuccess = () => resolve(request.result || []);
+                request.onerror = () => reject(request.error);
+            });
+            connectedSessionFolders = records.filter(record => record?.handle).map(record => record);
+            window.connectedSessionFolders = connectedSessionFolders;
+            renderOpenFilesList();
+        } catch (error) {
+            console.warn('Could not restore connected session folders', error);
+        }
+    }
+
+    async function persistConnectedSessionFolder(record) {
+        const db = await openSessionFolderDb();
+        if (!db) return;
+        await new Promise((resolve, reject) => {
+            const request = db.transaction(SESSION_FOLDER_DB_STORE, 'readwrite').objectStore(SESSION_FOLDER_DB_STORE).put(record, record.id);
+            request.onsuccess = resolve;
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    async function removeConnectedSessionFolder(record) {
+        connectedSessionFolders = connectedSessionFolders.filter(item => item.id !== record.id);
+        window.connectedSessionFolders = connectedSessionFolders;
+        try {
+            const db = await openSessionFolderDb();
+            if (db) db.transaction(SESSION_FOLDER_DB_STORE, 'readwrite').objectStore(SESSION_FOLDER_DB_STORE).delete(record.id);
+        } catch (error) {
+            console.warn('Could not remove connected session folder', error);
+        }
+        renderOpenFilesList();
+    }
+
+    async function connectSessionFolder() {
+        if (!window.showDirectoryPicker) {
+            alert('Connecting folders requires a Chromium-based browser with File System Access support.');
+            return;
+        }
+        try {
+            const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+            const record = { id: `${handle.name}-${Date.now()}`, name: handle.name, handle, connectedAt: Date.now() };
+            connectedSessionFolders = [...connectedSessionFolders.filter(item => item.name !== handle.name), record];
+            window.connectedSessionFolders = connectedSessionFolders;
+            await persistConnectedSessionFolder(record);
+            renderOpenFilesList();
+        } catch (error) {
+            if (error?.name !== 'AbortError') console.warn('Could not connect session folder', error);
+        }
+    }
+
+    async function ensureFolderPermission(handle, mode = 'readwrite') {
+        if (!handle) return false;
+        if (typeof handle.queryPermission === 'function' && await handle.queryPermission({ mode }) === 'granted') return true;
+        if (typeof handle.requestPermission === 'function') return (await handle.requestPermission({ mode })) === 'granted';
+        return true;
+    }
 
     function getDefaultSessionFolderName() {
         const prefixes = getAllTaxonIdPrefixes();
@@ -10869,7 +10957,7 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
     function openDownloadSessionModal() {
         const modal = document.getElementById('downloadSessionModal');
         if (!modal) return;
-        document.getElementById('downloadSessionFolderName').value = getDefaultSessionFolderName();
+        document.getElementById('downloadSessionFolderName').value = activeSessionFolderName || getDefaultSessionFolderName();
         const selectAll = document.getElementById('downloadSessionSelectAll');
         const options = Array.from(document.querySelectorAll('.download-session-option'));
         if (selectAll) selectAll.checked = true;
@@ -10880,6 +10968,184 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
     function closeDownloadSessionModal() {
         const modal = document.getElementById('downloadSessionModal');
         if (modal) modal.style.display = 'none';
+    }
+
+    function openSessionNamePrompt() {
+        const input = document.getElementById('sessionNameInput');
+        if (input) input.value = activeSessionFolderName || getDefaultSessionFolderName();
+        sessionNamePromptPending = true;
+        openModal('sessionNameModal');
+        setTimeout(() => input?.focus(), 0);
+    }
+
+    async function saveSessionFromShortcut() {
+        if (!activeSessionFolderName) {
+            openSessionNamePrompt();
+            return;
+        }
+        const files = buildSessionFiles();
+        if (!files.length) return;
+        try {
+            if (connectedSessionFolders.length) {
+                await saveSessionToConnectedFolder(activeSessionFolderName, files);
+            } else {
+                openDownloadSessionModal();
+            }
+        } catch (error) {
+            console.warn('Session save failed', error);
+            alert('Could not save the session to the connected folder.');
+        }
+    }
+
+    async function confirmSessionNamePrompt() {
+        const input = document.getElementById('sessionNameInput');
+        const name = String(input?.value || '').trim();
+        if (!name) return;
+        activeSessionFolderName = name;
+        window.activeSessionFolderName = activeSessionFolderName;
+        sessionNamePromptPending = false;
+        closeModal('sessionNameModal');
+        const files = buildSessionFiles();
+        if (!files.length) return;
+        try {
+            if (connectedSessionFolders.length) {
+                await saveSessionToConnectedFolder(name, files);
+                if (pendingRecentSessionAfterSave) {
+                    const session = pendingRecentSessionAfterSave;
+                    pendingRecentSessionAfterSave = null;
+                    await openRecentSession(session);
+                }
+            } else {
+                openDownloadSessionModal();
+                const folderNameInput = document.getElementById('downloadSessionFolderName');
+                if (folderNameInput) folderNameInput.value = name;
+            }
+        } catch (error) {
+            console.warn('Session save failed', error);
+            alert('Could not save the session.');
+        }
+    }
+
+    function hasLoadedSessionFiles() {
+        return Object.keys(uploadedInteractionFiles || {}).length > 0
+            || Object.keys(uploadedAccessoryFiles || {}).length > 0
+            || Object.keys(uploadedEmbeddingFiles || {}).length > 0;
+    }
+
+    function clearSessionAppData() {
+        clearFullNetworkPostBuildCooldown();
+        isBuilding = false;
+        isSettling = false;
+        simulation?.stop();
+        activeSubData?.simulation?.stop();
+        if (currentViewId !== 'base') switchView('base');
+
+        Object.keys(uploadedInteractionFiles).forEach(name => delete uploadedInteractionFiles[name]);
+        Object.keys(uploadedAccessoryFiles).forEach(name => delete uploadedAccessoryFiles[name]);
+        Object.keys(uploadedEmbeddingFiles).forEach(name => delete uploadedEmbeddingFiles[name]);
+        Object.keys(uploadedFileViewerData).forEach(name => delete uploadedFileViewerData[name]);
+        Object.keys(accessoryDataFiles).forEach(name => delete accessoryDataFiles[name]);
+        Object.keys(accessoryVariableValues).forEach(name => delete accessoryVariableValues[name]);
+        Object.keys(interactionParsedEdgeCounts).forEach(name => delete interactionParsedEdgeCounts[name]);
+        pendingUploadedFileNames.clear();
+        variableConfigs = [];
+        window.variableConfigs = variableConfigs;
+        variableConfigMap.clear();
+        customVariableSelectionCache.clear();
+
+        fullAdjacency.clear();
+        proteinMetadata.clear();
+        aliasData.clear();
+        allIDs = [];
+        totalUniqueLinks = 0;
+        interactionLinkLabelHeaders = [];
+        interactionLinkLabelValues.clear();
+        embeddingDataByType = { network: null, sequence: null };
+        embeddingSelectedIdsByType = { network: new Set(), sequence: new Set() };
+        embeddingReferenceNodeIdsByType = { network: new Set(), sequence: new Set() };
+        invalidateEmbeddingVectorCache();
+        markEmbeddingsDirty(true);
+
+        nodes = [];
+        links = [];
+        window.nodes = nodes;
+        window.links = links;
+        nodeMap.clear();
+        collections = new Map();
+        selectedNodes.clear();
+        selectedWedges.clear();
+        selectedHistogramBins.clear();
+        vennSelectedNodes.clear();
+        vennPinnedSelectedNodes.clear();
+        mindMapSelectedNodes.clear();
+        mindMapCollapsedNodes.clear();
+        selectedNodesDraft = null;
+        selectionHistory = [];
+        pathNodes.clear();
+        pathEdges.clear();
+        shortestPathGroupsToolOpen = false;
+        shortestPathDisplayMode = 'none';
+        currentSeeds = [];
+        mergedNetworkState = { active: false, taxa: [], originalNodes: [], originalLinks: [], nodeById: new Map(), linkCounts: null };
+        activeSubData = null;
+        pendingSessionRestore = false;
+        sessionRestoreAppliedSignature = '';
+        activeSessionFolderName = '';
+        window.activeSessionFolderName = activeSessionFolderName;
+
+        const startButton = document.getElementById('startBtn');
+        if (startButton) {
+            startButton.disabled = true;
+            startButton.style.display = 'block';
+            startButton.textContent = 'Build Network';
+        }
+        document.getElementById('pauseBtn')?.style && (document.getElementById('pauseBtn').style.display = 'none');
+        document.getElementById('progress-wrapper')?.style && (document.getElementById('progress-wrapper').style.display = 'none');
+        document.getElementById('openFilesProgress')?.style && (document.getElementById('openFilesProgress').style.display = 'none');
+        try { updateUploadedListsUI(); } catch (error) { console.warn('Could not refresh upload UI after clearing session', error); }
+        try { updateViewMenu(); } catch (error) { console.warn('Could not refresh view menu after clearing session', error); }
+        try { refreshInfoBoxFromSelection(); } catch (error) { console.warn('Could not refresh info box after clearing session', error); }
+        try {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            draw();
+        } catch (error) {
+            console.warn('Could not redraw canvas after clearing session', error);
+        }
+    }
+
+    function openRecentSessionConfirmation(session) {
+        pendingRecentSessionConfirmation = session;
+        const text = document.getElementById('recentSessionConfirmText');
+        if (text) text.textContent = `Do you want to save the current session before opening ${session.name}?`;
+        openModal('recentSessionConfirmModal');
+    }
+
+    async function resolveRecentSessionConfirmation(choice) {
+        const session = pendingRecentSessionConfirmation;
+        pendingRecentSessionConfirmation = null;
+        closeModal('recentSessionConfirmModal');
+        if (!session || choice === 'cancel') return;
+        if (choice === 'no') {
+            await openRecentSession(session);
+            return;
+        }
+        if (!connectedSessionFolders.length) {
+            pendingRecentSessionAfterSave = session;
+            openDownloadSessionModal();
+            return;
+        }
+        if (!activeSessionFolderName) {
+            pendingRecentSessionAfterSave = session;
+            openSessionNamePrompt();
+            return;
+        }
+        try {
+            await saveSessionToConnectedFolder(activeSessionFolderName, buildSessionFiles());
+            await openRecentSession(session);
+        } catch (error) {
+            console.warn('Could not save before opening recent session', error);
+            alert('Could not save the current session.');
+        }
     }
 
     function shouldIncludeStringScapeLogo() {
@@ -11219,15 +11485,14 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         return true;
     }
 
-    async function downloadSessionFiles() {
+    function buildSessionFiles() {
         const folderNameInput = document.getElementById('downloadSessionFolderName');
-        const folderName = (folderNameInput?.value || '').trim() || getDefaultSessionFolderName();
         const choices = {
-            uploadedFiles: document.getElementById('downloadSessionUploadedFiles')?.checked,
-            nodePositions: document.getElementById('downloadSessionNodePositions')?.checked,
-            collections: document.getElementById('downloadSessionCollections')?.checked,
-            selectedNodes: document.getElementById('downloadSessionSelectedNodes')?.checked,
-            changedSettings: document.getElementById('downloadSessionChangedSettings')?.checked
+            uploadedFiles: document.getElementById('downloadSessionUploadedFiles')?.checked ?? true,
+            nodePositions: document.getElementById('downloadSessionNodePositions')?.checked ?? true,
+            collections: document.getElementById('downloadSessionCollections')?.checked ?? true,
+            selectedNodes: document.getElementById('downloadSessionSelectedNodes')?.checked ?? true,
+            changedSettings: document.getElementById('downloadSessionChangedSettings')?.checked ?? true
         };
         const files = [];
         if (choices.uploadedFiles) {
@@ -11259,6 +11524,33 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
             const text = collectChangedSessionSettings();
             files.push(['changed_settings.txt', (text ? text + '\n' : ''), 'text/plain;charset=utf-8;']);
         }
+        return files;
+    }
+
+    async function writeSessionFilesToFolder(folderHandle, folderName, files) {
+        if (!await ensureFolderPermission(folderHandle, 'readwrite')) throw new Error('Folder permission was not granted.');
+        const sessionDir = await folderHandle.getDirectoryHandle(folderName, { create: true });
+        for (const [name, content, mime] of files) {
+            const fileHandle = await sessionDir.getFileHandle(name, { create: true });
+            const writable = await fileHandle.createWritable();
+            await writable.write(new Blob([content], { type: mime }));
+            await writable.close();
+        }
+    }
+
+    async function saveSessionToConnectedFolder(folderName, files) {
+        const record = connectedSessionFolders[0];
+        if (!record) return false;
+        await writeSessionFilesToFolder(record.handle, folderName, files);
+        activeSessionFolderName = folderName;
+        window.activeSessionFolderName = activeSessionFolderName;
+        return true;
+    }
+
+    async function downloadSessionFiles() {
+        const folderNameInput = document.getElementById('downloadSessionFolderName');
+        const folderName = (folderNameInput?.value || '').trim() || getDefaultSessionFolderName();
+        const files = buildSessionFiles();
 
         if (!files.length) {
             alert('Select at least one session file type to download.');
@@ -11266,15 +11558,11 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
 
         try {
-            if (window.showDirectoryPicker) {
+            if (connectedSessionFolders.length) {
+                await saveSessionToConnectedFolder(folderName, files);
+            } else if (window.showDirectoryPicker) {
                 const parentDir = await window.showDirectoryPicker({ mode: 'readwrite' });
-                const sessionDir = await parentDir.getDirectoryHandle(folderName, { create: true });
-                for (const [name, content, mime] of files) {
-                    const fileHandle = await sessionDir.getFileHandle(name, { create: true });
-                    const writable = await fileHandle.createWritable();
-                    await writable.write(new Blob([content], { type: mime }));
-                    await writable.close();
-                }
+                await writeSessionFilesToFolder(parentDir, folderName, files);
             } else {
                 files.forEach(([name, content, mime]) => {
                     const blob = new Blob([content], { type: mime });
@@ -11285,7 +11573,14 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
                     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
                 });
             }
+            activeSessionFolderName = folderName;
+            window.activeSessionFolderName = activeSessionFolderName;
             closeDownloadSessionModal();
+            if (pendingRecentSessionAfterSave) {
+                const session = pendingRecentSessionAfterSave;
+                pendingRecentSessionAfterSave = null;
+                await openRecentSession(session);
+            }
         } catch (error) {
             console.warn('Session download failed', error);
             alert('Could not open a folder picker in this browser. If supported, use a Chromium-based browser to download into a chosen folder.');
@@ -11377,6 +11672,372 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             openLabel: 'Open Files',
             onRemove: removeAccessoryUpload
         });
+        renderOpenFilesList();
+    }
+
+    function clearSubmenu(submenu) {
+        submenu.innerHTML = '';
+    }
+
+    function positionOpenSubmenu(item, submenu) {
+        const rect = item.getBoundingClientRect();
+        submenu.style.left = `${Math.round(rect.right + 6)}px`;
+        submenu.style.top = `${Math.round(rect.top - 5)}px`;
+    }
+
+    function pointInTriangle(point, first, second, third) {
+        const sign = (a, b, c) => (a.x - c.x) * (b.y - c.y) - (b.x - c.x) * (a.y - c.y);
+        const firstSign = sign(point, first, second);
+        const secondSign = sign(point, second, third);
+        const thirdSign = sign(point, third, first);
+        const hasNegative = firstSign < 0 || secondSign < 0 || thirdSign < 0;
+        const hasPositive = firstSign > 0 || secondSign > 0 || thirdSign > 0;
+        return !(hasNegative && hasPositive);
+    }
+
+    function createSafeSubmenuTriangle(item, submenu) {
+        window.__openFilesSafeTriangleCleanups = window.__openFilesSafeTriangleCleanups || new Set();
+        const triangleSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        triangleSvg.classList.add('open-files-safe-triangle');
+        triangleSvg.setAttribute('aria-hidden', 'true');
+        triangleSvg.style.display = 'none';
+        const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+        triangleSvg.appendChild(polygon);
+        document.body.appendChild(triangleSvg);
+
+        let anchor = null;
+        let corners = null;
+        let tracking = false;
+
+        const updateGeometry = () => {
+            if (!anchor) return;
+            const submenuRect = submenu.getBoundingClientRect();
+            corners = {
+                top: { x: submenuRect.left, y: submenuRect.top },
+                bottom: { x: submenuRect.left, y: submenuRect.bottom }
+            };
+            polygon.setAttribute('points', `${anchor.x},${anchor.y} ${corners.top.x},${corners.top.y} ${corners.bottom.x},${corners.bottom.y}`);
+        };
+        submenu.__updateSafeTriangle = updateGeometry;
+
+        const hideTriangle = () => {
+            triangleSvg.style.display = 'none';
+            item.classList.remove('safe-open');
+            submenu.classList.remove('safe-open');
+            tracking = false;
+            anchor = null;
+            corners = null;
+            document.removeEventListener('pointermove', handlePointerMove);
+        };
+        const handlePointerMove = event => {
+            if (!tracking || !anchor || !corners) return;
+            const point = { x: event.clientX, y: event.clientY };
+            if (item.contains(event.target) || triangleSvg.contains(event.target) || pointInTriangle(point, anchor, corners.top, corners.bottom)) return;
+            hideTriangle();
+        };
+        const beginTracking = event => {
+            if (submenu.contains(event.relatedTarget) || triangleSvg.contains(event.relatedTarget)) return;
+            item.classList.add('safe-open');
+            anchor = { x: event.clientX, y: event.clientY };
+            triangleSvg.style.display = 'block';
+            updateGeometry();
+            tracking = true;
+            document.addEventListener('pointermove', handlePointerMove);
+        };
+        const enterSubmenu = () => {
+            item.classList.add('safe-open');
+            submenu.classList.add('safe-open');
+            updateGeometry();
+        };
+        const leaveSubmenu = event => {
+            if (!item.contains(event.relatedTarget) && !triangleSvg.contains(event.relatedTarget)) {
+                submenu.classList.remove('safe-open');
+                hideTriangle();
+            }
+        };
+        item.addEventListener('mouseenter', beginTracking);
+        submenu.addEventListener('mouseenter', enterSubmenu);
+        submenu.addEventListener('mouseleave', leaveSubmenu);
+        window.__openFilesSafeTriangleCleanups.add(hideTriangle);
+        return hideTriangle;
+    }
+
+    async function renderConnectedFolders(submenu) {
+        clearSubmenu(submenu);
+        const connectButton = document.createElement('button');
+        connectButton.type = 'button';
+        connectButton.textContent = 'Connect Folder';
+        connectButton.onclick = event => {
+            event.stopPropagation();
+            connectSessionFolder();
+        };
+        submenu.appendChild(connectButton);
+        if (!connectedSessionFolders.length) {
+            const text = document.createElement('p');
+            text.textContent = 'Create a folder on your computer (called something like "StringScape sessions") and connect it here. Connecting a folder gives StringScape read-write access to that folder, allowing you to save sessions with Ctrl+S and open previous sessions via "Open recent".';
+            submenu.appendChild(text);
+            submenu.__updateSafeTriangle?.();
+            return;
+        }
+        connectedSessionFolders.forEach(record => {
+            const row = document.createElement('div');
+            row.className = 'open-files-folder-row';
+            const name = document.createElement('span');
+            name.textContent = record.name;
+            name.title = record.name;
+            const disconnect = document.createElement('button');
+            disconnect.type = 'button';
+            disconnect.className = 'open-files-small-btn';
+            disconnect.textContent = 'Disconnect';
+            disconnect.onclick = event => {
+                event.stopPropagation();
+                removeConnectedSessionFolder(record);
+            };
+            row.append(name, disconnect);
+            submenu.appendChild(row);
+        });
+        const text = document.createElement('p');
+        text.textContent = 'Create a folder on your computer (called something like "StringScape sessions") and connect it here. Connecting a folder gives StringScape read-write access to that folder, allowing you to save sessions with Ctrl+S and open previous sessions via "Open recent".';
+        submenu.appendChild(text);
+        submenu.__updateSafeTriangle?.();
+    }
+
+    async function getRecentSessionEntries() {
+        const entries = [];
+        for (const record of connectedSessionFolders) {
+            if (!await ensureFolderPermission(record.handle, 'read')) continue;
+            for await (const [name, handle] of record.handle.entries()) {
+                if (handle.kind !== 'directory') continue;
+                let latest = record.connectedAt || 0;
+                try {
+                    for await (const [, fileHandle] of handle.entries()) {
+                        if (fileHandle.kind !== 'file') continue;
+                        const file = await fileHandle.getFile();
+                        latest = Math.max(latest, file.lastModified || 0);
+                    }
+                } catch (error) {
+                    console.warn(`Could not inspect recent session ${name}`, error);
+                }
+                entries.push({ name, handle, parent: record, latest });
+            }
+        }
+        return entries.sort((a, b) => b.latest - a.latest);
+    }
+
+    async function renderRecentSessions(submenu) {
+        if (submenu.__recentSessionsLoading || submenu.__recentSessionsLoaded) return;
+        submenu.__recentSessionsLoading = true;
+        clearSubmenu(submenu);
+        if (!connectedSessionFolders.length) {
+            const text = document.createElement('p');
+            text.textContent = 'You must connect a folder to use this feature';
+            submenu.appendChild(text);
+            submenu.__updateSafeTriangle?.();
+            submenu.__recentSessionsLoaded = true;
+            submenu.__recentSessionsLoading = false;
+            return;
+        }
+        const loading = document.createElement('p');
+        loading.textContent = 'Loading recent sessions...';
+        submenu.appendChild(loading);
+        let sessions;
+        try {
+            sessions = await getRecentSessionEntries();
+        } catch (error) {
+            submenu.__recentSessionsLoading = false;
+            clearSubmenu(submenu);
+            const text = document.createElement('p');
+            text.textContent = 'Could not load recent sessions';
+            submenu.appendChild(text);
+            submenu.__updateSafeTriangle?.();
+            return;
+        }
+        clearSubmenu(submenu);
+        if (!sessions.length) {
+            const text = document.createElement('p');
+            text.textContent = 'No sessions found';
+            submenu.appendChild(text);
+            submenu.__updateSafeTriangle?.();
+            submenu.__recentSessionsLoaded = true;
+            submenu.__recentSessionsLoading = false;
+            return;
+        }
+        sessions.forEach(session => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = session.name;
+            button.title = `${session.name} (${session.parent.name})`;
+            button.onclick = async event => {
+                event.stopPropagation();
+                if (hasLoadedSessionFiles()) {
+                    openRecentSessionConfirmation(session);
+                } else {
+                    await openRecentSession(session);
+                }
+            };
+            submenu.appendChild(button);
+        });
+        submenu.__updateSafeTriangle?.();
+        requestAnimationFrame(() => submenu.__updateSafeTriangle?.());
+        submenu.__recentSessionsLoaded = true;
+        submenu.__recentSessionsLoading = false;
+    }
+
+    async function openRecentSession(session) {
+        if (!await ensureFolderPermission(session.handle, 'read')) return;
+        const files = [];
+        for await (const [name, handle] of session.handle.entries()) {
+            if (handle.kind !== 'file') continue;
+            files.push(await handle.getFile());
+        }
+        if (!files.length) return;
+        try {
+            clearSessionAppData();
+            await processOpenFiles(files);
+            await applyUploadedSessionFiles();
+        } catch (error) {
+            console.error('Recent session loading failed', error);
+            alert(`Could not open recent session ${session.name}.`);
+        }
+    }
+
+    function renderOpenFilesList() {
+        const container = document.getElementById('openFilesList');
+        if (!container) return;
+        window.__openFilesSafeTriangleCleanups?.forEach(cleanup => cleanup());
+        document.querySelectorAll('.open-files-safe-triangle').forEach(triangle => triangle.remove());
+        window.__openFilesSafeTriangleCleanups?.clear();
+        container.innerHTML = '';
+        const trigger = document.createElement('div');
+        trigger.className = 'open-files-trigger';
+        container.appendChild(trigger);
+        const openButton = document.createElement('button');
+        openButton.type = 'button';
+        openButton.className = 'upload-inline-open-btn';
+        openButton.textContent = 'Open ▾';
+        openButton.onclick = event => {
+            event.stopPropagation();
+            closeWelcomeOverlay();
+            menu.classList.toggle('open');
+        };
+        trigger.appendChild(openButton);
+
+        const menu = document.createElement('div');
+        menu.className = 'open-files-menu';
+        const openFilesButton = document.createElement('button');
+        openFilesButton.type = 'button';
+        openFilesButton.textContent = 'Open Files';
+        openFilesButton.onclick = event => {
+            event.stopPropagation();
+            menu.classList.remove('open');
+            document.getElementById('openFilesInput')?.click();
+        };
+        menu.append(openFilesButton);
+
+        const openFolderButton = document.createElement('button');
+        openFolderButton.type = 'button';
+        openFolderButton.textContent = 'Open Folder';
+        openFolderButton.onclick = event => {
+            event.stopPropagation();
+            menu.classList.remove('open');
+            document.getElementById('sessionFolderInput')?.click();
+        };
+        menu.append(openFolderButton);
+
+        const openExampleButton = document.createElement('button');
+        openExampleButton.type = 'button';
+        openExampleButton.textContent = 'Open Example (E. coli K-12)';
+        openExampleButton.onclick = async event => {
+            event.stopPropagation();
+            menu.classList.remove('open');
+            await loadExampleDatasetFiles();
+        };
+        menu.append(openExampleButton);
+
+        const recentItem = document.createElement('div');
+        recentItem.className = 'open-files-menu-item';
+        const recentButton = document.createElement('button');
+        recentButton.type = 'button';
+        recentButton.textContent = 'Open Recent...  ›';
+        recentItem.appendChild(recentButton);
+        const recentSubmenu = document.createElement('div');
+        recentSubmenu.className = 'open-files-submenu';
+        recentItem.appendChild(recentSubmenu);
+        recentItem.addEventListener('mouseenter', () => {
+            positionOpenSubmenu(recentItem, recentSubmenu);
+            renderRecentSessions(recentSubmenu);
+        });
+        createSafeSubmenuTriangle(recentItem, recentSubmenu);
+        menu.appendChild(recentItem);
+
+        const connectItem = document.createElement('div');
+        connectItem.className = 'open-files-menu-item';
+        const connectButton = document.createElement('button');
+        connectButton.type = 'button';
+        connectButton.textContent = 'Connect Folder...  ›';
+        connectItem.appendChild(connectButton);
+        const connectSubmenu = document.createElement('div');
+        connectSubmenu.className = 'open-files-submenu';
+        connectItem.appendChild(connectSubmenu);
+        connectItem.addEventListener('mouseenter', () => {
+            positionOpenSubmenu(connectItem, connectSubmenu);
+            renderConnectedFolders(connectSubmenu);
+        });
+        createSafeSubmenuTriangle(connectItem, connectSubmenu);
+        menu.appendChild(connectItem);
+        trigger.appendChild(menu);
+
+        const itemsWrap = document.createElement('div');
+        itemsWrap.className = 'uploaded-file-items';
+        container.appendChild(itemsWrap);
+        const interactionNames = [...new Set([...Object.keys(uploadedInteractionFiles), ...Array.from(pendingUploadedFileNames).filter(name => isInteractionFileName(name))])];
+        const accessoryNames = [...new Set([
+            ...Object.keys(uploadedAccessoryFiles),
+            ...Object.keys(uploadedEmbeddingFiles),
+            ...Array.from(pendingUploadedFileNames).filter(name => !isInteractionFileName(name))
+        ])];
+        if (!interactionNames.length && !accessoryNames.length) {
+            const empty = document.createElement('span');
+            empty.className = 'uploaded-file-list-empty';
+            empty.textContent = 'No files uploaded';
+            itemsWrap.appendChild(empty);
+            return;
+        }
+
+        const appendGroup = (heading, names, onRemove) => {
+            if (!names.length) return;
+            const headingEl = document.createElement('span');
+            headingEl.className = 'uploaded-file-group-heading';
+            headingEl.textContent = heading;
+            itemsWrap.appendChild(headingEl);
+            names.forEach(name => {
+                const isLoading = pendingUploadedFileNames.has(name);
+                const chip = document.createElement('button');
+                chip.type = 'button';
+                chip.className = `uploaded-file-chip${isLoading ? ' is-loading' : ''}`;
+                chip.title = isLoading ? `${name} (loading)` : name;
+                const label = document.createElement('span');
+                label.className = 'uploaded-file-chip-label';
+                label.textContent = name;
+                chip.appendChild(label);
+                if (!isLoading) {
+                    const remove = document.createElement('span');
+                    remove.className = 'uploaded-file-chip-remove';
+                    remove.textContent = '×';
+                    remove.title = 'Remove file';
+                    remove.onclick = event => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onRemove(name);
+                    };
+                    chip.appendChild(remove);
+                    chip.onclick = () => openFileViewer(name);
+                }
+                itemsWrap.appendChild(chip);
+            });
+        };
+        appendGroup('Interaction files', interactionNames, removeInteractionUpload);
+        appendGroup('Accessory files', accessoryNames, removeAccessoryUpload);
     }
 
     function refreshVariableFileList() {
@@ -16809,6 +17470,12 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     window.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 's') {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            saveSessionFromShortcut();
+            return;
+        }
         if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'z') {
             e.preventDefault();
             undoLastAction();
@@ -22219,6 +22886,14 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         return /\.gz$/i.test(String(fileName || ''));
     }
 
+    function isInteractionFileName(fileName) {
+        return String(fileName || '').toLowerCase().includes('link');
+    }
+
+    function classifyUploadedFile(file) {
+        return isInteractionFileName(file?.name) ? 'interaction' : 'accessory';
+    }
+
     function stripGzipSuffix(fileName) {
         return String(fileName || '').replace(/\.gz$/i, '');
     }
@@ -22246,7 +22921,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         });
     }
 
-    async function fetchExampleDatasetFiles() {
+    async function fetchExampleDatasetFiles(progressOptions = {}) {
         const apiUrl = 'https://api.github.com/repos/JoelTre/StringScape/contents/examples/E.%20coli%20K-12';
         const response = await fetch(apiUrl, {
             headers: { Accept: 'application/vnd.github+json' }
@@ -22259,20 +22934,27 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         if (!Array.isArray(entries)) return [];
 
         const fileEntries = entries.filter(entry => entry && entry.type === 'file' && entry.download_url);
+        if (typeof progressOptions.onDiscovered === 'function') {
+            progressOptions.onDiscovered(fileEntries.map(entry => entry.name));
+        }
         const downloadedFiles = [];
-        for (const entry of fileEntries) {
+        for (let index = 0; index < fileEntries.length; index++) {
+            const entry = fileEntries[index];
             const fileResponse = await fetch(entry.download_url);
             if (!fileResponse.ok) {
                 throw new Error(`Failed to download example file: ${entry.name}`);
             }
             const fileBuffer = await fileResponse.arrayBuffer();
             downloadedFiles.push(new File([fileBuffer], entry.name, { type: 'application/octet-stream' }));
+            if (typeof progressOptions.onProgress === 'function') {
+                progressOptions.onProgress(index + 1, fileEntries.length);
+            }
         }
 
         return downloadedFiles;
     }
 
-    async function processInteractionFiles(files) {
+    async function processInteractionFiles(files, progressOptions = {}) {
         const targetFiles = Array.from(files || []);
         if (!targetFiles.length) return;
         const progressWrapper = document.getElementById('fileInputProgress');
@@ -22290,6 +22972,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 `# Uploaded file: ${file.name}`
             ]);
             if (progressBar) progressBar.style.width = `${Math.round(((i + 1) / targetFiles.length) * 100)}%`;
+            if (typeof progressOptions.onProgress === 'function') progressOptions.onProgress(i + 1, targetFiles.length);
         }
 
         rebuildInteractionDataFromUploads();
@@ -22297,7 +22980,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         setTimeout(() => { if (progressWrapper) progressWrapper.style.display = 'none'; }, 300);
     }
 
-    async function processAccessoryFiles(files) {
+    async function processAccessoryFiles(files, progressOptions = {}) {
         const targetFiles = Array.from(files || []);
         if (!targetFiles.length) return;
         const progressWrapper = document.getElementById('infoInputProgress');
@@ -22339,6 +23022,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             processed++;
             const pct = Math.round((processed / targetFiles.length) * 100);
             if (progressBar) progressBar.style.width = `${pct}%`;
+            if (typeof progressOptions.onProgress === 'function') progressOptions.onProgress(processed, targetFiles.length);
             if (pct >= 99) {
                 setTimeout(() => { if (progressWrapper) progressWrapper.style.display = 'none'; }, 300);
             }
@@ -22389,6 +23073,49 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     window.processInteractionFiles = processInteractionFiles;
     window.processAccessoryFiles = processAccessoryFiles;
 
+    async function processOpenFiles(files) {
+        const targetFiles = Array.from(files || []);
+        if (!targetFiles.length) return;
+        targetFiles.forEach(file => pendingUploadedFileNames.add(stripGzipSuffix(file.name)));
+        updateUploadedListsUI();
+        const progressWrapper = document.getElementById('openFilesProgress');
+        const progressBar = document.getElementById('openFilesProgressBar');
+        if (progressWrapper) {
+            progressWrapper.style.display = 'block';
+        }
+        if (progressBar) progressBar.style.width = '0%';
+        const interactionFiles = targetFiles.filter(file => classifyUploadedFile(file) === 'interaction');
+        const accessoryFiles = targetFiles.filter(file => classifyUploadedFile(file) === 'accessory');
+        const completedByType = { interaction: 0, accessory: 0 };
+        const updateCombinedProgress = (type, completed) => {
+            completedByType[type] = completed;
+            const percentage = Math.round(((completedByType.interaction + completedByType.accessory) / targetFiles.length) * 100);
+            if (progressWrapper) progressWrapper.classList.remove('is-loading');
+            if (progressBar) progressBar.style.width = `${percentage}%`;
+        };
+        try {
+            await Promise.all([
+                interactionFiles.length
+                    ? processInteractionFiles(interactionFiles, { onProgress: completed => updateCombinedProgress('interaction', completed) })
+                    : Promise.resolve(),
+                accessoryFiles.length
+                    ? processAccessoryFiles(accessoryFiles, { onProgress: completed => updateCombinedProgress('accessory', completed) })
+                    : Promise.resolve()
+            ]);
+        } finally {
+            targetFiles.forEach(file => pendingUploadedFileNames.delete(stripGzipSuffix(file.name)));
+            updateUploadedListsUI();
+            if (progressWrapper) progressWrapper.classList.remove('is-loading');
+            if (progressBar) progressBar.style.width = '100%';
+            setTimeout(() => {
+                if (progressWrapper) progressWrapper.style.display = 'none';
+                if (progressBar) progressBar.style.width = '0%';
+            }, 300);
+        }
+    }
+
+    window.processOpenFiles = processOpenFiles;
+
     window.handleInteractionUploadChange = async (e) => {
         try {
             const files = Array.from(e?.target?.files || []);
@@ -22409,6 +23136,45 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         }
     };
 
+    window.handleOpenFilesUploadChange = async (e) => {
+        try {
+            await processOpenFiles(Array.from(e?.target?.files || []));
+        } catch (error) {
+            console.error('Failed to load files', error);
+        } finally {
+            if (e?.target) e.target.value = '';
+        }
+    };
+
+    async function loadExampleDatasetFiles() {
+        const progressWrapper = document.getElementById('openFilesProgress');
+        const progressBar = document.getElementById('openFilesProgressBar');
+        const discoveredNames = [];
+        const setDownloadProgress = (completed, total) => {
+            if (progressWrapper) progressWrapper.style.display = 'block';
+            if (progressBar) progressBar.style.width = `${total ? Math.round((completed / total) * 100) : 0}%`;
+        };
+        try {
+            const exampleFiles = await fetchExampleDatasetFiles({
+                onDiscovered: names => {
+                    discoveredNames.push(...names);
+                    names.forEach(name => pendingUploadedFileNames.add(stripGzipSuffix(name)));
+                    updateUploadedListsUI();
+                    setDownloadProgress(0, names.length);
+                },
+                onProgress: setDownloadProgress
+            });
+            await new Promise(requestAnimationFrame);
+            closeModal('guideModal');
+            await processOpenFiles(exampleFiles);
+            await applyUploadedSessionFiles();
+        } catch (error) {
+            discoveredNames.forEach(name => pendingUploadedFileNames.delete(stripGzipSuffix(name)));
+            updateUploadedListsUI();
+            throw error;
+        }
+    }
+
     // Load example files (add code below)
     const loadExampleBtnEl = document.getElementById('loadExampleBtn');
     if (loadExampleBtnEl) {
@@ -22417,21 +23183,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             loadExampleBtnEl.disabled = true;
             loadExampleBtnEl.textContent = 'Loading example...';
             try {
-                const exampleFiles = await fetchExampleDatasetFiles();
-                const linkFiles = exampleFiles.filter(file => file.name.toLowerCase().includes('link'));
-                const accessoryFiles = exampleFiles.filter(file => !file.name.toLowerCase().includes('link'));
-
-                await new Promise(requestAnimationFrame);
-                closeModal('guideModal');
-
-                if (linkFiles.length > 0) {
-                    await processInteractionFiles(linkFiles);
-                }
-                if (accessoryFiles.length > 0) {
-                    await processAccessoryFiles(accessoryFiles);
-                }
-
-                await applyUploadedSessionFiles();
+                await loadExampleDatasetFiles();
             } catch (error) {
                 console.error('Failed to load example dataset', error);
                 alert('Failed to load the example dataset. Please try again.');
@@ -22444,8 +23196,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     const interactionInputEl = document.getElementById('fileInput');
     const accessoryInputEl = document.getElementById('infoInput');
+    const openFilesInputEl = document.getElementById('openFilesInput');
     if (interactionInputEl) interactionInputEl.onchange = window.handleInteractionUploadChange;
     if (accessoryInputEl) accessoryInputEl.onchange = window.handleAccessoryUploadChange;
+    if (openFilesInputEl) openFilesInputEl.onchange = window.handleOpenFilesUploadChange;
 
     //document.getElementById('genomeInputBtn').onclick = () => {
     //     document.getElementById('genomeInput').click();
@@ -22461,16 +23215,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const folderFiles = Array.from(e.target.files || []);
         if (!folderFiles.length) return;
 
-        const linkFiles = folderFiles.filter(file => file.name.toLowerCase().includes('link'));
-        const accessoryFiles = folderFiles.filter(file => !file.name.toLowerCase().includes('link'));
+        const linkFiles = folderFiles.filter(file => classifyUploadedFile(file) === 'interaction');
 
-        if (linkFiles.length > 0) {
-            await processInteractionFiles(linkFiles);
-        }
-
-        if (accessoryFiles.length > 0) {
-            await processAccessoryFiles(accessoryFiles);
-        }
+        await processOpenFiles(folderFiles);
 
         try { await applyUploadedSessionFiles(); } catch (e) { console.warn('applyUploadedSessionFiles failed', e); }
 
@@ -22909,11 +23656,6 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             const text = button.textContent.trim();
             if (text === 'Open Start Guide') {
                 bindClick(button, () => openModal('guideModal'));
-            } else if (text === 'Open Previous Session') {
-                bindClick(button, () => {
-                    closeWelcomeOverlay();
-                    document.getElementById('sessionFolderInput')?.click();
-                });
             } else if (text === 'About StringScape') {
                 bindClick(button, () => openModal('aboutModal'));
             }
@@ -23013,6 +23755,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         bindClick(document.getElementById('ai-python-console-btn'), () => togglepythonpanelMode());
         bindClick(document.getElementById('collection-cycle-toggle-btn'), () => toggleCollectionColorCycle());
         bindClick(document.getElementById('downloadSessionDownloadBtn'), () => downloadSessionFiles());
+        bindClick(document.getElementById('sessionNameSaveBtn'), () => confirmSessionNamePrompt());
+        bindClick(document.getElementById('recentSessionCancelBtn'), () => resolveRecentSessionConfirmation('cancel'));
+        bindClick(document.getElementById('recentSessionNoBtn'), () => resolveRecentSessionConfirmation('no'));
+        bindClick(document.getElementById('recentSessionSaveBtn'), () => resolveRecentSessionConfirmation('save'));
 
         bindClick(document.getElementById('protein-info-toggle-btn'), () => openProteinInfoBox());
         bindClick(document.getElementById('protein-info-prev-btn'), () => navigateProteinInfo('left'));
@@ -23165,4 +23911,5 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     initAiPanel();
     initWebGPU();
     updateUploadedListsUI();
+    loadConnectedSessionFolders();
     refreshInfoBoxFromSelection();
