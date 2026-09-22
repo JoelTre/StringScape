@@ -99,6 +99,7 @@
         return mainScriptSourcePromise;
     }
     const canvas = document.querySelector("#network");
+    const secondaryCanvas = document.querySelector("#secondary-network");
     const gpuCanvas = document.querySelector("#network-gpu") || (() => {
         const created = document.createElement('canvas');
         created.id = 'network-gpu';
@@ -159,6 +160,7 @@
     let isDragMode = false, draggedNode = null, hasDragged = false;
     let currentSeeds = [];
     let currentMousePos = [0, 0];
+    let secondaryMousePos = [0, 0];
     let lastMousePosition = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
     let isBuilding = false;
     let isSettling = false;
@@ -169,6 +171,12 @@
     
     let isRenamingColl = null; 
     let currentViewId = 'base';
+    let secondaryViewId = 'base';
+    let splitViewOpen = false;
+    let secondaryPanelMinimized = false;
+    let splitDividerRatio = 0.5;
+    let secondaryRenderInProgress = false;
+    let secondaryTransform = d3.zoomIdentity.translate(window.innerWidth / 4, window.innerHeight / 2).scale(0.15).translate(-window.innerWidth / 2, -window.innerHeight / 2);
     let previousViewId = 'base';
     let collections = new Map();
     let activeSubData = null;
@@ -8361,12 +8369,17 @@ self.onmessage = async (event) => {
     // This function handles the resizing of the canvas element when the window size changes. It updates the canvas dimensions based on the device pixel ratio, ensures that GPU buffers are resized if necessary, and triggers a redraw of the canvas. Additionally, it resizes the embedding plot if it is currently active.
     function resize() {
         console.log("function resize()");
-        const dpr = window.devicePixelRatio || 1;
-        canvas.width = window.innerWidth * dpr;
-        canvas.height = window.innerHeight * dpr;
+        const primaryRect = canvas.getBoundingClientRect();
+        canvas.width = Math.max(1, Math.round(primaryRect.width));
+        canvas.height = Math.max(1, Math.round(primaryRect.height));
+        if (secondaryCanvas) {
+            const secondaryRect = secondaryCanvas.getBoundingClientRect();
+            secondaryCanvas.width = Math.max(1, Math.round(secondaryRect.width));
+            secondaryCanvas.height = Math.max(1, Math.round(secondaryRect.height));
+        }
         ensureGpuCanvasSize();
         if (window.gpuState) window.gpuState.needsResize = true;
-        ctx.scale(dpr, dpr);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
         draw();
         if (currentViewId === 'Embeddings' && typeof Plotly !== 'undefined') {
             const plotEl = document.getElementById('embeddings-plot');
@@ -9182,6 +9195,14 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
             draw();
             if (currentViewId !== 'Venn Diagram' && currentViewId !== 'Scatter Plot' && currentViewId !== 'Mind Map') checkOffscreenNodes();
+        });
+
+    const secondaryZoomBehavior = d3.zoom()
+        .scaleExtent([0.001, 20])
+        .filter(event => !isBrushMode && !isLassoMode && !isFrameMode && !event.button)
+        .on('zoom', event => {
+            secondaryTransform = event.transform;
+            renderSecondaryView();
         });
 
         // This function determines the set of nodes that should be considered "active" for the pie chart view, based on the current data source selection (e.g., selected nodes, specific collection, or all nodes).
@@ -12818,6 +12839,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const available = taxa.length === 2;
         if (controls) controls.style.display = available ? 'block' : 'none';
         if (linkControls) linkControls.style.display = mergedNetworkState.active ? 'block' : 'none';
+        updateSecondarySpeciesPanel();
         if (!available) return;
         if (button) button.textContent = mergedNetworkState.active ? 'Split Networks' : 'Merge Networks';
         const speciesLinkMode = document.querySelector('#linkMode option[value="species"]');
@@ -12841,6 +12863,76 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             if (nodeMode) nodeMode.value = 'species';
             if (linkMode) linkMode.value = 'species';
         }
+        updateSecondarySpeciesPanel();
+    }
+
+    function updateSecondarySpeciesPanel() {
+        const panel = document.getElementById('secondary-left-panel');
+        if (!panel) return;
+        const available = getUploadedInteractionTaxa().length === 2;
+        panel.classList.toggle('hidden', !splitViewOpen || !available);
+        if (!available) return;
+        const mainNodeFilter = document.getElementById('mergedNodeFilter');
+        const mainLinkFilter = document.getElementById('mergedLinkFilter');
+        const nodeFilter = document.getElementById('secondary-merged-node-filter');
+        const linkFilter = document.getElementById('secondary-merged-link-filter');
+        cloneSelectOptions(mainNodeFilter, nodeFilter);
+        cloneSelectOptions(mainLinkFilter, linkFilter);
+        if (nodeFilter) nodeFilter.value = mergedNodeFilter;
+        if (linkFilter) linkFilter.value = mergedLinkFilter;
+    }
+
+    function applySplitDividerPosition() {
+        const ratio = Math.max(0.25, Math.min(0.75, splitDividerRatio));
+        const dividerOffset = (ratio - 0.5) * window.innerWidth;
+        const divider = document.getElementById('split-view-divider');
+        if (divider) divider.style.left = `${50 + (dividerOffset / Math.max(window.innerWidth, 1)) * 100}%`;
+        canvas.style.transform = `translateX(calc(-25vw + ${dividerOffset / 2}px))`;
+        if (secondaryCanvas) {
+            secondaryCanvas.style.left = '100%';
+            secondaryCanvas.style.width = '100%';
+            secondaryCanvas.style.transform = `translateX(calc(-50vw + ${dividerOffset}px))`;
+        }
+        document.getElementById('secondary-left-panel')?.style.setProperty('left', `calc(${ratio * 100}% + 15px)`);
+        const primaryMenu = document.getElementById('view-selector-container');
+        if (primaryMenu) {
+            primaryMenu.style.left = `${(ratio * 50)}%`;
+            primaryMenu.style.width = `${ratio * 100}%`;
+        }
+        const secondaryMenu = document.getElementById('secondary-view-selector');
+        if (secondaryMenu) {
+            secondaryMenu.style.left = `${(ratio + 1) * 50}%`;
+            secondaryMenu.style.width = `${Math.max(220, window.innerWidth * (1 - ratio) - 40)}px`;
+        }
+    }
+
+    function setSplitView(open) {
+        splitViewOpen = !!open;
+        document.body.classList.toggle('split-view-active', splitViewOpen);
+        const button = document.getElementById('split-view-btn');
+        if (button) {
+            button.setAttribute('aria-pressed', String(splitViewOpen));
+            button.title = splitViewOpen ? 'Close split view' : 'Open split view';
+        }
+        if (!splitViewOpen) {
+            document.getElementById('secondary-view-selector')?.remove();
+            document.getElementById('secondary-left-panel')?.classList.add('hidden');
+            secondaryCanvas?.style.removeProperty('left');
+            secondaryCanvas?.style.removeProperty('width');
+            secondaryCanvas?.style.removeProperty('transform');
+            canvas.style.removeProperty('transform');
+            document.getElementById('split-view-divider')?.style.removeProperty('left');
+            const primaryMenu = document.getElementById('view-selector-container');
+            primaryMenu?.style.removeProperty('left');
+            primaryMenu?.style.removeProperty('width');
+            return;
+        }
+        applySplitDividerPosition();
+        updateSecondarySpeciesPanel();
+        updateViewMenu();
+        syncSecondaryViewMenu();
+        d3.select(secondaryCanvas).call(secondaryZoomBehavior).call(secondaryZoomBehavior.transform, secondaryTransform);
+        resize();
     }
 
     function getMergedPresenceMatch(presence, filter) {
@@ -16911,6 +17003,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 const item = container.append("div")
                     // Add the 'item-disabled' class if necessary
                     .attr("class", `view-option-item ${currentViewId === opt.id ? 'active-view' : ''} ${isBtnDisabled ? 'item-disabled' : ''}`)
+                    .attr("data-view-id", opt.id)
                     .on("click", (e) => {
                         e.stopPropagation();
                         // Block clicks if disabled
@@ -16991,6 +17084,41 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             newBtn.classed('new-coll-btn-full', true);
 
                 updateVennControls();
+                syncSecondaryViewMenu();
+    }
+
+    function syncSecondaryViewMenu() {
+        if (!splitViewOpen) return;
+        const host = document.getElementById('secondary-view-selector') || document.body.appendChild(Object.assign(document.createElement('div'), { id: 'secondary-view-selector' }));
+        const primaryBox = document.getElementById('view-selector-box');
+        if (!primaryBox) return;
+        host.innerHTML = '';
+        const box = primaryBox.cloneNode(true);
+        box.querySelector('#current-view-label')?.setAttribute('id', 'secondary-current-view-label');
+        box.querySelector('#secondary-current-view-label').textContent = getViewLabel(secondaryViewId);
+        box.querySelectorAll('.view-option-item').forEach(item => {
+            item.classList.toggle('active-view', item.dataset.viewId === secondaryViewId);
+            item.addEventListener('click', event => {
+                event.stopPropagation();
+                if (item.classList.contains('item-disabled')) return;
+                secondaryViewId = item.dataset.viewId || 'base';
+                syncSecondaryViewMenu();
+                renderSecondaryView();
+            });
+        });
+        host.appendChild(box);
+    }
+
+    function getViewLabel(viewId) {
+        if (viewId === 'base') return 'Full Network';
+        if (viewId === 'selected') return 'Selected Nodes';
+        if (viewId === 'pie_chart') return 'Pie Chart';
+        if (viewId === 'histogram') return 'Histogram';
+        if (viewId === 'Venn Diagram') return 'Venn Diagram';
+        if (viewId === 'Scatter Plot') return 'Scatter Plot';
+        if (viewId === 'Mind Map') return 'Mind Map';
+        if (viewId === 'Embeddings') return 'Embeddings';
+        return String(viewId || '').replace('coll_', '');
     }
 
     function switchView(viewId, historyMeta = null) {
@@ -17904,10 +18032,16 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     d3.select(window).on("mousemove", (e) => {
         lastMousePosition = { x: e.clientX, y: e.clientY };
-        const [mx, my] = d3.pointer(e, canvas); 
+        const secondaryRect = splitViewOpen && secondaryCanvas ? secondaryCanvas.getBoundingClientRect() : null;
+        const overSecondary = secondaryRect
+            && e.clientX >= secondaryRect.left && e.clientX <= secondaryRect.right
+            && e.clientY >= secondaryRect.top && e.clientY <= secondaryRect.bottom;
+        const pointerCanvas = overSecondary ? secondaryCanvas : canvas;
+        const [mx, my] = d3.pointer(e, pointerCanvas);
         const activeTransform = currentViewId === 'Venn Diagram' ? vennTransform : (currentViewId === 'Scatter Plot' ? scatterTransform : (currentViewId === 'Mind Map' ? mindMapTransform : transform));
-        const pt = activeTransform.invert([mx, my]); 
-        currentMousePos = currentViewId === 'Embeddings' ? [mx, my] : pt;
+        const pt = (overSecondary ? secondaryTransform : activeTransform).invert([mx, my]);
+        if (overSecondary) secondaryMousePos = currentViewId === 'Embeddings' ? [mx, my] : pt;
+        else currentMousePos = currentViewId === 'Embeddings' ? [mx, my] : pt;
 
         if (isChartDragSelecting) {
             if (chartDragType === 'pie') {
@@ -19717,6 +19851,41 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     function draw() {
+        drawCurrentView();
+        queueSecondaryRender();
+    }
+
+    function queueSecondaryRender() {
+        if (!splitViewOpen || secondaryRenderInProgress || !secondaryCanvas) return;
+        requestAnimationFrame(() => renderSecondaryView());
+    }
+
+    function renderSecondaryView() {
+        if (!splitViewOpen || secondaryRenderInProgress || !secondaryCanvas) return;
+        secondaryRenderInProgress = true;
+        const primaryViewId = currentViewId;
+        const primaryTransform = transform;
+        const primaryMousePos = currentMousePos;
+        const primaryLabel = document.getElementById('current-view-label')?.textContent;
+        currentViewId = secondaryViewId;
+        transform = secondaryTransform;
+        currentMousePos = secondaryMousePos;
+        drawCurrentView();
+        const secondaryContext = secondaryCanvas.getContext('2d');
+        secondaryContext.setTransform(1, 0, 0, 1, 0, 0);
+        secondaryContext.clearRect(0, 0, secondaryCanvas.width, secondaryCanvas.height);
+        secondaryContext.drawImage(canvas, 0, 0, secondaryCanvas.width, secondaryCanvas.height);
+        currentViewId = primaryViewId;
+        transform = primaryTransform;
+        currentMousePos = primaryMousePos;
+        if (primaryLabel && document.getElementById('current-view-label')) {
+            document.getElementById('current-view-label').textContent = primaryLabel;
+        }
+        drawCurrentView();
+        secondaryRenderInProgress = false;
+    }
+
+    function drawCurrentView() {
         //console.log("function draw()");
         updatePhysicsRuntimeLabel();
         // Handle special chart views
@@ -23343,6 +23512,47 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     });
     document.getElementById('mergedLinkFilter')?.addEventListener('change', event => {
         setMergedLinkFilter(event.target.value, 'Human');
+    });
+    document.getElementById('secondary-merged-node-filter')?.addEventListener('change', event => {
+        setMergedNodeFilter(event.target.value, 'Human');
+    });
+    document.getElementById('secondary-merged-link-filter')?.addEventListener('change', event => {
+        setMergedLinkFilter(event.target.value, 'Human');
+    });
+    document.getElementById('split-view-btn')?.addEventListener('click', () => {
+        setSplitView(!splitViewOpen);
+    });
+    document.getElementById('secondary-left-panel-toggle')?.addEventListener('click', () => {
+        secondaryPanelMinimized = !secondaryPanelMinimized;
+        document.getElementById('secondary-left-panel')?.classList.toggle('minimized', secondaryPanelMinimized);
+    });
+
+    const splitDivider = document.getElementById('split-view-divider');
+    let draggingSplitDivider = false;
+    splitDivider?.addEventListener('pointerdown', event => {
+        draggingSplitDivider = true;
+        splitDivider.setPointerCapture(event.pointerId);
+        event.preventDefault();
+    });
+    splitDivider?.addEventListener('pointermove', event => {
+        if (!draggingSplitDivider) return;
+        splitDividerRatio = event.clientX / Math.max(window.innerWidth, 1);
+        applySplitDividerPosition();
+        resize();
+    });
+    splitDivider?.addEventListener('pointerup', event => {
+        draggingSplitDivider = false;
+        splitDivider.releasePointerCapture(event.pointerId);
+    });
+    secondaryCanvas?.addEventListener('click', event => {
+        if (!splitViewOpen || secondaryViewId !== 'base') return;
+        const rect = secondaryCanvas.getBoundingClientRect();
+        const point = secondaryTransform.invert([
+            event.clientX - rect.left,
+            event.clientY - rect.top
+        ]);
+        const node = nodes.find(candidate => Math.hypot(candidate.x - point[0], candidate.y - point[1]) <= (candidate.r || 5) + 8);
+        if (node) selectNodes([node], false, 'Secondary canvas selection');
     });
     document.getElementById('nodeSizeSlider').oninput = () => {
         nodes.forEach(node => delete node._ssSize);
