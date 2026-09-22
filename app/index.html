@@ -3721,7 +3721,92 @@
 
         canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; background: var(--bg-color); }
         #network-gpu { z-index: 1; pointer-events: none; background: var(--bg-color); }
-        #network { z-index: 2; background: transparent; }
+        #network { z-index: 2; background: transparent; transition: transform 0.35s ease; }
+        #secondary-network {
+            z-index: 3;
+            left: 100%;
+            width: 100%;
+            opacity: 0;
+            pointer-events: none;
+            transform: translateX(100%);
+            transition: opacity 0.25s ease, transform 0.35s ease;
+        }
+        body.split-view-active #network { transform: translateX(-25vw); }
+        body.split-view-active #secondary-network {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translateX(-50vw);
+        }
+        #split-view-divider {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 50%;
+            width: 5px;
+            z-index: 9;
+            display: none;
+            transform: translateX(-50%);
+            background: var(--border-color);
+            box-shadow: 0 0 0 1px rgba(255,255,255,0.08), 0 0 14px rgba(0,0,0,0.45);
+            cursor: col-resize;
+        }
+        body.split-view-active #split-view-divider { display: block; }
+        #split-view-divider::after {
+            content: '⋮';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 7px 5px;
+            border-radius: 4px;
+            background: var(--button-bg);
+            color: var(--text-color);
+            font-size: 12px;
+        }
+        #split-view-btn {
+            position: fixed;
+            top: 10px;
+            left: 365px;
+            z-index: 30;
+            width: auto;
+            min-width: 112px;
+            padding: 15px 12px;
+            border-radius: 6px;
+            margin: 0;
+            background: var(--button-bg);
+            border: 1px solid var(--input-border);
+            color: var(--text-color);
+            white-space: nowrap;
+        }
+        #split-view-btn:hover, #split-view-btn[aria-pressed="true"] { background: var(--accent-color); }
+        #secondary-left-panel {
+            position: fixed;
+            top: 70px;
+            left: calc(50% + 15px);
+            z-index: 12;
+            width: 245px;
+            padding: 12px 14px;
+            box-sizing: border-box;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--surface-color);
+            box-shadow: 4px 0 15px var(--shadow-color);
+            transition: left 0.25s ease, transform 0.35s ease;
+        }
+        #secondary-left-panel.hidden { display: none; }
+        #secondary-left-panel.minimized { transform: translateX(-245px); }
+        #secondary-left-panel .toggle-tab { left: 100%; top: 0; }
+        #secondary-left-panel.minimized .toggle-tab span { transform: rotate(180deg); }
+        #secondary-view-selector {
+            position: fixed;
+            left: 75%;
+            bottom: 20px;
+            z-index: 30;
+            width: min(550px, calc(50vw - 40px));
+            transform: translateX(-50%);
+        }
+        #secondary-view-selector .view-selector-box { position: relative; }
+        body.structures-view-active #secondary-network { display: none !important; }
         body.structures-view-active canvas { display: none !important; }
         #protein-complex-structures-view {
             position: fixed;
@@ -4643,6 +4728,16 @@
     </div>
 </div>
 
+<button id="split-view-btn" type="button" aria-pressed="false" title="Open split view">←|→ Split view (experimental)</button>
+
+<div id="secondary-left-panel" class="hidden" aria-label="Secondary canvas species filters">
+    <div id="secondary-left-panel-toggle" class="toggle-tab"><span>◂</span></div>
+    <label for="secondary-merged-node-filter">Show Nodes From</label>
+    <select id="secondary-merged-node-filter"></select>
+    <label for="secondary-merged-link-filter">Show Links From</label>
+    <select id="secondary-merged-link-filter"></select>
+</div>
+
 <div id="guideModal" class="modal">
     <div class="modal-content">
         <span class="close-modal">&times;</span>
@@ -5217,6 +5312,8 @@
 </div>
 
 <canvas id="network"></canvas>
+<canvas id="secondary-network" aria-label="Secondary canvas"></canvas>
+<div id="split-view-divider" role="separator" aria-label="Resize split view"></div>
 
 <!-- Welcome Overlay -->
 <div id="welcome-overlay" class="welcome-overlay">
