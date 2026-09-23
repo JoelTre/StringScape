@@ -145,7 +145,7 @@
     window.fullAdjacency = fullAdjacency;
     window.proteinMetadata = proteinMetadata;
     window.aliasData = aliasData;
-    let isPaused = false, physicsEnabled = true, isPhysicsStopped = false, mergedPhysicsResumeAlphaPending = false, selectedNodes = new Set(), selectedWedges = new Set(), selectedHistogramBins = new Set(), hoverBin = null;
+    let isPaused = false, physicsEnabled = true, fullNetworkPhysicsEnabled = true, subnetworkPhysicsEnabled = true, isPhysicsStopped = false, mergedPhysicsResumeAlphaPending = false, selectedNodes = new Set(), selectedWedges = new Set(), selectedHistogramBins = new Set(), hoverBin = null;
     let selectionHistory = [], pathNodes = new Set(), pathEdges = new Set();
     let shortestPathDisplayMode = 'none';
     let shortestPathGroupsToolOpen = false;
@@ -161,6 +161,7 @@
     let currentSeeds = [];
     let currentMousePos = [0, 0];
     let secondaryMousePos = [0, 0];
+    let brushPreviewCanvas = canvas;
     let lastMousePosition = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
     let isBuilding = false;
     let isSettling = false;
@@ -172,14 +173,35 @@
     let isRenamingColl = null; 
     let currentViewId = 'base';
     let secondaryViewId = 'base';
+    let secondaryPreviousViewId = 'base';
+    let renderingSecondaryView = false;
+    let secondaryScatterXVariable = 'centrality';
+    let secondaryScatterYVariable = 'size';
+    let secondaryVennCollectionA = 'selected';
+    let secondaryVennCollectionB = null;
+    let secondaryPieDataSource = 'network';
+    let secondaryHistogramDataSource = 'network';
+    let secondaryHistogramScope = 'full';
+    let secondaryGestureActive = false;
+    let suppressNextSecondaryCanvasClick = false;
+    let primaryMenuViewId = 'base';
     let splitViewOpen = false;
     let secondaryPanelMinimized = false;
     let splitDividerRatio = 0.5;
     let secondaryRenderInProgress = false;
+    let secondaryRenderQueued = false;
+    let secondaryInteractionState = { pieWedges: [], pieButtons: [], histogramBins: [], histogramButtons: [] };
+    let hoveredNodeCanvas = canvas;
+    let secondaryVennTransform = d3.zoomIdentity;
+    let secondaryScatterTransform = d3.zoomIdentity;
+    let secondaryProteinZoomPreviousTransform = null;
+    let chartDragCanvas = canvas;
     let secondaryTransform = d3.zoomIdentity.translate(window.innerWidth / 4, window.innerHeight / 2).scale(0.15).translate(-window.innerWidth / 2, -window.innerHeight / 2);
     let previousViewId = 'base';
     let collections = new Map();
     let activeSubData = null;
+    let secondarySubData = null;
+    let secondarySelectedNodeIds = new Set();
     let simulation = null;
     let selectedViewState = { nodes: [], links: [] }; 
     let isCreatingInline = false;
@@ -571,7 +593,7 @@
         - ss.set_app_style(color_theme='blue', mode='dark') -> Returns {"status", "color_theme", "mode", "message"}
         - ss.set_app_background_colour(color='#171c24') -> Returns {"status", "color", "message"}
         - ss.set_app_background_by(mode='mono') -> Returns {"status", "mode", "message"}
-        - ss.set_physics(physics='on', alpha=None) -> Returns {"status", "physics", "alpha", "message"}
+        - ss.set_physics(physics='on', target='active', alpha=None) -> target is 'full', 'subnetwork', 'both', or 'active'; returns {"status", "physics", "target", "alpha", "message"}
         - ss.export_selection(format='json') -> Returns {"status", "format", "exported_count", "message"}
         - ss.reset_visuals() -> Returns {"status": "success"}
         - ss.focus_on(node_ids) -> Returns {"status", "node_ids", "message"}
@@ -881,7 +903,7 @@
     const undoTrackedButtonIds = new Set([
         'nodeShow', 'nodeHide', 'nodeLabelShow', 'nodeLabelHide',
         'linkLabelShow', 'linkLabelHide', 'linkDirectionOn', 'linkDirectionOff',
-        'darkModeToggle', 'mindMapClusterSizeToggle', 'physBtn', 'stopPhysBtn'
+        'darkModeToggle', 'mindMapClusterSizeToggle', 'stopPhysBtn'
     ]);
     const undoToggleGroups = [
         ['nodeShow', 'nodeHide'],
@@ -901,11 +923,11 @@
             });
             return;
         }
-        if (element.id === 'physBtn' || element.id === 'stopPhysBtn') {
+        if (element.id === 'stopPhysBtn') {
             undoBegin('control', {
                 id: element.id,
-                toggleKey: element.id === 'physBtn' ? 'physicsEnabled' : 'isPhysicsStopped',
-                value: element.id === 'physBtn' ? physicsEnabled : isPhysicsStopped
+            toggleKey: 'isPhysicsStopped',
+            value: isPhysicsStopped
             });
             return;
         }
@@ -1198,6 +1220,13 @@
         if (aiPythonActionRecordingEnabled && String(actor) === 'Human') {
             aiAppendManualActionToPythonScript(actionText, cleanedLines);
         }
+    }
+
+    function aiRecordSetPhysicsHistory(actor, target, enabled) {
+        const physics = enabled ? 'on' : 'off';
+        aiAppendActionHistory(actor, `${enabled ? 'Played' : 'Paused'} ${target} physics`, [
+            `ss.set_physics(physics=${aiFormatPythonSingleQuotedString(physics)}, target=${aiFormatPythonSingleQuotedString(target)})`
+        ]);
     }
 
     function aiAppendHistoryCommentBlock(category, title, content) {
@@ -1520,7 +1549,16 @@
             : !document.body.classList.contains('ai-panel-open');
         if (!nextOpen) cancelAiProcessing(false);
         document.body.classList.toggle('ai-panel-open', nextOpen);
-        // Do not shift canvas when AI panel opens/closes (keep center stable)
+        if (splitViewOpen) {
+            applySplitDividerPosition();
+            resize();
+            window.setTimeout(() => {
+                if (splitViewOpen) {
+                    applySplitDividerPosition();
+                    resize();
+                }
+            }, 450);
+        }
         
         // For Scatter Plot, only update controls without full redraw to avoid freezing
         if (currentViewId === 'Scatter Plot') {
@@ -1858,7 +1896,7 @@
         lines.push('- ss.set_app_style(color_theme="blue", mode="dark") -> Returns {"status", "color_theme", "mode", "message"}');
         lines.push('- ss.set_app_background_colour(color="#171c24") -> Returns {"status", "color", "message"}');
         lines.push('- ss.set_app_background_by(mode="mono") -> Returns {"status", "mode", "message"}');
-        lines.push('- ss.set_physics(physics="on", alpha=None) -> Returns {"status", "physics", "alpha", "message"}');
+        lines.push('- ss.set_physics(physics="on", target="active", alpha=None) -> target is full, subnetwork, both, or active; returns {"status", "physics", "target", "alpha", "message"}');
         lines.push('- ss.export_selection(format="json") -> Returns {"status", "format", "exported_count", "message"}');
         lines.push('- ss.reset_visuals() -> Returns {"status": "success"}');
         lines.push('- ss.focus_on(node_ids) -> Returns {"status", "node_ids", "message"}');
@@ -3366,7 +3404,29 @@
                 }
                 if (method === 'set_app_background_colour') { const color = String(args.color || ''); if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return result('warning', { message: 'color must be a hex colour.' }); const input = document.getElementById('bgColor'); undoBegin('control', { id: 'bgColor', value: input?.value || '' }); input.value = color; input.dispatchEvent(new Event('input')); aiRecordSetAppBackgroundColourHistory(color, 'AI'); return result('success', { color }); }
                 if (method === 'set_app_background_by') { const mode = normal(args.mode); if (!['mono','voronoi'].includes(mode)) return result('warning', { message: 'mode must be mono or voronoi.' }); backgroundMode = mode; document.getElementById('bgMode').value = mode; updateBackgroundControlsUI(); aiRecordSetAppBackgroundByHistory(mode, 'AI'); queueDraw(animate); return result('success', { mode }); }
-                if (method === 'set_physics') { const physics = normal(args.physics); if (!['on','off'].includes(physics)) return result('warning', { message: 'physics must be on or off.' }); if (args.alpha != null) { const alpha = +args.alpha; if (!Number.isFinite(alpha)) return result('warning', { message: 'alpha must be numerical.' }); document.getElementById('alphaSlider').value = alpha; } togglePhysics(physics === 'on'); if (args.alpha != null) updatePhysicsForce(); return result('success', { physics, alpha: args.alpha ?? null }); }
+                if (method === 'set_physics') {
+                    const physics = normal(args.physics);
+                    if (!['on', 'off'].includes(physics)) return result('warning', { message: 'physics must be on or off.' });
+                    const requestedTarget = normal(args.target || 'active');
+                    const target = requestedTarget === 'active'
+                        ? (isSubnetworkView() ? 'subnetwork' : 'full')
+                        : requestedTarget;
+                    if (!['full', 'subnetwork', 'both'].includes(target)) return result('warning', { message: "target must be 'full', 'subnetwork', 'both', or 'active'." });
+                    if (args.alpha != null) {
+                        const alpha = +args.alpha;
+                        if (!Number.isFinite(alpha)) return result('warning', { message: 'alpha must be numerical.' });
+                        document.getElementById('alphaSlider').value = alpha;
+                    }
+                    if (target === 'both') {
+                        togglePhysics(physics === 'on', 'api', 'full', 'AI', false);
+                        togglePhysics(physics === 'on', 'api', 'subnetwork', 'AI', false);
+                    } else {
+                        togglePhysics(physics === 'on', 'api', target, 'AI', false);
+                    }
+                    aiRecordSetPhysicsHistory('AI', target, physics === 'on');
+                    if (args.alpha != null) updatePhysicsForce();
+                    return result('success', { physics, target, alpha: args.alpha ?? null });
+                }
                 if (method === 'merge_networks') {
                     const taxa = getUploadedInteractionTaxa();
                     if (taxa.length !== 2) return result('warning', { message: 'Exactly two taxon networks must be uploaded.' });
@@ -4592,7 +4652,7 @@ class _StringScapeAPI:
     def set_app_style(self, color_theme='blue', mode='dark'): return self._call('set_app_style', color_theme=color_theme, mode=mode)
     def set_app_background_colour(self, color='#171c24'): return self._call('set_app_background_colour', color=color)
     def set_app_background_by(self, mode='mono'): return self._call('set_app_background_by', mode=mode)
-    def set_physics(self, physics='on', alpha=None): return self._call('set_physics', physics=physics, alpha=alpha)
+    def set_physics(self, physics='on', target='active', alpha=None): return self._call('set_physics', physics=physics, target=target, alpha=alpha)
     def set_frame(self, top_left_x, top_left_y, bottom_right_x, bottom_right_y, enable=True, animate=False): return self._call('set_frame', top_left_x=top_left_x, top_left_y=top_left_y, bottom_right_x=bottom_right_x, bottom_right_y=bottom_right_y, enable=enable, animate=animate)
     def download_frame(self, target_resolution=None): return self._call('download_frame', target_resolution=target_resolution)
     def export_selection(self, format='csv'): return self._call('export_selection', format=format)
@@ -8369,6 +8429,8 @@ self.onmessage = async (event) => {
     // This function handles the resizing of the canvas element when the window size changes. It updates the canvas dimensions based on the device pixel ratio, ensures that GPU buffers are resized if necessary, and triggers a redraw of the canvas. Additionally, it resizes the embedding plot if it is currently active.
     function resize() {
         console.log("function resize()");
+        if (proteinInfoZoomHotkeyState) proteinInfoZoomHotkeyState.invalidated = true;
+        secondaryProteinZoomPreviousTransform = null;
         const primaryRect = canvas.getBoundingClientRect();
         canvas.width = Math.max(1, Math.round(primaryRect.width));
         canvas.height = Math.max(1, Math.round(primaryRect.height));
@@ -8390,6 +8452,7 @@ self.onmessage = async (event) => {
     window.addEventListener('resize', () => {
         clearTimeout(resizeTimer);
         resizeTimer = setTimeout(() => {
+            if (splitViewOpen) applySplitDividerPosition();
             resize(); 
         }, 50); // 250ms delay is usually the "sweet spot"
     });
@@ -9199,9 +9262,12 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     const secondaryZoomBehavior = d3.zoom()
         .scaleExtent([0.001, 20])
-        .filter(event => !isBrushMode && !isLassoMode && !isFrameMode && !event.button)
+        .filter(event => !isBrushMode && !isLassoMode && !isFrameMode && secondaryViewId !== 'pie_chart' && secondaryViewId !== 'histogram' && !event.button)
         .on('zoom', event => {
             secondaryTransform = event.transform;
+            if (secondaryViewId === 'Venn Diagram') secondaryVennTransform = event.transform;
+            if (secondaryViewId === 'Scatter Plot') secondaryScatterTransform = event.transform;
+            updateSecondaryViewControls();
             renderSecondaryView();
         });
 
@@ -9599,24 +9665,35 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 
     function updateScatterControls(layout = null) {
-        const controls = document.getElementById('scatter-controls');
-        const xSel = document.getElementById('scatterXVariable');
-        const ySel = document.getElementById('scatterYVariable');
-        const recenterBtn = document.getElementById('scatter-recenter-btn');
+        const prefix = renderingSecondaryView ? 'secondary-' : '';
+        const controls = document.getElementById(`${prefix}scatter-controls`);
+        const xSel = document.getElementById(`${prefix}scatterXVariable`);
+        const ySel = document.getElementById(`${prefix}scatterYVariable`);
+        const recenterBtn = document.getElementById(`${prefix}scatter-recenter-btn`);
         if (!controls || !xSel || !ySel) return;
 
-        controls.style.display = currentViewId === 'Scatter Plot' ? 'block' : 'none';
-        if (currentViewId !== 'Scatter Plot') {
+        const viewId = renderingSecondaryView ? secondaryViewId : currentViewId;
+        let xVariable = renderingSecondaryView ? secondaryScatterXVariable : scatterXVariable;
+        let yVariable = renderingSecondaryView ? secondaryScatterYVariable : scatterYVariable;
+        controls.style.display = viewId === 'Scatter Plot' ? 'block' : 'none';
+        if (viewId !== 'Scatter Plot') {
             if (recenterBtn) recenterBtn.style.display = 'none';
             return;
         }
 
         const options = getScatterVariableOptions();
         const values = new Set(options.map(o => o.value));
-        if (!values.has(scatterXVariable)) scatterXVariable = options[0]?.value || 'centrality';
-        if (!values.has(scatterYVariable)) scatterYVariable = options[1]?.value || options[0]?.value || 'size';
-        if (scatterXVariable === scatterYVariable && options.length > 1) {
-            scatterYVariable = options.find(o => o.value !== scatterXVariable)?.value || scatterYVariable;
+        if (!values.has(xVariable)) xVariable = options[0]?.value || 'centrality';
+        if (!values.has(yVariable)) yVariable = options[1]?.value || options[0]?.value || 'size';
+        if (xVariable === yVariable && options.length > 1) {
+            yVariable = options.find(o => o.value !== xVariable)?.value || yVariable;
+        }
+        if (renderingSecondaryView) {
+            secondaryScatterXVariable = xVariable;
+            secondaryScatterYVariable = yVariable;
+        } else {
+            scatterXVariable = xVariable;
+            scatterYVariable = yVariable;
         }
 
         const fill = (sel, selectedValue) => {
@@ -9630,16 +9707,17 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
             });
         };
 
-        fill(xSel, scatterXVariable);
-        fill(ySel, scatterYVariable);
+        fill(xSel, xVariable);
+        fill(ySel, yVariable);
 
-        if (layout?.controlX !== undefined && layout?.controlY !== undefined) {
-            controls.style.left = `${layout.controlX}px`;
-            controls.style.top = `${layout.controlY}px`;
-        }
+        const rect = (renderingSecondaryView ? secondaryCanvas : canvas).getBoundingClientRect();
+        controls.style.left = `${rect.left + rect.width / 2}px`;
+        controls.style.top = `${rect.bottom - controls.offsetHeight - 140}px`;
+        controls.style.transform = 'translateX(-50%)';
 
         if (recenterBtn) {
-            const isReset = Math.abs((scatterTransform?.k || 1) - 1) < 1e-6
+            const activeTransform = renderingSecondaryView ? secondaryScatterTransform : scatterTransform;
+            const isReset = Math.abs((activeTransform?.k || 1) - 1) < 1e-6
                 && Math.abs(scatterTransform?.x || 0) < 1e-6
                 && Math.abs(scatterTransform?.y || 0) < 1e-6;
             recenterBtn.style.display = isReset ? 'none' : 'block';
@@ -9653,6 +9731,14 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         d3.select(canvas).call(zoomBehavior.transform, scatterTransform);
         updateScatterControls();
         draw();
+    }
+
+    function recenterSecondaryScatterPlot() {
+        secondaryScatterTransform = d3.zoomIdentity;
+        secondaryTransform = secondaryScatterTransform;
+        d3.select(secondaryCanvas).call(secondaryZoomBehavior).call(secondaryZoomBehavior.transform, secondaryScatterTransform);
+        renderSecondaryView();
+        updateSecondaryViewControls();
     }
 
     function startScatterPlotAsyncLoading() {
@@ -9680,9 +9766,9 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
             
             if (scatterPointsRendered >= scatterPointsToRender.length) {
                 scatterPointsLoadingInProgress = false;
-                draw();
+                drawCurrentView();
             } else {
-                draw();
+                drawCurrentView();
                 requestAnimationFrame(renderBatch);
             }
         }
@@ -10355,13 +10441,22 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     function updateVennControls() {
         const controls = document.getElementById('venn-controls');
-        const selA = document.getElementById('vennCollectionA');
-        const selB = document.getElementById('vennCollectionB');
-        const recenterBtn = document.getElementById('venn-recenter-btn');
+        const prefix = renderingSecondaryView ? 'secondary-' : '';
+        const targetControls = document.getElementById(`${prefix}venn-controls`) || controls;
+        const selA = document.getElementById(`${prefix}vennCollectionA`);
+        const selB = document.getElementById(`${prefix}vennCollectionB`);
+        const recenterBtn = document.getElementById(`${prefix}venn-recenter-btn`);
         if (!controls || !selA || !selB) return;
 
-        controls.style.display = currentViewId === 'Venn Diagram' ? 'flex' : 'none';
-        if (currentViewId !== 'Venn Diagram') {
+        const viewId = renderingSecondaryView ? secondaryViewId : currentViewId;
+        targetControls.style.display = viewId === 'Venn Diagram' ? 'flex' : 'none';
+        if (renderingSecondaryView) {
+            const rect = secondaryCanvas.getBoundingClientRect();
+            targetControls.style.left = `${rect.left + rect.width / 2}px`;
+            targetControls.style.top = `${rect.bottom - targetControls.offsetHeight - 140}px`;
+            targetControls.style.transform = 'translateX(-50%)';
+        }
+        if (viewId !== 'Venn Diagram') {
             if (recenterBtn) recenterBtn.style.display = 'none';
             return;
         }
@@ -10382,10 +10477,10 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         makeOptions(selA, vennCollectionA);
         makeOptions(selB, vennCollectionB);
 
-        if (vennLayoutCache) {
-            controls.style.left = `${vennLayoutCache.controlX}px`;
-            controls.style.top = `${vennLayoutCache.controlY}px`;
-        }
+        const controlRect = (renderingSecondaryView ? secondaryCanvas : canvas).getBoundingClientRect();
+        targetControls.style.left = `${controlRect.left + controlRect.width / 2}px`;
+        targetControls.style.top = `${controlRect.bottom - targetControls.offsetHeight - 140}px`;
+        targetControls.style.transform = 'translateX(-50%)';
 
         if (recenterBtn) {
             const isReset = Math.abs((vennTransform?.k || 1) - 1) < 1e-6
@@ -10404,6 +10499,39 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         hoverVennSection = null;
         updateVennControls();
         draw();
+    }
+
+    function recenterSecondaryVennDiagram() {
+        secondaryVennTransform = d3.zoomIdentity;
+        secondaryTransform = secondaryVennTransform;
+        d3.select(secondaryCanvas).call(secondaryZoomBehavior).call(secondaryZoomBehavior.transform, secondaryVennTransform);
+        renderSecondaryView();
+        updateSecondaryViewControls();
+    }
+
+    function toggleSecondaryProteinZoomHotkey() {
+        const selectedIds = Array.from(getEffectiveSelectedNodesSet() || new Set());
+        const secondaryNodes = secondaryViewId === 'selected' ? (secondarySubData?.nodes || []) : nodes;
+        const selected = selectedIds.map(id => secondaryNodes.find(node => node.id === id) || nodeMap.get(id) || nodes.find(node => node.id === id)).filter(Boolean);
+        if (!selected.length) return;
+        if (secondaryProteinZoomPreviousTransform) {
+            secondaryTransform = secondaryProteinZoomPreviousTransform;
+            secondaryProteinZoomPreviousTransform = null;
+        } else {
+            secondaryProteinZoomPreviousTransform = secondaryTransform;
+            const minX = Math.min(...selected.map(node => node.x - (node.r || 5)));
+            const maxX = Math.max(...selected.map(node => node.x + (node.r || 5)));
+            const minY = Math.min(...selected.map(node => node.y - (node.r || 5)));
+            const maxY = Math.max(...selected.map(node => node.y + (node.r || 5)));
+            const scale = Math.min((secondaryCanvas.width - 100) / Math.max(1, maxX - minX), (secondaryCanvas.height - 100) / Math.max(1, maxY - minY), 2);
+            secondaryTransform = d3.zoomIdentity.translate(secondaryCanvas.width / 2, secondaryCanvas.height / 2).scale(scale).translate(-(minX + maxX) / 2, -(minY + maxY) / 2);
+        }
+        d3.select(secondaryCanvas)
+            .call(secondaryZoomBehavior)
+            .interrupt()
+            .transition()
+            .duration(600)
+            .call(secondaryZoomBehavior.transform, secondaryTransform);
     }
 
     function downloadVennDiagram(format) {
@@ -10593,12 +10721,15 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         selectedHistogramBins = new Set(startSet);
         const activeNodes = getHistogramActiveNodes();
         const displayMode = getHistogramDisplayMode();
+        const interactionBins = chartDragCanvas === secondaryCanvas
+            ? secondaryInteractionState.histogramBins
+            : (window.histogramBins || []);
 
         const matches = activeNodes.filter(node => {
             const value = getHistogramNodeValue(node, displayMode);
             if (value === undefined || value === null) return false;
             for (const x0 of selectedHistogramBins) {
-                const bin = window.histogramBins?.find(b => b.x0 === x0);
+                const bin = interactionBins.find(b => b.x0 === x0);
                 if (bin && value >= bin.x0 && value < bin.x1) return true;
             }
             return false;
@@ -10607,17 +10738,30 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 
     function commitGraphSelectionsToNodes() {
+        const applyMatches = (matches, query) => {
+            const matchIds = new Set(matches.map(node => node.id));
+            const currentSelection = new Set(selectedNodes);
+            let nextSelection = matchIds;
+            if (isSubtractMode) nextSelection = new Set([...currentSelection].filter(id => !matchIds.has(id)));
+            else if (isIntersectMode) nextSelection = new Set([...currentSelection].filter(id => matchIds.has(id)));
+            else if (isAdditiveMode) nextSelection = new Set([...currentSelection, ...matchIds]);
+            selectedNodes = nextSelection;
+            selectedNodesDraft = new Set(nextSelection);
+            proteinInfoZoomHotkeyState && (proteinInfoZoomHotkeyState.invalidated = true);
+            secondaryProteinZoomPreviousTransform = null;
+            refreshInfoBoxFromSelection(query);
+            updateViewMenu();
+        };
         if (currentViewId === 'pie_chart') {
             const matches = selectedWedges.size > 0 ? applyPieSelectionsFromSet(selectedWedges) : [];
-            if (matches.length > 0) selectNodes(matches, false, 'Pie selection commit');
-            else deselectNodes();
+            applyMatches(matches, 'Pie selection commit');
             return;
         }
 
         if (currentViewId === 'histogram') {
             const matches = selectedHistogramBins.size > 0 ? applyHistogramSelectionsFromSet(selectedHistogramBins) : [];
             if (matches.length > 0) {
-                selectNodes(matches, false, 'Histogram selection commit');
+                applyMatches(matches, 'Histogram selection commit');
                 const bins = Array.from(selectedHistogramBins)
                     .map(x0 => window.histogramBins?.find(bin => bin.x0 === x0))
                     .filter(Boolean);
@@ -10627,14 +10771,13 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
                     aiRecordSelectByRangeHistory(getHistogramDisplayMode() || 'histogram', minValue, maxValue, 'Human');
                 }
             }
-            else deselectNodes();
+            else applyMatches([], 'Histogram selection commit');
             return;
         }
 
         if (currentViewId === 'Venn Diagram') {
             const matches = nodes.filter(n => vennSelectedNodes.has(n.id));
-            if (matches.length > 0) selectNodes(matches, false, 'Venn selection commit');
-            else deselectNodes();
+            applyMatches(matches, 'Venn selection commit');
         }
 
         // When leaving Mind Map, map selected mind map nodes to the proteins they represent
@@ -12884,26 +13027,242 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     function applySplitDividerPosition() {
         const ratio = Math.max(0.25, Math.min(0.75, splitDividerRatio));
-        const dividerOffset = (ratio - 0.5) * window.innerWidth;
+        const aiPanel = document.getElementById('ai-side-panel');
+        const aiPanelWidth = document.body.classList.contains('ai-panel-open')
+            ? (aiPanel?.getBoundingClientRect().width || 0)
+            : 0;
+        const availableRight = Math.max(1, window.innerWidth - aiPanelWidth);
+        const dividerShift = aiPanelWidth > 0 ? aiPanelWidth / 2 : 0;
+        const dividerX = Math.max(1, Math.min(availableRight - 1, ratio * window.innerWidth - dividerShift));
         const divider = document.getElementById('split-view-divider');
-        if (divider) divider.style.left = `${50 + (dividerOffset / Math.max(window.innerWidth, 1)) * 100}%`;
-        canvas.style.transform = `translateX(calc(-25vw + ${dividerOffset / 2}px))`;
+        if (divider) divider.style.left = `${dividerX}px`;
+        canvas.style.left = '0px';
+        canvas.style.width = `${dividerX}px`;
+        canvas.style.transform = 'none';
+        canvas.style.transition = 'none';
         if (secondaryCanvas) {
-            secondaryCanvas.style.left = '100%';
-            secondaryCanvas.style.width = '100%';
-            secondaryCanvas.style.transform = `translateX(calc(-50vw + ${dividerOffset}px))`;
+            secondaryCanvas.style.left = `${dividerX}px`;
+            secondaryCanvas.style.width = `${Math.max(1, availableRight - dividerX)}px`;
+            secondaryCanvas.style.transform = 'none';
+            secondaryCanvas.style.transition = 'none';
         }
         document.getElementById('secondary-left-panel')?.style.setProperty('left', `calc(${ratio * 100}% + 15px)`);
         const primaryMenu = document.getElementById('view-selector-container');
         if (primaryMenu) {
-            primaryMenu.style.left = `${(ratio * 50)}%`;
-            primaryMenu.style.width = `${ratio * 100}%`;
+            primaryMenu.style.left = `${dividerX / 2}px`;
+            primaryMenu.style.width = `${dividerX}px`;
+            primaryMenu.style.transition = 'none';
+            primaryMenu.querySelector('#view-selector-stack')?.style.setProperty('width', '100%');
         }
         const secondaryMenu = document.getElementById('secondary-view-selector');
         if (secondaryMenu) {
-            secondaryMenu.style.left = `${(ratio + 1) * 50}%`;
-            secondaryMenu.style.width = `${Math.max(220, window.innerWidth * (1 - ratio) - 40)}px`;
+            const secondaryWidth = Math.max(1, availableRight - dividerX);
+            secondaryMenu.style.left = `${dividerX + secondaryWidth / 2}px`;
+            secondaryMenu.style.width = `${secondaryWidth}px`;
+            secondaryMenu.style.display = 'flex';
+            secondaryMenu.style.justifyContent = 'center';
+            secondaryMenu.querySelector('#view-selector-stack')?.style.setProperty('width', '100%');
         }
+        updateSecondaryViewControls();
+    }
+
+    function updateSecondaryViewControls() {
+        const scatterButton = document.getElementById('secondary-scatter-recenter-btn');
+        const vennButton = document.getElementById('secondary-venn-recenter-btn');
+        const button = secondaryViewId === 'Scatter Plot' ? scatterButton : vennButton;
+        if (!['Scatter Plot', 'Venn Diagram'].includes(secondaryViewId)) {
+            scatterButton?.style.setProperty('display', 'none');
+            vennButton?.style.setProperty('display', 'none');
+            return;
+        }
+        if (!button) return;
+        const activeTransform = secondaryViewId === 'Scatter Plot' ? secondaryScatterTransform : secondaryVennTransform;
+        const isReset = Math.abs((activeTransform?.k || 1) - 1) < 1e-6
+            && Math.abs(activeTransform?.x || 0) < 1e-6
+            && Math.abs(activeTransform?.y || 0) < 1e-6;
+        button.style.display = isReset ? 'none' : 'block';
+    }
+
+    function ensureSecondaryGraphControls() {
+        const host = document.getElementById('secondary-view-selector');
+        if (!host) return;
+        ['scatter-controls', 'venn-controls'].forEach(sourceId => {
+            const source = document.getElementById(sourceId);
+            const targetId = `secondary-${sourceId}`;
+            if (!source || document.getElementById(targetId)) return;
+            const clone = source.cloneNode(true);
+            clone.id = targetId;
+            clone.style.position = 'fixed';
+            clone.style.width = sourceId === 'scatter-controls' ? 'min(460px, 42vw)' : 'min(550px, 42vw)';
+            const sourceStyle = getComputedStyle(source);
+            clone.style.background = sourceStyle.background;
+            clone.style.border = sourceStyle.border;
+            clone.style.borderRadius = sourceStyle.borderRadius;
+            clone.style.padding = sourceStyle.padding;
+            clone.style.boxShadow = sourceStyle.boxShadow;
+            clone.style.zIndex = '7';
+            clone.style.display = 'none';
+            clone.querySelectorAll('[id]').forEach(element => {
+                element.id = `secondary-${element.id}`;
+            });
+            const cloneRecenter = clone.querySelector(`#secondary-${sourceId === 'scatter-controls' ? 'scatter' : 'venn'}-recenter-btn`);
+            if (cloneRecenter) {
+                cloneRecenter.style.position = 'absolute';
+                cloneRecenter.style.left = '50%';
+                cloneRecenter.style.transform = 'translateX(-50%)';
+                cloneRecenter.style.width = 'auto';
+                cloneRecenter.style.minWidth = '0';
+                cloneRecenter.style.padding = '5px 8px';
+                cloneRecenter.style.zIndex = '8';
+            }
+            clone.querySelectorAll('label[for]').forEach(label => {
+                label.htmlFor = `secondary-${label.htmlFor}`;
+            });
+            document.body.appendChild(clone);
+        });
+        document.getElementById('secondary-scatterXVariable')?.addEventListener('change', event => {
+            secondaryScatterXVariable = event.target.value;
+            if (secondaryScatterXVariable === secondaryScatterYVariable) secondaryScatterYVariable = getScatterVariableOptions().find(option => option.value !== secondaryScatterXVariable)?.value || secondaryScatterYVariable;
+            renderSecondaryView();
+        });
+        document.getElementById('secondary-scatterYVariable')?.addEventListener('change', event => {
+            secondaryScatterYVariable = event.target.value;
+            if (secondaryScatterYVariable === secondaryScatterXVariable) secondaryScatterXVariable = getScatterVariableOptions().find(option => option.value !== secondaryScatterYVariable)?.value || secondaryScatterXVariable;
+            renderSecondaryView();
+        });
+        document.getElementById('secondary-vennCollectionA')?.addEventListener('change', event => {
+            secondaryVennCollectionA = event.target.value;
+            renderSecondaryView();
+        });
+        document.getElementById('secondary-vennCollectionB')?.addEventListener('change', event => {
+            secondaryVennCollectionB = event.target.value;
+            renderSecondaryView();
+        });
+        document.getElementById('secondary-scatter-recenter-btn')?.addEventListener('click', event => {
+            event.stopPropagation();
+            recenterSecondaryScatterPlot();
+        });
+        document.getElementById('secondary-venn-recenter-btn')?.addEventListener('click', event => {
+            event.stopPropagation();
+            recenterSecondaryVennDiagram();
+        });
+    }
+
+    function commitSecondaryGraphSelection(viewId = secondaryViewId) {
+        if (!['pie_chart', 'histogram', 'Venn Diagram'].includes(viewId)) return;
+        const savedViewId = currentViewId;
+        const savedPieDataSource = pieDataSource;
+        const savedHistogramDataSource = histogramDataSource;
+        const savedHistogramScope = histogramScope;
+        const savedVennA = vennCollectionA;
+        const savedVennB = vennCollectionB;
+        currentViewId = viewId;
+        if (viewId === 'pie_chart') pieDataSource = secondaryPieDataSource;
+        if (viewId === 'histogram') {
+            histogramDataSource = secondaryHistogramDataSource;
+            histogramScope = secondaryHistogramScope;
+        }
+        if (viewId === 'Venn Diagram') {
+            vennCollectionA = secondaryVennCollectionA;
+            vennCollectionB = secondaryVennCollectionB;
+        }
+        commitGraphSelectionsToNodes();
+        currentViewId = savedViewId;
+        pieDataSource = savedPieDataSource;
+        histogramDataSource = savedHistogramDataSource;
+        histogramScope = savedHistogramScope;
+        vennCollectionA = savedVennA;
+        vennCollectionB = savedVennB;
+    }
+
+    function classifyVennPointFromCircles(circles, x, y) {
+        if (!circles?.c1 || !circles?.c2) return null;
+        const inCircle = circle => Math.hypot(x - circle.x, y - circle.y) <= circle.r;
+        const inLeft = inCircle(circles.c1);
+        const inRight = inCircle(circles.c2);
+        if (inLeft && inRight) return 'both';
+        if (inLeft) return 'left';
+        if (inRight) return 'right';
+        return null;
+    }
+
+    function prepareSecondarySelectedView() {
+        if (secondaryViewId !== 'selected') return;
+        secondarySelectedNodeIds = new Set(selectedNodes);
+        const savedViewId = currentViewId;
+        const savedSubData = activeSubData;
+        currentViewId = 'selected';
+        initSubNetworkView('selected', Array.from(secondarySelectedNodeIds));
+        secondarySubData = activeSubData;
+        activeSubData = savedSubData;
+        currentViewId = savedViewId;
+        setTimeout(() => {
+            if (secondaryViewId !== 'selected' || !secondarySubData?.nodes?.length) return;
+            const fitTransform = fitNodesInView(secondarySubData.nodes, 50, secondaryCanvas);
+            d3.select(secondaryCanvas).call(secondaryZoomBehavior).transition().duration(800).call(secondaryZoomBehavior.transform, fitTransform);
+        }, 70);
+        return true;
+    }
+
+    function applySecondaryNodeSelection(node, query = 'Secondary canvas selection') {
+        if (!node) return;
+        const currentSelection = new Set(selectedNodes);
+        const nodeIds = new Set([node.id]);
+        let nextSelection = nodeIds;
+        if (isSubtractMode) {
+            nextSelection = new Set(currentSelection);
+            nodeIds.forEach(id => nextSelection.delete(id));
+        } else if (isIntersectMode) {
+            nextSelection = new Set([...currentSelection].filter(id => nodeIds.has(id)));
+        } else if (isAdditiveMode) {
+            nextSelection = new Set([...currentSelection, ...nodeIds]);
+        }
+        selectedNodes = new Set(nextSelection);
+        selectedNodesDraft = new Set(nextSelection);
+        selectionHistory.push({ ids: new Set(nextSelection), query, summary: null });
+        if (selectionHistory.length > 15) selectionHistory.shift();
+        proteinInfoZoomHotkeyState && (proteinInfoZoomHotkeyState.invalidated = true);
+        secondaryProteinZoomPreviousTransform = null;
+        refreshInfoBoxFromSelection(query);
+        updateViewMenu();
+        draw();
+    }
+
+    function switchSecondaryView(viewId) {
+        if (viewId === secondaryViewId) return;
+        commitSecondaryGraphSelection();
+        secondaryPreviousViewId = secondaryViewId;
+        secondaryViewId = viewId;
+        if (secondaryViewId !== 'Scatter Plot') document.getElementById('secondary-scatter-controls')?.style.setProperty('display', 'none');
+        if (secondaryViewId !== 'Venn Diagram') document.getElementById('secondary-venn-controls')?.style.setProperty('display', 'none');
+        prepareSecondarySelectedView();
+        syncSecondaryViewMenu();
+        if (secondaryViewId === 'selected') {
+            renderSecondaryView();
+            return;
+        }
+        if (secondaryViewId.startsWith('coll_')) {
+            const collection = collections.get(secondaryViewId.slice(5));
+            if (collection) {
+                const savedViewId = currentViewId;
+                const savedSubData = activeSubData;
+                currentViewId = secondaryViewId;
+                initSubNetworkView(secondaryViewId, Array.from(collection.nodeIds || []));
+                secondarySubData = activeSubData;
+                activeSubData = savedSubData;
+                currentViewId = savedViewId;
+                setTimeout(() => {
+                    if (secondaryViewId !== viewId || !secondarySubData?.nodes?.length) return;
+                    const fitTransform = fitNodesInView(secondarySubData.nodes, 50, secondaryCanvas);
+                    d3.select(secondaryCanvas).call(secondaryZoomBehavior).transition().duration(800).call(secondaryZoomBehavior.transform, fitTransform);
+                }, 70);
+            }
+        }
+        const nextSecondaryTransform = secondaryViewId === 'Venn Diagram'
+            ? secondaryVennTransform
+            : (secondaryViewId === 'Scatter Plot' ? secondaryScatterTransform : secondaryTransform);
+        d3.select(secondaryCanvas).call(secondaryZoomBehavior).call(secondaryZoomBehavior.transform, nextSecondaryTransform);
+        renderSecondaryView();
     }
 
     function setSplitView(open) {
@@ -12916,22 +13275,34 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         }
         if (!splitViewOpen) {
             document.getElementById('secondary-view-selector')?.remove();
+            document.getElementById('secondary-scatter-controls')?.remove();
+            document.getElementById('secondary-venn-controls')?.remove();
             document.getElementById('secondary-left-panel')?.classList.add('hidden');
             secondaryCanvas?.style.removeProperty('left');
             secondaryCanvas?.style.removeProperty('width');
             secondaryCanvas?.style.removeProperty('transform');
+            secondaryCanvas?.style.removeProperty('transition');
+            canvas.style.removeProperty('left');
+            canvas.style.removeProperty('width');
             canvas.style.removeProperty('transform');
+            canvas.style.removeProperty('transition');
             document.getElementById('split-view-divider')?.style.removeProperty('left');
             const primaryMenu = document.getElementById('view-selector-container');
             primaryMenu?.style.removeProperty('left');
             primaryMenu?.style.removeProperty('width');
+            primaryMenu?.style.removeProperty('transition');
+            primaryMenu?.querySelector('#view-selector-stack')?.style.removeProperty('width');
+            resize();
             return;
         }
         applySplitDividerPosition();
         updateSecondarySpeciesPanel();
         updateViewMenu();
         syncSecondaryViewMenu();
-        d3.select(secondaryCanvas).call(secondaryZoomBehavior).call(secondaryZoomBehavior.transform, secondaryTransform);
+        const initialSecondaryTransform = secondaryViewId === 'Venn Diagram'
+            ? secondaryVennTransform
+            : (secondaryViewId === 'Scatter Plot' ? secondaryScatterTransform : secondaryTransform);
+        d3.select(secondaryCanvas).call(secondaryZoomBehavior).call(secondaryZoomBehavior.transform, initialSecondaryTransform);
         resize();
     }
 
@@ -14697,7 +15068,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         }).filter(Boolean);
         if (!nodesToZoom.length) return;
 
-        const targetTransform = fitNodesInView(nodesToZoom, 50);
+        const targetTransform = fitNodesInView(nodesToZoom, 50, canvas);
         if (!targetTransform) return;
 
         d3.select(canvas).transition().duration(600).call(zoomBehavior.transform, targetTransform);
@@ -17002,7 +17373,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
                 const item = container.append("div")
                     // Add the 'item-disabled' class if necessary
-                    .attr("class", `view-option-item ${currentViewId === opt.id ? 'active-view' : ''} ${isBtnDisabled ? 'item-disabled' : ''}`)
+                    .attr("class", `view-option-item ${(renderingSecondaryView ? primaryMenuViewId : currentViewId) === opt.id ? 'active-view' : ''} ${isBtnDisabled ? 'item-disabled' : ''}`)
                     .attr("data-view-id", opt.id)
                     .on("click", (e) => {
                         e.stopPropagation();
@@ -17101,12 +17472,13 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             item.addEventListener('click', event => {
                 event.stopPropagation();
                 if (item.classList.contains('item-disabled')) return;
-                secondaryViewId = item.dataset.viewId || 'base';
-                syncSecondaryViewMenu();
-                renderSecondaryView();
+                switchSecondaryView(item.dataset.viewId || 'base');
             });
         });
         host.appendChild(box);
+        applySplitDividerPosition();
+        ensureSecondaryGraphControls();
+        updateSecondaryViewControls();
     }
 
     function getViewLabel(viewId) {
@@ -17123,6 +17495,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     function switchView(viewId, historyMeta = null) {
         console.log("function switchView(viewId)");
+        syncActivePhysicsState(viewId);
         const fromViewId = currentViewId;
         const historyActor = historyMeta?.actor || 'Human';
         if (viewId !== fromViewId) {
@@ -17283,7 +17656,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         draw();
     }
 
-    function fitNodesInView(nodes, margin = 50) {
+    function fitNodesInView(nodes, margin = 50, targetCanvas = canvas) {
         if (!nodes || nodes.length === 0) return d3.zoomIdentity;
         
         // Find bounding box of all nodes
@@ -17296,8 +17669,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             maxY = Math.max(maxY, n.y + r);
         });
         
-        const width = window.innerWidth;
-        const height = window.innerHeight;
+        const width = Math.max(1, targetCanvas?.width || window.innerWidth);
+        const height = Math.max(1, targetCanvas?.height || window.innerHeight);
         
         const nodeWidth = maxX - minX;
         const nodeHeight = maxY - minY;
@@ -17395,6 +17768,19 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         return physicsEnabled && !isPhysicsStopped;
     }
 
+    function isSubnetworkView(viewId = currentViewId) {
+        return viewId === 'selected' || String(viewId || '').startsWith('coll_');
+    }
+
+    function getPhysicsEnabledForView(viewId = currentViewId) {
+        return isSubnetworkView(viewId) ? subnetworkPhysicsEnabled : fullNetworkPhysicsEnabled;
+    }
+
+    function syncActivePhysicsState(viewId = currentViewId) {
+        physicsEnabled = getPhysicsEnabledForView(viewId);
+        return physicsEnabled;
+    }
+
     function clearFullNetworkPostBuildCooldown() {
         if (fullNetworkPostBuildAutoPauseTimer) {
             clearTimeout(fullNetworkPostBuildAutoPauseTimer);
@@ -17446,11 +17832,14 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     function updatePhysicsControlButtons() {
-        const physBtn = document.getElementById('physBtn');
-        if (physBtn) {
-            physBtn.innerText = physicsEnabled ? 'Pause Physics (spacebar)' : 'Resume Physics (spacebar)';
-            physBtn.style.background = physicsEnabled ? '#3498db' : '#666';
-        }
+        const updateButton = (id, enabled, label) => {
+            const button = document.getElementById(id);
+            if (!button) return;
+            button.innerText = enabled ? `Pause ${label} Physics` : `Resume ${label} Physics`;
+            button.style.background = enabled ? '#3498db' : '#666';
+        };
+        updateButton('fullNetworkPhysBtn', fullNetworkPhysicsEnabled, 'Full Network');
+        updateButton('subnetworkPhysBtn', subnetworkPhysicsEnabled, 'Subnetwork');
 
         const stopBtn = document.getElementById('stopPhysBtn');
         if (stopBtn) {
@@ -17459,33 +17848,60 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         }
     }
 
-    function togglePhysics(state, reason = 'manual') {
+    function togglePhysics(state, reason = 'manual', targetType = null, historyActor = 'Human', recordHistory = true) {
         console.log("function togglePhysics(state)");
+        const type = targetType || (isSubnetworkView() ? 'subnetwork' : 'full');
         if (isPhysicsStopped && state) {
+            syncActivePhysicsState();
             physicsEnabled = false;
-            const simForcedOff = currentViewId === 'base' ? simulation : activeSubData?.simulation;
+            const simForcedOff = type === 'full' ? simulation : activeSubData?.simulation;
             if (simForcedOff) simForcedOff.stop();
             updatePhysicsControlButtons();
             updatePhysicsRuntimeLabel();
             return;
         }
 
-        physicsEnabled = state;
+        if (type === 'subnetwork') subnetworkPhysicsEnabled = state;
+        else fullNetworkPhysicsEnabled = state;
+        syncActivePhysicsState();
         if (!state) {
             physicsAutoPlayFromPause = false;
             clearFullNetworkPostBuildCooldown();
         }
         updatePhysicsControlButtons();
         updatePhysicsRuntimeLabel();
-        const sim = currentViewId === 'base' ? simulation : activeSubData?.simulation;
-        if (canPhysicsRun() && sim) {
+        const subSim = isSubnetworkView(currentViewId)
+            ? activeSubData?.simulation
+            : (splitViewOpen && isSubnetworkView(secondaryViewId) ? secondarySubData?.simulation : activeSubData?.simulation);
+        const sim = type === 'subnetwork' ? subSim : simulation;
+        if (state && !isPhysicsStopped && sim) {
             const restartAlpha = mergedPhysicsResumeAlphaPending
                 ? Math.max(0.5, +document.getElementById('alphaSlider')?.value || 0.5)
                 : ((isBuilding || isSettling) ? 0.5 : +document.getElementById('alphaSlider').value);
-            restartActivePhysics(restartAlpha);
+            if (type === 'full' && currentViewId === 'base') {
+                restartActivePhysics(restartAlpha);
+            } else if (type === 'subnetwork' && isSubnetworkView(currentViewId)) {
+                restartActivePhysics(restartAlpha);
+            } else {
+                sim.alpha(restartAlpha).restart();
+            }
             mergedPhysicsResumeAlphaPending = false;
         }
         else if (sim) sim.stop();
+        if (recordHistory && ['full', 'subnetwork'].includes(type)) {
+            aiRecordSetPhysicsHistory(historyActor, type, state);
+        }
+    }
+
+    function togglePhysicsForOpenViews() {
+        const openTypes = new Set();
+        const addViewPhysicsType = viewId => {
+            if (viewId === 'base') openTypes.add('full');
+            else if (isSubnetworkView(viewId)) openTypes.add('subnetwork');
+        };
+        addViewPhysicsType(currentViewId);
+        if (splitViewOpen) addViewPhysicsType(secondaryViewId);
+        openTypes.forEach(type => togglePhysics(type === 'subnetwork' ? !subnetworkPhysicsEnabled : !fullNetworkPhysicsEnabled, 'spacebar', type, 'Human'));
     }
 
     function updatePhysicsRuntimeLabel() {
@@ -17544,10 +17960,13 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             <div style="line-height:1.3;">Annotation: ${annotationText}</div>
         `;
 
-        const [x, y] = transform.apply([node.x, node.y]);
+        const tooltipCanvas = hoveredNodeCanvas || canvas;
+        const tooltipRect = tooltipCanvas.getBoundingClientRect();
+        const tooltipTransform = tooltipCanvas === secondaryCanvas ? secondaryTransform : transform;
+        const [x, y] = tooltipTransform.apply([node.x, node.y]);
         const offsetX = 14;
         const offsetY = -25;
-        tooltip.style.transform = `translate(${x + offsetX}px, ${y + offsetY}px)`;
+        tooltip.style.transform = `translate(${tooltipRect.left + x + offsetX}px, ${tooltipRect.top + y + offsetY}px)`;
         tooltip.style.visibility = 'visible';
         tooltip.style.opacity = '1';
         tooltip.style.pointerEvents = 'auto';
@@ -17619,10 +18038,42 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             return;
         }
         if (document.activeElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+        if (e.code === 'Space' || e.key === ' ') {
+            e.preventDefault();
+            togglePhysicsForOpenViews();
+            return;
+        }
+        const secondaryRect = splitViewOpen && secondaryCanvas ? secondaryCanvas.getBoundingClientRect() : null;
+        const pointerOverSecondary = !!secondaryRect
+            && lastMousePosition.x >= secondaryRect.left
+            && lastMousePosition.x <= secondaryRect.right
+            && lastMousePosition.y >= secondaryRect.top
+            && lastMousePosition.y <= secondaryRect.bottom;
         // Allow modifier keys to be detected even when pointer is outside the canvas
-        if (!isPointerOverMainCanvas && currentViewId !== 'Embeddings' && !['Shift','Control','Alt'].includes(e.key)) return;
+        if (!pointerOverSecondary && !isPointerOverMainCanvas && currentViewId !== 'Embeddings' && !['Shift','Control','Alt'].includes(e.key)) return;
         if (isVariableSettingsOpen) return;
         const key = e.key.toLowerCase();
+
+        if (pointerOverSecondary && ['f', 's', 'z', 'i', '+', '=', '-'].includes(key)) {
+            e.preventDefault();
+            if (key === 's') {
+                switchSecondaryView(secondaryViewId === 'selected' ? 'base' : 'selected');
+            } else if (key === 'f') {
+                const target = secondaryViewId === 'base' ? secondaryPreviousViewId : 'base';
+                switchSecondaryView(target || 'base');
+            } else if (key === 'z') {
+                toggleSecondaryProteinZoomHotkey();
+            } else {
+                const savedViewId = currentViewId;
+                currentViewId = secondaryViewId;
+                if (key === 'i') invertSelection('Human');
+                else modifySelection(key === '-' ? -1 : 1, { actor: 'Human' });
+                currentViewId = savedViewId;
+                renderSecondaryView();
+                draw();
+            }
+            return;
+        }
 
         // While drawing/exporting a frame, lock selection state so keyboard shortcuts
         // cannot select, invert, expand, or clear node selections.
@@ -17718,11 +18169,6 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 e.preventDefault();
                 openCollectionMenu(lastMousePosition.x, lastMousePosition.y);
             }
-            return;
-        }
-        if (e.code === 'Space' || key === ' ') {
-            e.preventDefault();
-            togglePhysics(!physicsEnabled, 'spacebar');
             return;
         }
         if (key === 'z') {
@@ -17938,6 +18384,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const pt = activeTransform.invert([mx, my]); 
 
         if (e.button === 0 && (currentViewId === 'pie_chart' || currentViewId === 'histogram')) {
+            chartDragCanvas = canvas;
             const onPieButton = currentViewId === 'pie_chart' && window.pieChartButtons?.some(b => mx >= b.x && mx <= b.x + b.width && my >= b.y && my <= b.y + b.height);
             const onHistButton = currentViewId === 'histogram' && window.histogramButtons?.some(b => mx >= b.x && mx <= b.x + b.width && my >= b.y && my <= b.y + b.height);
 
@@ -17957,6 +18404,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                         const labels = new Set(selectedWedges);
                         labels.add(wedge.label);
                         applyPieSelectionsFromSet(labels);
+                        commitGraphSelectionsToNodes();
                     }
                 } else {
                     const bin = window.histogramBins?.find(b => mx >= b.x && mx <= b.x + b.width && my >= b.y && my <= b.y + b.height);
@@ -17964,6 +18412,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                         const starts = new Set(selectedHistogramBins);
                         starts.add(bin.x0);
                         applyHistogramSelectionsFromSet(starts);
+                        commitGraphSelectionsToNodes();
                     }
                 }
                 suppressNextChartClick = true;
@@ -18037,6 +18486,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             && e.clientX >= secondaryRect.left && e.clientX <= secondaryRect.right
             && e.clientY >= secondaryRect.top && e.clientY <= secondaryRect.bottom;
         const pointerCanvas = overSecondary ? secondaryCanvas : canvas;
+        brushPreviewCanvas = overSecondary ? secondaryCanvas : canvas;
         const [mx, my] = d3.pointer(e, pointerCanvas);
         const activeTransform = currentViewId === 'Venn Diagram' ? vennTransform : (currentViewId === 'Scatter Plot' ? scatterTransform : (currentViewId === 'Mind Map' ? mindMapTransform : transform));
         const pt = (overSecondary ? secondaryTransform : activeTransform).invert([mx, my]);
@@ -18044,20 +18494,38 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         else currentMousePos = currentViewId === 'Embeddings' ? [mx, my] : pt;
 
         if (isChartDragSelecting) {
+            const chartRegions = chartDragCanvas === secondaryCanvas ? secondaryInteractionState : {
+                pieWedges: window.pieChartWedges || [],
+                pieButtons: window.pieChartButtons || [],
+                histogramBins: window.histogramBins || [],
+                histogramButtons: window.histogramButtons || []
+            };
             if (chartDragType === 'pie') {
-                const wedge = getPieWedgeAtPoint(mx, my);
+                const regions = chartRegions.pieWedges;
+                const chartWidth = chartDragCanvas.width;
+                const chartHeight = chartDragCanvas.height;
+                const centerX = chartWidth / 2;
+                const centerY = chartHeight / 2;
+                const angle = Math.atan2(my - centerY, mx - centerX);
+                const distance = Math.hypot(mx - centerX, my - centerY);
+                const normalizedAngle = angle < 0 ? angle + 2 * Math.PI : angle;
+                const wedge = distance <= Math.min(chartWidth, chartHeight) / 3.5
+                    ? regions.find(item => normalizedAngle >= item.startAngle && normalizedAngle <= item.endAngle)
+                    : null;
                 if (wedge && !selectedWedges.has(wedge.label)) {
                     const labels = new Set(selectedWedges);
                     labels.add(wedge.label);
                     applyPieSelectionsFromSet(labels);
+                    commitSecondaryGraphSelection();
                     draw();
                 }
-            } else if (chartDragType === 'histogram' && window.histogramBins) {
-                const bin = window.histogramBins.find(b => mx >= b.x && mx <= b.x + b.width && my >= b.y && my <= b.y + b.height);
+            } else if (chartDragType === 'histogram' && chartRegions.histogramBins.length) {
+                const bin = chartRegions.histogramBins.find(b => mx >= b.x && mx <= b.x + b.width && my >= b.y && my <= b.y + b.height);
                 if (bin && !selectedHistogramBins.has(bin.x0)) {
                     const starts = new Set(selectedHistogramBins);
                     starts.add(bin.x0);
                     applyHistogramSelectionsFromSet(starts);
+                    commitSecondaryGraphSelection();
                     draw();
                 }
             }
@@ -18235,9 +18703,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     });
 
     d3.select(window).on("mouseup", () => {
+        if (finishSecondaryGesture()) return;
         if (isChartDragSelecting) {
             isChartDragSelecting = false;
             chartDragType = null;
+            chartDragCanvas = canvas;
             return;
         }
 
@@ -18351,6 +18821,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     applyVennSelectionIds(new Set([nodeObj.id]));
                 }
                 draw();
+                commitGraphSelectionsToNodes();
                 return;
             }
 
@@ -18361,6 +18832,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     applyVennSelectionIds(idSet);
                 }
                 draw();
+                commitGraphSelectionsToNodes();
                 return;
             }
 
@@ -18480,6 +18952,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                         selectedWedges.clear();
                         selectedWedges.add(clickedWedge.label);
                     }
+                    commitGraphSelectionsToNodes();
                     draw();
                 }
             }
@@ -18533,9 +19006,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     selectedHistogramBins.add(clickedBin.x0);
                 }
                 draw();
+                commitGraphSelectionsToNodes();
             } else {
                 // Click outside histogram bars - deselect all
                 selectedHistogramBins.clear();
+                commitGraphSelectionsToNodes();
                 draw();
             }
             return;
@@ -18864,7 +19339,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const pad = 28;
         const w1 = ctx.measureText('Plot Full Network').width + pad * 2;
         const w2 = ctx.measureText('Plot Selected Nodes').width + pad * 2;
-        const w3 = ctx.measureText('Plot Collection').width + pad * 2;
+        const w3 = ctx.measureText('Plot Collection ▾').width + pad * 2;
         const totalWidth = w1 + w2 + w3 + buttonSpacing * 2;
         const buttonX1 = centerX - totalWidth / 2;
         const buttonX2 = buttonX1 + w1 + buttonSpacing;
@@ -18898,7 +19373,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         
         drawPieButton(buttonX1, buttonY, w1, buttonHeight, 'Plot Full Network', pieDataSource === 'network');
         drawPieButton(buttonX2, buttonY, w2, buttonHeight, 'Plot Selected Nodes', pieDataSource === 'selected');
-        drawPieButton(buttonX3, buttonY, w3, buttonHeight, 'Plot Collection', pieDataSource.startsWith('collection_'));
+        drawPieButton(buttonX3, buttonY, w3, buttonHeight, 'Plot Collection ▾', pieDataSource.startsWith('collection_'));
         
         window.pieChartButtons = [
             { x: buttonX1, y: buttonY, width: w1, height: buttonHeight, action: 'network' },
@@ -19192,7 +19667,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const pad = 28; // horizontal padding each side
         const w1 = ctx.measureText('Plot Full Network').width + pad * 2;
         const w2 = ctx.measureText('Plot Selected Nodes').width + pad * 2;
-        const w3 = ctx.measureText('Plot Collection').width + pad * 2;
+        const w3 = ctx.measureText('Plot Collection ▾').width + pad * 2;
         const totalWidth = w1 + w2 + w3 + buttonSpacing * 2;
         const buttonX1 = centerX - totalWidth / 2;
         const buttonX2 = buttonX1 + w1 + buttonSpacing;
@@ -19229,7 +19704,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         drawPillButton(buttonX2, buttonY, w2, buttonHeight, 'Plot Selected Nodes', histogramDataSource === 'selected');
         
         // Add "Plot Collection" button with hover menu
-        drawPillButton(buttonX3, buttonY, w3, buttonHeight, 'Plot Collection', histogramDataSource.startsWith('collection_'));
+        drawPillButton(buttonX3, buttonY, w3, buttonHeight, 'Plot Collection ▾', histogramDataSource.startsWith('collection_'));
 
         window.histogramButtons = [
             { x: buttonX1, y: buttonY, width: w1, height: buttonHeight, action: 'full' },
@@ -19571,16 +20046,18 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 ctx.lineWidth = brushRadius * scale * 2;
                 ctx.stroke();
             }
-            const s = toScreen(currentMousePos[0], currentMousePos[1]);
-            ctx.beginPath();
-            ctx.arc(s.x, s.y, brushRadius * scale, 0, 2 * Math.PI);
-            ctx.fillStyle = 'rgba(255, 152, 0, 0.07)';
-            ctx.fill();
-            ctx.strokeStyle = '#ff9800';
-            ctx.lineWidth = 1.5;
-            ctx.setLineDash([4, 4]);
-            ctx.stroke();
-            ctx.setLineDash([]);
+            if (brushPreviewCanvas === (renderingSecondaryView ? secondaryCanvas : canvas)) {
+                const s = toScreen(currentMousePos[0], currentMousePos[1]);
+                ctx.beginPath();
+                ctx.arc(s.x, s.y, brushRadius * scale, 0, 2 * Math.PI);
+                ctx.fillStyle = 'rgba(255, 152, 0, 0.07)';
+                ctx.fill();
+                ctx.strokeStyle = '#ff9800';
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([4, 4]);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
         }
 
         updateVennControls();
@@ -19834,7 +20311,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 ctx.stroke();
             }
 
-            if (currentMousePos) {
+            if (currentMousePos && brushPreviewCanvas === (renderingSecondaryView ? secondaryCanvas : canvas)) {
                 ctx.beginPath();
                 ctx.arc(tx(currentMousePos[0]), ty(currentMousePos[1]), brushRadius * tk, 0, 2 * Math.PI);
                 ctx.fillStyle = 'rgba(255, 152, 0, 0.07)';
@@ -19856,33 +20333,104 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     function queueSecondaryRender() {
-        if (!splitViewOpen || secondaryRenderInProgress || !secondaryCanvas) return;
+        if (!splitViewOpen || !secondaryCanvas) return;
+        secondaryRenderQueued = true;
+        if (secondaryRenderInProgress) return;
         requestAnimationFrame(() => renderSecondaryView());
     }
 
     function renderSecondaryView() {
-        if (!splitViewOpen || secondaryRenderInProgress || !secondaryCanvas) return;
+        if (!splitViewOpen || !secondaryCanvas) return;
+        if (secondaryRenderInProgress) return;
+        secondaryRenderQueued = false;
         secondaryRenderInProgress = true;
         const primaryViewId = currentViewId;
+        primaryMenuViewId = primaryViewId;
+        const primarySubData = activeSubData;
+        const primarySelectedNodesDraft = selectedNodesDraft;
         const primaryTransform = transform;
+        const primaryVennTransform = vennTransform;
+        const primaryScatterTransform = scatterTransform;
+        const primaryScatterXVariable = scatterXVariable;
+        const primaryScatterYVariable = scatterYVariable;
+        const primaryVennCollectionA = vennCollectionA;
+        const primaryVennCollectionB = vennCollectionB;
+        const primaryPieDataSource = pieDataSource;
+        const primaryHistogramDataSource = histogramDataSource;
+        const primaryHistogramScope = histogramScope;
         const primaryMousePos = currentMousePos;
         const primaryLabel = document.getElementById('current-view-label')?.textContent;
+        const primaryCanvasWidth = canvas.width;
+        const primaryCanvasHeight = canvas.height;
+        const secondaryCanvasWidth = secondaryCanvas.width;
+        const secondaryCanvasHeight = secondaryCanvas.height;
         currentViewId = secondaryViewId;
+        renderingSecondaryView = true;
+        syncActivePhysicsState(secondaryViewId);
+        activeSubData = isSubnetworkView(secondaryViewId) ? secondarySubData : primarySubData;
+        if (secondaryViewId === 'Scatter Plot') {
+            scatterXVariable = secondaryScatterXVariable;
+            scatterYVariable = secondaryScatterYVariable;
+        }
+        if (secondaryViewId === 'Venn Diagram') {
+            vennCollectionA = secondaryVennCollectionA;
+            vennCollectionB = secondaryVennCollectionB;
+        }
+        if (secondaryViewId === 'pie_chart') pieDataSource = secondaryPieDataSource;
+        if (secondaryViewId === 'histogram') {
+            histogramDataSource = secondaryHistogramDataSource;
+            histogramScope = secondaryHistogramScope;
+        }
+        if (secondaryViewId === 'selected') selectedNodesDraft = new Set(selectedNodes);
         transform = secondaryTransform;
+        vennTransform = secondaryVennTransform;
+        scatterTransform = secondaryScatterTransform;
         currentMousePos = secondaryMousePos;
+        canvas.width = secondaryCanvasWidth;
+        canvas.height = secondaryCanvasHeight;
         drawCurrentView();
+        secondaryInteractionState = {
+            pieWedges: Array.isArray(window.pieChartWedges) ? window.pieChartWedges.map(wedge => ({ ...wedge })) : [],
+            pieButtons: Array.isArray(window.pieChartButtons) ? window.pieChartButtons.map(button => ({ ...button })) : [],
+            histogramBins: Array.isArray(window.histogramBins) ? window.histogramBins.map(bin => ({ ...bin })) : [],
+            histogramButtons: Array.isArray(window.histogramButtons) ? window.histogramButtons.map(button => ({ ...button })) : []
+        };
         const secondaryContext = secondaryCanvas.getContext('2d');
         secondaryContext.setTransform(1, 0, 0, 1, 0, 0);
         secondaryContext.clearRect(0, 0, secondaryCanvas.width, secondaryCanvas.height);
-        secondaryContext.drawImage(canvas, 0, 0, secondaryCanvas.width, secondaryCanvas.height);
+        secondaryContext.drawImage(canvas, 0, 0);
+        canvas.width = primaryCanvasWidth;
+        canvas.height = primaryCanvasHeight;
         currentViewId = primaryViewId;
+        primaryMenuViewId = primaryViewId;
+        renderingSecondaryView = false;
+        syncActivePhysicsState(primaryViewId);
+        activeSubData = primarySubData;
+        secondaryScatterXVariable = scatterXVariable;
+        secondaryScatterYVariable = scatterYVariable;
+        secondaryVennCollectionA = vennCollectionA;
+        secondaryVennCollectionB = vennCollectionB;
+        secondaryPieDataSource = pieDataSource;
+        secondaryHistogramDataSource = histogramDataSource;
+        secondaryHistogramScope = histogramScope;
+        scatterXVariable = primaryScatterXVariable;
+        scatterYVariable = primaryScatterYVariable;
+        vennCollectionA = primaryVennCollectionA;
+        vennCollectionB = primaryVennCollectionB;
+        pieDataSource = primaryPieDataSource;
+        histogramDataSource = primaryHistogramDataSource;
+        histogramScope = primaryHistogramScope;
+        selectedNodesDraft = primaryViewId === 'selected' ? new Set(selectedNodes) : primarySelectedNodesDraft;
         transform = primaryTransform;
+        vennTransform = primaryVennTransform;
+        scatterTransform = primaryScatterTransform;
         currentMousePos = primaryMousePos;
         if (primaryLabel && document.getElementById('current-view-label')) {
             document.getElementById('current-view-label').textContent = primaryLabel;
         }
         drawCurrentView();
         secondaryRenderInProgress = false;
+        if (secondaryRenderQueued) queueSecondaryRender();
     }
 
     function drawCurrentView() {
@@ -20373,6 +20921,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     // This function takes an array of target nodes and updates the current selection state. It also manages the selection history for undo functionality, updates the info box with details about the selected nodes, and shows buttons for creating or modifying collections based on the selection. The function can be triggered by various user actions, such as clicking on nodes, using the legend, or performing a search.
     function selectNodes(targets, isLegendClick = false, query = "", searchSummary = null, preserveProteinInfoHistory = false, historyMeta = null) {
         console.log(`function selectNodes(targets: [not displaying to save console space], isLegendClick: ${isLegendClick}, query: ${query})`);
+        if (proteinInfoZoomHotkeyState) proteinInfoZoomHotkeyState.invalidated = true;
+        secondaryProteinZoomPreviousTransform = null;
         const previousSelection = new Set(getEffectiveSelectedNodesSet() || new Set());
         undoBegin('selection', { ids: Array.from(previousSelection) });
         const nextSelection = new Set(targets.map(n => n.id));
@@ -21329,6 +21879,17 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         };
 
         targetNodes.forEach(applyStyle);
+        if (secondarySubData?.nodes?.length) {
+            const styledById = new Map(targetNodes.map(node => [node.id, node]));
+            secondarySubData.nodes.forEach(node => {
+                const styled = styledById.get(node.id);
+                if (!styled) return;
+                node.r = styled.r;
+                node.col = styled.col;
+                node.borderCol = styled.borderCol;
+                node.borderWidth = styled.borderWidth;
+            });
+        }
         customColourTimer?.mark('node styling');
         uploadNodeGpuStyles(targetNodes, mode, cRange, sRange, eRange, monoCol);
         customColourTimer?.mark('GPU style upload');
@@ -21337,6 +21898,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         customColourTimer?.mark('legend rebuild');
         refreshInfoBoxFromSelection();
         draw();
+        if (splitViewOpen && secondarySubData?.nodes?.length && !renderingSecondaryView) renderSecondaryView();
         customColourTimer?.end();
     }
 
@@ -23408,7 +23970,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             if (!window.__stringscapeSuppressNextBuildHistory) aiRecordBuildNetworkHistory(threshold, 'Human');
             window.__stringscapeSuppressNextBuildHistory = false;
             scatterEigenCacheKey = null;
-            nodes = []; links = []; window.nodes = nodes; window.links = links; nodeMap.clear(); document.getElementById('startBtn').style.display = 'none'; document.getElementById('progress-wrapper').style.display = 'block'; document.getElementById('pauseBtn').style.display = 'block'; document.getElementById('physBtn').style.display = 'block';
+            nodes = []; links = []; window.nodes = nodes; window.links = links; nodeMap.clear(); document.getElementById('startBtn').style.display = 'none'; document.getElementById('progress-wrapper').style.display = 'block'; document.getElementById('pauseBtn').style.display = 'block';
             let processedLinks = new Set(), startTime = Date.now(); isBuilding = true; isSettling = false; updateViewMenu();
             let lastBuildRefreshAt = startTime;
             let lastBuildStyleRefreshAt = startTime;
@@ -23462,6 +24024,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     function deselectNodes(historyMeta = null) { 
         console.log("function deselectNodes()");
+        if (proteinInfoZoomHotkeyState) proteinInfoZoomHotkeyState.invalidated = true;
+        secondaryProteinZoomPreviousTransform = null;
         if (currentViewId === 'Embeddings' && !embeddingSelectionClearIntent) return;
         const hadSelection = getEffectiveSelectedNodesSet().size > 0;
         if (hadSelection) undoBegin('selection', { ids: Array.from(getEffectiveSelectedNodesSet()) });
@@ -23522,6 +24086,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     document.getElementById('split-view-btn')?.addEventListener('click', () => {
         setSplitView(!splitViewOpen);
     });
+    const splitViewButton = document.getElementById('split-view-btn');
+    const rightPanel = document.getElementById('right-panel');
+    if (splitViewButton && rightPanel && splitViewButton.parentElement !== rightPanel) {
+        rightPanel.appendChild(splitViewButton);
+    }
     document.getElementById('secondary-left-panel-toggle')?.addEventListener('click', () => {
         secondaryPanelMinimized = !secondaryPanelMinimized;
         document.getElementById('secondary-left-panel')?.classList.toggle('minimized', secondaryPanelMinimized);
@@ -23544,15 +24113,350 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         draggingSplitDivider = false;
         splitDivider.releasePointerCapture(event.pointerId);
     });
+
+    function getSecondaryGesturePoint(event) {
+        const rect = secondaryCanvas.getBoundingClientRect();
+        const screenPoint = [event.clientX - rect.left, event.clientY - rect.top];
+        if (secondaryViewId === 'Scatter Plot') return secondaryScatterTransform.invert(screenPoint);
+        if (secondaryViewId === 'Venn Diagram') return secondaryVennTransform.invert(screenPoint);
+        return secondaryTransform.invert(screenPoint);
+    }
+
+    function finishSecondaryGesture() {
+        if (!secondaryGestureActive) return false;
+        const points = isLassoMode ? lassoPoints : brushPoints;
+        const selectedForView = secondaryViewId === 'selected' ? (secondarySubData?.nodes || []) : nodes;
+        let matches = [];
+        if (points.length >= 1) {
+            if (secondaryViewId === 'Scatter Plot' && scatterLayoutState?.points) {
+                matches = scatterLayoutState.points
+                    .filter(point => isLassoMode
+                        ? d3.polygonContains(points, [point.x, point.y])
+                        : points.some(([x, y]) => Math.hypot(point.x - x, point.y - y) <= brushRadius))
+                    .map(point => point.node);
+            } else if (secondaryViewId === 'Venn Diagram' && window.vennDiagramState?.nodeBasePos) {
+                matches = Array.from(window.vennDiagramState.nodeBasePos.entries())
+                    .filter(([, point]) => isLassoMode
+                        ? d3.polygonContains(points, [point.x, point.y])
+                        : points.some(([x, y]) => Math.hypot(point.x - x, point.y - y) <= brushRadius))
+                    .map(([id]) => nodeMap.get(id))
+                    .filter(Boolean);
+            } else {
+                matches = selectedForView.filter(node => isLassoMode
+                    ? d3.polygonContains(points, [node.x, node.y])
+                    : points.some(([x, y]) => Math.hypot(node.x - x, node.y - y) <= brushRadius));
+            }
+        }
+        const savedViewId = currentViewId;
+        const savedSubData = activeSubData;
+        currentViewId = secondaryViewId;
+        activeSubData = secondaryViewId === 'selected' ? secondarySubData : savedSubData;
+        if (matches.length) applySearchLogic(matches, isLassoMode ? 'Secondary Lasso Selection' : 'Secondary Brush Selection');
+        else if (points.length) deselectNodes({ actor: 'Human' });
+        activeSubData = savedSubData;
+        currentViewId = savedViewId;
+        lassoPoints = [];
+        brushPoints = [];
+        secondaryGestureActive = false;
+        suppressNextSecondaryCanvasClick = true;
+        draw();
+        return true;
+    }
+
+    secondaryCanvas?.addEventListener('mousedown', event => {
+        if (!splitViewOpen || event.button !== 0 || (!isLassoMode && !isBrushMode)) return;
+        secondaryGestureActive = true;
+        const point = getSecondaryGesturePoint(event);
+        if (isLassoMode) lassoPoints = [point];
+        else brushPoints = [point];
+        event.preventDefault();
+    });
+    secondaryCanvas?.addEventListener('mousemove', event => {
+        if (!secondaryGestureActive) return;
+        const point = getSecondaryGesturePoint(event);
+        if (isLassoMode) lassoPoints.push(point);
+        else brushPoints.push(point);
+        draw();
+    });
     secondaryCanvas?.addEventListener('click', event => {
-        if (!splitViewOpen || secondaryViewId !== 'base') return;
+        if (suppressNextSecondaryCanvasClick) {
+            suppressNextSecondaryCanvasClick = false;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            return;
+        }
+        if (!splitViewOpen || (secondaryViewId !== 'base' && secondaryViewId !== 'selected')) return;
         const rect = secondaryCanvas.getBoundingClientRect();
         const point = secondaryTransform.invert([
             event.clientX - rect.left,
             event.clientY - rect.top
         ]);
-        const node = nodes.find(candidate => Math.hypot(candidate.x - point[0], candidate.y - point[1]) <= (candidate.r || 5) + 8);
-        if (node) selectNodes([node], false, 'Secondary canvas selection');
+        const drawNodes = secondaryViewId === 'selected' ? (secondarySubData?.nodes || []) : nodes;
+        const node = drawNodes.find(candidate => Math.hypot(candidate.x - point[0], candidate.y - point[1]) <= (candidate.r || 5) + 8);
+        if (node) {
+            applySecondaryNodeSelection(node);
+        } else {
+            selectedNodes = new Set();
+            selectedNodesDraft = new Set();
+            secondaryProteinZoomPreviousTransform = null;
+            refreshInfoBoxFromSelection();
+            updateViewMenu();
+            draw();
+        }
+    });
+
+    secondaryCanvas?.addEventListener('contextmenu', event => {
+        if (!splitViewOpen) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (secondaryGestureActive || isLassoMode || isBrushMode) {
+            secondaryGestureActive = false;
+            lassoPoints = [];
+            brushPoints = [];
+            disableBrushAndLassoSelection(false);
+            secondaryCanvas.style.cursor = 'grab';
+            draw();
+        }
+    });
+
+    secondaryCanvas?.addEventListener('mousedown', event => {
+        if (!splitViewOpen || event.button !== 0 || (secondaryViewId !== 'pie_chart' && secondaryViewId !== 'histogram')) return;
+        const rect = secondaryCanvas.getBoundingClientRect();
+        const mx = event.clientX - rect.left;
+        const my = event.clientY - rect.top;
+        const buttons = secondaryViewId === 'pie_chart' ? secondaryInteractionState.pieButtons : secondaryInteractionState.histogramButtons;
+        const onButton = buttons.some(item => mx >= item.x && mx <= item.x + item.width && my >= item.y && my <= item.y + item.height);
+        if (onButton) return;
+
+        chartDragCanvas = secondaryCanvas;
+        isChartDragSelecting = true;
+        chartDragType = secondaryViewId === 'pie_chart' ? 'pie' : 'histogram';
+        if (!event.shiftKey) {
+            selectedWedges.clear();
+            selectedHistogramBins.clear();
+        }
+        if (chartDragType === 'histogram') {
+            const bin = secondaryInteractionState.histogramBins.find(item => mx >= item.x && mx <= item.x + item.width && my >= item.y && my <= item.y + item.height);
+            if (bin) applyHistogramSelectionsFromSet(new Set([bin.x0]));
+            commitSecondaryGraphSelection();
+        } else {
+            const centerX = secondaryCanvas.width / 2;
+            const centerY = secondaryCanvas.height / 2;
+            const angle = Math.atan2(my - centerY, mx - centerX);
+            const distance = Math.hypot(mx - centerX, my - centerY);
+            if (distance <= Math.min(secondaryCanvas.width, secondaryCanvas.height) / 3.5) {
+                const normalizedAngle = angle < 0 ? angle + 2 * Math.PI : angle;
+                const wedge = secondaryInteractionState.pieWedges.find(item => normalizedAngle >= item.startAngle && normalizedAngle <= item.endAngle);
+                if (wedge) applyPieSelectionsFromSet(new Set([wedge.label]));
+                commitSecondaryGraphSelection();
+            }
+        }
+        suppressNextChartClick = true;
+        draw();
+        event.preventDefault();
+    });
+
+    secondaryCanvas?.addEventListener('click', event => {
+        if (!splitViewOpen || secondaryViewId === 'base') return;
+        const rect = secondaryCanvas.getBoundingClientRect();
+        const mx = event.clientX - rect.left;
+        const my = event.clientY - rect.top;
+
+        if (suppressNextChartClick && (secondaryViewId === 'pie_chart' || secondaryViewId === 'histogram')) {
+            suppressNextChartClick = false;
+            return;
+        }
+
+        if (secondaryViewId === 'Scatter Plot' && scatterLayoutState?.points) {
+            const ux = secondaryScatterTransform.invertX(mx);
+            const uy = secondaryScatterTransform.invertY(my);
+            const zoomK = Math.max(secondaryScatterTransform.k || 1, 1e-6);
+            const clicked = scatterLayoutState.points.find(point => {
+                const dx = ux - point.x;
+                const dy = uy - point.y;
+                const hitRadius = point.r + (2 / zoomK);
+                return dx * dx + dy * dy <= hitRadius * hitRadius;
+            });
+            if (clicked) {
+                if (isAdditiveMode || isSubtractMode || isIntersectMode) applySearchLogic([clicked.node], `Scatter Node: ${clicked.id}`);
+                else selectNodes([clicked.node], false, `Scatter Node: ${clicked.id}`);
+            } else {
+                deselectNodes();
+            }
+            draw();
+            return;
+        }
+
+        if (secondaryViewId === 'Venn Diagram' && window.vennDiagramState) {
+            const ux = mx;
+            const uy = my;
+            const state = window.vennDiagramState;
+            const clickedNode = state.nodes.find(node => {
+                const dx = ux - node.x;
+                const dy = uy - node.y;
+                return dx * dx + dy * dy <= (node.r + 2) * (node.r + 2);
+            });
+            if (clickedNode) {
+                const nodeObj = nodeMap.get(clickedNode.id);
+                if (nodeObj) applyVennSelectionIds(new Set([nodeObj.id]));
+            } else {
+                const wx = secondaryVennTransform.invertX(ux);
+                const wy = secondaryVennTransform.invertY(uy);
+                const section = classifyVennPointFromCircles(state.circles, wx, wy);
+                if (section) applyVennSelectionIds(state.nodeSets[section] || new Set());
+                else {
+                    vennSelectedNodes.clear();
+                    refreshInfoBoxFromSelection();
+                }
+            }
+            draw();
+            commitSecondaryGraphSelection();
+            return;
+        }
+
+        if (secondaryViewId === 'pie_chart') {
+            const button = secondaryInteractionState.pieButtons.find(item => mx >= item.x && mx <= item.x + item.width && my >= item.y && my <= item.y + item.height);
+            if (button) {
+                if (button.action === 'network') secondaryPieDataSource = 'network';
+                if (button.action === 'selected') secondaryPieDataSource = 'selected';
+                selectedWedges.clear();
+                hideChartCollectionMenu();
+                draw();
+                return;
+            }
+            const centerX = secondaryCanvas.width / 2;
+            const centerY = secondaryCanvas.height / 2;
+            const radius = Math.min(secondaryCanvas.width, secondaryCanvas.height) / 3.5;
+            const angle = Math.atan2(my - centerY, mx - centerX);
+            const distance = Math.hypot(mx - centerX, my - centerY);
+            if (distance <= radius) {
+                const normalizedAngle = angle < 0 ? angle + 2 * Math.PI : angle;
+                const wedge = secondaryInteractionState.pieWedges.find(item => normalizedAngle >= item.startAngle && normalizedAngle <= item.endAngle);
+                if (wedge) {
+                    if (isAdditiveMode || isSubtractMode || isIntersectMode) {
+                        if (selectedWedges.has(wedge.label)) selectedWedges.delete(wedge.label);
+                        else selectedWedges.add(wedge.label);
+                    } else {
+                        selectedWedges = new Set([wedge.label]);
+                    }
+                    draw();
+                    commitSecondaryGraphSelection();
+                }
+            }
+            return;
+        }
+
+        if (secondaryViewId === 'histogram') {
+            const button = secondaryInteractionState.histogramButtons.find(item => mx >= item.x && mx <= item.x + item.width && my >= item.y && my <= item.y + item.height);
+            if (button) {
+                if (button.action === 'full') {
+                    secondaryHistogramScope = 'full';
+                    secondaryHistogramDataSource = 'network';
+                } else if (button.action === 'selected') {
+                    secondaryHistogramScope = 'selected';
+                    secondaryHistogramDataSource = 'selected';
+                }
+                hideChartCollectionMenu();
+                draw();
+                return;
+            }
+            const bin = secondaryInteractionState.histogramBins.find(item => mx >= item.x && mx <= item.x + item.width && my >= item.y && my <= item.y + item.height);
+            selectedHistogramBins = bin
+                ? (isAdditiveMode || isSubtractMode || isIntersectMode
+                    ? new Set(selectedHistogramBins).has(bin.x0)
+                        ? new Set([...selectedHistogramBins].filter(x0 => x0 !== bin.x0))
+                        : new Set([...selectedHistogramBins, bin.x0])
+                    : new Set([bin.x0]))
+                : new Set();
+            draw();
+            commitSecondaryGraphSelection();
+        }
+    });
+
+    secondaryCanvas?.addEventListener('mousemove', event => {
+        if (!splitViewOpen) return;
+        const rect = secondaryCanvas.getBoundingClientRect();
+        const mx = event.clientX - rect.left;
+        const my = event.clientY - rect.top;
+
+        if (isLassoMode || isBrushMode) {
+            secondaryCanvas.style.setProperty('cursor', 'crosshair', 'important');
+            return;
+        }
+
+        if (isChartDragSelecting && chartDragCanvas === secondaryCanvas && chartDragType === 'histogram') {
+            const bin = secondaryInteractionState.histogramBins.find(item => mx >= item.x && mx <= item.x + item.width && my >= item.y && my <= item.y + item.height);
+            if (bin && !selectedHistogramBins.has(bin.x0)) {
+                applyHistogramSelectionsFromSet(new Set([...selectedHistogramBins, bin.x0]));
+                draw();
+            }
+            return;
+        }
+
+        if (secondaryViewId === 'pie_chart' || secondaryViewId === 'histogram') {
+            const items = secondaryViewId === 'pie_chart' ? secondaryInteractionState.pieButtons : secondaryInteractionState.histogramButtons;
+            const bins = secondaryViewId === 'histogram' ? secondaryInteractionState.histogramBins : [];
+            const overInteractive = items.some(item => mx >= item.x && mx <= item.x + item.width && my >= item.y && my <= item.y + item.height)
+                || bins.some(item => mx >= item.x && mx <= item.x + item.width && my >= item.y && my <= item.y + item.height);
+            secondaryCanvas.style.cursor = overInteractive ? 'pointer' : 'grab';
+            return;
+        }
+
+        if (secondaryViewId === 'Scatter Plot' && scatterLayoutState?.points) {
+            const ux = secondaryScatterTransform.invertX(mx);
+            const uy = secondaryScatterTransform.invertY(my);
+            const zoomK = Math.max(secondaryScatterTransform.k || 1, 1e-6);
+            const hovered = scatterLayoutState.points.find(point => {
+                const dx = ux - point.x;
+                const dy = uy - point.y;
+                const hitRadius = point.r + (2 / zoomK);
+                return dx * dx + dy * dy <= hitRadius * hitRadius;
+            });
+            secondaryCanvas.style.cursor = hovered ? 'pointer' : 'grab';
+            return;
+        }
+
+        if (secondaryViewId === 'Venn Diagram' && window.vennDiagramState) {
+            const ux = mx;
+            const uy = my;
+            const state = window.vennDiagramState;
+            const node = state.nodes.find(item => Math.hypot(ux - item.x, uy - item.y) <= item.r + 2);
+            const section = classifyVennPointFromCircles(state.circles, secondaryVennTransform.invertX(ux), secondaryVennTransform.invertY(uy));
+            secondaryCanvas.style.cursor = node || section ? 'pointer' : 'grab';
+            const nextNodeId = node ? node.id : null;
+            const nextSection = node ? null : section;
+            if (hoverVennNodeId !== nextNodeId || hoverVennSection !== nextSection) {
+                hoverVennNodeId = nextNodeId;
+                hoverVennSection = nextSection;
+                renderSecondaryView();
+            }
+            return;
+        }
+
+        const [x, y] = secondaryTransform.invert([mx, my]);
+        const drawNodes = secondaryViewId === 'base' ? nodes : (secondarySubData?.nodes || []);
+        const found = drawNodes.find(node => Math.hypot(node.x - x, node.y - y) < (node.r || 5) * Math.max(1, 5 - 2 * secondaryTransform.k));
+        secondaryCanvas.style.cursor = found ? 'pointer' : (isDragMode ? 'crosshair' : 'grab');
+        if (found) {
+            hoveredNodeCanvas = secondaryCanvas;
+            if (!hoveredNode || hoveredNode.id !== found.id) {
+                hoveredNode = found;
+                scheduleNodeHoverTooltip(found);
+            }
+        } else if (!isTooltipHovered) {
+            hoveredNode = null;
+            hoveredNodeCanvas = canvas;
+            hideNodeHoverTooltip();
+        }
+    });
+
+    secondaryCanvas?.addEventListener('mouseleave', () => {
+        secondaryCanvas.style.setProperty('cursor', (isLassoMode || isBrushMode) ? 'crosshair' : 'grab', 'important');
+        if (!isTooltipHovered) {
+            hoveredNode = null;
+            hoveredNodeCanvas = canvas;
+            hideNodeHoverTooltip();
+        }
     });
     document.getElementById('nodeSizeSlider').oninput = () => {
         nodes.forEach(node => delete node._ssSize);
@@ -23753,19 +24657,30 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     };
     applyTheme(currentColorTheme, currentUiMode, { persist: false });
     updateBackgroundControlsUI();
-    document.getElementById('physBtn').onclick = (e) => togglePhysics(!physicsEnabled, 'physBtn');
+    document.getElementById('fullNetworkPhysBtn').onclick = () => togglePhysics(!fullNetworkPhysicsEnabled, 'full-network-button', 'full');
+    document.getElementById('subnetworkPhysBtn').onclick = () => togglePhysics(!subnetworkPhysicsEnabled, 'subnetwork-button', 'subnetwork');
     document.getElementById('stopPhysBtn').onclick = (e) => {
         isPhysicsStopped = !isPhysicsStopped;
         if (isPhysicsStopped) {
             clearFullNetworkPostBuildCooldown();
             physicsAutoPlayFromPause = false;
-            const sim = currentViewId === 'base' ? simulation : activeSubData?.simulation;
-            if (sim) sim.stop();
+            simulation?.stop();
+            activeSubData?.simulation?.stop();
+            secondarySubData?.simulation?.stop();
+            fullNetworkPhysicsEnabled = false;
+            subnetworkPhysicsEnabled = false;
             physicsEnabled = false;
         }
         updatePhysicsControlButtons();
         if (isPhysicsStopped) {
-            togglePhysics(false, 'stop-physics');
+            togglePhysics(false, 'stop-physics', 'full', 'Human', false);
+            aiRecordSetPhysicsHistory('Human', 'both', false);
+        } else {
+            fullNetworkPhysicsEnabled = true;
+            subnetworkPhysicsEnabled = true;
+            syncActivePhysicsState();
+            if (simulation) simulation.alpha(+document.getElementById('alphaSlider')?.value || 0.5).restart();
+            if (activeSubData?.simulation) activeSubData.simulation.alpha(+document.getElementById('alphaSlider')?.value || 0.5).restart();
         }
         updatePhysicsRuntimeLabel();
     };
