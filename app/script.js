@@ -145,8 +145,10 @@
     window.fullAdjacency = fullAdjacency;
     window.proteinMetadata = proteinMetadata;
     window.aliasData = aliasData;
-    let isPaused = false, physicsEnabled = true, fullNetworkPhysicsEnabled = true, subnetworkPhysicsEnabled = true, isPhysicsStopped = false, mergedPhysicsResumeAlphaPending = false, selectedNodes = new Set(), selectedWedges = new Set(), selectedHistogramBins = new Set(), hoverBin = null;
+    let isPaused = false, physicsEnabled = true, fullNetworkPhysicsEnabled = true, subnetworkPhysicsEnabled = true, isPhysicsStopped = false, mergedPhysicsResumeAlphaPending = false, selectedNodes = new Set(), selectedLinks = new Set(), selectionTargetMode = 'nodes', selectedWedges = new Set(), selectedHistogramBins = new Set(), hoverBin = null;
     let selectionHistory = [], pathNodes = new Set(), pathEdges = new Set();
+    let linkSelectionHistory = [];
+    let linkColorStatsCache = new Map();
     let shortestPathDisplayMode = 'none';
     let shortestPathGroupsToolOpen = false;
     let shortestPathGroup1Ids = new Set();
@@ -392,6 +394,8 @@
         { type: 'function', function: { name: 'calculate_math', description: 'Solve math.', parameters: { type: 'object', properties: { eq: { type: 'string' } } } } },
         { type: 'function', function: { name: 'Search_and_select', description: 'Searches for and selects nodes. Put terms in quote marks (e.g. "lipid synthesis")', parameters: { type: 'object', properties: { query: { type: 'string' }, scope: { type: 'string', description: 'all|layer|centrality|annotation|localization|size or var::<file>::<variable>' } }, required: ['query'] } } },
         { type: 'function', function: { name: 'Select_nodes', description: 'Selects specific nodes by ID.', parameters: { type: 'object', properties: { node_ids: { type: 'array', items: { type: 'string' }, description: 'List of node IDs to select.' }, mode: { type: 'string', description: 'replace|add|subtract|intersect|invert' }, animate: { type: 'boolean' } }, required: ['node_ids'] } } },
+        { type: 'function', function: { name: 'Set_selection_target', description: 'Sets whether nodes or links are selected. If nodes are selected, switching the target to "links" causes the links between the selected nodes to become selected and the nodes to be deselected. If links are selected, switching the toggle to "nodes" causes the nodes at the ends of selected links to become selected and the links to become deselected. ', parameters: { type: 'object', properties: { target: { type: 'string', enum: ['nodes', 'links'] }, animate: { type: 'boolean' } }, required: ['target'] } } },
+        { type: 'function', function: { name: 'Select_links', description: 'Selects links by their undirected endpoint key, for example proteinA-proteinB.', parameters: { type: 'object', properties: { link_ids: { type: 'array', items: { type: 'string' } }, mode: { type: 'string', enum: ['replace', 'add', 'subtract', 'intersect'] }, animate: { type: 'boolean' } }, required: ['link_ids'] } } },
         { type: 'function', function: { name: 'Invert_selection', description: 'Inverts the current node selection: selected nodes become deselected and deselected active nodes become selected.' } },
         { type: 'function', function: { name: 'Select_neighbours', description: 'Expands from the currently selected nodes to include connected neighbours (same behavior as pressing the + hotkey).', parameters: { type: 'object', properties: { depth: { type: 'number', description: 'How many expansion steps to apply (default 1).' }, animate: { type: 'boolean' } } } } },
         { type: 'function', function: { name: 'Get_variable_range', description: 'Gets the numerical range for a variable key.', parameters: { type: 'object', properties: { variable_key: { type: 'string' } }, required: ['variable_key'] } } },
@@ -565,6 +569,8 @@
         StringScape API (ss is already available; import stringscape as ss is also supported). Every method returns a dictionary containing at least {"status": "success" | "warning" | "error"}:
         - ss.search_and_select(query, scope='all', animate=False) -> Returns {"status", "query", "scope", "matched_count", "selected_node_ids", "message"}
         - ss.select(node_ids, mode='replace', animate=False) -> Returns {"status", "mode", "requested_node_ids", "selected_node_ids", "selected_count", "missing_node_ids", "message"} (modes: replace, add, subtract, intersect, invert)
+        - ss.set_selection_target(target='nodes'|'links', animate=False) -> Sets whether nodes or links are selected. If nodes are selected, switching the target to "links" causes the links between the selected nodes to become selected and the nodes to be deselected. If links are selected, switching the toggle to "nodes" causes the nodes at the ends of selected links to become selected and the links to become deselected. 
+        - ss.select_links(link_ids, mode='replace', animate=False) -> Selects links by undirected endpoint key.
         - ss.invert_selection(animate=False) -> Returns {"status", "selected_node_ids", "selected_count", "message"}
         - ss.deselect_all() -> Returns {"status": "success", "selected_count": 0, "selected_node_ids": []}
         - ss.select_neighbors(node_id, depth=1, animate=False) -> Returns {"status", "node_id", "depth", "neighbor_node_ids", "selected_node_ids", "message"}
@@ -1255,12 +1261,18 @@
         ]);
     }
 
-    function aiRecordSelectionHistory(nodeIds, actor = 'Human') {
+    function aiRecordSelectionHistory(nodeIds, actor = 'Human', mode = 'replace') {
         const ids = Array.isArray(nodeIds) ? nodeIds.map(id => String(id)).filter(Boolean) : [];
         if (!ids.length) return;
-        aiAppendActionHistory(actor, 'Selected node(s)', [
-            `ss.select(${aiFormatPythonStringList(ids)}, mode="replace", animate=False)`
+        const selectionMode = ['replace', 'add', 'subtract', 'intersect', 'invert'].includes(mode) ? mode : 'replace';
+        aiAppendActionHistory(actor, `Select ${ids.length} node${ids.length === 1 ? '' : 's'} (${selectionMode})`, [
+            `ss.select(${aiFormatPythonStringList(ids)}, mode=${aiFormatPythonSingleQuotedString(selectionMode)}, animate=False)`
         ]);
+    }
+
+    function aiSelectionHistoryMeta(nodeIds, actor = 'Human') {
+        const mode = isAdditiveMode ? 'add' : isSubtractMode ? 'subtract' : isIntersectMode ? 'intersect' : 'replace';
+        return { actor, nodeIds: Array.from(nodeIds || [], String), mode };
     }
 
     function aiRecordDeselectHistory(actor = 'Human') {
@@ -1407,6 +1419,18 @@
     function aiRecordColorLinksByHistory(linkVariableKey, actor = 'Human') {
         aiAppendActionHistory(actor, `Set color links by to ${linkVariableKey}`, [
             `ss.color_links_by(${aiFormatPythonSingleQuotedString(linkVariableKey)})`
+        ]);
+    }
+
+    function aiRecordSelectionTargetHistory(target, actor = 'Human') {
+        aiAppendActionHistory(actor, `Set selection target to ${target}`, [
+            `ss.set_selection_target(${aiFormatPythonSingleQuotedString(target)})`
+        ]);
+    }
+
+    function aiRecordSelectLinksHistory(linkIds, mode = 'replace', actor = 'Human') {
+        aiAppendActionHistory(actor, `Select ${linkIds.length} link${linkIds.length === 1 ? '' : 's'} (${mode})`, [
+            `ss.select_links(${aiFormatPythonStringList(linkIds)}, mode=${aiFormatPythonSingleQuotedString(mode)})`
         ]);
     }
 
@@ -1829,6 +1853,9 @@
     }
 
     function aiBuildPythonInstructionsText() {
+        // Keep the copyable instructions identical to the system prompt sent to the AI.
+        return AI_PYTHON_SCRIPT_INSTRUCTIONS_TEXT;
+
         const lines = [];
         lines.push('You can write Python scripts that run inside StringScape using Pyodide. These scripts can perfom actions in the app and analyze uploaded data.');
         lines.push('');
@@ -3164,8 +3191,38 @@
                         : mode === 'intersect' ? new Set([...selectedIds].filter(id => foundIds.has(id)))
                         : new Set(activeNodes().map(node => String(node.id)).filter(id => !selectedIds.has(id)));
                     const next = activeNodes().filter(node => nextIds.has(String(node.id)));
-                    selectNodes(next, false, 'Python API selection', null, false, { actor: 'AI' }); queueDraw(animate);
+                    selectNodes(next, false, 'Python API selection', null, false, { actor: 'AI', nodeIds: found.map(node => String(node.id)), mode }); queueDraw(animate);
                     return result(found.length || mode === 'invert' ? 'success' : 'warning', { mode, requested_node_ids: ids, selected_node_ids: selected(), selected_count: selected().length, missing_node_ids: ids.filter(id => !foundIds.has(id)) });
+                }
+                if (method === 'set_selection_target') {
+                    const target = normal(args.target || args.mode || '');
+                    if (!['nodes', 'links'].includes(target)) return result('warning', { target, message: 'target must be nodes or links.' });
+                    setSelectionTargetMode(target);
+                    aiRecordSelectionTargetHistory(target, 'AI');
+                    queueDraw(animate);
+                    return result('success', { target });
+                }
+                if (method === 'select_links') {
+                    const rawIds = args.link_ids ?? args.link_id ?? [];
+                    const requestedIds = (Array.isArray(rawIds) ? rawIds : [rawIds]).filter(id => id != null).map(String);
+                    const mode = normal(args.mode || 'replace');
+                    if (!['replace', 'add', 'subtract', 'intersect'].includes(mode)) return result('warning', { mode, message: 'mode must be replace, add, subtract, or intersect.' });
+                    if (selectionTargetMode !== 'links') {
+                        setSelectionTargetMode('links');
+                        aiRecordSelectionTargetHistory('links', 'AI');
+                    }
+                    const available = new Map(getActiveGraphLinks().map(link => [getLinkEdgeKey(link), link]));
+                    const matchedIds = requestedIds.filter(id => available.has(id));
+                    const matched = new Set(matchedIds);
+                    if (mode === 'replace') selectedLinks = matched;
+                    else if (mode === 'add') matched.forEach(id => selectedLinks.add(id));
+                    else if (mode === 'subtract') matched.forEach(id => selectedLinks.delete(id));
+                    else selectedLinks = new Set([...selectedLinks].filter(id => matched.has(id)));
+                    aiRecordSelectLinksHistory(matchedIds, mode, 'AI');
+                    refreshInfoBoxFromSelection('Python API link selection');
+                    updateViewMenu();
+                    queueDraw(animate);
+                    return result(matchedIds.length ? 'success' : 'warning', { mode, requested_link_ids: requestedIds, selected_link_ids: [...selectedLinks], selected_count: selectedLinks.size, missing_link_ids: requestedIds.filter(id => !available.has(id)) });
                 }
                 if (method === 'invert_selection') return invertSelection('AI', animate);
                 if (method === 'select_neighbors') {
@@ -4625,6 +4682,8 @@ class _StringScapeAPI:
     def search_and_select(self, query, scope='all', animate=False): return self._call('search_and_select', query=query, scope=scope, animate=animate)
     def select(self, node_ids, mode='replace', animate=False):
         return self._call('select', node_ids=[node_ids] if isinstance(node_ids, str) else list(node_ids), mode=mode, animate=animate)
+    def set_selection_target(self, target, animate=False): return self._call('set_selection_target', target=target, animate=animate)
+    def select_links(self, link_ids, mode='replace', animate=False): return self._call('select_links', link_ids=[link_ids] if isinstance(link_ids, str) else list(link_ids), mode=mode, animate=animate)
     def invert_selection(self, animate=False): return self._call('invert_selection', animate=animate)
     def select_neighbors(self, node_id, depth=1, animate=False): return self._call('select_neighbors', node_id=node_id, depth=depth, animate=animate)
     def list_variables(self): return self._call('list_variables')
@@ -8227,10 +8286,23 @@ self.onmessage = async (event) => {
         return (k - zoomStart) / (zoomEnd - zoomStart);
     }
 
+    function getLinkVariableColor(link, mode, fallbackColor) {
+        if (!mode?.startsWith('linkvar::')) return fallbackColor;
+        const variable = mode.slice('linkvar::'.length);
+        const stats = getLinkVariableStats(variable);
+        const rawValue = link[variable] !== undefined ? link[variable] : getLinkVariableValue(link, variable);
+        if (stats.continuous) {
+            const numericValue = String(rawValue ?? '').trim() === '' || !Number.isFinite(Number(rawValue)) ? 0 : Number(rawValue);
+            return d3.interpolateViridis((numericValue - stats.min) / ((stats.max - stats.min) || 1));
+        }
+        return d3.scaleOrdinal(d3.schemeTableau10).domain(stats.categories)(String(rawValue ?? '').trim() || 'N/A');
+    }
+
     function computeLinkRenderStyle(link, options = {}) {
         const {
             isPath = false,
             isHigh = false,
+            isSelected = false,
             isSearching = false,
             visibilityMode = 'all',
             linkMode = 'score',
@@ -8240,9 +8312,9 @@ self.onmessage = async (event) => {
 
         if (isPath) {
             return {
-                alpha: 1,
+                alpha: selectionTargetMode === 'links' ? (isSelected ? 0.9 : 0.05) : 1,
                 color: '#ff4444',
-                width: 4
+                width: selectionTargetMode === 'links' && isSelected ? 4 : 4
             };
         }
 
@@ -8260,18 +8332,27 @@ self.onmessage = async (event) => {
             color = getScoreLinkGreyColor(link.value);
             width = (Math.sqrt(link.value) / 8) * (isHigh ? 2 : 1);
         } else {
-            color = linkBaseColor;
+            color = getLinkVariableColor(link, linkMode, linkBaseColor);
             width = 1 * (isHigh ? 2 : 1);
         }
 
         if (link._ssColor) color = link._ssColor;
         if (Number.isFinite(link._ssOpacity)) alpha *= link._ssOpacity;
+        if (Number.isFinite(link._ssWidth)) width = link._ssWidth;
         width = Number.isFinite(link._ssWidth) ? link._ssWidth : width * linkWidthMultiplier;
 
+        const normalWidth = Number.isFinite(width) && width > 0 ? width : 1;
+        if (selectionTargetMode === 'links') {
+            return {
+                alpha: isSelected ? 0.9 : 0.05,
+                color,
+                width: normalWidth * (isSelected ? 1 : 1)
+            };
+        }
         return {
             alpha: Math.max(0, Math.min(1, alpha)),
             color,
-            width: Number.isFinite(width) && width > 0 ? width : 1
+            width: normalWidth
         };
     }
 
@@ -8342,10 +8423,12 @@ self.onmessage = async (event) => {
 
         activeLinks.forEach(l => {
             const isPath = pathEdges.has(getUndirectedEdgeKey(l.source.id, l.target.id));
-            const isHigh = isSearching && (effectiveSelection.has(l.source.id) || effectiveSelection.has(l.target.id));
+            const isSelected = selectionTargetMode === 'links' && selectedLinks.has(getLinkEdgeKey(l));
+            const isHigh = isSelected || (isSearching && (effectiveSelection.has(l.source.id) || effectiveSelection.has(l.target.id)));
             const style = computeLinkRenderStyle(l, {
                 isPath,
                 isHigh,
+                isSelected,
                 isSearching,
                 visibilityMode,
                 linkMode,
@@ -9299,6 +9382,9 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     // This function retrieves the available options for the scatter plot variable selector, including built-in options
     function getScatterVariableOptions() {
+        if (selectionTargetMode === 'links') {
+            return getLinkVariableOptions(true);
+        }
         const opts = [
             { value: 'centrality', label: 'Centrality' },
             { value: 'size', label: 'Protein Size' },
@@ -9335,8 +9421,41 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         return opts;
     }
 
+    function getLinkVariableOptions(continuousOnly = false) {
+        const options = [];
+        const variables = Array.from(new Set(['combined_score', ...interactionLinkLabelHeaders]));
+        variables.forEach(variable => {
+            const continuous = variable === 'combined_score' || getLinkVariableStats(variable).continuous;
+            if (continuousOnly && !continuous) return;
+            options.push({
+                value: variable === 'combined_score' ? 'linkvar::combined_score' : `linkvar::${variable}`,
+                label: variable === 'combined_score' ? 'Combined Score' : variable
+            });
+        });
+        return options;
+    }
+
+    function getScatterItems() {
+        if (selectionTargetMode !== 'links') return nodes;
+        return getActiveGraphLinks().map(link => ({
+            ...link,
+            id: getLinkEdgeKey(link),
+            x: (link.source.x + link.target.x) / 2,
+            y: (link.source.y + link.target.y) / 2,
+            r: 4,
+            col: getLinkVariableColor(link, document.getElementById('linkMode')?.value || 'score', '#999999')
+        }));
+    }
+
     // This function retrieves the value to be used for a given node and scatter plot variable key.
     function getScatterValueForNode(node, key, resolvedSizeSource, resolvedAnnotationSource) {
+        if (key?.startsWith('linkvar::')) {
+            const variable = key.slice('linkvar::'.length);
+            const rawValue = node?.[variable] !== undefined
+                ? node[variable]
+                : getLinkVariableValue(node, variable);
+            return Number(rawValue);
+        }
         if (key === 'centrality') return Number.isFinite(node.centrality) ? node.centrality : 0;
         if (key === 'size') {
             // Use the source passed in from outside the loop
@@ -9743,8 +9862,9 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     function startScatterPlotAsyncLoading() {
         if (currentViewId !== 'Scatter Plot') return;
+        updateScatterControls();
         
-        const pointData = nodes.map(node => {
+        const pointData = getScatterItems().map(node => {
             const xv = getScatterValueForNode(node, scatterXVariable);
             const yv = getScatterValueForNode(node, scatterYVariable);
             if (!Number.isFinite(xv) || !Number.isFinite(yv)) return null;
@@ -10660,6 +10780,153 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         return undefined;
     }
 
+    function getChartLinks(dataSource = 'network') {
+        const sourceLinks = links || [];
+        if (dataSource === 'selected') return sourceLinks.filter(link => selectedLinks.has(getLinkEdgeKey(link)));
+        if (dataSource?.startsWith('collection_')) {
+            const collection = collections.get(dataSource.replace('collection_', ''));
+            const ids = new Set(collection?.nodeIds || []);
+            return sourceLinks.filter(link => ids.has(getLinkEndpointId(link.source)) && ids.has(getLinkEndpointId(link.target)));
+        }
+        return sourceLinks;
+    }
+
+    function getLinkChartVariable() {
+        const mode = document.getElementById('linkMode')?.value || 'score';
+        return mode === 'score' ? 'combined_score' : mode.startsWith('linkvar::') ? mode.slice('linkvar::'.length) : null;
+    }
+
+    function isContinuousLinkChartVariable(variable, chartLinks) {
+        return !!variable && chartLinks.length > 0 && chartLinks.every(link => {
+            const value = getLinkVariableValue(link, variable);
+            return String(value ?? '').trim() !== '' && Number.isFinite(Number(value));
+        });
+    }
+
+    function drawLinkVariableHistogramView() {
+        window.histogramBins = [];
+        window.histogramButtons = [];
+        const chartLinks = getChartLinks(histogramDataSource);
+        const variable = getLinkChartVariable();
+        const values = chartLinks.map(link => Number(getLinkVariableValue(link, variable))).filter(Number.isFinite);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = getCanvasBackgroundColor();
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        if (!isContinuousLinkChartVariable(variable, chartLinks) || !values.length) {
+            ctx.fillStyle = '#888';
+            ctx.font = '20px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('Select a continuous link variable for the histogram.', canvas.width / 2, canvas.height / 2);
+            drawLinkChartSourceButtons('histogram', canvas.height - 120);
+            return;
+        }
+        const padding = 60;
+        const width = (canvas.width - 2 * padding) * 0.5;
+        const height = (canvas.height - 2 * padding) * 0.5;
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+        const leftOffset = centerX - width / 2;
+        const topOffset = centerY - height / 2;
+        const min = d3.min(values), max = d3.max(values);
+        const x = d3.scaleLinear().domain([min === max ? min - 1 : min, min === max ? max + 1 : max]).range([leftOffset, leftOffset + width]);
+        const bins = d3.histogram().domain(x.domain()).thresholds(30)(values);
+        currentHistogramBins = bins;
+        const y = d3.scaleLinear().domain([0, d3.max(bins, bin => bin.length) || 1]).range([topOffset + height, topOffset]);
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 18px Arial';
+        ctx.fillText(`Histogram of ${variable}`, canvas.width / 2, 40);
+        bins.forEach(bin => {
+            const bx = x(bin.x0), by = y(bin.length);
+            const bw = Math.max(1, x(bin.x1) - bx - 1);
+            const colour = getLinkVariableColor({ [variable]: (bin.x0 + bin.x1) / 2 }, `linkvar::${variable}`, '#999999');
+            ctx.fillStyle = colour;
+            ctx.fillRect(bx, by, bw, topOffset + height - by);
+            window.histogramBins.push({ x: bx, y: by, width: bw, height: topOffset + height - by, x0: bin.x0, x1: bin.x1 });
+        });
+        ctx.strokeStyle = '#666';
+        ctx.beginPath();
+        ctx.moveTo(leftOffset, topOffset + height);
+        ctx.lineTo(leftOffset + width, topOffset + height);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(leftOffset, topOffset);
+        ctx.lineTo(leftOffset, topOffset + height);
+        ctx.stroke();
+        ctx.fillStyle = '#ccc';
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'center';
+        x.ticks(8).forEach(tick => {
+            const tickX = x(tick);
+            ctx.beginPath();
+            ctx.moveTo(tickX, topOffset + height);
+            ctx.lineTo(tickX, topOffset + height + 6);
+            ctx.stroke();
+            ctx.fillText(Number.isInteger(tick) ? String(tick) : tick.toFixed(2), tickX, topOffset + height + 20);
+        });
+        const buttonY = topOffset + height + 60;
+        const buttonHeight = 32;
+        const buttonSpacing = 16;
+        ctx.font = 'bold 13px Arial';
+        const pad = 28;
+        const labels = ['Plot Full Network', 'Plot Selected Links', 'Plot Collection ▾'];
+        const widths = labels.map(label => ctx.measureText(label).width + pad * 2);
+        const totalWidth = widths.reduce((sum, item) => sum + item, 0) + buttonSpacing * 2;
+        let buttonX = centerX - totalWidth / 2;
+        labels.forEach((label, index) => {
+            drawLinkChartButton(buttonX, buttonY, widths[index], buttonHeight, label,
+                index === 0 ? histogramDataSource === 'network' : index === 1 ? histogramDataSource === 'selected' : histogramDataSource.startsWith('collection_'));
+            window.histogramButtons.push({ x: buttonX, y: buttonY, width: widths[index], height: buttonHeight, action: index === 0 ? 'full' : index === 1 ? 'selected' : 'collection' });
+            buttonX += widths[index] + buttonSpacing;
+        });
+    }
+
+    function drawLinkChartButton(x, y, width, height, label, active) {
+        const radius = height / 2;
+        ctx.beginPath();
+        ctx.moveTo(x + radius, y);
+        ctx.lineTo(x + width - radius, y);
+        ctx.arcTo(x + width, y, x + width, y + height, radius);
+        ctx.lineTo(x + width, y + height - radius);
+        ctx.arcTo(x + width, y + height, x + width - radius, y + height, radius);
+        ctx.lineTo(x + radius, y + height);
+        ctx.arcTo(x, y + height, x, y + height - radius, radius);
+        ctx.lineTo(x, y + radius);
+        ctx.arcTo(x, y, x + radius, y, radius);
+        ctx.closePath();
+        ctx.fillStyle = active ? getThemeCssVar('--accent-color', '#4caf50') : getThemeCssVar('--surface-color-panel', '#222');
+        ctx.fill();
+        ctx.strokeStyle = active ? getThemeCssVar('--accent-color-soft', '#53bd57') : getThemeCssVar('--input-border', '#555');
+        ctx.stroke();
+        ctx.fillStyle = getThemeCssVar('--accent-contrast', '#fff');
+        ctx.font = 'bold 13px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, x + width / 2, y + height / 2);
+        ctx.textBaseline = 'alphabetic';
+    }
+
+    function drawLinkChartSourceButtons(type, buttonY) {
+        const centerX = canvas.width / 2;
+        const buttonHeight = 32;
+        const buttonSpacing = 16;
+        const labels = ['Plot Full Network', 'Plot Selected Links', 'Plot Collection ▾'];
+        ctx.font = 'bold 13px Arial';
+        const widths = labels.map(label => ctx.measureText(label).width + 28 * 2);
+        const totalWidth = widths.reduce((sum, item) => sum + item, 0) + buttonSpacing * 2;
+        let buttonX = centerX - totalWidth / 2;
+        const buttons = [];
+        labels.forEach((label, index) => {
+            const source = type === 'histogram' ? histogramDataSource : pieDataSource;
+            const active = index === 0 ? source === 'network' : index === 1 ? source === 'selected' : source.startsWith('collection_');
+            drawLinkChartButton(buttonX, buttonY, widths[index], buttonHeight, label, active);
+            buttons.push({ x: buttonX, y: buttonY, width: widths[index], height: buttonHeight, action: index === 0 ? (type === 'histogram' ? 'full' : 'network') : index === 1 ? 'selected' : 'collection' });
+            buttonX += widths[index] + buttonSpacing;
+        });
+        if (type === 'histogram') window.histogramButtons = buttons;
+        else window.pieChartButtons = buttons;
+    }
+
     function getPieWedgeAtPoint(mx, my) {
         if (!window.pieChartWedges?.length) return null;
         const centerX = canvas.width / 2;
@@ -11223,6 +11490,7 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         allIDs = [];
         totalUniqueLinks = 0;
         interactionLinkLabelHeaders = [];
+        linkColorStatsCache.clear();
         interactionLinkLabelValues.clear();
         embeddingDataByType = { network: null, sequence: null };
         embeddingSelectedIdsByType = { network: new Set(), sequence: new Set() };
@@ -11237,6 +11505,7 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         nodeMap.clear();
         collections = new Map();
         selectedNodes.clear();
+        selectedLinks.clear();
         selectedWedges.clear();
         selectedHistogramBins.clear();
         vennSelectedNodes.clear();
@@ -12746,6 +13015,25 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         }
     }
 
+    function updateLinkModeOptions() {
+        const select = document.getElementById('linkMode');
+        if (!select) return;
+        const currentValue = select.value || 'score';
+        select.innerHTML = '';
+        const options = [{ value: 'score', text: 'Combined Score' }, { value: 'mono', text: 'Mono' }];
+        interactionLinkLabelHeaders.forEach(header => {
+            if (header === 'combined_score' || header === 'score') return;
+            options.push({ value: `linkvar::${header}`, text: header });
+        });
+        options.forEach(optionData => {
+            const option = document.createElement('option');
+            option.value = optionData.value;
+            option.textContent = optionData.text;
+            select.appendChild(option);
+        });
+        select.value = Array.from(select.options).some(option => option.value === currentValue) ? currentValue : 'score';
+    }
+
     function handleColorModeChange(mode, historyMeta = null) {
         syncColorModeSelects(mode);
         const historyActor = historyMeta?.actor || 'Human';
@@ -14213,6 +14501,23 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         return { rows, extraColumns };
     }
 
+    function getSelectedLinkInfoRows() {
+        const selected = getActiveGraphLinks().filter(link => selectedLinks.has(getLinkEdgeKey(link)));
+        const linkVariableColumns = Array.from(new Set(['combined_score', ...interactionLinkLabelHeaders]));
+        const columns = ['Protein ID 1', 'Protein ID 2', ...linkVariableColumns];
+        const rows = selected.map(link => {
+            const row = {
+                'Protein ID 1': getLinkEndpointId(link.source),
+                'Protein ID 2': getLinkEndpointId(link.target)
+            };
+            linkVariableColumns.forEach(header => {
+                row[header] = getLinkVariableValue(link, header);
+            });
+            return row;
+        });
+        return { columns, rows };
+    }
+
     function createProteinMetadataRecord() {
         return { size: 0, annotation: 'Unknown', description: '', preferred_name: '', localization: 'Unknown', aliases: [], geneId: '', sequence: '', uniprotAc: '', ncbiProteinId: '', ncbiGeneId: '', pubmedGeneId: '', pdbIds: [] };
     }
@@ -15141,6 +15446,29 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const nodeInfoBtn = document.getElementById('node-info-table-btn');
         refreshProteinInfoPanel();
 
+        if (selectionTargetMode === 'links') {
+            const selectedLinkCount = selectedLinks.size;
+            if (infoControls) infoControls.style.display = selectedLinkCount ? 'flex' : 'none';
+            const growBtn = document.getElementById('mind-map-grow-btn');
+            const shrinkBtn = document.getElementById('mind-map-shrink-btn');
+            if (growBtn) growBtn.style.display = selectedLinkCount ? 'inline-block' : 'none';
+            if (shrinkBtn) shrinkBtn.style.display = selectedLinkCount ? 'inline-block' : 'none';
+            if (nodeInfoBtn) {
+                nodeInfoBtn.textContent = 'Link Info Table';
+                nodeInfoBtn.onclick = () => openLinkInfoTable();
+                nodeInfoBtn.style.display = selectedLinkCount ? 'inline-flex' : 'none';
+            }
+            if (!selectedLinkCount) {
+                infoId.innerText = 'No Links Selected';
+                setSafeInfoContentText(infoContent, 'Select Links to View Information');
+            } else {
+                infoId.innerText = 'Link Selection';
+                setSafeInfoContentText(infoContent, `Matches: ${selectedLinkCount} link${selectedLinkCount === 1 ? '' : 's'}`);
+            }
+            refreshLinkCollectionControl();
+            return;
+        }
+
         if (currentViewId === 'Embeddings') {
             const selectedPointIds = Array.from(getActiveEmbeddingSelectionSet());
             const mappedSelectedIds = Array.from(getEffectiveSelectedNodesSet());
@@ -15283,6 +15611,14 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         openModal('nodeInfoTableModal');
     }
 
+    function openLinkInfoTable() {
+        updateNodeInfoTableModalChrome('Link Info Table', true);
+        const { columns, rows } = getSelectedLinkInfoRows();
+        nodeInfoTableState = { columns, rows, filteredRows: rows, searchQuery: '', mode: 'link' };
+        renderNodeInfoTable();
+        openModal('nodeInfoTableModal');
+    }
+
     function openMindMapNodeInfoTable() {
         // Build a Mind Map Node -> proteins table plus any columns from the selected Node Info File
         isBrushMode = false;
@@ -15408,7 +15744,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         summary.textContent = totalRows ?    `Showing ${rows.length} of ${totalRows} row(s). Double click any column heading to expand the column. Shift + scroll to scroll horizontally.${searchSuffix}` : 'No rows available.';
 
         if (!totalRows) {
-            wrap.innerHTML = `<div style="padding:12px; color:#aaa;">${nodeInfoTableState.mode === 'mindMap' ? 'No Mind Map nodes available.' : 'Select one or more nodes to populate this table.'}</div>`;
+            const emptyMessage = nodeInfoTableState.mode === 'mindMap'
+                ? 'No Mind Map nodes available.'
+                : (nodeInfoTableState.mode === 'link' ? 'Select one or more links to populate this table.' : 'Select one or more nodes to populate this table.');
+            wrap.innerHTML = `<div style="padding:12px; color:#aaa;">${emptyMessage}</div>`;
             enableNodeInfoTableColumnResize();
             return;
         }
@@ -15708,7 +16047,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
-        link.download = 'node_info_table.csv';
+        const sessionFileName = String(activeSessionFolderName || getDefaultSessionFolderName())
+            .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
+            .replace(/\s+/g, '_');
+        const tableFileName = nodeInfoTableState.mode === 'link' ? 'link_info_table.csv' : 'node_info_table.csv';
+        link.download = `${sessionFileName}_${tableFileName}`;
         link.click();
         URL.revokeObjectURL(link.href);
     }
@@ -16197,10 +16540,271 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     function getEffectiveSelectedNodesSet() {
+        if (selectionTargetMode === 'links') return new Set();
         if (currentViewId === 'Venn Diagram') return vennSelectedNodes;
         if (currentViewId === 'Mind Map') return mindMapSelectedNodes;
         if (currentViewId === 'selected' && selectedNodesDraft instanceof Set) return selectedNodesDraft;
         return selectedNodes;
+    }
+
+    function getLinkEndpointId(endpoint) {
+        return typeof endpoint === 'object' ? endpoint?.id : endpoint;
+    }
+
+    function getLinkEdgeKey(link) {
+        return getUndirectedEdgeKey(getLinkEndpointId(link?.source), getLinkEndpointId(link?.target));
+    }
+
+    function getLinkVariableValue(link, variable) {
+        if (!link || !variable) return '';
+        if (variable === 'combined_score') return link.value ?? '';
+        const directValue = link[variable];
+        if (directValue !== undefined && directValue !== null) return directValue;
+        return interactionLinkLabelValues.get(getLinkEdgeKey(link))?.[variable] ?? '';
+    }
+
+    function getLinkVariableStats(variable) {
+        const activeLinks = getActiveGraphLinks();
+        const cacheKey = `${currentViewId}|${variable}|${activeLinks.length}|${interactionLinkLabelHeaders.join('|')}`;
+        const cached = linkColorStatsCache.get(cacheKey);
+        if (cached) return cached;
+        const values = activeLinks.map(link => getLinkVariableValue(link, variable));
+        const presentValues = values.filter(value => String(value ?? '').trim() !== '');
+        const numericValues = presentValues.map(value => Number(value));
+        const continuous = presentValues.length > 0 && numericValues.every(Number.isFinite);
+        const normalizedValues = continuous
+            ? values.map(value => {
+                const numeric = Number(value);
+                return String(value ?? '').trim() === '' || !Number.isFinite(numeric) ? 0 : numeric;
+            })
+            : values;
+        const stats = {
+            values,
+            normalizedValues,
+            continuous,
+            min: continuous ? Math.min(0, ...normalizedValues) : 0,
+            max: continuous ? Math.max(0, ...normalizedValues) : 1,
+            categories: continuous ? [] : Array.from(new Set(values.map(value => String(value ?? '').trim() || 'N/A')))
+        };
+        linkColorStatsCache.set(cacheKey, stats);
+        return stats;
+    }
+
+    function getActiveGraphLinks() {
+        const graphViewUsesFullNetwork = currentViewId === 'base'
+            || currentViewId === 'Scatter Plot'
+            || currentViewId === 'Venn Diagram'
+            || currentViewId === 'histogram'
+            || currentViewId === 'pie_chart'
+            || currentViewId === 'Embeddings';
+        return graphViewUsesFullNetwork ? links : (activeSubData?.links || []);
+    }
+
+    function distanceToSegment(pointX, pointY, source, target) {
+        const dx = target.x - source.x;
+        const dy = target.y - source.y;
+        const lengthSquared = dx * dx + dy * dy;
+        const t = lengthSquared ? Math.max(0, Math.min(1, ((pointX - source.x) * dx + (pointY - source.y) * dy) / lengthSquared)) : 0;
+        const nearestX = source.x + t * dx;
+        const nearestY = source.y + t * dy;
+        return Math.hypot(pointX - nearestX, pointY - nearestY);
+    }
+
+    function getLinkAtPoint(pointX, pointY) {
+        const hitRadius = 8 / Math.max(transform.k || 1, 1e-6);
+        return getActiveGraphLinks()
+            .filter(link => link.source?.x !== undefined && link.target?.x !== undefined)
+            .map(link => ({ link, distance: distanceToSegment(pointX, pointY, link.source, link.target) }))
+            .filter(item => item.distance <= hitRadius)
+            .sort((a, b) => a.distance - b.distance)[0]?.link || null;
+    }
+
+    function applyLinkSelection(link, query = 'Link Selection') {
+        linkSelectionHistory.push(new Set(selectedLinks));
+        if (linkSelectionHistory.length > 15) linkSelectionHistory.shift();
+        const selectionMode = isAdditiveMode ? 'add' : isSubtractMode ? 'subtract' : isIntersectMode ? 'intersect' : 'replace';
+        if (!link) {
+            selectedLinks.clear();
+        } else {
+            const key = getLinkEdgeKey(link);
+            if (isAdditiveMode) selectedLinks.add(key);
+            else if (isSubtractMode) selectedLinks.delete(key);
+            else if (isIntersectMode) {
+                if (!selectedLinks.has(key)) selectedLinks.clear();
+                else selectedLinks = new Set([key]);
+            } else selectedLinks = new Set([key]);
+        }
+        aiRecordSelectLinksHistory(link ? [getLinkEdgeKey(link)] : [], selectionMode, 'Human');
+        refreshInfoBoxFromSelection(query);
+        updateViewMenu();
+        draw();
+    }
+
+    function applyLinkSelectionSet(matchedLinks, query) {
+        linkSelectionHistory.push(new Set(selectedLinks));
+        if (linkSelectionHistory.length > 15) linkSelectionHistory.shift();
+        const selectionMode = isAdditiveMode ? 'add' : isSubtractMode ? 'subtract' : isIntersectMode ? 'intersect' : 'replace';
+        const matchedKeys = new Set(matchedLinks.map(getLinkEdgeKey));
+        if (isSubtractMode) {
+            matchedKeys.forEach(key => selectedLinks.delete(key));
+        } else if (isIntersectMode) {
+            selectedLinks = new Set(Array.from(selectedLinks).filter(key => matchedKeys.has(key)));
+        } else if (isAdditiveMode) {
+            matchedKeys.forEach(key => selectedLinks.add(key));
+        } else {
+            selectedLinks = matchedKeys;
+        }
+        aiRecordSelectLinksHistory([...matchedKeys], selectionMode, 'Human');
+        refreshInfoBoxFromSelection(query);
+        updateViewMenu();
+    }
+
+    function linkMatchesSelectionGesture(link, points, useLasso) {
+        if (useLasso) {
+            if (d3.polygonContains(points, [link.source.x, link.source.y]) || d3.polygonContains(points, [link.target.x, link.target.y])) return true;
+            for (let index = 0; index < points.length; index++) {
+                const next = points[(index + 1) % points.length];
+                if (segmentsIntersect(link.source.x, link.source.y, link.target.x, link.target.y, points[index][0], points[index][1], next[0], next[1])) return true;
+            }
+            return false;
+        }
+        return points.some(([x, y]) => distanceToSegment(x, y, link.source, link.target) <= brushRadius);
+    }
+
+    function segmentsIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
+        const orientation = (ax, ay, bx, by, cx, cy) => (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+        const onSegment = (ax, ay, bx, by, cx, cy) => Math.min(ax, bx) <= cx && cx <= Math.max(ax, bx) && Math.min(ay, by) <= cy && cy <= Math.max(ay, by);
+        const o1 = orientation(x1, y1, x2, y2, x3, y3);
+        const o2 = orientation(x1, y1, x2, y2, x4, y4);
+        const o3 = orientation(x3, y3, x4, y4, x1, y1);
+        const o4 = orientation(x3, y3, x4, y4, x2, y2);
+        const epsilon = 1e-9;
+        return (o1 * o2 < -epsilon && o3 * o4 < -epsilon)
+            || (Math.abs(o1) <= epsilon && onSegment(x1, y1, x2, y2, x3, y3))
+            || (Math.abs(o2) <= epsilon && onSegment(x1, y1, x2, y2, x4, y4))
+            || (Math.abs(o3) <= epsilon && onSegment(x3, y3, x4, y4, x1, y1))
+            || (Math.abs(o4) <= epsilon && onSegment(x3, y3, x4, y4, x2, y2));
+    }
+
+    function refreshSelectionTargetToggle() {
+        document.querySelectorAll('[data-selection-target]').forEach(button => {
+            button.classList.toggle('active', button.dataset.selectionTarget === selectionTargetMode);
+        });
+    }
+
+    function setSelectionTargetMode(mode) {
+        const nextMode = mode === 'links' ? 'links' : 'nodes';
+        if (nextMode === selectionTargetMode) return;
+        linkSelectionHistory = [];
+        if (nextMode === 'links') {
+            const nodeIds = new Set(getEffectiveSelectedNodesSet());
+            selectedLinks = new Set(getActiveGraphLinks()
+                .filter(link => nodeIds.has(getLinkEndpointId(link.source)) && nodeIds.has(getLinkEndpointId(link.target)))
+                .map(getLinkEdgeKey));
+            selectedNodes.clear();
+        } else {
+            const nodeIds = new Set();
+            getActiveGraphLinks().forEach(link => {
+                if (!selectedLinks.has(getLinkEdgeKey(link))) return;
+                nodeIds.add(getLinkEndpointId(link.source));
+                nodeIds.add(getLinkEndpointId(link.target));
+            });
+            selectedNodes = nodeIds;
+            selectedNodesDraft = new Set(nodeIds);
+            selectedLinks.clear();
+        }
+        selectionTargetMode = nextMode;
+        refreshSelectionTargetToggle();
+        refreshInfoBoxFromSelection();
+        updateViewMenu();
+        updateLegendForSelectionTarget();
+        updateScatterControls();
+        draw();
+    }
+
+    function getSelectedLinkEndpointIds() {
+        const ids = new Set();
+        getActiveGraphLinks().forEach(link => {
+            if (!selectedLinks.has(getLinkEdgeKey(link))) return;
+            ids.add(getLinkEndpointId(link.source));
+            ids.add(getLinkEndpointId(link.target));
+        });
+        return ids;
+    }
+
+    function refreshLinkCollectionControl() {
+        const container = d3.select('#coll-add-btn-container');
+        container.html('');
+        if (selectionTargetMode !== 'links' || selectedLinks.size === 0) return;
+        const endpointIds = new Set(getSelectedLinkEndpointIds());
+        const addButton = container.append('button')
+            .attr('class', 'action-btn')
+            .style('width', '100%')
+            .style('justify-content', 'center')
+            .style('background', 'var(--accent-color)')
+            .text('Add to Collection');
+
+        addButton.on('click', event => {
+                event.stopPropagation();
+                addButton.style('display', 'none');
+                const ui = container.append('div').attr('id', 'inline-add-ui');
+                const hasCollections = collections.size > 0;
+                const select = ui.append('select')
+                    .attr('id', 'inline-coll-dropdown')
+                    .style('display', hasCollections ? 'block' : 'none');
+
+                if (hasCollections) {
+                    collections.forEach((value, name) => select.append('option').attr('value', name).text(name));
+                    select.append('option').attr('value', 'NEW').text('+ Create Collection');
+                }
+
+                const nameInput = ui.append('input')
+                    .attr('type', 'text')
+                    .attr('placeholder', 'Collection Name...')
+                    .style('display', hasCollections ? 'none' : 'block');
+
+                select.on('change', function() {
+                    const isNew = this.value === 'NEW';
+                    nameInput.style('display', isNew ? 'block' : 'none');
+                    if (isNew) setTimeout(() => nameInput.node()?.focus(), 10);
+                });
+
+                if (!hasCollections) nameInput.node()?.focus();
+
+                const row = ui.append('div').attr('class', 'btn-row');
+                row.append('button')
+                    .attr('class', 'btn-secondary')
+                    .text('Cancel')
+                    .on('click', event => {
+                        event.stopPropagation();
+                        refreshInfoBoxFromSelection();
+                    });
+                row.append('button')
+                    .attr('class', 'btn-primary')
+                    .text('Add')
+                    .on('click', event => {
+                        event.stopPropagation();
+                        let target = hasCollections ? select.property('value') : 'NEW';
+                        if (target === 'NEW') {
+                            target = nameInput.property('value').trim();
+                            if (!target || collections.has(target)) return;
+                            undoCaptureCollection(target);
+                            collections.set(target, { nodeIds: new Set(), nodes: [], links: [] });
+                            aiRecordCreateCollectionHistory(target, 'Human');
+                        } else {
+                            undoCaptureCollection(target);
+                        }
+                        endpointIds.forEach(id => collections.get(target).nodeIds.add(id));
+                        aiRecordAddToCollectionHistory(target, 'Human');
+                        refreshLegendIfCollectionMode();
+                        updateViewMenu();
+                        refreshInfoBoxFromSelection();
+                    });
+            });
+    }
+
+    function updateLegendForSelectionTarget() {
+        if (typeof updateSizesAndColors === 'function') updateSizesAndColors();
     }
 
     // Return a Set of node IDs that are visible in the current view
@@ -16312,7 +16916,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     function openCollectionMenu(clientX, clientY) {
         console.log("function openCollectionMenu(clientX, clientY)");
-        const effectiveSelection = getEffectiveSelectedNodesSet();
+        const effectiveSelection = selectionTargetMode === 'links'
+            ? getSelectedLinkEndpointIds()
+            : getEffectiveSelectedNodesSet();
         if (!effectiveSelection || effectiveSelection.size === 0) return;
         const menuId = 'collection-context-menu';
         let menu = document.getElementById(menuId);
@@ -16338,7 +16944,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             document.body.appendChild(menu);
         }
 
-        menu.innerHTML = '<div style="color:#ccc; font-size:12px; margin-bottom:6px;">Add Selection to a collection:</div>';
+        menu.innerHTML = `<div style="color:#ccc; font-size:12px; margin-bottom:6px;">${selectionTargetMode === 'links' ? 'Add link endpoint nodes to a collection:' : 'Add Selection to a collection:'}</div>`;
 
         let hasCollections = collections && collections.size > 0;
         if (!hasCollections) {
@@ -16429,7 +17035,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 }
                 undoCaptureCollection(name);
                 collections.set(name, { nodeIds: new Set(), nodes: [], links: [] });
-                selectedNodes.forEach(id => collections.get(name).nodeIds.add(id));
+                const collectionIds = selectionTargetMode === 'links' ? getSelectedLinkEndpointIds() : selectedNodes;
+                collectionIds.forEach(id => collections.get(name).nodeIds.add(id));
                 aiRecordCreateCollectionHistory(name, 'Human');
                 aiRecordAddToCollectionHistory(name, 'Human');
                 refreshLegendIfCollectionMode();
@@ -17422,8 +18029,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
             createBtn({ 
                 id: 'selected', 
-                name: 'Selected Nodes (S)', 
-                disabled: !hasSelection // Add a disabled flag
+                name: selectionTargetMode === 'links' ? 'Selected Links (S)' : 'Selected Nodes (S)', 
+                disabled: selectionTargetMode === 'links' ? selectedLinks.size === 0 : !hasSelection // Add a disabled flag
             });
 
             // 2. Graphs Section
@@ -17483,7 +18090,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     function getViewLabel(viewId) {
         if (viewId === 'base') return 'Full Network';
-        if (viewId === 'selected') return 'Selected Nodes';
+        if (viewId === 'selected') return selectionTargetMode === 'links' ? 'Selected Links' : 'Selected Nodes';
         if (viewId === 'pie_chart') return 'Pie Chart';
         if (viewId === 'histogram') return 'Histogram';
         if (viewId === 'Venn Diagram') return 'Venn Diagram';
@@ -17627,7 +18234,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         }
 
         currentViewId = viewId;
-        const labelText = viewId === 'base' ? 'Full Network' : (viewId === 'selected' ? 'Selected Nodes' : viewId.replace('coll_', ''));
+        const labelText = viewId === 'base' ? 'Full Network' : (viewId === 'selected' ? getViewLabel('selected') : viewId.replace('coll_', ''));
         d3.select("#current-view-label").text(labelText);
 
         if (viewId === 'base') {
@@ -17637,8 +18244,15 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             updateSizesAndColors();
         } else if (viewId === 'selected') {
             d3.select(canvas).call(zoomBehavior.transform, transform);
-            selectedNodesDraft = new Set(selectedNodes);
-            initSubNetworkView('selected', Array.from(selectedNodes));
+            const selectedViewNodeIds = selectionTargetMode === 'links'
+                ? Array.from(new Set(links.filter(link => selectedLinks.has(getLinkEdgeKey(link))).flatMap(link => [getLinkEndpointId(link.source), getLinkEndpointId(link.target)])))
+                : Array.from(selectedNodes);
+            selectedNodesDraft = new Set(selectedViewNodeIds);
+            initSubNetworkView('selected', selectedViewNodeIds);
+            if (selectionTargetMode === 'links' && activeSubData) {
+                activeSubData.links = activeSubData.links.filter(link => selectedLinks.has(getLinkEdgeKey(link)));
+                activeSubData.simulation.force('link').links(activeSubData.links);
+            }
         } else if (viewId === 'Mind Map') {
             d3.select(canvas).call(zoomBehavior.transform, mindMapTransform);
             updateMindMapControls();
@@ -18050,7 +18664,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             && lastMousePosition.y >= secondaryRect.top
             && lastMousePosition.y <= secondaryRect.bottom;
         // Allow modifier keys to be detected even when pointer is outside the canvas
-        if (!pointerOverSecondary && !isPointerOverMainCanvas && currentViewId !== 'Embeddings' && !['Shift','Control','Alt'].includes(e.key)) return;
+        if (!pointerOverSecondary && !isPointerOverMainCanvas && currentViewId !== 'Embeddings' && selectionTargetMode !== 'links' && !['Shift','Control','Alt'].includes(e.key)) return;
         if (isVariableSettingsOpen) return;
         const key = e.key.toLowerCase();
 
@@ -18095,6 +18709,14 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
         if (key === 'a' || (e.ctrlKey && key === 'a')) {
             e.preventDefault();
+            if (selectionTargetMode === 'links') {
+                selectedLinks = new Set(getActiveGraphLinks().map(getLinkEdgeKey));
+                aiRecordSelectLinksHistory([...selectedLinks], 'replace', 'Human');
+                refreshInfoBoxFromSelection('Select All Links');
+                updateViewMenu();
+                draw();
+                return;
+            }
             if (currentViewId === 'histogram') {
                 selectedHistogramBins = new Set((window.histogramBins || []).map(b => b.x0));
                 draw();
@@ -18164,7 +18786,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         }
         if (e.key === 'Escape') { switchView('base'); deselectNodes({ actor: 'Human' }); closeCollectionMenu(); return; }
         if (key === 'm') {
-            const effectiveSelection = getEffectiveSelectedNodesSet();
+            const effectiveSelection = selectionTargetMode === 'links' ? selectedLinks : getEffectiveSelectedNodesSet();
             if (effectiveSelection && effectiveSelection.size > 0) {
                 e.preventDefault();
                 openCollectionMenu(lastMousePosition.x, lastMousePosition.y);
@@ -18663,6 +19285,13 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
         // --- 3. EXISTING NODE/DRAG LOGIC ---
         const drawNodes = currentViewId === 'base' ? nodes : activeSubData?.nodes || [];
+        if (selectionTargetMode === 'links' && !draggedNode && !isLassoMode && !isBrushMode) {
+            const linkUnderPointer = getLinkAtPoint(pt[0], pt[1]);
+            const newCursor = linkUnderPointer ? 'pointer' : 'grab';
+            if (canvas.style.cursor !== newCursor) canvas.style.cursor = newCursor;
+            if (linkUnderPointer || getEffectiveSelectedNodesSet().size > 0) draw();
+            return;
+        }
         if (draggedNode) { 
             hasDragged = true; 
             draggedNode.x = pt[0]; 
@@ -18749,15 +19378,24 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     if (d3.polygonContains(poly, [pos.x, pos.y])) ids.add(id);
                 });
                 if (ids.size > 0) applyVennSelectionIds(ids);
+            } else if (selectionTargetMode === 'links' && currentViewId === 'Scatter Plot' && scatterLayoutState?.points) {
+                const matches = scatterLayoutState.points
+                    .filter(p => d3.polygonContains(poly, [p.x, p.y]))
+                    .map(p => p.link || p.node)
+                    .filter(Boolean);
+                applyLinkSelectionSet(matches, "Lasso Link Selection");
             } else if (currentViewId === 'Scatter Plot' && scatterLayoutState?.points) {
                 const matches = scatterLayoutState.points
                     .filter(p => d3.polygonContains(poly, [p.x, p.y]))
                     .map(p => p.node)
                     .filter(Boolean);
-                if (matches.length > 0) applySearchLogic(matches, "Lasso Selection");
+                if (matches.length > 0) applySearchLogic(matches, "Lasso Selection", null, aiSelectionHistoryMeta(matches.map(node => node.id)));
+            } else if (selectionTargetMode === 'links') {
+                const matches = getActiveGraphLinks().filter(link => linkMatchesSelectionGesture(link, poly, true));
+                applyLinkSelectionSet(matches, "Lasso Link Selection");
             } else {
                 const matches = drawNodes.filter(n => d3.polygonContains(poly, [n.x, n.y]));
-                if (matches.length > 0) applySearchLogic(matches, "Lasso Selection");
+                if (matches.length > 0) applySearchLogic(matches, "Lasso Selection", null, aiSelectionHistoryMeta(matches.map(node => node.id)));
             }
         } else if (isBrushMode && brushPoints.length > 0) {
             if (currentViewId === 'Venn Diagram' && window.vennDiagramState?.nodeBasePos) {
@@ -18770,6 +19408,12 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     if (hit) ids.add(id);
                 });
                 if (ids.size > 0) applyVennSelectionIds(ids);
+            } else if (selectionTargetMode === 'links' && currentViewId === 'Scatter Plot' && scatterLayoutState?.points) {
+                const matches = scatterLayoutState.points
+                    .filter(p => brushPoints.some(pt => Math.hypot(p.x - pt[0], p.y - pt[1]) <= brushRadius))
+                    .map(p => p.link || p.node)
+                    .filter(Boolean);
+                applyLinkSelectionSet(matches, "Brush Link Selection");
             } else if (currentViewId === 'Scatter Plot' && scatterLayoutState?.points) {
                 const matches = scatterLayoutState.points
                     .filter(p => brushPoints.some(pt => {
@@ -18778,10 +19422,13 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     }))
                     .map(p => p.node)
                     .filter(Boolean);
-                if (matches.length > 0) applySearchLogic(matches, "Brush Selection");
+                if (matches.length > 0) applySearchLogic(matches, "Brush Selection", null, aiSelectionHistoryMeta(matches.map(node => node.id)));
+            } else if (selectionTargetMode === 'links') {
+                const matches = getActiveGraphLinks().filter(link => linkMatchesSelectionGesture(link, brushPoints, false));
+                applyLinkSelectionSet(matches, "Brush Link Selection");
             } else {
                 const matches = drawNodes.filter(n => brushPoints.some(pt => { const dx = n.x - pt[0], dy = n.y - pt[1]; return Math.sqrt(dx*dx + dy*dy) <= brushRadius; }));
-                if (matches.length > 0) applySearchLogic(matches, "Brush Selection");
+                if (matches.length > 0) applySearchLogic(matches, "Brush Selection", null, aiSelectionHistoryMeta(matches.map(node => node.id)));
             }
         }
         if (lassoPoints.length > 0 || brushPoints.length > 0) {
@@ -18875,8 +19522,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 return (dx * dx + dy * dy) <= (hitR * hitR);
             });
             if (clicked) {
-                if (isAdditiveMode || isSubtractMode || isIntersectMode) {
-                    applySearchLogic([clicked.node], `Scatter Node: ${clicked.id}`);
+                if (selectionTargetMode === 'links') {
+                    applyLinkSelection(clicked.link || clicked.node, `Scatter Link: ${clicked.id}`);
+                } else if (isAdditiveMode || isSubtractMode || isIntersectMode) {
+                    applySearchLogic([clicked.node], `Scatter Node: ${clicked.id}`, null, aiSelectionHistoryMeta([clicked.node.id]));
                 } else {
                     selectNodes([clicked.node], false, `Scatter Node: ${clicked.id}`);
                 }
@@ -19020,6 +19669,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const drawNodes = currentViewId === 'base' ? nodes : activeSubData?.nodes || [];
         const zoomK = Math.max(transform.k || 1, 1e-6);
         const zoomAdjustedMultiplier = Math.max(1, 5 - 2 * zoomK);
+        if (selectionTargetMode === 'links') {
+            const foundLink = getLinkAtPoint(mx, my);
+            applyLinkSelection(foundLink, foundLink ? 'Link Selection' : 'Clear Link Selection');
+            return;
+        }
         const found = drawNodes.find(n => { const dx = n.x - mx, dy = n.y - my; const baseRadius = n.r || 5; const hoverRadius = baseRadius * zoomAdjustedMultiplier; return Math.sqrt(dx*dx + dy*dy) < hoverRadius; });
         if (found) {
             const effectiveSelection = getEffectiveSelectedNodesSet?.() || new Set();
@@ -19032,7 +19686,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     auto_close_ms: 2400
                 });
             }
-            if (isAdditiveMode || isSubtractMode || isIntersectMode) applySearchLogic([found], "Custom Selection"); else selectNodes([found], false, "", null, false, { actor: 'Human' });
+            if (isAdditiveMode || isSubtractMode || isIntersectMode) applySearchLogic([found], "Custom Selection", null, aiSelectionHistoryMeta([found.id])); else selectNodes([found], false, "", null, false, { actor: 'Human' });
         } else deselectNodes({ actor: 'Human' });
         draw();
     });
@@ -19173,8 +19827,73 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         //draw();
     });
 
+    function drawLinkVariablePieView() {
+        const chartLinks = getChartLinks(pieDataSource);
+        const variable = getLinkChartVariable();
+        const values = chartLinks.map(link => String(getLinkVariableValue(link, variable) ?? '')).filter(Boolean);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = getCanvasBackgroundColor();
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        if (isContinuousLinkChartVariable(variable, chartLinks)) {
+            ctx.fillStyle = '#888';
+            ctx.font = '20px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('Select a categorical link variable for the pie chart.', canvas.width / 2, canvas.height / 2);
+            drawLinkChartSourceButtons('pie', canvas.height - 120);
+            return;
+        }
+        const counts = new Map();
+        values.forEach(value => counts.set(value, (counts.get(value) || 0) + 1));
+        const data = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+        const total = values.length;
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+        const radius = Math.min(canvas.width, canvas.height) / 3.5;
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 18px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(`Pie chart of ${variable || 'link variable'}`, centerX, 40);
+        window.pieChartWedges = [];
+        let angle = -Math.PI / 2;
+        const scale = d3.scaleOrdinal(d3.schemeTableau10).domain(data.map(entry => entry[0]));
+        data.forEach(([label, count]) => {
+            const slice = total ? count / total * 2 * Math.PI : 0;
+            ctx.beginPath();
+            ctx.moveTo(centerX, centerY);
+            ctx.arc(centerX, centerY, radius, angle, angle + slice);
+            ctx.closePath();
+            ctx.fillStyle = scale(label);
+            ctx.fill();
+            ctx.strokeStyle = '#222';
+            ctx.stroke();
+            window.pieChartWedges.push({ label, startAngle: angle, endAngle: angle + slice });
+            angle += slice;
+        });
+
+        const buttonY = centerY + radius + 58;
+        const buttonHeight = 32;
+        const buttonSpacing = 16;
+        ctx.font = 'bold 13px Arial';
+        const labels = ['Plot Full Network', 'Plot Selected Links', 'Plot Collection ▾'];
+        const widths = labels.map(label => ctx.measureText(label).width + 28 * 2);
+        const totalWidth = widths.reduce((sum, item) => sum + item, 0) + buttonSpacing * 2;
+        let buttonX = centerX - totalWidth / 2;
+        window.pieChartButtons = [];
+        labels.forEach((label, index) => {
+            drawLinkChartButton(buttonX, buttonY, widths[index], buttonHeight, label,
+                index === 0 ? pieDataSource === 'network' : index === 1 ? pieDataSource === 'selected' : pieDataSource.startsWith('collection_'));
+            window.pieChartButtons.push({ x: buttonX, y: buttonY, width: widths[index], height: buttonHeight, action: index === 0 ? 'network' : index === 1 ? 'selected' : 'collection' });
+            buttonX += widths[index] + buttonSpacing;
+        });
+    }
+
     function drawPieChartView() {
         console.log("function drawPieChartView()")
+        if (selectionTargetMode === 'links') {
+            drawLinkVariablePieView();
+            return;
+        }
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.fillStyle = getCanvasBackgroundColor();
@@ -19396,6 +20115,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     function drawHistogramView() {
         console.log("function drawHistogramView()");
+        if (selectionTargetMode === 'links') {
+            drawLinkVariableHistogramView();
+            return;
+        }
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.fillStyle = getCanvasBackgroundColor();
         ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -20091,6 +20814,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const yScale = d3.scaleLinear().range([plot.y + plot.h, plot.y]);
 
         // --- 1. RESOLVE SOURCES ONCE (PRE-LOOP) ---
+        const scatterItems = getScatterItems();
         const currentSizeSource = (scatterXVariable === 'size' || scatterYVariable === 'size') 
             ? resolveProteinSizeSource(nodes) 
             : null;
@@ -20105,7 +20829,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
         let pointData = scatterPointsLoadingInProgress && scatterPointsToRender.length > 0
             ? scatterPointsToRender
-            : nodes.map(node => {
+            : scatterItems.map(node => {
                 // Pass the resolved sources into the function
                 const xv = getScatterValueForNode(node, scatterXVariable, currentSizeSource, currentAnnotationSource);
                 const yv = getScatterValueForNode(node, scatterYVariable, currentSizeSource, currentAnnotationSource);
@@ -20218,6 +20942,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         ctx.fillText(`Scatter plot of ${xLabel} vs ${yLabel}`, canvas.width / 2, 40);
         ctx.font = '14px Arial';
         ctx.fillText(`Correlation coefficient (r): ${correlationCoeff.toFixed(3)}`, canvas.width / 2, 70);
+        if (selectionTargetMode === 'links') {
+            ctx.font = '13px Arial';
+            ctx.fillText('Points here represent links', canvas.width / 2, 92);
+        }
         ctx.textAlign = 'start';
         ctx.textBaseline = 'alphabetic';
 
@@ -20232,7 +20960,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         ctx.fillText(yLabel, 0, 0);
         ctx.restore();
 
-        const hasSelection = selectedNodes.size > 0;
+        const hasSelection = selectionTargetMode === 'links' ? selectedLinks.size > 0 : selectedNodes.size > 0;
         const nowMs = Date.now();
         const currentNodeColorMode = document.getElementById('colorMode')?.value || 'layer';
         const plottedPoints = [];
@@ -20248,10 +20976,12 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             const x = tx(xBase);
             const y = ty(yBase);
             const node = d.node;
-            const isSelected = selectedNodes.has(node.id);
+            const isSelected = selectionTargetMode === 'links' ? selectedLinks.has(node.id) : selectedNodes.has(node.id);
             const isDim = hasSelection && !isSelected;
 
-            const nodeColor = currentNodeColorMode === 'collection'
+            const nodeColor = selectionTargetMode === 'links'
+                ? getLinkVariableColor(node, document.getElementById('linkMode')?.value || 'score', '#999999')
+                : currentNodeColorMode === 'collection'
                 ? getCollectionColorForNode(node.id, nowMs)
                 : (currentNodeColorMode === 'complex_pdbs' ? getComplexPdbColorForNode(node.id, nowMs) : (node.col || '#4caf50'));
 
@@ -20266,7 +20996,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             ctx.lineWidth = 1;
             ctx.stroke();
 
-            plottedPoints.push({ id: node.id, x: xBase, y: yBase, r: rBase, node });
+            plottedPoints.push({ id: node.id, x: xBase, y: yBase, r: rBase, node, link: selectionTargetMode === 'links' ? node : null });
         });
         ctx.globalAlpha = 1;
 
@@ -20533,10 +21263,12 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
             activeLinks.forEach(l => {
                 const isPath = pathEdges.has(getUndirectedEdgeKey(l.source.id, l.target.id));
-                const isHigh = isSearching && (effectiveSelection.has(l.source.id) || effectiveSelection.has(l.target.id));
+                const isSelected = selectionTargetMode === 'links' && selectedLinks.has(getLinkEdgeKey(l));
+                const isHigh = isSelected || (isSearching && (effectiveSelection.has(l.source.id) || effectiveSelection.has(l.target.id)));
                 const style = computeLinkRenderStyle(l, {
                     isPath,
                     isHigh,
+                    isSelected,
                     isSearching,
                     visibilityMode,
                     linkMode,
@@ -21063,8 +21795,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         updateViewMenu();
         updateVennControls();
         updateVennControls();
-        if (historyMeta?.actor && effectiveSelection.size > 0) {
-            aiRecordSelectionHistory(Array.from(effectiveSelection), historyMeta.actor);
+        if (historyMeta?.actor && (effectiveSelection.size > 0 || historyMeta.nodeIds?.length)) {
+            aiRecordSelectionHistory(historyMeta.nodeIds || Array.from(effectiveSelection), historyMeta.actor, historyMeta.mode);
         }
     }
 
@@ -21484,6 +22216,38 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     function modifySelection(dir, historyMeta = null) {
         console.log(`function modifySelection(dir: ${dir})`);
+        if (selectionTargetMode === 'links') {
+            if (!selectedLinks.size && dir > 0) {
+                draw();
+                return new Set();
+            }
+            if (dir > 0) {
+                linkSelectionHistory.push(new Set(selectedLinks));
+                const endpointIds = getSelectedLinkEndpointIds();
+                const expanded = new Set(selectedLinks);
+                getActiveGraphLinks().forEach(link => {
+                    if (endpointIds.has(getLinkEndpointId(link.source)) || endpointIds.has(getLinkEndpointId(link.target))) {
+                        expanded.add(getLinkEdgeKey(link));
+                    }
+                });
+                selectedLinks = expanded;
+                refreshInfoBoxFromSelection('Expanded Link Selection');
+                updateViewMenu();
+                if (historyMeta?.actor) aiRecordExpandHistory(historyMeta.actor);
+                draw();
+                return new Set(expanded);
+            }
+            const previous = linkSelectionHistory.pop();
+            if (previous) {
+                selectedLinks = new Set(previous);
+                refreshInfoBoxFromSelection('Shrank Link Selection');
+                updateViewMenu();
+            } else {
+                deselectNodes();
+            }
+            draw();
+            return new Set(selectedLinks);
+        }
         const effectiveSelection = getEffectiveSelectedNodesSet();
         if (effectiveSelection.size || dir < 0) {
             undoBegin('selection', { ids: Array.from(effectiveSelection) });
@@ -21951,14 +22715,59 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             .style("margin-bottom", "4px")
             .style("font-size", "12px")
             .style("color", "#ddd")
-            .text("Colour nodes by");
+            .text(selectionTargetMode === 'links' ? "Colour links by" : "Colour nodes by");
         keyColorWrap.append("select").attr("id", "keyColorMode");
-        syncColorModeSelects(mode);
         const keyColorSelect = document.getElementById('keyColorMode');
-        if (keyColorSelect) {
+        if (selectionTargetMode === 'links') {
+            updateLinkModeOptions();
+            cloneSelectOptions(document.getElementById('linkMode'), keyColorSelect);
+            keyColorSelect.value = document.getElementById('linkMode')?.value || 'score';
+        } else {
+            syncColorModeSelects(mode);
+        }
+        if (keyColorSelect && selectionTargetMode === 'links') {
+            keyColorSelect.onchange = function() {
+                const linkModeSelect = document.getElementById('linkMode');
+                if (linkModeSelect) linkModeSelect.value = this.value;
+                aiRecordColorLinksByHistory(this.value, 'Human');
+                refreshLegendForCurrentViewOnly();
+                draw();
+            };
+        } else if (keyColorSelect) {
             keyColorSelect.onchange = function() {
                 handleColorModeChange(this.value, { actor: 'Human' });
             };
+        }
+
+        if (selectionTargetMode === 'links') {
+            const linkMode = document.getElementById('linkMode')?.value || 'score';
+            const activeLinks = getActiveGraphLinks();
+            const variable = linkMode === 'score' ? 'combined_score' : linkMode.startsWith('linkvar::') ? linkMode.slice(9) : null;
+            if (variable) {
+                const stats = variable === 'combined_score'
+                    ? { continuous: true, min: 200, max: 1000 }
+                    : getLinkVariableStats(variable);
+                if (stats.continuous) {
+                    const min = stats.min;
+                    const max = stats.max;
+                    const gradient = d3.range(0, 1.01, 0.1).map(t => variable === 'combined_score' ? getScoreLinkGreyColor(200 + t * 800) : d3.interpolateViridis(t)).join(', ');
+                    legendControls.append('div').attr('class', 'gradient-container').append('div').attr('class', 'gradient-bar').style('background', `linear-gradient(to right, ${gradient})`);
+                    const labels = legendControls.append('div').attr('class', 'grad-labels');
+                    labels.append('span').text(String(variable === 'combined_score' ? 200 : min));
+                    labels.append('span').text(String(variable === 'combined_score' ? 1000 : max));
+                } else {
+                    const categories = Array.from(new Set(values.map(value => String(value ?? '') || 'N/A')));
+                    const scale = d3.scaleOrdinal(d3.schemeTableau10).domain(categories);
+                    categories.forEach(category => {
+                        const row = legendControls.append('div').style('display', 'flex').style('align-items', 'center').style('gap', '6px').style('margin-bottom', '3px');
+                        row.append('span').style('width', '12px').style('height', '12px').style('background', scale(category)).style('display', 'inline-block');
+                        row.append('span').style('font-size', '12px').text(category);
+                    });
+                }
+            } else if (linkMode === 'mono') {
+                legendControls.append('div').attr('class', 'gradient-container').append('div').attr('class', 'gradient-bar').style('background', document.getElementById('linkColor')?.value || '#999999');
+            }
+            return;
         }
 
         const footerNotes = [];
@@ -23321,6 +24130,14 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
     const additiveBtnEl = document.getElementById('additiveBtn');
     if (additiveBtnEl) additiveBtnEl.onclick = () => toggleSelectionMode('add');
+    document.querySelectorAll('[data-selection-target]').forEach(button => {
+        button.onclick = () => {
+            const target = button.dataset.selectionTarget;
+            setSelectionTargetMode(target);
+            aiRecordSelectionTargetHistory(target, 'Human');
+        };
+    });
+    refreshSelectionTargetToggle();
     const subtractBtnEl = document.getElementById('subtractBtn');
     if (subtractBtnEl) subtractBtnEl.onclick = () => toggleSelectionMode('remove');
     const intersectBtnEl = document.getElementById('intersectBtn');
@@ -23482,6 +24299,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         totalUniqueLinks = 0;
         const tempLinks = new Set();
         interactionLinkLabelHeaders = [];
+        linkColorStatsCache.clear();
         interactionLinkLabelValues = new Map();
 
         Object.keys(interactionParsedEdgeCounts).forEach(k => delete interactionParsedEdgeCounts[k]);
@@ -23576,6 +24394,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const interactionCount = Object.keys(uploadedInteractionFiles).length;
         document.getElementById('startBtn').disabled = interactionCount === 0;
         updateLinkLabelFieldOptions();
+        updateLinkModeOptions();
         updateUploadedListsUI();
         updateMergeControls();
     }
@@ -24027,9 +24846,12 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         if (proteinInfoZoomHotkeyState) proteinInfoZoomHotkeyState.invalidated = true;
         secondaryProteinZoomPreviousTransform = null;
         if (currentViewId === 'Embeddings' && !embeddingSelectionClearIntent) return;
-        const hadSelection = getEffectiveSelectedNodesSet().size > 0;
+        const hadSelection = selectionTargetMode === 'links' ? selectedLinks.size > 0 : getEffectiveSelectedNodesSet().size > 0;
         if (hadSelection) undoBegin('selection', { ids: Array.from(getEffectiveSelectedNodesSet()) });
-        if (currentViewId === 'selected') {
+        if (selectionTargetMode === 'links') {
+            selectedLinks.clear();
+            linkSelectionHistory = [];
+        } else if (currentViewId === 'selected') {
             selectedNodesDraft = new Set();
         } else {
             selectedNodes.clear();
@@ -24278,7 +25100,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 return dx * dx + dy * dy <= hitRadius * hitRadius;
             });
             if (clicked) {
-                if (isAdditiveMode || isSubtractMode || isIntersectMode) applySearchLogic([clicked.node], `Scatter Node: ${clicked.id}`);
+                if (isAdditiveMode || isSubtractMode || isIntersectMode) applySearchLogic([clicked.node], `Scatter Node: ${clicked.id}`, null, aiSelectionHistoryMeta([clicked.node.id]));
                 else selectNodes([clicked.node], false, `Scatter Node: ${clicked.id}`);
             } else {
                 deselectNodes();
@@ -24586,8 +25408,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     };
     const linkModeEl = document.getElementById('linkMode');
     if (linkModeEl) {
+        updateLinkModeOptions();
         linkModeEl.onchange = (e) => {
             aiRecordColorLinksByHistory(e.target.value, 'Human');
+            refreshLegendForCurrentViewOnly();
             draw();
         };
     }
