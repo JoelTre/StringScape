@@ -149,6 +149,11 @@
     let selectionHistory = [], pathNodes = new Set(), pathEdges = new Set();
     let linkSelectionHistory = [];
     let linkColorStatsCache = new Map();
+    let linkComparisonContextCache = { key: '', context: null };
+    const comparisonVariables = {
+        nodes: { a: 'centrality', b: 'local_clustering_coefficient', normalized: true },
+        links: { a: 'combined_score', b: '' }
+    };
     let shortestPathDisplayMode = 'none';
     let shortestPathGroupsToolOpen = false;
     let shortestPathGroup1Ids = new Set();
@@ -409,8 +414,10 @@
         { type: 'function', function: { name: 'View_node_label_options', description: 'Lists the available node label fields that can be displayed.' } },
         { type: 'function', function: { name: 'Set_node_label', description: 'Sets the node label field. With the default all-node target, this also updates the manual node-label field control.', parameters: { type: 'object', properties: { nodes: { type: 'array', items: { type: 'string' }, description: 'Node IDs to target, or omit to set the global manual label field.' }, label_key: { type: 'string', description: 'Exact node label option value.' }, animate: { type: 'boolean' } }, required: ['label_key'] } } },
         { type: 'function', function: { name: 'Set_node_size_by_variable', description: 'Scales node sizes using a numerical variable and magnitude.', parameters: { type: 'object', properties: { key: { type: 'string', description: 'Numerical variable key.' }, magnitude: { type: 'number', description: 'Scaling magnitude from 0 to 1.' }, animate: { type: 'boolean' } }, required: ['key', 'magnitude'] } } },
+        { type: 'function', function: { name: 'Set_node_comparison_variables', description: 'Sets Variable A and Variable B for Compare two variables node colouring. Both variables must have the same type.', parameters: { type: 'object', properties: { variable_a: { type: 'string' }, variable_b: { type: 'string' }, normalized: { type: 'boolean', description: 'Normalize each continuous node variable before comparison. Defaults to true.' }, animate: { type: 'boolean' } }, required: ['variable_a', 'variable_b'] } } },
         { type: 'function', function: { name: 'View_colour_links_by_options', description: 'Lists the available variables for colouring links.' } },
         { type: 'function', function: { name: 'Color_links_by', description: 'Sets the link colouring variable and updates the manual link-colour control.', parameters: { type: 'object', properties: { link_variable_key: { type: 'string', description: 'Exact link colouring option value.' }, animate: { type: 'boolean' } }, required: ['link_variable_key'] } } },
+        { type: 'function', function: { name: 'Set_link_comparison_variables', description: 'Sets Variable A and Variable B for Compare two variables link colouring. Both variables must have the same type.', parameters: { type: 'object', properties: { variable_a: { type: 'string' }, variable_b: { type: 'string' }, animate: { type: 'boolean' } }, required: ['variable_a', 'variable_b'] } } },
         { type: 'function', function: { name: 'Set_link_color', description: 'Sets the colour of links. By default affects all links; pass link IDs in links to target specific links.', parameters: { type: 'object', properties: { links: { type: 'array', items: { type: 'string' }, description: 'Link IDs to affect, or omit to affect all links.' }, color: { type: 'string', description: 'Six-digit hexadecimal colour.' }, animate: { type: 'boolean' } }, required: ['color'] } } },
         { type: 'function', function: { name: 'Set_link_direction_arrow_visibility', description: 'Shows or hides direction arrows on links. By default affects all links; pass link IDs to target specific links.', parameters: { type: 'object', properties: { links: { type: 'array', items: { type: 'string' }, description: 'Link IDs to affect, or omit to affect all links.' }, visibility: { type: 'string', enum: ['show', 'hide'] }, animate: { type: 'boolean' } }, required: ['visibility'] } } },
         { type: 'function', function: { name: 'View_link_width', description: 'Returns the current link width setting.' } },
@@ -586,7 +593,9 @@
         - ss.set_node_visibility(nodes='all', visibility='show'), ss.set_node_label_visibility(nodes='all', visibility='show') -> Returns {"status", "affected_count", "message"}
         - ss.set_node_label(nodes='all', label_key='') -> Returns {"status", "affected_count"}
         - ss.set_node_size_by_variable(key, magnitude=0.5) -> Returns {"status", "key", "magnitude", "message"}
+        - ss.set_node_comparison_variables(variable_a, variable_b, normalized=True, animate=False) -> Sets Variable A and Variable B for Compare two variables node colouring. Both variables must have the same type.
         - ss.color_links_by(link_variable_key) -> Returns {"status": "success", "link_variable_key"}
+        - ss.set_link_comparison_variables(variable_a, variable_b, animate=False) -> Sets Variable A and Variable B for Compare two variables link colouring. Both variables must have the same type.
         - ss.merge_networks() -> Merges the two uploaded species networks, or splits them if already merged.
         - ss.set_show_nodes_from(selection) -> Sets merged-network node filtering to first, second, first-only, second-only, and, or.
         - ss.set_show_links_from(selection) -> Sets merged-network link filtering to first, second, first-only, second-only, and, or.
@@ -1419,6 +1428,15 @@
     function aiRecordColorLinksByHistory(linkVariableKey, actor = 'Human') {
         aiAppendActionHistory(actor, `Set color links by to ${linkVariableKey}`, [
             `ss.color_links_by(${aiFormatPythonSingleQuotedString(linkVariableKey)})`
+        ]);
+    }
+
+    function aiRecordSetComparisonVariablesHistory(target, variableA, variableB, normalized = true, actor = 'Human') {
+        const method = target === 'nodes' ? 'set_node_comparison_variables' : 'set_link_comparison_variables';
+        const argumentsText = [aiFormatPythonSingleQuotedString(variableA), aiFormatPythonSingleQuotedString(variableB)];
+        if (target === 'nodes') argumentsText.push(`normalized=${normalized ? 'True' : 'False'}`);
+        aiAppendActionHistory(actor, `Set ${target} comparison variables to ${variableA} and ${variableB}`, [
+            `ss.${method}(${argumentsText.join(', ')})`
         ]);
     }
 
@@ -3662,6 +3680,15 @@
                     if (!select || ![...select.options].some(option => option.value === mode)) return result('warning', { variable: requested, message: 'Colour variable was not found.' });
                     select.value = mode; handleColorModeChange(mode, { actor: 'AI' }); queueDraw(animate); return result('success', { variable: mode, animate });
                 }
+                if (method === 'set_node_comparison_variables' || method === 'set_link_comparison_variables') {
+                    const target = method === 'set_node_comparison_variables' ? 'nodes' : 'links';
+                    const variableA = String(args.variable_a ?? args.a ?? '').trim();
+                    const variableB = String(args.variable_b ?? args.b ?? '').trim();
+                    const applied = setComparisonVariables(target, variableA, variableB, args.normalized !== false, 'AI');
+                    if (!applied.ok) return result('warning', { variable_a: variableA, variable_b: variableB, message: applied.message });
+                    queueDraw(animate);
+                    return result('success', { variable_a: variableA, variable_b: variableB, normalized: applied.normalized, target });
+                }
                 if (method === 'set_node_color') {
                     const rawIds = args.nodes ?? args.node_ids ?? args.node_id ?? args.id;
                     const requestedNames = rawIds == null || (Array.isArray(rawIds) && !rawIds.length)
@@ -4028,6 +4055,14 @@
                 animate: args.animate === true
             }));
         }
+        if (toolName === 'Set_node_comparison_variables') {
+            return JSON.parse(stringScapePythonBridge.call_json('set_node_comparison_variables', {
+                variable_a: String(args.variable_a ?? args.a ?? '').trim(),
+                variable_b: String(args.variable_b ?? args.b ?? '').trim(),
+                normalized: args.normalized !== false,
+                animate: args.animate === true
+            }));
+        }
         if (toolName === 'View_colour_links_by_options') {
             const options = Array.from(document.getElementById('linkMode')?.options || [])
                 .map(option => ({ value: option.value, label: option.textContent }));
@@ -4036,6 +4071,13 @@
         if (toolName === 'Color_links_by') {
             return JSON.parse(stringScapePythonBridge.call_json('color_links_by', {
                 link_variable_key: String(args.link_variable_key ?? args.key ?? '').trim(),
+                animate: args.animate === true
+            }));
+        }
+        if (toolName === 'Set_link_comparison_variables') {
+            return JSON.parse(stringScapePythonBridge.call_json('set_link_comparison_variables', {
+                variable_a: String(args.variable_a ?? args.a ?? '').trim(),
+                variable_b: String(args.variable_b ?? args.b ?? '').trim(),
                 animate: args.animate === true
             }));
         }
@@ -4693,11 +4735,13 @@ class _StringScapeAPI:
     def select_by_category(self, variable_key, category, animate=False, mode='replace'): return self._call('select_by_category', variable_key=variable_key, category=category, mode=mode, animate=animate)
     def set_node_size(self, nodes='all', size=5, animate=False): return self._call('set_node_size', nodes=nodes, size=size, animate=animate)
     def set_node_size_by_variable(self, key, magnitude, animate=False): return self._call('set_node_size_by_variable', key=key, magnitude=magnitude, animate=animate)
+    def set_node_comparison_variables(self, variable_a, variable_b, normalized=True, animate=False): return self._call('set_node_comparison_variables', variable_a=variable_a, variable_b=variable_b, normalized=normalized, animate=animate)
     def set_node_glow(self, nodes='all', magnitude=0, animate=False): return self._call('set_node_glow', nodes=nodes, magnitude=magnitude, animate=animate)
     def set_node_visibility(self, nodes='all', visibility='show', animate=False): return self._call('set_node_visibility', nodes=nodes, visibility=visibility, animate=animate)
     def set_node_label_visibility(self, nodes='all', visibility='show', animate=False): return self._call('set_node_label_visibility', nodes=nodes, visibility=visibility, animate=animate)
     def set_node_label(self, nodes='all', label_key='', animate=False): return self._call('set_node_label', nodes=nodes, label_key=label_key, animate=animate)
     def color_links_by(self, link_variable_key, animate=False): return self._call('color_links_by', link_variable_key=link_variable_key, animate=animate)
+    def set_link_comparison_variables(self, variable_a, variable_b, animate=False): return self._call('set_link_comparison_variables', variable_a=variable_a, variable_b=variable_b, animate=animate)
     def merge_networks(self, animate=False): return self._call('merge_networks', animate=animate)
     def set_show_nodes_from(self, selection, animate=False): return self._call('set_show_nodes_from', selection=selection, animate=animate)
     def set_show_links_from(self, selection, animate=False): return self._call('set_show_links_from', selection=selection, animate=animate)
@@ -5862,7 +5906,7 @@ sys.modules['stringscape'] = _stringscape_module
     // End of AI tool and chat interface functions
 
     let transform = d3.zoomIdentity.translate(window.innerWidth/2, window.innerHeight/2).scale(0.15).translate(-window.innerWidth/2, -window.innerHeight/2);
-    let linkOpacity = 0.6, geneLinkOpacity = 0.9, totalUniqueLinks = 0;
+    let linkOpacity = 0.7, geneLinkOpacity = 0.9, totalUniqueLinks = 0;
     let backgroundMode = 'mono';
     let bgVoronoiOpacity = 0.35;
     let bgVoronoiBlur = 2;
@@ -8287,6 +8331,7 @@ self.onmessage = async (event) => {
     }
 
     function getLinkVariableColor(link, mode, fallbackColor) {
+        if (mode === 'compare') return getComparisonColor(link, getActiveLinkComparisonContext());
         if (!mode?.startsWith('linkvar::')) return fallbackColor;
         const variable = mode.slice('linkvar::'.length);
         const stats = getLinkVariableStats(variable);
@@ -8311,8 +8356,9 @@ self.onmessage = async (event) => {
         } = options;
 
         if (isPath) {
+            const hasLinkSelection = selectionTargetMode === 'links' && selectedLinks.size > 0;
             return {
-                alpha: selectionTargetMode === 'links' ? (isSelected ? 0.9 : 0.05) : 1,
+                alpha: hasLinkSelection ? (isSelected ? 0.9 : 0.05) : 1,
                 color: '#ff4444',
                 width: selectionTargetMode === 'links' && isSelected ? 4 : 4
             };
@@ -8333,7 +8379,20 @@ self.onmessage = async (event) => {
             width = (Math.sqrt(link.value) / 8) * (isHigh ? 2 : 1);
         } else {
             color = getLinkVariableColor(link, linkMode, linkBaseColor);
-            width = 1 * (isHigh ? 2 : 1);
+            width = (linkMode === 'mono' || linkMode === 'compare' ? 2 : 1) * (isHigh ? 2 : 1);
+        }
+
+        const linkWidthMode = document.getElementById('linkWidthMode')?.value || 'none';
+        if (linkWidthMode === 'score') {
+            width = (Math.sqrt(Number(link.value) || 0) / 8) * (isHigh ? 2 : 1);
+        } else if (linkWidthMode.startsWith('linkvar::')) {
+            const variable = linkWidthMode.slice('linkvar::'.length);
+            const stats = getLinkVariableStats(variable);
+            const value = Number(getLinkVariableValue(link, variable));
+            const normalized = Number.isFinite(value) ? clamp01((value - stats.min) / ((stats.max - stats.min) || 1)) : 0;
+            width = (1 + normalized * 3) * (isHigh ? 2 : 1);
+        } else if (linkMode === 'score') {
+            width = 2 * (isHigh ? 2 : 1);
         }
 
         if (link._ssColor) color = link._ssColor;
@@ -8342,9 +8401,9 @@ self.onmessage = async (event) => {
         width = Number.isFinite(link._ssWidth) ? link._ssWidth : width * linkWidthMultiplier;
 
         const normalWidth = Number.isFinite(width) && width > 0 ? width : 1;
-        if (selectionTargetMode === 'links') {
+        if (selectionTargetMode === 'links' && selectedLinks.size > 0) {
             return {
-                alpha: isSelected ? 0.9 : 0.05,
+                alpha: Math.max(0, Math.min(1, alpha * (isSelected ? 0.9 : 0.05))),
                 color,
                 width: normalWidth * (isSelected ? 1 : 1)
             };
@@ -8648,6 +8707,7 @@ self.onmessage = async (event) => {
             ? getLocalizationColorScale(targetNodes, builtInColorSource)
             : null;
         const complexPdbState = mode === 'complex_pdbs' ? ensureComplexPdbColorState() : null;
+        const comparisonContext = mode === 'compare' ? getComparisonContext('nodes', targetNodes) : null;
         const complexPdbScale = complexPdbState?.colorScale || d3.scaleOrdinal(d3.schemeTableau10);
         const customVariableColourContext = buildCustomVariableColourContext(mode, targetNodes);
         const speciesPresenceMap = mode === 'species' ? getSpeciesPresenceMap(targetNodes) : null;
@@ -8669,7 +8729,8 @@ self.onmessage = async (event) => {
             const eigenVal = Number.isFinite(n.eigen) ? n.eigen : 0;
             const proteinSizeVal = getProteinSizeValue(n.id, proteinSizeSource);
             let colorValue = 0.5;
-            if (mode === 'species') n.col = getMergedSpeciesColor(getSpeciesPresenceForNode(n, speciesPresenceMap));
+            if (mode === 'compare') n.col = getComparisonColor(n, comparisonContext);
+            else if (mode === 'species') n.col = getMergedSpeciesColor(getSpeciesPresenceForNode(n, speciesPresenceMap));
             else if (mode === 'layer') {
                 const layerLabel = n.layer === 99 ? 'Disconnected' : `Layer ${n.layer}`;
                 const defaultColor = (n.layer === 99) ? '#888' : d3.interpolateViridis(1 - ((n.layer || 0) / 10));
@@ -9694,6 +9755,10 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
             sameOption.value = 'same_as_color';
             sameOption.textContent = 'Same as Colour Nodes By variable';
             borderColorSelect.appendChild(sameOption);
+            const compareOption = document.createElement('option');
+            compareOption.value = 'compare';
+            compareOption.textContent = 'Compare two variables';
+            borderColorSelect.appendChild(compareOption);
             getVisibleColorModeVariableEntries().forEach(entry => {
                 const option = document.createElement('option');
                 option.value = entry.key;
@@ -9706,8 +9771,9 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         if (sizeSelect && !sizeSelect.value) sizeSelect.value = 'none';
     }
 
-    function getNodeBorderColor(node, key, innerColor, proteinSizeSource, ranges) {
+    function getNodeBorderColor(node, key, innerColor, proteinSizeSource, ranges, comparisonContext = null) {
         if (key === 'same_as_color') return d3.color(innerColor)?.brighter(0.8) || '#ffffff';
+        if (key === 'compare') return d3.color(getComparisonColor(node, comparisonContext))?.brighter(0.8) || '#ffffff';
         const value = getNodeVariableMagnitude(node, key, proteinSizeSource);
         const min = ranges?.[key]?.[0] || 0;
         const span = (ranges?.[key]?.[1] - min) || 1;
@@ -12911,6 +12977,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             {value:'biological_process', text:'Biological process (mind-map most specific)', color:'#ccc'},
             {value:'size', text:'Protein size', color:'#93c5fd'},
             {value:'random', text:'Random', color:'#ffffff'},
+            {value:'compare', text:'Compare two variables', color:'#ffffff'},
             {value:'mono', text:'Mono', color:'#ffffff'},
             {value:'species', text:'Species', color:'#ffffff'}
         ];
@@ -12974,6 +13041,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         }
 
         syncColorModeSelects(select.value);
+        syncComparisonControls();
 
         updateNodeLabelFieldOptions();
         updateSearchScopeOptions();
@@ -13020,7 +13088,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         if (!select) return;
         const currentValue = select.value || 'score';
         select.innerHTML = '';
-        const options = [{ value: 'score', text: 'Combined Score' }, { value: 'mono', text: 'Mono' }];
+        const options = [{ value: 'score', text: 'Combined Score' }, { value: 'compare', text: 'Compare two variables' }, { value: 'mono', text: 'Mono' }];
         interactionLinkLabelHeaders.forEach(header => {
             if (header === 'combined_score' || header === 'score') return;
             options.push({ value: `linkvar::${header}`, text: header });
@@ -13032,10 +13100,272 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             select.appendChild(option);
         });
         select.value = Array.from(select.options).some(option => option.value === currentValue) ? currentValue : 'score';
+        updateLinkWidthModeOptions();
+        syncComparisonControls();
+    }
+
+    function updateLinkWidthModeOptions() {
+        const select = document.getElementById('linkWidthMode');
+        if (!select) return;
+        const currentValue = select.value || 'none';
+        select.innerHTML = '<option value="none">None</option><option value="score">Combined Score</option>';
+        interactionLinkLabelHeaders.forEach(header => {
+            if (header !== 'combined_score' && header !== 'score' && getLinkVariableStats(header).continuous) {
+                const option = document.createElement('option');
+                option.value = `linkvar::${header}`;
+                option.textContent = header;
+                select.appendChild(option);
+            }
+        });
+        select.value = Array.from(select.options).some(option => option.value === currentValue) ? currentValue : 'none';
+    }
+
+    function getComparisonOptionData(target) {
+        if (target === 'links') {
+            return [
+                { value: 'combined_score', label: 'Combined Score', type: 'continuous' },
+                ...interactionLinkLabelHeaders.filter(header => header !== 'combined_score' && header !== 'score').map(header => ({
+                    value: header,
+                    label: header,
+                    type: getLinkVariableStats(header).continuous ? 'continuous' : 'categorical'
+                }))
+            ];
+        }
+        const select = document.getElementById('colorMode');
+        const excluded = new Set(['compare', 'mono', 'random', 'embeddings', 'species']);
+        return Array.from(select?.options || []).filter(option => !excluded.has(option.value)).map(option => ({
+            value: option.value,
+            label: option.textContent,
+            type: getNodeComparisonVariableType(option.value)
+        }));
+    }
+
+    function getNodeComparisonVariableType(variable) {
+        if (['layer', 'centrality', 'local_clustering_coefficient', 'eigen', 'annotation', 'size', 'pdb_structure_count'].includes(variable)) return 'continuous';
+        if (variable?.startsWith('var::')) {
+            const type = getCustomVariableSelection(variable)?.cfg?.type || '';
+            return type === 'Numerical - Continuous' ? 'continuous' : 'categorical';
+        }
+        return 'categorical';
+    }
+
+    function getNodeComparisonValue(node, variable) {
+        if (!node) return null;
+        if (variable === 'layer') return Number(node.layer);
+        if (variable === 'centrality' || variable === 'local_clustering_coefficient' || variable === 'eigen') return Number(node[variable]);
+        if (variable === 'size') return getProteinSizeValue(node.id);
+        if (variable === 'annotation') return getAnnotationLengthFromSource(node.id, resolveBuiltInColorSource('annotation'));
+        if (variable === 'pdb_structure_count') return getPdbStructureCount(node.id);
+        if (variable === 'collection') return getNodeCollectionMemberships(node.id).sort().join('|') || 'None';
+        if (variable === 'characterization') return getCharacterizationValue(node.id);
+        if (variable === 'localization') return getBuiltInColorValueFromSource(node.id, 'localization', resolveBuiltInColorSource('localization'));
+        if (variable === 'biological_process') return getBiologicalProcessKey(node.id);
+        if (variable === 'complex_pdbs') return getComplexPdbMemberships(node.id).sort().join('|') || 'None';
+        if (variable?.startsWith('var::')) return getCustomVariableValue(node, variable);
+        return null;
+    }
+
+    function getComparisonContext(target, items) {
+        const { a, b } = comparisonVariables[target];
+        const options = getComparisonOptionData(target);
+        const optionA = options.find(option => option.value === a);
+        const optionB = options.find(option => option.value === b);
+        if (!optionA || !optionB || optionA.type !== optionB.type) return { valid: false };
+        const valueFor = target === 'nodes'
+            ? (item, variable) => getNodeComparisonValue(item, variable)
+            : (item, variable) => getLinkVariableValue(item, variable);
+        if (optionA.type === 'continuous') {
+            const numericValue = value => String(value ?? '').trim() === '' ? NaN : Number(value);
+            const valuesA = items.map(item => numericValue(valueFor(item, a))).filter(Number.isFinite);
+            const valuesB = items.map(item => numericValue(valueFor(item, b))).filter(Number.isFinite);
+            const normalized = target === 'nodes' && comparisonVariables.nodes.normalized !== false;
+            const minA = d3.min(valuesA) ?? 0, maxA = d3.max(valuesA) ?? 1;
+            const minB = d3.min(valuesB) ?? 0, maxB = d3.max(valuesB) ?? 1;
+            const differenceFor = item => {
+                const valueA = numericValue(valueFor(item, a));
+                const valueB = numericValue(valueFor(item, b));
+                if (!Number.isFinite(valueA) || !Number.isFinite(valueB)) return NaN;
+                return normalized
+                    ? ((valueA - minA) / ((maxA - minA) || 1)) - ((valueB - minB) / ((maxB - minB) || 1))
+                    : valueA - valueB;
+            };
+            const differences = items.map(differenceFor).filter(Number.isFinite);
+            return { valid: true, continuous: true, a, b, valueFor, numericValue, differenceFor, normalized, maxAbs: d3.max(differences, difference => Math.abs(difference)) || 1 };
+        }
+        return { valid: true, continuous: false, a, b, valueFor };
+    }
+
+    function getComparisonColor(item, context) {
+        if (!context?.valid) return '#999999';
+        const a = context.valueFor(item, context.a);
+        const b = context.valueFor(item, context.b);
+        if (context.continuous) {
+            const difference = context.differenceFor(item);
+            return Number.isFinite(difference) ? d3.interpolateRdBu(clamp01((difference / context.maxAbs + 1) / 2)) : '#999999';
+        }
+        return String(a ?? 'N/A') === String(b ?? 'N/A') ? d3.interpolateRdBu(1) : d3.interpolateRdBu(0);
+    }
+
+    function getActiveLinkComparisonContext() {
+        const activeLinks = getActiveGraphLinks();
+        const { a, b } = comparisonVariables.links;
+        const key = `${currentViewId}|${activeLinks.length}|${a}|${b}`;
+        if (linkComparisonContextCache.key !== key) {
+            linkComparisonContextCache = { key, context: getComparisonContext('links', activeLinks) };
+        }
+        return linkComparisonContextCache.context;
+    }
+
+    function setComparisonVariables(target, variableA, variableB, normalized = true, actor = 'Human') {
+        const options = getComparisonOptionData(target);
+        const optionA = options.find(option => option.value === variableA);
+        const optionB = options.find(option => option.value === variableB);
+        if (!optionA || !optionB || optionA.type !== optionB.type) return { ok: false, message: 'Variable A and Variable B must be available and have the same type.' };
+        const state = comparisonVariables[target];
+        state.a = variableA;
+        state.b = variableB;
+        if (target === 'nodes') {
+            state.normalized = normalized !== false;
+            const select = document.getElementById('colorMode');
+            if (select) select.value = 'compare';
+            syncComparisonControls();
+            updateSizesAndColors();
+        } else {
+            const select = document.getElementById('linkMode');
+            if (select) select.value = 'compare';
+            linkComparisonContextCache.key = '';
+            syncComparisonControls();
+            refreshLegendForCurrentViewOnly();
+            draw();
+        }
+        aiRecordSetComparisonVariablesHistory(target, variableA, variableB, state.normalized, actor);
+        return { ok: true, normalized: state.normalized };
+    }
+
+    function renderComparisonControls(container, target, onChange) {
+        if (!container) return;
+        const options = getComparisonOptionData(target);
+        const state = comparisonVariables[target];
+        const typeFor = value => options.find(option => option.value === value)?.type;
+        if (!options.some(option => option.value === state.a)) state.a = options[0]?.value || '';
+        const compatibleOptions = options.filter(option => option.type === typeFor(state.a) && option.value !== state.a);
+        if (!compatibleOptions.some(option => option.value === state.b)) state.b = compatibleOptions[0]?.value || '';
+        container.innerHTML = '';
+        [['Variable A', 'a', options], ['Variable B', 'b', compatibleOptions]].forEach(([label, key, choices]) => {
+            const labelEl = document.createElement('label');
+            labelEl.textContent = label;
+            const select = document.createElement('select');
+            choices.forEach(option => {
+                const element = document.createElement('option');
+                element.value = option.value;
+                element.textContent = option.label;
+                select.appendChild(element);
+            });
+            select.value = state[key];
+            select.onchange = () => {
+                state[key] = select.value;
+                const compatible = options.find(option => option.value === state.a)?.type === options.find(option => option.value === state.b)?.type;
+                if (!compatible) state.b = options.find(option => option.value !== state.a && option.type === typeFor(state.a))?.value || '';
+                aiRecordSetComparisonVariablesHistory(target, state.a, state.b, state.normalized, 'Human');
+                onChange();
+            };
+            container.append(labelEl, select);
+        });
+    }
+
+    function syncComparisonControls() {
+        const nodeMode = document.getElementById('colorMode')?.value;
+        const linkMode = document.getElementById('linkMode')?.value;
+        const nodeContainer = document.getElementById('nodeCompareControls');
+        const linkContainer = document.getElementById('linkCompareControls');
+        if (nodeContainer) {
+            nodeContainer.style.display = nodeMode === 'compare' ? '' : 'none';
+            if (nodeMode === 'compare') renderComparisonControls(nodeContainer, 'nodes', () => { syncComparisonControls(); updateSizesAndColors(); });
+        }
+        if (linkContainer) {
+            linkContainer.style.display = linkMode === 'compare' ? '' : 'none';
+            if (linkMode === 'compare') renderComparisonControls(linkContainer, 'links', () => { syncComparisonControls(); refreshLegendForCurrentViewOnly(); draw(); });
+        }
+    }
+
+    function appendComparisonLegend(container, target, context) {
+        if (!context?.valid) {
+            container.append('div').style('font-size', '12px').style('color', '#f59e0b').text('Choose two variables of the same type.');
+            return;
+        }
+        const labels = Object.fromEntries(getComparisonOptionData(target).map(option => [option.value, option.label]));
+        container.append('div').style('font-size', '12px').style('margin-bottom', '6px').text(`${labels[context.a]} − ${labels[context.b]}`);
+        if (context.continuous) {
+            if (target === 'nodes') {
+                const toggle = container.append('div').attr('class', 'link-direction-toggle').style('margin-bottom', '8px');
+                [['raw', 'Raw values'], ['normalized', 'Normalized']].forEach(([value, label]) => {
+                    toggle.append('button')
+                        .attr('type', 'button')
+                        .attr('class', `link-direction-option${(value === 'normalized') === context.normalized ? ' active' : ''}`)
+                        .text(label)
+                        .on('click', () => {
+                            comparisonVariables.nodes.normalized = value === 'normalized';
+                            aiRecordSetComparisonVariablesHistory('nodes', comparisonVariables.nodes.a, comparisonVariables.nodes.b, comparisonVariables.nodes.normalized, 'Human');
+                            updateSizesAndColors();
+                        });
+                });
+            }
+            const gradient = d3.range(0, 1.01, 0.1).map(d3.interpolateRdBu).join(', ');
+            const gradientContainer = container.append('div').attr('class', 'gradient-container');
+            const bar = gradientContainer.append('div').attr('class', 'gradient-bar').style('background', `linear-gradient(to right, ${gradient})`);
+            const scaleLabels = container.append('div').attr('class', 'grad-labels');
+            scaleLabels.append('span').text(`−${context.maxAbs}`);
+            scaleLabels.append('span').text(`+${context.maxAbs}`);
+            if (target === 'nodes') {
+                const range = [-context.maxAbs, context.maxAbs];
+                const inputs = container.append('div').attr('class', 'range-inputs');
+                const minBox = inputs.append('div');
+                minBox.append('label').text('Min.');
+                const minInput = minBox.append('input').attr('type', 'number').attr('step', 'any').property('value', range[0]);
+                const maxBox = inputs.append('div');
+                maxBox.append('label').text('Max.');
+                const maxInput = maxBox.append('input').attr('type', 'number').attr('step', 'any').property('value', range[1]);
+                const minHandle = gradientContainer.append('div').attr('class', 'range-handle').style('left', '0%');
+                const maxHandle = gradientContainer.append('div').attr('class', 'range-handle').style('right', '0%');
+                const updateHandles = () => {
+                    const min = Math.max(range[0], Math.min(range[1], Number(minInput.property('value'))));
+                    const max = Math.max(min, Math.min(range[1], Number(maxInput.property('value'))));
+                    minInput.property('value', min); maxInput.property('value', max);
+                    minHandle.style('left', `${((min - range[0]) / (range[1] - range[0])) * 100}%`);
+                    maxHandle.style('right', `${100 - ((max - range[0]) / (range[1] - range[0])) * 100}%`);
+                };
+                const drag = d3.drag().on('drag', function(event) {
+                    const rect = bar.node().getBoundingClientRect();
+                    const percent = clamp01(((event.sourceEvent?.clientX ?? rect.left) - rect.left) / rect.width);
+                    const value = range[0] + percent * (range[1] - range[0]);
+                    if (this === minHandle.node()) minInput.property('value', Math.min(value, Number(maxInput.property('value'))));
+                    else maxInput.property('value', Math.max(value, Number(minInput.property('value'))));
+                    updateHandles();
+                });
+                minHandle.call(drag); maxHandle.call(drag);
+                minInput.on('input', updateHandles); maxInput.on('input', updateHandles);
+                container.append('button').text('Select range').style('background', '#666').on('click', () => {
+                    const activeNodes = (currentViewId === 'base' || currentViewId === 'Venn Diagram' || currentViewId === 'Scatter Plot' || currentViewId === 'Embeddings') ? nodes : (activeSubData?.nodes || []);
+                    const min = Number(minInput.property('value')), max = Number(maxInput.property('value'));
+                    const matches = activeNodes.filter(node => {
+                        const difference = context.differenceFor(node);
+                        return Number.isFinite(difference) && difference >= min && difference <= max;
+                    });
+                    applySearchLogic(matches, 'Compare variables range', null, aiSelectionHistoryMeta(matches.map(node => node.id)));
+                });
+            }
+        } else {
+            [['Match', d3.interpolateRdBu(1)], ['Do not match', d3.interpolateRdBu(0)]].forEach(([label, color]) => {
+                const row = container.append('div').style('display', 'flex').style('align-items', 'center').style('gap', '6px').style('margin-bottom', '3px');
+                row.append('span').style('width', '12px').style('height', '12px').style('background', color).style('display', 'inline-block');
+                row.append('span').style('font-size', '12px').text(label);
+            });
+        }
     }
 
     function handleColorModeChange(mode, historyMeta = null) {
         syncColorModeSelects(mode);
+        syncComparisonControls();
         const historyActor = historyMeta?.actor || 'Human';
         if (mode !== currentColorMode) {
             aiRecordSetNodeColouringHistory(mode, historyActor);
@@ -21344,6 +21674,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     nodeAlpha = Math.min(0.75, baseDimAlpha + proximityBonus);
                 }
             }
+            if (selectionTargetMode === 'links') nodeAlpha = 0.5;
             n.renderAlpha = nodeAlpha;
             n.gpuIsPath = isPath;
             n.gpuIsHigh = isHigh;
@@ -22332,7 +22663,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         document.getElementById('val-bri').innerText = val; 
         linkOpacity = linkOpacityFromSliderValue(val); draw(); 
     }
-    setLinkBrightness(0.6);
+    setLinkBrightness(0.7);
 
     function updatePhysicsForce() {
         console.log("function updatePhysicsForce()");
@@ -22510,6 +22841,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const maxPdb = pdbCounts?.length ? Math.max(...pdbCounts) : 1;
         const pdbRange = (maxPdb - minPdb) || 1;
         const complexPdbState = mode === 'complex_pdbs' ? ensureComplexPdbColorState() : null;
+        const comparisonContext = (mode === 'compare' || selectedBorderColorMode === 'compare') ? getComparisonContext('nodes', targetNodes) : null;
         const complexPdbScale = complexPdbState?.colorScale || d3.scaleOrdinal(d3.schemeTableau10);
         const customVariableColourContext = buildCustomVariableColourContext(mode, targetNodes);
         customColourTimer?.mark('range and colour-scale setup');
@@ -22538,7 +22870,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             const borderColorNormalized = clamp01((borderColorValue - (borderColorRange[0] || 0)) / borderColorSpan);
             n.r = (6 * nSizeBase) + (sizeNormalized * 60 * sizeByMagnitude);
             n.borderWidth = borderWidth * (1 + (borderWidthMode === 'none' ? 0 : borderNormalized * borderWidthByMagnitude));
-            if (mode === 'species') n.col = getMergedSpeciesColor(getSpeciesPresenceForNode(n, speciesPresenceMap));
+            if (mode === 'compare') n.col = getComparisonColor(n, comparisonContext);
+            else if (mode === 'species') n.col = getMergedSpeciesColor(getSpeciesPresenceForNode(n, speciesPresenceMap));
             else if (mode === 'layer') {
                 const layerLabel = n.layer === 99 ? 'Disconnected' : `Layer ${n.layer}`;
                 const defaultColor = n.layer === 99 ? '#888' : d3.interpolateViridis(1 - (n.layer / 10));
@@ -22639,7 +22972,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             }
             else if (mode === 'random') n.col = n.randColor || "#fff";
             else n.col = monoCol;
-            n.borderCol = getNodeBorderColor(n, selectedBorderColorMode, n.col || monoCol, proteinSizeSource, variableRanges);
+            n.borderCol = getNodeBorderColor(n, selectedBorderColorMode, n.col || monoCol, proteinSizeSource, variableRanges, comparisonContext);
         };
 
         targetNodes.forEach(applyStyle);
@@ -22730,6 +23063,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 const linkModeSelect = document.getElementById('linkMode');
                 if (linkModeSelect) linkModeSelect.value = this.value;
                 aiRecordColorLinksByHistory(this.value, 'Human');
+                syncComparisonControls();
                 refreshLegendForCurrentViewOnly();
                 draw();
             };
@@ -22739,9 +23073,26 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             };
         }
 
+        const comparisonTarget = selectionTargetMode === 'links' ? 'links' : 'nodes';
+        const comparisonModeActive = comparisonTarget === 'links'
+            ? document.getElementById('linkMode')?.value === 'compare'
+            : mode === 'compare';
+        if (comparisonModeActive) {
+            const comparisonWrap = legendControls.append('div').style('margin-bottom', '10px').node();
+            renderComparisonControls(comparisonWrap, comparisonTarget, () => {
+                syncComparisonControls();
+                if (comparisonTarget === 'nodes') updateSizesAndColors();
+                else { refreshLegendForCurrentViewOnly(); draw(); }
+            });
+        }
+
         if (selectionTargetMode === 'links') {
             const linkMode = document.getElementById('linkMode')?.value || 'score';
             const activeLinks = getActiveGraphLinks();
+            if (linkMode === 'compare') {
+                appendComparisonLegend(legendControls, 'links', getComparisonContext('links', activeLinks));
+                return;
+            }
             const variable = linkMode === 'score' ? 'combined_score' : linkMode.startsWith('linkvar::') ? linkMode.slice(9) : null;
             if (variable) {
                 const stats = variable === 'combined_score'
@@ -22756,7 +23107,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     labels.append('span').text(String(variable === 'combined_score' ? 200 : min));
                     labels.append('span').text(String(variable === 'combined_score' ? 1000 : max));
                 } else {
-                    const categories = Array.from(new Set(values.map(value => String(value ?? '') || 'N/A')));
+                    const categories = Array.from(new Set(activeLinks.map(link => String(getLinkVariableValue(link, variable) ?? '') || 'N/A')));
                     const scale = d3.scaleOrdinal(d3.schemeTableau10).domain(categories);
                     categories.forEach(category => {
                         const row = legendControls.append('div').style('display', 'flex').style('align-items', 'center').style('gap', '6px').style('margin-bottom', '3px');
@@ -22767,6 +23118,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             } else if (linkMode === 'mono') {
                 legendControls.append('div').attr('class', 'gradient-container').append('div').attr('class', 'gradient-bar').style('background', document.getElementById('linkColor')?.value || '#999999');
             }
+            return;
+        }
+
+        if (mode === 'compare') {
+            appendComparisonLegend(legendControls, 'nodes', getComparisonContext('nodes', activeNodes));
             return;
         }
 
@@ -25398,6 +25754,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         draw();
     };
     document.getElementById('linkWidthSlider').onchange = (e) => aiRecordSetLinkWidthHistory(e.target.value, 'Human');
+    const linkWidthModeEl = document.getElementById('linkWidthMode');
+    if (linkWidthModeEl) linkWidthModeEl.onchange = () => draw();
     document.getElementById('brightnessSlider').oninput = e => setLinkBrightness(+e.target.value);
     document.getElementById('brightnessSlider').onchange = (e) => aiRecordSetLinkOpacityHistory(e.target.value, 'Human');
     const geneBrightnessSlider = document.getElementById('geneBrightnessSlider');
@@ -25411,6 +25769,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         updateLinkModeOptions();
         linkModeEl.onchange = (e) => {
             aiRecordColorLinksByHistory(e.target.value, 'Human');
+            syncComparisonControls();
             refreshLegendForCurrentViewOnly();
             draw();
         };
