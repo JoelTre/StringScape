@@ -4573,9 +4573,16 @@
                 <option value="size">Protein size</option>
                 <option value="pdb_structure_count">PDB structure count</option>
                 <option value="random">Random</option>
+                <option value="compare">Compare two variables</option>
                 <option value="mono">Mono</option>
                 <option value="species" style="display:none;">Species</option>
             </select>
+            <div id="nodeCompareControls" style="display:none; margin-top:8px;">
+                <label>Variable A</label>
+                <select id="nodeCompareVariableA"></select>
+                <label>Variable B</label>
+                <select id="nodeCompareVariableB"></select>
+            </div>
             <label>Mono Node Colour</label>
             <input type="color" id="nodeMonoColor" value="#4caf50">
 
@@ -4637,9 +4644,16 @@
             <label>Colour Links By</label>
             <select id="linkMode">
                 <option value="score" selected>Combined Score</option>
+                <option value="compare">Compare two variables</option>
                 <option value="mono">Mono</option>
                 <option value="species" style="display:none;">Species</option>
             </select>
+            <div id="linkCompareControls" style="display:none; margin-top:8px;">
+                <label>Variable A</label>
+                <select id="linkCompareVariableA"></select>
+                <label>Variable B</label>
+                <select id="linkCompareVariableB"></select>
+            </div>
             <label>Mono Link Colour</label>
             <input type="color" id="linkColor" value="#999999">
             
@@ -4669,8 +4683,11 @@
             <label>Link Width <span id="val-linkw" class="slider-val">1</span></label>
             <input type="range" id="linkWidthSlider" min="0.2" max="5" step="0.1" value="1">
 
-            <label>Link Opacity <span id="val-bri" class="slider-val">0.6</span></label>
-            <input type="range" id="brightnessSlider" min="0" max="1" step="0.01" value="0.6">
+            <label>Link Width By</label>
+            <select id="linkWidthMode"><option value="none" selected>None</option></select>
+
+            <label>Link Opacity <span id="val-bri" class="slider-val">0.7</span></label>
+            <input type="range" id="brightnessSlider" min="0" max="1" step="0.01" value="0.7">
 
             <!-- <label>Gene Link Opacity <span id="val-gene-bri" class="slider-val">0.9</span></label> -->
             <!-- <input type="range" id="geneBrightnessSlider" min="0" max="1" step="0.01" value="0.9"> -->
