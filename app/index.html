@@ -3215,7 +3215,11 @@
             justify-content: flex-start; /* Changed from center */
             align-items: center;
         }
-        .search-more-content { display: none; background: var(--surface-color-soft); padding: 10px; border-radius: 4px; border: 1px solid var(--border-color); margin-top: 5px; margin-bottom: 5px; }
+        .search-more-content { display: none; background: transparent; padding: 5px 0 0; border: none; margin: 0; }
+        .selection-target-toggle { display: flex; gap: 4px; width: 100%; background: var(--surface-color-panel-alt); border-radius: 16px; border: 1px solid var(--input-border); padding: 2px; margin: 6px 0 8px; box-sizing: border-box; }
+        .selection-target-toggle .selection-target-option { flex: 1; margin: 0; border: none; border-radius: 13px; background: transparent; color: var(--text-color); font-size: 12px; font-weight: bold; padding: 6px 0; cursor: pointer; }
+        .selection-target-toggle .selection-target-option:hover { background: var(--button-bg-hover); }
+        .selection-target-toggle .selection-target-option.active { background: var(--accent-color); color: var(--accent-contrast); }
         .search-mode-row { display: flex; gap: 5px; margin-bottom: 5px; }
         .search-mode-row button, .select-tool-row button { margin-top: 0; font-size: 11px; height: 28px; background: var(--button-bg); color: var(--text-color); flex: 1; border: 1px solid var(--input-border); }
 
@@ -3300,8 +3304,20 @@
         #dragNodesBtn.active { background: var(--accent-color) !important; }
         .select-tool-row { display: flex; gap: 5px; }
 
-        .dropdown-content { display: none; margin-top: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--border-color); }
-        .dropdown-toggle { font-size: 18px; font-weight: bold; color: var(--accent-color-soft); cursor: pointer; display: block; margin-top: 20px; padding: 8px 0; border-bottom: 1px solid var(--border-color-strong); }
+        .dropdown-content { display: none; margin-top: 10px; padding-bottom: 10px; }
+        .dropdown-toggle { 
+            font-size: 18px; 
+            font-weight: bold; 
+            color: var(--accent-color-soft); 
+            background-color: var(--button-bg);
+            cursor: pointer; 
+            display: block; 
+            margin-top: 20px; 
+            width: fit-content;
+            padding: 0px 8px;
+            border-radius: 8px;
+            border: 1px solid var(--button-bg); }
+        .dropdown-toggle:hover { background-color: var(--button-bg-hover); }
         #progress-wrapper { margin-top: 15px; }
         #progress-container { width: 100%; height: 8px; background: var(--surface-color-panel); border-radius: 4px; overflow: hidden; }
         #progress-bar { width: 0%; height: 100%; background: var(--accent-color); transition: width 0.2s; }
@@ -4463,7 +4479,12 @@
                 opacity: 1;
             }
         }
-        
+        .dropdown-divider {
+            border: none;
+            border-top: 1px solid var(--border-color, #333); /* Adjust line color */
+            margin: 12px 0; /* Adjust vertical spacing */
+            width: 100%;
+            }
     </style>
 </head>
 <body>
@@ -4496,7 +4517,7 @@
         </div>
         <div class="upload-progress" id="openFilesProgress"><div class="upload-progress-track"><div class="upload-progress-bar" id="openFilesProgressBar"></div></div><div class="upload-progress-text">Loading...</div></div>
 
-        <span id="more-toggle" class="dropdown-toggle">Advanced ▾</span>
+        <span id="more-toggle" class="dropdown-toggle" style="justify-self: center; background-color: transparent; border: none;">Advanced ▾</span>
         <div id="more-drop" class="dropdown-content">
             <!-- <button id="genomeInputBtn" type="button" style="background:#3498db; margin-bottom:10px;">Load Genome (fasta) (optional)</button> -->
             <!-- <input type="file" id="genomeInput" accept=".fa,.fasta,.fna" multiple style="display:none;"> -->
@@ -4606,6 +4627,7 @@
             </div>
         </div>
 
+        <hr class="dropdown-divider">
         <span class="dropdown-toggle">Links (edges) ▾</span>
         <div id="links-drop" class="dropdown-content">
             <div id="mergedLinkFilterContainer" style="display:none; margin-bottom:12px;">
@@ -4654,11 +4676,13 @@
             <!-- <input type="range" id="geneBrightnessSlider" min="0" max="1" step="0.01" value="0.9"> -->
         </div>
 
+        <hr class="dropdown-divider">
         <span class="dropdown-toggle">Variables ▾</span>
         <div id="variables-drop" class="dropdown-content">
             <button id="pill-blue-btn" style="width:100%;">Variable Settings</button>
         </div>
 
+        <hr class="dropdown-divider">
         <span class="dropdown-toggle">App style ▾</span>
         <div id="bg-drop" class="dropdown-content">
             <label>Colour Background By</label>
@@ -4706,6 +4730,7 @@
             </div>
         </div>
 
+        <hr class="dropdown-divider">
         <span class="dropdown-toggle">Physics ▾</span>
         <div id="physics-drop" class="dropdown-content">
             <button id="fullNetworkPhysBtn" style="width:100%; margin-bottom:10px; background:#3498db; color:#fff; border:none; padding:8px 10px; border-radius:999px;">Pause Full Network Physics</button>
@@ -4730,6 +4755,7 @@
             <button id="dragNodesBtn" style="margin-top:15px; background:#666">Drag nodes</button>
         </div>
 
+        <hr class="dropdown-divider">
         <span class="dropdown-toggle">Download ▾</span>
         <div id="download-drop" class="dropdown-content">
             <button id="pill-blue-btn" data-download-action="session" style="width:100%;">Save Session...</button>
@@ -4776,7 +4802,7 @@
             </p>
         </div>
 
-        <button class="btn-secondary" style="margin-bottom: auto; width: 100%; color: var(--text-color);">About StringScape</button>
+        <button class="btn-secondary" style="margin-top: 20px; margin-bottom: auto; width: 100%; color: var(--text-color); background-color: var(--button-bg);">About StringScape</button>
 
     </div>
 </div>
@@ -4835,7 +4861,7 @@
             For custom node info files, the first column should have the node ID (matching the node IDs in the links file), and the other columns can contain data on any variables associated with the nodes. Files for variables with a hierarchical nature should have one column heading containing the word “parent” and another column heading containing the word “child” with the rows of the columns containing the variable category names. Upload a separate file assigning each network node to a category (i.e., assigning each network node to a mind map node). <br><br>
             The app accepts CSV, TSV, Pipe-separated, semicolon-separated, Space-separated, and .h5 files.
         </p>
-        <button class="btn-secondary" style="margin-bottom: auto; width: 100%;">About StringScape</button>
+        <button class="btn-secondary" style="margin-bottom: auto; width: 100%; background-color: var(--button-bg);">About StringScape</button>
     </div>
 </div>
 
@@ -4901,6 +4927,10 @@
         </div>
         <div id="moreToggle" class="Selection-tools-btn">Selection Tools ▾</div>
         <div id="search-more-drop" class="search-more-content">
+            <div id="selection-target-toggle" class="selection-target-toggle" role="group" aria-label="Selection target">
+                <button type="button" class="selection-target-option active" data-selection-target="nodes">Nodes</button>
+                <button type="button" class="selection-target-option" data-selection-target="links">Links</button>
+            </div>
             <div class="search-mode-row">
                 <button id="additiveBtn" class="mode-venn-btn" title="Selection Mode: Add" aria-label="Selection mode add">
                     <span class="venn-mini venn-add"><span class="region"></span></span>
