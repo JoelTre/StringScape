@@ -6478,7 +6478,7 @@
             homologyViewerMode = mode;
             updateHomologyViewerToggle();
             if (!simulationMolstarViewer && typeof molstar !== 'undefined' && molstar.Viewer) {
-                simulationMolstarViewer = await molstar.Viewer.create('molstar-simulation-container', { layoutIsExpanded: false, layoutShowControls: false, layoutShowRemoteState: false, layoutShowSequence: false, layoutShowLog: false, viewportShowExpand: false, viewportShowSelectionMode: false, viewportShowAnimation: false });
+                simulationMolstarViewer = await molstar.Viewer.create('molstar-simulation-container', { disabledExtensions: ['volseg', 'mp4-export'], layoutIsExpanded: false, layoutShowControls: false, layoutShowRemoteState: false, layoutShowSequence: false, layoutShowLog: false, viewportShowExpand: false, viewportShowSelectionMode: false, viewportShowAnimation: false });
             }
             if (!simulationMolstarViewer?.plugin) return;
             await simulationMolstarViewer.plugin.clear();
@@ -6510,6 +6510,7 @@
             try {
                 if (!simulationMolstarViewer && typeof molstar !== 'undefined' && molstar.Viewer) {
                     simulationMolstarViewer = await molstar.Viewer.create('molstar-simulation-container', {
+                        disabledExtensions: ['volseg', 'mp4-export'],
                         layoutIsExpanded: false, layoutShowControls: false, layoutShowRemoteState: false,
                         layoutShowSequence: false, layoutShowLog: false, viewportShowExpand: false,
                         viewportShowSelectionMode: false, viewportShowAnimation: false
@@ -6559,11 +6560,13 @@
             try {
                 if (typeof molstar !== 'undefined' && molstar.Viewer) {
                     molstarViewer1 = await molstar.Viewer.create('molstar-container-1', {
+                        disabledExtensions: ['volseg', 'mp4-export'],
                         layoutIsExpanded: false, layoutShowControls: false, layoutShowRemoteState: false,
                         layoutShowSequence: false, layoutShowLog: false, viewportShowExpand: false,
                         viewportShowSelectionMode: false, viewportShowAnimation: false
                     });
                     molstarViewer2 = await molstar.Viewer.create('molstar-container-2', {
+                        disabledExtensions: ['volseg', 'mp4-export'],
                         layoutIsExpanded: false, layoutShowControls: false, layoutShowRemoteState: false,
                         layoutShowSequence: false, layoutShowLog: false, viewportShowExpand: false,
                         viewportShowSelectionMode: false, viewportShowAnimation: false
