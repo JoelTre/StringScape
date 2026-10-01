@@ -172,6 +172,19 @@
         body.light-mode #otherConstraintsBadge[class*="bg-sky"] { background:#e0f2fe; border-color:#7dd3fc; color:#075985; }
         body.light-mode #physicsStatusBadge, body.light-mode #matchSummaryBadge, body.light-mode #modelBuildTime { background:#e0e7ff; border-color:#c7d2fe; color:#3730a3; }
         body.light-mode #physicsStatusBadge[class*="bg-red"] { background:#fee2e2; border-color:#fca5a5; color:#991b1b; }
+        .responsive-viewer-header { flex-wrap:wrap; gap:.5rem; }
+        .responsive-viewer-header > h2, .responsive-viewer-header > h3 { min-width:0; flex-wrap:wrap; overflow-wrap:anywhere; }
+        .responsive-viewer-header > div { min-width:0; flex-wrap:wrap; }
+        .responsive-viewer-header select { max-width:100%; }
+        #PDBTitle, #AFTitle { overflow-wrap:anywhere; }
+        @media (max-width:640px) {
+            #viewDetailsBtn { width:100%; max-width:100%; margin-left:0; padding:.75rem 1rem; font-size:1rem; line-height:1.35; white-space:normal; text-align:center; }
+            #referenceStructureName { flex-basis:100%; }
+            #headerBetaTag { display:none; }
+            #diffColorLegend { width:min(10rem,35vw); min-width:4rem; flex-shrink:1; }
+            #diffLegendBar { flex-wrap:wrap; text-align:center; }
+            #physicsMouseGestureHint { display:none; }
+        }
     </style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col">
@@ -189,7 +202,7 @@
             </svg>
 
             <span class="text-3xl font-black tracking-tight gradient-text ml-0.5 py-1 leading-normal">StringScape</span>
-            <span class="bg-gray-800 text-xs text-gray-400 px-2 py-0.5 rounded-full border border-gray-700">Beta 1.0</span>
+            <span id="headerBetaTag" class="bg-gray-800 text-xs text-gray-400 px-2 py-0.5 rounded-full border border-gray-700">Beta 1.0</span>
             </a>
         </div>
         <div class="ml-auto flex items-center gap-6">
@@ -311,7 +324,7 @@
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <!-- Reference PDB 3D Container -->
             <div class="bg-slate-900 border rounded-xl flex flex-col overflow-hidden shadow-lg h-[380px] relative" style="border-color: #3498db4d;">
-                <div class="bg-slate-900/90 px-4 py-2.5 border-b flex justify-between items-center z-10" style="border-color: #3498db33;">
+                <div class="responsive-viewer-header bg-slate-900/90 px-4 py-2.5 border-b flex justify-between items-center z-10" style="border-color: #3498db33;">
                     <h2 class="font-semibold text-xs flex items-center gap-2" style="color: #3498db;">
                         <span class="w-2.5 h-2.5 rounded-full inline-block" style="background-color: #3498db;"></span> Reference PDB: <span id="PDBTitle" class="text-white font-mono">6YKM</span>
                     </h2>
@@ -322,7 +335,7 @@
 
             <!-- AlphaFold 3D Container -->
             <div class="bg-slate-900 border rounded-xl flex flex-col overflow-hidden shadow-lg h-[380px] relative" style="border-color: #2eccbf4d;">
-                <div class="bg-slate-900/90 px-4 py-2.5 border-b flex justify-between items-center z-10" style="border-color: #2eccbf33;">
+                <div class="responsive-viewer-header bg-slate-900/90 px-4 py-2.5 border-b flex justify-between items-center z-10" style="border-color: #2eccbf33;">
                     <h2 class="font-semibold text-xs flex items-center gap-2" style="color: #2eccbf;">
                         <span class="w-2.5 h-2.5 rounded-full inline-block" style="background-color: #2eccbf;"></span> AlphaFold: <span id="AFTitle" class="text-white font-mono">P09348 + P0AF06</span>
                     </h2>
@@ -345,11 +358,11 @@
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <!-- Reference PDB Distance Matrix -->
             <div class="bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden shadow-lg self-start min-w-0 relative">
-                <div class="bg-slate-900/90 px-4 py-2.5 border-b border-slate-800 flex justify-between items-center z-10">
+                <div class="responsive-viewer-header bg-slate-900/90 px-4 py-2.5 border-b border-slate-800 flex justify-between items-center z-10">
                     <h3 class="font-semibold text-xs text-slate-200 flex items-center gap-2">
                         <i class="fa-solid fa-border-all" style="color: #3498db;"></i> Reference PDB Distance Matrix
                     </h3>
-                    <div class="flex items-center gap-2">
+                    <div class="flex flex-wrap items-center gap-2">
                         <select id="PDBChainSelect" class="bg-slate-950 border border-slate-700 text-slate-300 rounded text-xs px-2 py-0.5 focus:outline-none"></select>
                         <button type="button" data-action-click="8" title="Download overview PNG" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-0.5 rounded text-xs border border-slate-700"><i class="fa-solid fa-download"></i> Low-res</button><button type="button" data-action-click="9" title="Download full-resolution PNG" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-0.5 rounded text-xs border border-slate-700"><i class="fa-solid fa-download"></i> Full-res</button>
                         <button id="resetPDBZoomBtn" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-0.5 rounded text-xs border border-slate-700 transition" title="Reset Zoom">
@@ -367,7 +380,7 @@
 
             <!-- AlphaFold Distance Matrix -->
             <div class="bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden shadow-lg self-start min-w-0 relative">
-                <div class="bg-slate-900/90 px-4 py-2.5 border-b border-slate-800 flex justify-between items-center z-10">
+                <div class="responsive-viewer-header bg-slate-900/90 px-4 py-2.5 border-b border-slate-800 flex justify-between items-center z-10">
                     <h3 class="font-semibold text-xs text-slate-200 flex items-center gap-2">
                         <i class="fa-solid fa-border-all" style="color: #2eccbf;"></i> AlphaFold Distance Matrix
                     </h3>
@@ -509,7 +522,7 @@
             </div>
 
             <!-- Difference Color Legend -->
-            <div class="bg-slate-950 px-5 py-2.5 border-t border-slate-800 flex items-center justify-center gap-2 text-xs text-slate-400"> 
+            <div id="diffLegendBar" class="bg-slate-950 px-5 py-2.5 border-t border-slate-800 flex items-center justify-center gap-2 text-xs text-slate-400"> 
                 <span id="diffLegendMin">0.0 Å (Identical Distance)</span> 
                 <div id="diffColorLegend" class="h-2.5 w-64 rounded-full border border-slate-700 shrink-0"></div> 
                 <span id="diffLegendMax">≥ 10.0 Å (High Structural Difference)</span> 
@@ -518,7 +531,7 @@
 
         <!-- Section 5: Morph Distance Matrix Viewer -->
         <div class="bg-slate-900 border border-violet-500/40 rounded-xl flex flex-col overflow-hidden shadow-xl">
-            <div class="bg-slate-900/90 px-5 py-3 border-b border-violet-500/20 flex flex-wrap justify-between items-center gap-3">
+            <div class="responsive-viewer-header bg-slate-900/90 px-5 py-3 border-b border-violet-500/20 flex flex-wrap justify-between items-center gap-3">
                 <div>
                     <h2 class="font-semibold text-sm text-white flex items-center gap-2">
                         <i class="fa-solid fa-sliders text-violet-400"></i> Morph Distance Matrix
@@ -666,6 +679,17 @@
                 </div>
             </div>
 
+            <div id="physicsNonProteinToggleSection" class="hidden bg-slate-900/60 px-5 py-2 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div class="flex flex-wrap items-center gap-2 min-w-0">
+                    <span class="text-slate-400 font-medium uppercase text-[10px] flex items-center gap-1.5 mr-1 tracking-wider"><i class="fa-solid fa-flask text-emerald-400"></i> Non protein toggles:</span>
+                    <div id="physicsNonProteinToggles" class="flex flex-wrap items-center gap-1.5 min-w-0 flex-1 max-h-24 overflow-y-auto"></div>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <button id="showAllNonProteinBtn" type="button" class="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-slate-200 px-2.5 py-1 rounded text-[11px] border border-slate-700 transition">Show All</button>
+                    <button id="hideAllNonProteinBtn" type="button" class="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-slate-200 px-2.5 py-1 rounded text-[11px] border border-slate-700 transition">Hide All</button>
+                </div>
+            </div>
+
             <!-- 3D Physics Scene Canvas Container -->
             <div class="bg-slate-900/60 px-5 py-2 border-b border-slate-800 flex flex-wrap items-center gap-2 text-xs"><span class="text-slate-400 font-medium uppercase text-[10px] tracking-wider"><i class="fa-solid fa-layer-group text-emerald-400"> </i> Structure toggles:</span><button id="toggleHomologyStructure" type="button" data-action-click="32" class="px-2.5 py-1 rounded border border-slate-700 bg-slate-900 text-white">Homology model <i class="fa-solid fa-eye"></i></button><span id="physicsReferenceStructureToggles" class="contents"></span><button id="toggleSpringStructure" type="button" data-action-click="34" aria-pressed="false" class="px-2.5 py-1 rounded border border-dashed border-slate-800 bg-slate-950/60 text-slate-500">Springs <i class="fa-solid fa-eye-slash"></i></button></div>
             <div class="bg-slate-900/60 px-5 py-2 border-b border-slate-800 flex flex-wrap items-center gap-2 text-xs"><span class="text-slate-400 font-medium uppercase text-[10px] tracking-wider"><i class="fa-solid fa-layer-group text-emerald-400"> </i> Aligned toggles:</span><button id="toggleAlignedResidues" type="button" data-action-click="35" class="px-2.5 py-1 rounded border border-slate-700 bg-slate-900 text-white">Aligned residues <i class="fa-solid fa-eye"></i></button><button id="toggleUnalignedResidues" type="button" data-action-click="36" class="px-2.5 py-1 rounded border border-slate-700 bg-slate-900 text-white">Unaligned residues <i class="fa-solid fa-eye"></i></button></div>
@@ -725,7 +749,7 @@
                     <div id="physicsPulseKey" class="flex items-center gap-2"><i class="fa-solid fa-palette text-sky-400"></i> Residues with pulsing opacity are not in the Reference PDB(s) <button id="pausePhysicsPulseBtn" type="button" data-action-click="48" class="rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-0.5 text-[10px]">Pause Pulsing</button></div>
                     <div id="physicsColourKey">Chain: each protein chain has a distinct colour.</div>
                     <div id="physicsDifferenceKey" class="hidden">PDB–Homology Cα distance: <span style="color:#38bdf8">0 Å</span> · <span style="color:#facc15">5 Å</span> · <span style="color:#ef4444">≥10 Å</span> · Grey and pulsing: no reference equivalent</div>
-                    <div class="text-[10px] text-slate-400 mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                    <div id="physicsMouseGestureHint" class="text-[10px] text-slate-400 mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
                         <span><i class="fa-solid fa-computer-mouse text-indigo-400 mr-1"></i> Left Drag: Rotate</span>
                         <span><i class="fa-solid fa-computer-mouse text-indigo-400 mr-1"></i> Right Drag: Pan</span>
                         <span><i class="fa-solid fa-magnifying-glass-plus text-violet-400 mr-1"></i> Scroll: Zoom</span>
@@ -776,7 +800,7 @@
                                class="w-full h-2.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50">
                     </div>
                     <span class="text-[11px] text-amber-400 font-medium whitespace-nowrap flex items-center gap-1.5 shrink-0">
-                        Max Repulsion (100%) 
+                        Max (100%) 
                     </span>
                     <button type="button" data-action-click="49" class="bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 px-2.5 py-1 rounded text-[11px] border border-slate-700 transition whitespace-nowrap" title="Reset to 0% (Off)">
                         Reset
