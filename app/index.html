@@ -6,18 +6,19 @@
         default-src 'self';
         script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' 
             https://joeltre.github.io
+            https://cdnjs.cloudflare.com
             https://d3js.org 
             https://cdn.plot.ly 
             https://cdn.jsdelivr.net 
             https://cdn.pyodide.org 
             https://static.cloudflareinsights.com
             https://unpkg.com;
-        style-src 'self' 'unsafe-inline' 
+        style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com 
             https://cdn.jsdelivr.net 
             https://unpkg.com;
-        font-src 'self' 
+        font-src 'self' data: https://cdnjs.cloudflare.com https://fonts.gstatic.com 
             https://cdn.jsdelivr.net;
-        connect-src 'self' data:
+        connect-src 'self' data: blob: https://models.rcsb.org https://www.ebi.ac.uk https://rest.uniprot.org
             http://127.0.0.1:1234
             https://joeltre.github.io
             https://api.github.com 
@@ -3905,6 +3906,23 @@
             gap: 12px;
             margin-bottom: 18px;
         }
+        #protein-complex-structures-view .structures-hero {
+            position: sticky;
+            top: -24px;
+            z-index: 10;
+            background: var(--surface-color-strong);
+            padding: 16px 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+        #protein-complex-structures-view .structures-toolbar { flex-wrap: wrap; gap: 12px; }
+        .structures-sort { position: relative; color: var(--accent-color-soft); }
+        .structures-sort summary { cursor: pointer; font-weight: bold; padding: 4px 8px; border-radius: 8px; list-style: none; }
+        .structures-sort summary:hover { background: var(--button-bg); }
+        .structures-sort-menu { position: absolute; right: 0; top: calc(100% + 6px); background: var(--surface-color-panel); border: 1px solid var(--border-color-strong); border-radius: 8px; min-width: 260px; box-shadow: 0 2px 8px var(--shadow-color); z-index: 130; }
+        .structures-sort-menu button { display: block; width: 100%; padding: 10px 12px; background: none; border: none; color: var(--muted-text-color); text-align: left; cursor: pointer; font-size: .85rem; }
+        .structures-sort-menu button:hover { background: var(--button-bg); }
+        .structures-sort-menu button.active { color: var(--accent-color-soft); font-weight: 700; }
+        #protein-complex-structures-view .protein-complex-card-detail { scroll-margin-top: 180px; }
         #protein-complex-structures-view .structures-hero-copy {
             display: flex;
             flex-direction: column;
@@ -3984,6 +4002,9 @@
             grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
             gap: 16px;
         }
+        #protein-complex-structures-view .protein-complex-card-item {
+            min-width: 0;
+        }
         #protein-complex-structures-view .protein-complex-card {
             position: relative;
             display: flex;
@@ -4004,6 +4025,58 @@
             border-color: var(--accent-color-soft);
             box-shadow: 0 18px 36px var(--shadow-color);
             outline: none;
+        }
+        #protein-complex-structures-view .protein-complex-card.selected {
+            border-color: var(--accent-color);
+            background: var(--surface-color-panel-alt);
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.22), 0 18px 36px var(--shadow-color);
+        }
+        #protein-complex-structures-view .protein-complex-card-detail {
+            display: none;
+            grid-column: 1 / -1;
+            margin-top: 12px;
+            padding: 22px;
+            border: 1px solid var(--accent-color);
+            border-radius: 18px;
+            background: var(--surface-color-panel);
+            box-shadow: 0 18px 36px var(--shadow-color);
+        }
+        #protein-complex-structures-view .protein-complex-card-detail.expanded {
+            display: block;
+        }
+        #protein-complex-structures-view .protein-complex-card-detail .protein-complex-structure-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 16px;
+            margin-bottom: 10px;
+        }
+        #protein-complex-structures-view .protein-complex-card-detail .protein-complex-structure-copy {
+            min-width: 0;
+        }
+        #protein-complex-structures-view .protein-complex-card-detail .protein-complex-structure-title {
+            margin: 0;
+            color: var(--text-color);
+            font-size: 20px;
+        }
+        #protein-complex-structures-view .protein-complex-card-detail .protein-complex-structure-subtitle,
+        #protein-complex-structures-view .protein-complex-card-detail .protein-complex-structure-status {
+            color: var(--muted-text-color);
+            font-size: 13px;
+            line-height: 1.4;
+        }
+        #protein-complex-structures-view .protein-complex-card-detail .protein-complex-structure-viewer-host {
+            width: 100%;
+            height: clamp(420px, 68vh, 820px);
+            border: 1px solid var(--input-border);
+            border-radius: 14px;
+            overflow: hidden;
+            background: var(--surface-color-panel-alt);
+            position: relative;
+        }
+        #protein-complex-structures-view .protein-complex-card-detail .protein-complex-structure-viewer-host canvas {
+            display: block !important;
+            background-color: inherit !important;
         }
         #protein-complex-structures-view .protein-complex-preview {
             width: 100%;
@@ -5515,6 +5588,850 @@
     </div>
 </div>
 
+
+<template id="homology-modeller-template">
+    <style>html { overflow: hidden; } body { display: flow-root; margin: 0; }</style>
+    <!-- Precompiled Tailwind CSS; no browser-side compiler or eval required. -->
+    <link rel="stylesheet" href="tailwind.css">
+    <!-- Mol* Viewer CSS & JS -->
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/molstar@3.38.0/build/viewer/molstar.css" />
+    <script type="text/javascript" src="molstar-csp.js"></script>
+    <!-- Three.js Library for Physics Simulation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        
+        body {
+            background-color: #0B0F19;
+            color: #F3F4F6;
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+        .structure-id-input { font-family: Arial, Helvetica, sans-serif; font-variant-numeric: proportional-nums; letter-spacing: .035em; }
+        .reference-comparison-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
+        .reference-comparison-table thead { background: rgba(2,6,23,.8); color: #94a3b8; text-transform: uppercase; letter-spacing: .04em; font-size: 11px; }
+        .reference-comparison-table th { padding: 12px 16px; border-bottom: 1px solid #1e293b; white-space: nowrap; }
+        .reference-comparison-table td { padding: 10px 16px; border-bottom: 1px solid rgba(30,41,59,.6); white-space: nowrap; color: #cbd5e1; }
+        .reference-comparison-table tbody tr:hover { background: rgba(15,23,42,.7); }
+        #referenceDistanceMatrices > div { min-width: 0; }
+        #referenceComparison:not(.hidden) { display: flex; flex-direction: column; gap: 16px; }
+        #referenceComparison3d canvas { display: block; width: 100%; height: 100%; }
+        #morphTooltipReferences { max-height: 9rem; overflow-y: auto; }
+        .reference-visibility-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid #1e293b; background: rgba(15,23,42,.6); }
+        .reference-visibility-row.chain-row { max-height: 108px; overflow-y: auto; }
+        .reference-visibility-heading { color: #94a3b8; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; }
+        .reference-key { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; max-height: 140px; overflow-y: auto; padding: 10px 16px; background: rgba(2,6,23,.7); border-top: 1px solid #1e293b; color: #cbd5e1; font-size: 11px; }
+        .reference-key-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; }
+        .font-mono-code { font-family: 'Fira Code', monospace; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+        .msp-plugin { border-radius: 0.75rem; overflow: hidden; }
+        #detailsPanels { width: 100%; min-width: 0; }
+        #detailsPanels canvas { display: block; width: 100%; height: 100%; }
+        #physicsContainer, #physics3dCanvas { width: 100%; max-width: 100%; min-width: 0; }
+        #physics3dCanvas canvas { display: block; }
+
+        .gradient-text {
+            background: linear-gradient(135deg, #60A5FA 0%, #2eccbf 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        /* Ensure parent and child containers have explicit dimensions */
+        #alignmentInspector {
+        width: 100%;
+        }
+
+        #alignmentTmViewer {
+        width: 100%;
+        height: 360px;
+        min-height: 360px;
+        position: relative; /* Helps Mol* accurately calculate canvas bounds */
+        box-sizing: border-box;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 18px;
+            width: 18px;
+            border-radius: 50%;
+            background: #6366f1;
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(99, 102, 241, 0.6);
+            border: 2px solid #ffffff;
+            margin-top: -5px;
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 8px;
+            cursor: pointer;
+            background: #1e293b;
+            border-radius: 4px;
+            border: 1px solid #334155;
+        }
+        @keyframes homology-update-glow {
+            0%, 100% { box-shadow: 0 0 0 0 transparent; }
+            15%, 45% { box-shadow: 0 0 22px 6px rgba(167, 139, 250, 0.8); }
+        }
+        .homology-update-glow { animation: homology-update-glow 4s ease-out; }
+        @keyframes homology-build-glow {
+            0%, 100% { box-shadow: 0 0 8px 1px rgba(129, 140, 248, .3); }
+            50% { box-shadow: 0 0 18px 4px rgba(129, 140, 248, .65); }
+        }
+        #loadBtn.homology-build-glow { animation: homology-build-glow 2.2s ease-in-out infinite; }
+        @media (prefers-reduced-motion: reduce) {
+            .homology-update-glow { animation: none; }
+            #loadBtn.homology-build-glow { animation: none; box-shadow: 0 0 12px 2px rgba(129, 140, 248, .45); }
+        }
+        .string-file-picker { display:flex; align-items:center; flex-wrap:wrap; gap:.75rem; border-radius:.5rem; background:#083b3d; padding:.4rem; cursor:pointer; }
+        .string-file-picker.has-file { background:#1e293b; }
+        .string-file-picker input[type=file] { position:absolute; width:1px; height:1px; opacity:0; overflow:hidden; }
+        .string-file-button { display:inline-block; padding:.5rem .75rem; border:1px solid rgba(20,184,166,.4); border-radius:.5rem; background:#0f766e; color:white; font-size:.75rem; font-weight:500; }
+        .structure-file-picker { position:relative; display:inline-flex; align-items:center; gap:.4rem; cursor:pointer; padding:.35rem .65rem; border:1px solid rgba(20,184,166,.4); border-radius:.5rem; background:#0f766e; color:white; font-size:.75rem; font-weight:500; }
+        .structure-file-picker:hover { background:#0d9488; border-color:#2dd4bf; }
+        .structure-file-picker input { position:absolute; width:1px; height:1px; opacity:0; }
+        .string-file-picker:hover .string-file-button { background:#0d9488; border-color:#2dd4bf; }
+        .string-file-name { color:#befff6; font-size:1rem; overflow-wrap:anywhere; }
+        .string-file-picker.has-file .string-file-name { color:#2dd4bf; }
+        @keyframes find-matches-glow {
+            0%, 100% { box-shadow:0 0 0 0 transparent; }
+            20%, 50% { box-shadow:0 0 18px 5px rgba(45,212,191,.8); }
+        }
+        #findStringMatchesBtn.ready-glow { animation:find-matches-glow 3s ease-out; }
+        @media (prefers-reduced-motion:reduce) { #findStringMatchesBtn.ready-glow { animation:none; } }
+        #stringUploadBox { background: #082f35; border-color: #115e59; }
+        @keyframes string-id-glow { 0% { color:#facc15; text-shadow:0 0 18px #facc15,0 0 7px #fef08a; } 100% { color:white; text-shadow:none; } }
+        #pdbInput2.string-id-glow { animation:string-id-glow 3s ease-out forwards; }
+        @media (prefers-reduced-motion: reduce) { #pdbInput2.string-id-glow { animation:none; } }
+        header { --header-link-color:#9ca3af; }
+        header nav.text-gray-400, #themeToggle { color:var(--header-link-color); }
+        #themeToggle { width:2.5rem; height:2.5rem; flex:none; display:grid; place-items:center; border:1px solid rgba(150,150,150,.4); border-radius:50%; background:transparent; transition:background .2s,transform .2s; }
+        #themeToggle:hover { transform:scale(1.08); }
+        body.light-mode { color-scheme:light; background:#f1f5f9; color:#172033; }
+        body.light-mode header { --header-link-color:#475569; background:rgba(248,250,252,.95); border-color:#cbd5e1; }
+        body.light-mode header nav.text-gray-400, body.light-mode #themeToggle { color:var(--header-link-color); }
+        body.light-mode [class~="bg-slate-950"], body.light-mode [class~="bg-slate-900"] { background-color:#fff; }
+        body.light-mode [class~="bg-slate-800"], body.light-mode [class~="bg-slate-700"], body.light-mode [class~="bg-gray-800"] { background-color:#e2e8f0; }
+        body.light-mode [class~="text-white"]:not([class*="bg-teal"]):not([class*="bg-indigo"]):not([class*="bg-violet"]):not([class*="bg-emerald"]):not([class*="bg-amber"]):not([class*="bg-sky"]):not([class*="bg-blue"]):not([class*="bg-red"]), body.light-mode [class~="text-slate-100"], body.light-mode [class~="text-slate-200"], body.light-mode [class~="text-slate-300"] { color:#172033; }
+        body.light-mode [class~="text-slate-400"], body.light-mode [class~="text-gray-400"] { color:#475569; }
+        body.light-mode [class~="border-slate-800"], body.light-mode [class~="border-slate-700"], body.light-mode [class~="border-gray-800"], body.light-mode [class~="border-gray-700"] { border-color:#cbd5e1; }
+        body.light-mode input, body.light-mode textarea, body.light-mode select { color:#172033; }
+        body.light-mode .reference-comparison-table thead, body.light-mode .reference-key, body.light-mode .reference-visibility-row { background:#e2e8f0; color:#334155; }
+        body.light-mode .reference-comparison-table td { color:#334155; border-color:#cbd5e1; }
+        body.light-mode #stringUploadBox { background:#dff5f1; border-color:#5eead4; }
+        body.light-mode .string-file-name { color:#0f766e; }
+        body.light-mode label[for="pdbInput1"] { color:#075985; }
+        body.light-mode label[for="pdbInput2"] { color:#0f766e; }
+        body.light-mode #stringFinderToggle { color:#0f766e; }
+        body.light-mode .string-file-picker, body.light-mode .string-file-picker.has-file { background:#ccfbf1; }
+        body.light-mode [class*="bg-slate-900/"], body.light-mode [class*="bg-slate-800/"] { background-color:#e8eef5; }
+        body.light-mode #physicsContainer, body.light-mode #physics3dCanvas { background:#fff; }
+        body.light-mode #physicsContainer button[aria-label="Capture physics viewport"] { background:#f8fafc; border-color:#cbd5e1; color:#334155; }
+        body.light-mode #physicsSnapshotPanel, body.light-mode #physicsContainer .absolute.bottom-4.left-4 { background:#f8fafc; border-color:#cbd5e1; color:#334155; }
+        body.light-mode #loadSimulationMolstarBtn, body.light-mode #downloadMmCifBtn { color:#fff; }
+        body.light-mode #referenceComparison3d, body.light-mode #molstar-container-1, body.light-mode #molstar-container-2,
+        body.light-mode #canvasParent1, body.light-mode #canvasParent2, body.light-mode #diffCanvasParent,
+        body.light-mode #morphCanvasParent { background:#f8fafc; }
+        body.light-mode table thead tr, body.light-mode .reference-comparison-table thead { background:#e2e8f0; color:#334155; }
+        body.light-mode button.border-dashed[class*="bg-slate-950/"] { background:#e2e8f0; border-color:#94a3b8; color:#475569; }
+        body.light-mode button.border-dashed[class*="bg-slate-950/"]:hover { background:#cbd5e1; color:#1e293b; }
+        body.light-mode input[type=range]::-webkit-slider-runnable-track { background:#cbd5e1; border-color:#94a3b8; }
+        body.light-mode input[type=range]::-moz-range-track { background:#cbd5e1; border:1px solid #94a3b8; border-radius:4px; height:8px; }
+        body.light-mode { scrollbar-color:#94a3b8 #e2e8f0; }
+        body.light-mode ::-webkit-scrollbar-track { background:#e2e8f0; }
+        body.light-mode ::-webkit-scrollbar-thumb { background:#94a3b8; }
+        body.light-mode ::-webkit-scrollbar-thumb:hover { background:#64748b; }
+        body.light-mode #simulationMolstarPlaceholder { background:rgba(248,250,252,.96); color:#475569; }
+        body.light-mode #simulationMolstarPlaceholder > div:first-child { background:#e2e8f0; border-color:#cbd5e1; }
+        body.light-mode #alignmentTableBody tr { background:#fff; }
+        body.light-mode #alignmentTableBody tr:hover { background:#f1f5f9; }
+        body.light-mode #alignmentTmViewer { background:#fff; }
+        body.light-mode #residueRepulsionBadge, body.light-mode #otherConstraintsBadge { background:#e2e8f0; border-color:#cbd5e1; color:#334155; }
+        body.light-mode #residueRepulsionBadge[class*="bg-amber"] { background:#fef3c7; border-color:#fcd34d; color:#92400e; }
+        body.light-mode #otherConstraintsBadge[class*="bg-sky"] { background:#e0f2fe; border-color:#7dd3fc; color:#075985; }
+        body.light-mode #physicsStatusBadge, body.light-mode #matchSummaryBadge, body.light-mode #modelBuildTime { background:#e0e7ff; border-color:#c7d2fe; color:#3730a3; }
+        body.light-mode #physicsStatusBadge[class*="bg-red"] { background:#fee2e2; border-color:#fca5a5; color:#991b1b; }
+    </style>
+
+
+    <div class="flex justify-end p-2"><button id="closeHomologyModeller" type="button" aria-label="Close homology modeller" class="px-3 py-2 rounded-lg bg-slate-800 text-slate-200 hover:bg-slate-700">Close ×</button></div>
+
+
+
+    <!-- Main Content Body -->
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 flex flex-col gap-6">
+        <section class="space-y-3">
+            <section class="bg-slate-900 border border-indigo-500/30 rounded-xl p-5 text-slate-300 leading-relaxed" style="font-size: 1rem;" aria-label="About the homology modeller">
+                <p>This app builds homology models of protein complexes (including DNA, RNA, small molecule ligands, and ions) by aligning AlphaFold models onto a reference structure from the Protein Data Bank. You can type in any reference PDB ID(s) and the app will automatically find the AlphaFold models to align (but if the protein sequences in the reference are quite different from the sequences in the uploaded files, the app may identify the wrong proteins to use). This homology modeller feature is available as a stand-alone web app at <a href="https://stringscape.net/homology_modeller" target="_blank" rel="noopener noreferrer" class="text-sky-400 hover:underline">stringscape.net/homology_modeller</a>.</p>
+            </section>
+            
+<!-- Reference PDB input -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-2 w-full">
+                <div class="flex items-center justify-between gap-2"><label for="pdbInput1" class="block text-base font-semibold text-sky-300">Reference Protein Data Bank IDs (comma-separated)</label><label class="structure-file-picker"><input id="referenceStructureUpload" type="file" accept=".pdb,.ent,.cif,.mmcif" data-action-change="0"><i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> Upload structure</label></div>
+                <textarea rows="3" id="pdbInput1" data-action-input="0" class="w-full bg-slate-950 text-white rounded-lg p-3 focus:outline-none uppercase structure-id-input text-xl font-semibold" style="border: 1px solid #3498db66;"></textarea>
+            </div>
+
+            <!-- STRING file search -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
+                <h2><button id="stringFinderToggle" type="button" data-action-click="4" aria-expanded="false" aria-controls="stringFinderContent" class="w-full flex items-center justify-between gap-3 text-left font-semibold text-teal-300 hover:text-teal-200"><span>Automatically find the matching proteins from your species (optional)</span><i id="stringFinderChevron" class="fa-solid fa-chevron-down" aria-hidden="true"></i></button></h2>
+                <div id="stringFinderContent" class="hidden space-y-3">
+                <p class="text-s">Uses the STRING sequence and alias files loaded in the main upload box.</p>
+                <p id="sharedStringFiles" class="text-xs text-slate-400"></p>
+                <p class="text-s text-slate-400">The app will search for matches for each of the chains in the reference PDB typed above using a top-500 k-mer shortlist and local BLOSUM62 Smith-Waterman alignment with the gap penalties set in the Alignment Settings (see build process below).</p>
+                <button id="findStringMatchesBtn" type="button" data-action-click="5" class="bg-teal-700 hover:bg-teal-600 disabled:opacity-50 text-white rounded-lg px-4 py-2 text-sm"><i class="fa-solid fa-magnifying-glass mr-2" aria-hidden="true"></i>Find matches for Reference PDB chains</button>
+                <p id="stringAliasStatus" role="status" class="hidden text-xs text-slate-400"></p>
+                <p id="stringMatchStatus" role="status" class="hidden text-xs text-teal-200"></p> <button id="downloadStringMatchesBtn" type="button" data-action-click="6" class="hidden self-end bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded text-xs border border-slate-700"><i class="fa-solid fa-download"></i> Download CSV</button>
+                <div id="stringMatchResults" class="rounded-lg border border-slate-800 text-xs text-slate-300 max-h-80 overflow-auto empty:hidden"></div>
+                </div>
+            </div>
+            
+            <!-- AlphaFold / UniProt input -->
+            <form id="dualPdbForm" class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3 w-full">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="md:col-span-2"><div class="flex items-center justify-between gap-2 mb-2"><label for="pdbInput2" class="block text-base font-semibold text-teal-300">AlphaFold IDs, UniProt IDs, or PDB IDs</label><label class="structure-file-picker"><input id="alphaFoldStructureUpload" type="file" accept=".pdb,.ent,.cif,.mmcif" data-action-change="3"><i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> Upload structures</label></div><textarea id="pdbInput2" rows="3" data-action-input="1" class="w-full bg-slate-950 text-white rounded-lg p-3 focus:outline-none uppercase structure-id-input text-xl font-semibold resize-y" style="border: 1px solid #2eccbf66;"></textarea></div>
+                </div>
+                <button type="submit" id="loadBtn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-4 py-2.5 rounded-lg transition-all flex items-center gap-2 text-xs"><i class="fa-solid fa-code-compare"></i> Build Homology model</button>
+                <p id="sequenceOnlyNotice" class="text-xs text-amber-300 hidden"></p>
+            </form>
+            <div class="flex flex-wrap items-center justify-between gap-4 w-full">
+                <p id="referenceStructureName" class="text-2xl font-semibold text-slate-200 flex-1 min-w-0" aria-live="polite">Reference: Enter a PDB ID</p>
+            <button id="viewDetailsBtn" type="button" data-action-click="7" class="ml-auto shrink-0 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg px-6 py-3 text-2xl font-semibold transition" aria-expanded="false">View homology model build process ▾</button>
+            </div>
+        </section>
+
+
+        <!-- Homology build process UI -->
+        <div id="detailsPanels" class="hidden space-y-6" aria-hidden="true">
+
+        <!--Overview box-->
+        <section id="workflowOverview" class="bg-slate-900 border border-indigo-500/30 rounded-xl p-5 shadow-sm text-sm text-slate-300 leading-relaxed" aria-label="Modelling workflow">
+            <p class="mb-3" style="font-size: 1.2rem; font-weight: bold;">This app builds homology models of protein complexes by aligning AlphaFold models onto a reference structure from the Protein Data Bank. This involves multiple steps:</p>
+            <ol class="list-decimal pl-5 space-y-2">
+                <li>
+                    <strong class="text-slate-100">Load one or more reference structures from the Protein Data Bank and load the AlphaFold structures from the AlphaFold database.</strong> If no AlphaFold model is available, the app just uses the protein sequence without any structural information.
+                    <ul class="list-disc pl-5 mt-2 space-y-1">
+                        <li><strong class="text-slate-100">Optional:</strong> If STRING files have been uploaded, the app searches each of the reference PDB chain sequences in the FASTA file for matches and then uses the alias file to get the UniProt IDs for each match, which are then used to fetch the AlphaFold models.</li>
+                    </ul>
+                </li>
+                <li><strong class="text-slate-100">Optional: If multiple reference files are loaded, identify equivalent chains/molecules between reference files.</strong> Sequence alignments between all chains/polynucleotides within and between reference PDBs are performed to find chains/polynucleotides of the same type. Then, a matrix is calculated of the distances between the centres of the chains/polynucleotides/molecules within each reference PDB. The distance matrixes are then uses to identify which chains/polynuclotides/molecules between the references are equavalent.</li>
+                <li><strong class="text-slate-100">Align each of the chain/polynucleotide sequences from the reference with each of the AlphaFold sequences.</strong> Semi-global alignment fits each reference chain/polynucleotide within an AlphaFold sequence, allowing for extra AlphaFold residues at either end. Alignment Settings also offers local Smith–Waterman and global Needleman–Wunsch as alignment methods.</li>
+                <li><strong class="text-slate-100">Calculate distance matrices.</strong> The distance matrix captures the spatial relationships between residues/nucleotides/atoms within each chain/polynucleotide/molecule and, for the reference structure, between each chain/polynucleotide/molecule.</li>
+                <li><strong class="text-slate-100">Build the morph distance matrix.</strong> The distance matrices of the aligned reference structures and the AlphaFold models are combined to create the morph distance matrix. The per-reference PDB and AlphaFold sliders determine the blend of shared intra-chain distances and each values influence on the simulation.</li>
+                <li><strong class="text-slate-100">Align AlphaFold models onto the reference structure.</strong> This has two phases: In phase 1, the AlphaFold structures are aligned to the reference structure via rigid-body Template Modelling alignment. In phase 2, an overdamped elastic simulation is run to relax the springs between each residue/nucleotide/atom. The spring lengths are determined by the morph matrix (each cell of the matrix corresponds to one spring in the simulation).</li>
+                <li><strong class="text-slate-100">Convert the simulation result into a mmCIF format and display in a Mol* viewer.</strong> The mmCIF file can then be downloaded.</li>
+            </ol>
+        </section>
+
+
+        <section id="referenceComparison" class="hidden space-y-4 mb-6" aria-label="Reference structure comparison">
+            <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
+                <div class="bg-slate-800/80 px-5 py-3 border-b border-slate-700 flex flex-wrap items-center justify-between gap-2"><h2 class="font-semibold text-sm text-white flex items-center gap-2"><i class="fa-solid fa-table-cells text-indigo-400"></i> Reference chain-centre distances</h2><span id="referenceCentreDistanceLegend" class="text-[11px] text-slate-300"></span></div>
+                <div id="referenceDistanceMatrices" class="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4" style="max-height:840px;min-height:0;overflow-y:auto"></div>
+            </div>
+            <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
+                <div class="bg-slate-800/80 px-5 py-3 border-b border-slate-700"><h2 class="font-semibold text-sm text-white flex items-center gap-2"><i class="fa-solid fa-link text-indigo-400"></i> Equivalent reference chains</h2></div>
+                <div id="referenceCorrespondenceTable" style="max-height:840px;min-height:0;overflow:auto"></div>
+            </div>
+            <div class="bg-slate-900 border border-sky-800 rounded-xl p-4"><div class="flex flex-wrap justify-between gap-3 mb-2"><h2 class="text-sky-300 font-semibold">Rigidly TM-aligned reference complexes</h2><label for="referenceComparisonColor" class="inline-flex shrink-0 items-center gap-2 whitespace-nowrap text-xs text-slate-300">Colour proteins by <select id="referenceComparisonColor" class="bg-slate-800 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs"><option value="reference">Reference PDB</option><option value="chain">Chains</option><option value="protein">Protein ID</option><option value="equivalent">Equivalent chains</option><option value="aligned">Aligned residues</option><option value="distance">Distance difference</option></select></label></div><div id="referenceComparisonMetrics" class="text-xs text-slate-300 mb-2"></div><div id="referenceStructureToggles" class="reference-visibility-row"></div><div id="referenceChainToggles" class="reference-visibility-row chain-row"></div><div class="reference-visibility-row"><button id="referenceShowAllChains" type="button" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded text-xs border border-slate-700">Show all</button><button id="referenceHideAllChains" type="button" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded text-xs border border-slate-700">Hide all</button></div><div id="referenceComparison3d" class="bg-black rounded" style="height:420px"></div><div id="referenceComparisonKey" class="reference-key"></div><p class="text-xs text-slate-400 mt-2">Lines connect equivalent chain centres. Drag to rotate, right-drag to pan, scroll to zoom.</p></div>
+        </section>
+
+        <!-- Section 1: Dual 3D Structure Viewers -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Reference PDB 3D Container -->
+            <div class="bg-slate-900 border rounded-xl flex flex-col overflow-hidden shadow-lg h-[380px] relative" style="border-color: #3498db4d;">
+                <div class="bg-slate-900/90 px-4 py-2.5 border-b flex justify-between items-center z-10" style="border-color: #3498db33;">
+                    <h2 class="font-semibold text-xs flex items-center gap-2" style="color: #3498db;">
+                        <span class="w-2.5 h-2.5 rounded-full inline-block" style="background-color: #3498db;"></span> Reference PDB: <span id="PDBTitle" class="text-white font-mono">6YKM</span>
+                    </h2>
+                    <div id="PDBResCount" class="text-[11px] px-2 py-0.5 rounded font-mono" style="background-color: #3498db1a; color: #3498db; border: 1px solid #3498db33;">0 Residues</div>
+                </div>
+                <div id="molstar-container-1" class="w-full flex-1 relative bg-black"></div>
+            </div>
+
+            <!-- AlphaFold 3D Container -->
+            <div class="bg-slate-900 border rounded-xl flex flex-col overflow-hidden shadow-lg h-[380px] relative" style="border-color: #2eccbf4d;">
+                <div class="bg-slate-900/90 px-4 py-2.5 border-b flex justify-between items-center z-10" style="border-color: #2eccbf33;">
+                    <h2 class="font-semibold text-xs flex items-center gap-2" style="color: #2eccbf;">
+                        <span class="w-2.5 h-2.5 rounded-full inline-block" style="background-color: #2eccbf;"></span> AlphaFold: <span id="AFTitle" class="text-white font-mono">P09348 + P0AF06</span>
+                    </h2>
+                    <div class="flex items-center gap-2"><label for="afMolstarColorSelect" class="text-[11px] text-slate-300">Colour</label><select id="afMolstarColorSelect" data-action-change="4" class="bg-slate-950 border border-teal-700/50 text-slate-200 rounded px-2 py-1 text-[11px]"><option value="chain">Colour by chain</option><option value="plddt">Colour by pLDDT</option></select><div id="AFResCount" class="text-[11px] px-2 py-0.5 rounded font-mono" style="background-color: #2eccbf1a; color: #2eccbf; border: 1px solid #2eccbf33;">0 Residues</div></div>
+                </div>
+                <div id="molstar-container-2" class="w-full flex-1 relative bg-black"></div>
+            </div>
+        </div>
+
+        <!-- Section 2: Individual Distance Matrix Viewers -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-sm flex items-center gap-3">
+            <label for="matrixPaletteSelect" class="text-slate-300">Matrix palette:</label>
+            <select id="matrixPaletteSelect" class="bg-slate-950 border border-slate-700 text-slate-300 rounded px-2 py-1 focus:outline-none">
+                <option value="viridis" selected>Viridis Dark</option>
+                <option value="spectral">Rainbow Spectral</option>
+                <option value="coolwarm">Cool-Warm</option>
+                <option value="grayscale">Grayscale</option>
+            </select>
+        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Reference PDB Distance Matrix -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden shadow-lg self-start min-w-0 relative">
+                <div class="bg-slate-900/90 px-4 py-2.5 border-b border-slate-800 flex justify-between items-center z-10">
+                    <h3 class="font-semibold text-xs text-slate-200 flex items-center gap-2">
+                        <i class="fa-solid fa-border-all" style="color: #3498db;"></i> Reference PDB Distance Matrix
+                    </h3>
+                    <div class="flex items-center gap-2">
+                        <select id="PDBChainSelect" class="bg-slate-950 border border-slate-700 text-slate-300 rounded text-xs px-2 py-0.5 focus:outline-none"></select>
+                        <button type="button" data-action-click="8" title="Download overview PNG" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-0.5 rounded text-xs border border-slate-700"><i class="fa-solid fa-download"></i> Low-res</button><button type="button" data-action-click="9" title="Download full-resolution PNG" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-0.5 rounded text-xs border border-slate-700"><i class="fa-solid fa-download"></i> Full-res</button>
+                        <button id="resetPDBZoomBtn" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-0.5 rounded text-xs border border-slate-700 transition" title="Reset Zoom">
+                            <i class="fa-solid fa-camera"></i> Reset
+                        </button>
+                    </div>
+                </div>
+                <p id="PDBResolutionNotice" class="hidden shrink-0 px-4 py-2 text-xs text-slate-400">To reduce memory use, this box displays a lower-resolution version of the matrix. Zoom in to see full resolution.</p>
+            <div id="canvasParent1" style="aspect-ratio: 1 / 1; flex-shrink: 0;" class="w-full relative bg-slate-950 flex items-center justify-center overflow-hidden">
+                    <canvas id="matrixCanvas1" class="cursor-crosshair absolute inset-0"></canvas>
+                    <div id="tooltip1" class="absolute hidden bg-slate-900/95 text-white text-xs p-2.5 rounded-lg shadow-2xl pointer-events-none z-20 backdrop-blur-md" style="border: 1px solid #3498db66;"></div>
+                </div>
+                <div id="PDBLegend" class="shrink-0 bg-slate-950 px-3 py-2 border-t border-slate-800 flex flex-wrap gap-2 text-[11px] text-slate-300 min-h-[36px] max-h-48 overflow-y-auto items-center"></div>
+            </div>
+
+            <!-- AlphaFold Distance Matrix -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden shadow-lg self-start min-w-0 relative">
+                <div class="bg-slate-900/90 px-4 py-2.5 border-b border-slate-800 flex justify-between items-center z-10">
+                    <h3 class="font-semibold text-xs text-slate-200 flex items-center gap-2">
+                        <i class="fa-solid fa-border-all" style="color: #2eccbf;"></i> AlphaFold Distance Matrix
+                    </h3>
+                    <div class="flex items-center gap-2">
+                        <select id="AFChainSelect" class="bg-slate-950 border border-slate-700 text-slate-300 rounded text-xs px-2 py-0.5 focus:outline-none"></select>
+                        <button type="button" data-action-click="10" title="Download overview PNG" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-0.5 rounded text-xs border border-slate-700"><i class="fa-solid fa-download"></i> Low-res</button><button type="button" data-action-click="11" title="Download full-resolution PNG" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-0.5 rounded text-xs border border-slate-700"><i class="fa-solid fa-download"></i> Full-res</button>
+                        <button id="resetAFZoomBtn" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-0.5 rounded text-xs border border-slate-700 transition" title="Reset Zoom">
+                            <i class="fa-solid fa-camera"></i> Reset
+                        </button>
+                    </div>
+                </div>
+                <p id="AFResolutionNotice" class="hidden shrink-0 px-4 py-2 text-xs text-slate-400">To reduce memory use, this box displays a lower-resolution version of the matrix. Zoom in to see full resolution.</p>
+            <div id="canvasParent2" style="aspect-ratio: 1 / 1; flex-shrink: 0;" class="w-full relative bg-slate-950 flex items-center justify-center overflow-hidden">
+                    <canvas id="matrixCanvas2" class="cursor-crosshair absolute inset-0"></canvas>
+                    <div id="tooltip2" class="absolute hidden bg-slate-900/95 text-white text-xs p-2.5 rounded-lg shadow-2xl pointer-events-none z-20 backdrop-blur-md" style="border: 1px solid #2eccbf66;"></div>
+                </div>
+                <div id="AFLegend" class="shrink-0 bg-slate-950 px-3 py-2 border-t border-slate-800 flex flex-wrap gap-2 text-[11px] text-slate-300 min-h-[36px] max-h-48 overflow-y-auto items-center"></div>
+            </div>
+        </div>
+
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-sm">            <div class="flex flex-wrap items-center gap-4 text-xs">
+                <span class="text-slate-400 font-medium uppercase tracking-wider text-[11px]"><i class="fa-solid fa-sliders text-indigo-400 mr-1"></i> Alignment Settings:</span>
+                <label class="flex items-center gap-2 text-slate-300">Method:
+                    <select id="alignmentModeInput" class="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-indigo-300">
+                        <option value="semiglobal" selected>Semi-global (recommended)</option>
+                        <option value="local">Smith–Waterman (local)</option>
+                        <option value="global">Needleman–Wunsch (global)</option>
+                    </select>
+                </label>
+                <div class="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800">
+                    <label for="similarityThreshold" class="text-slate-300">Match Threshold:</label>
+                    <input type="number" id="similarityThreshold" value="25" min="0" max="100" class="w-12 bg-slate-900 border border-slate-700 text-center rounded text-indigo-300 font-bold focus:outline-none">
+                    <span class="text-slate-500">% identity</span>
+                </div><label class="flex items-center gap-2 text-slate-300">Gap open cost: <input id="gapOpenInput" type="number" max="0" step="1" value="-10" class="w-20 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-indigo-300"></label><label class="flex items-center gap-2 text-slate-300">Gap extend cost: <input id="gapExtendInput" type="number" max="0" step="1" value="-1" class="w-20 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-indigo-300"></label></div>
+        </div>
+        <!-- Section 3: Sequence Alignment & Chain Equivalence Table -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
+            <div class="bg-slate-800/80 px-5 py-3 border-b border-slate-700 flex flex-wrap justify-between items-center gap-2">
+                <div>
+                    <h2 class="font-semibold text-sm text-white flex items-center gap-2">
+                        <i class="fa-solid fa-align-left text-indigo-400"></i> Sequence Alignment & Equivalent Chains
+                    </h2>
+                </div>
+                <div class="flex items-center gap-2"><button type="button" data-action-click="12" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded text-xs border border-slate-700"><i class="fa-solid fa-download"></i> Download CSV</button><div id="matchSummaryBadge" class="text-xs bg-indigo-500/10 text-indigo-300 px-3 py-1 rounded-full border border-indigo-500/20 font-medium">
+                    Calculating matches...
+                </div></div>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse text-xs">
+                    <thead>
+                        <tr class="bg-slate-950/80 text-slate-400 uppercase tracking-wider text-[11px] border-b border-slate-800">
+                            <th class="py-3 px-4">Reference PDB Chain</th>
+                            <th class="py-3 px-4">Length (PDB)</th>
+                            <th class="py-3 px-4">Equivalent AlphaFold Chain</th>
+                            <th id="preferredNameHeader" class="hidden py-3 px-4">Prefered name</th>
+                            <th class="py-3 px-4">Length (AF)</th>
+                            <th class="py-3 px-4">Sequence Identity</th>
+                            <th class="py-3 px-4">Sequence Similarity</th>
+                            <th class="py-3 px-4">TM-score</th>
+                            <th class="py-3 px-4">RMSD</th>
+                            <th class="py-3 px-4">Average TM-aligned Cα pair distance</th>
+                            <th class="py-3 px-4 text-center">Status</th>
+                            <th class="py-3 px-4 text-center w-[138px]">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="alignmentTableBody" class="divide-y divide-slate-800/60 font-mono">
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Expandable Alignment Inspector Drawer -->
+            <div id="alignmentInspector" class="hidden border-t border-slate-800 bg-slate-950 p-4">
+                <div class="flex justify-between items-center mb-3">
+                    <div class="flex flex-wrap items-center gap-3"><h4 id="alignmentInspectorTitle" class="text-xs font-semibold text-indigo-300 font-mono">Alignment View</h4><button id="alignmentDistanceBtn" type="button" data-action-click="13" aria-pressed="false" class="px-3 py-1.5 rounded text-xs bg-slate-800 text-slate-200">Colour by PDB-AF TM-aligned distance</button></div>
+                    <button data-action-click="14" class="text-slate-400 hover:text-white text-xs"><i class="fa-solid fa-xmark"></i> Close</button>
+                </div>
+                <div id="alignmentDistanceLegend" class="hidden mb-3 text-xs text-slate-400">TM-aligned Cα pair distance: <span style="color:#38bdf8">0 Å</span> <span class="inline-block w-32 h-2 rounded" style="background:linear-gradient(to right,#38bdf8,#facc15,#ef4444)"></span> <span style="color:#ef4444">10 Å or more</span> · Grey: no paired residue. Hover a letter for its distance.</div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                    <div id="alignmentSequencePanel" class="min-h-[440px] h-full">
+                        <div id="alignmentCodeBox" class="bg-slate-900 border border-slate-800 p-3 rounded-lg overflow-x-auto font-mono-code text-xs leading-relaxed text-slate-300 h-full min-h-[440px]">
+                        </div>
+                    </div>
+                    <div id="alignment3dPanel">
+                <div class="flex flex-wrap items-center gap-4 text-xs text-slate-400">
+                    <span style="color:#3498db">● Reference PDB</span><span style="color:#2eccbf">● AlphaFold</span>
+                    <span>Drag to rotate · Right-drag or Shift-drag to pan · Scroll to zoom</span>
+                    <button type="button" data-action-click="15" class="px-2 py-1 rounded bg-slate-800 text-slate-200">Reset view</button>
+                    <span id="alignmentTmMetrics"></span>
+                </div>
+                <div class="flex flex-wrap gap-5 items-center p-3 text-xs text-slate-300">
+<label>Residue size <output id="alignmentResidueValue">1.0×</output> <input aria-label="alignment residue size" type="range" min="0" max="3" step="0.1" value="1" data-action-input="2"></label>
+<label>Backbone size <output id="alignmentBackboneValue">2.0×</output> <input aria-label="alignment backbone size" type="range" min="0" max="8" step="0.1" value="2" data-action-input="3"></label></div><div id="alignmentTmViewer" class="mt-3 w-full h-[360px] bg-slate-950 rounded-lg border border-slate-800"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 4: Aligned Difference Matrix Comparison -->
+        <div class="bg-slate-900 border border-indigo-500/30 rounded-xl flex flex-col overflow-hidden shadow-xl">
+            <div class="bg-slate-900/90 px-5 py-3 border-b border-indigo-500/20 flex flex-wrap justify-between items-center gap-3">
+                <div>
+                    <h2 class="font-semibold text-sm text-white flex items-center gap-2">
+                        <i class="fa-solid fa-code-compare text-indigo-400"></i> Aligned Distance Matrix Comparison
+                    </h2>
+                    <p class="text-xs text-slate-400">This shows the differences in aligned residue-residue distances between the Reference PDB chain and the AlphaFold chain.</p>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-3 text-xs">
+                    <div class="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1 rounded border border-slate-800">
+                        <span class="text-slate-400">Active Match:</span>
+                        <select id="comparedPairSelect" class="bg-slate-900 border border-slate-700 text-indigo-300 font-semibold rounded px-2 py-0.5 focus:outline-none"></select>
+                    </div>
+
+                    <div class="flex items-center gap-1 bg-slate-950 p-1 rounded border border-slate-800">
+                        <button id="modeDiffBtn" data-action-click="16" class="px-2.5 py-1 rounded text-xs font-medium bg-indigo-600 text-white transition">Absolute Difference (|D1 - D2|)</button>
+                        <button id="modeOverlayBtn" data-action-click="17" class="px-2.5 py-1 rounded text-xs font-medium text-slate-400 hover:text-white transition">Split Triangle Overlay</button>
+                    </div>
+                    <button type="button" data-action-click="18" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-1 rounded border border-slate-700"><i class="fa-solid fa-download"></i> Low-res</button><button type="button" data-action-click="19" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-1 rounded border border-slate-700"><i class="fa-solid fa-download"></i> Full-res</button>
+
+                    <button id="resetDiffZoomBtn" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded border border-slate-700 transition" title="Reset Zoom">
+                        <i class="fa-solid fa-camera"></i> Reset
+                    </button>
+                </div>
+            </div>
+
+            <p id="diffResolutionNotice" class="hidden shrink-0 px-4 py-2 text-xs text-slate-400">To reduce memory use, this box displays a lower-resolution version of the matrix. Zoom in to see full resolution.</p>
+            <div id="diffCanvasParent" class="w-full h-[500px] relative bg-slate-950 flex items-center justify-center overflow-hidden">
+                <canvas id="diffMatrixCanvas" class="cursor-crosshair"></canvas>
+
+                <!-- Comparative Hover Tooltip -->
+                <div id="diffTooltip" class="absolute hidden bg-slate-900/95 border border-indigo-500/40 text-white text-xs p-3 rounded-lg shadow-2xl pointer-events-none z-20 backdrop-blur-md max-w-xs">
+                    <div id="diffTooltipTitle" class="font-semibold text-indigo-300 mb-1 border-b border-slate-800 pb-1">Aligned Residue Comparison</div>
+                    <div id="diffTooltipPos" class="text-slate-400 font-mono mb-1">Aligned Index: --</div>
+                    <div id="diffTooltipPDB" class="text-indigo-300 font-mono">Reference PDB: -- Å</div>
+                    <div id="diffTooltipAF" class="text-teal-300 font-mono">AlphaFold: -- Å</div>
+                    <div id="diffTooltipDelta" class="text-amber-400 font-bold font-mono mt-1 pt-1 border-t border-slate-800">Distance Δ: -- Å</div>
+                </div>
+            </div>
+
+            <!-- Difference Color Legend -->
+            <div class="bg-slate-950 px-5 py-2.5 border-t border-slate-800 flex items-center justify-center gap-2 text-xs text-slate-400"> 
+                <span id="diffLegendMin">0.0 Å (Identical Distance)</span> 
+                <div id="diffColorLegend" class="h-2.5 w-64 rounded-full border border-slate-700 shrink-0"></div> 
+                <span id="diffLegendMax">≥ 10.0 Å (High Structural Difference)</span> 
+            </div>
+        </div>
+
+        <!-- Section 5: Morph Distance Matrix Viewer -->
+        <div class="bg-slate-900 border border-violet-500/40 rounded-xl flex flex-col overflow-hidden shadow-xl">
+            <div class="bg-slate-900/90 px-5 py-3 border-b border-violet-500/20 flex flex-wrap justify-between items-center gap-3">
+                <div>
+                    <h2 class="font-semibold text-sm text-white flex items-center gap-2">
+                        <i class="fa-solid fa-sliders text-violet-400"></i> Morph Distance Matrix
+                    </h2>
+                    <p class="text-xs text-slate-400">This combines the Reference PDB distance matrix and the AlphaFold distance matrix into a combined matrix used to set the spring lengths in the physics simulation. </p>
+                    <p class="text-xs text-slate-400">Intra-chain: <span class="font-mono text-violet-300">D_morph = (Σ w_ref,i · D_ref,i + w_AF · D_AF) / (Σ w_ref,i + w_AF)</span> for available distances. If only one origin has a distance, its value is used. Inter-chain distances can come from each reference PDB and from a multi-chain AlphaFold structure.</p>
+                </div>
+
+                <!-- Colour by controls -->
+                <div class="flex items-center gap-2">
+                    <button id="toggleOriginBtn" data-action-click="20" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs border border-slate-700 transition flex items-center gap-1.5 shadow" title="Colour cells by Reference PDB, AlphaFold, Both (Blend), or Neither (Dark Grey)">
+                        <i class="fa-solid fa-shapes text-sky-400" id="originBtnIcon"></i> <span id="originBtnText">Colour by Origin</span>
+                    </button>
+                    <button id="showSpringCutoffBtn" data-action-click="21" aria-pressed="false" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs border border-slate-700 transition flex items-center gap-1.5 shadow" title="Show cells above the current spring cutoff as gap grey">
+                        <i class="fa-solid fa-filter"></i> <span>Show Spring Cutoff</span>
+                    </button>
+                    <button type="button" data-action-click="22" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 text-xs rounded border border-slate-700"><i class="fa-solid fa-download"></i> Low-res</button><button type="button" data-action-click="23" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 text-xs rounded border border-slate-700"><i class="fa-solid fa-download"></i> Full-res</button>
+                    <button id="resetMorphZoomBtn" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded text-xs border border-slate-700 transition" title="Reset Zoom">
+                        <i class="fa-solid fa-camera"></i> Reset
+                    </button>
+                </div>
+            </div>
+
+            <p id="morphResolutionNotice" class="hidden shrink-0 px-4 py-2 text-xs text-slate-400">To reduce memory use, this box displays a lower-resolution version of the matrix. Zoom in to see full resolution.</p>
+            <div id="morphCanvasParent" class="w-full h-[480px] relative bg-slate-950 flex items-center justify-center overflow-hidden">
+                <canvas id="morphMatrixCanvas" class="cursor-crosshair"></canvas>
+                <div id="morphMatrixLoading" role="status" class="hidden absolute top-4 left-1/2 -translate-x-1/2 z-20 rounded-lg border border-slate-700 bg-slate-950/85 px-3 py-2 text-sm text-violet-200 shadow-lg pointer-events-none"><i class="fa-solid fa-circle-notch fa-spin mr-2"></i>Loading morph distance matrix...</div>
+
+                <!-- Morph Hover Tooltip -->
+                <div id="morphTooltip" class="absolute hidden bg-slate-900/95 border border-violet-500/40 text-white text-xs p-3 rounded-lg shadow-2xl pointer-events-none z-20 backdrop-blur-md max-w-xs">
+                    <div class="font-semibold text-violet-300 mb-1 border-b border-slate-800 pb-1">Morph Interpolated Cell</div>
+                    <div id="morphTooltipPos" class="text-slate-400 font-mono mb-1">Position: --</div>
+                    <div id="morphTooltipMMSI" class="text-slate-200 font-mono">MMSI: --</div>
+                    <div id="morphTooltipPDB" class="font-mono" style="color: #3498db;">D1 (Reference PDB): -- Å</div>
+                    <div id="morphTooltipReferences" class="hidden max-h-36 overflow-y-auto font-mono"></div>
+                    <div id="morphTooltipAF" class="font-mono" style="color: #2eccbf;">D_AF (AlphaFold): -- Å</div>
+                    <div id="morphTooltipInterpolated" class="text-violet-300 font-bold font-mono mt-1 pt-1 border-t border-slate-800">D_morph: -- Å</div>
+                    <div id="morphTooltipOrigin" class="hidden text-[11px] font-mono mt-1 pt-1 border-t border-slate-800"></div>
+                </div>
+            </div>
+
+            <!-- Origin Colouring Legend Bar (Moved to the bottom of Section 5) -->
+            <div id="originLegendBar" class="hidden bg-slate-950/95 border-t border-slate-800 px-5 py-2.5 flex flex-wrap items-center justify-between text-[11px] text-slate-300 gap-2">
+                <span class="font-semibold text-white flex items-center gap-1.5">
+                    <i class="fa-solid fa-palette text-sky-400"></i> Origin Mode Key:
+                </span>
+                <div id="originLegendEntries" class="flex flex-wrap items-center gap-4 font-mono text-[10px]">
+                    <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full shadow-sm" style="background-color: #3498db;"></span> Reference PDB</span>
+                    <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full shadow-sm" style="background-color: #2eccbf;"></span> AlphaFold</span>
+                    <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full shadow-sm" style="background: linear-gradient(to right, #3498db, #2eccbf);"></span> Both (Blend based on slider values below physics simulation)</span>
+                    <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full border border-slate-700 shadow-sm" style="background-color: #1e293b;"></span> Neither (alignment gap)</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 6: Real-time Physics Elastic Network Simulation -->
+        <div class="bg-slate-900 border border-emerald-500/40 rounded-xl flex flex-col overflow-hidden shadow-2xl">
+            <div class="bg-slate-900/90 px-5 py-3 border-b border-emerald-500/20 flex flex-wrap justify-between items-center gap-3">
+                <div>
+                    <h2 class="font-semibold text-sm text-white flex items-center gap-2">
+                        <i class="fa-solid fa-atom text-emerald-400"></i> Real-time Elastic Physics Simulation
+                        <span id="physicsStatusBadge" class="text-[10px] bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded font-mono border border-indigo-500/30">Phase 1: TM-Aligned AlphaFold</span>
+                    </h2>
+                    <p class="text-xs text-slate-400">Phase 1 aligns each AlphaFold chain to to the Reference PDB via rigid-body TM-alignment. Phase 2 runs dynamic elastic network relaxation from these starting positions.</p>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-2 text-xs">
+                    <!-- Two Phase Switcher -->
+                    <div class="inline-flex rounded-lg p-0.5 bg-slate-950 border border-slate-700 text-xs shadow-inner">
+                        <button id="simPhase1Btn" data-action-click="24" class="px-2.5 py-1.5 rounded-md font-medium text-xs transition flex items-center gap-1.5 bg-indigo-600 text-white shadow ring-2 ring-indigo-400/30" title="Phase 1: Each chain matching AlphaFold distances and TM-aligned to Reference PDB coordinates">
+                            <i class="fa-solid fa-circle-nodes text-sky-300"></i> <span>Phase 1: TM-Align</span>
+                        </button>
+                        <button id="simPhase2Btn" data-action-click="25" class="px-2.5 py-1.5 rounded-md font-medium text-xs transition flex items-center gap-1.5 text-slate-400 hover:text-slate-200" title="Phase 2: Full active elastic network simulation from TM-aligned starting positions">
+                            <i class="fa-solid fa-circle-nodes text-emerald-400"></i> <span>Phase 2: Dynamic Sim</span>
+                        </button>
+                    </div>
+
+                    <button id="togglePhysicsBtn" data-action-click="26" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3 py-1.5 rounded-lg text-xs transition flex items-center gap-1.5 shadow">
+                        <i class="fa-solid fa-play" id="physicsPauseIcon"></i> <span id="physicsPauseText">Start Phase 2 Simulation</span>
+                    </button>
+                    <button id="toggleRigidBodyBtn" data-action-click="27" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs border border-slate-700 transition flex items-center gap-1.5 shadow" title="Toggle Rigid Body Simulation (protein chains act as rigid bodies)">
+                        <i class="fa-solid fa-cubes text-amber-400" id="rigidBodyIcon"></i> <span id="rigidBodyBtnText">Rigid Body: Off</span>
+                    </button>
+                    <button data-action-click="28" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded text-xs border border-slate-700 transition flex items-center gap-1" title="Reset all nodes back to Phase 1 TM-aligned coordinates">
+                        <i class="fa-solid fa-arrows-rotate"></i> Reset Simulation
+                    </button>
+                    <button data-action-click="29" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded text-xs border border-slate-700 transition" title="Reset Camera">
+                        <i class="fa-solid fa-camera"></i> Reset View
+                    </button>
+                </div>
+            </div>
+
+
+                <!-- Physics Controls & Stats Bar -->
+                <div class="bg-slate-950 px-5 py-3 border-b border-slate-800 flex flex-wrap items-center justify-between gap-4 text-xs">
+                    <div class="flex flex-wrap items-center gap-4">
+                        <div class="flex items-center gap-2">
+                            <label for="springStiffness" class="text-slate-400">Spring Stiffness (k):</label>
+                            <input type="range" id="springStiffness" min="0.1" max="20" step="0.1" value="2.0" class="w-24 h-1.5 bg-slate-800 rounded">
+                            <span id="stiffnessVal" class="text-emerald-400 font-mono font-bold">2.0</span>
+                        </div>
+
+                        <div class="flex items-center gap-2">
+                            <label for="mobilitySlider" class="text-slate-400">Mobility / Step Size (μ):</label>
+                            <input type="range" id="mobilitySlider" min="0.001" max="0.02" step="0.001" value="0.005" class="w-24 h-1.5 bg-slate-800 rounded">
+                            <span id="mobilityDisplay" class="text-emerald-400 font-mono font-bold">0.005</span>
+                        </div>
+
+                        <div class="flex items-center gap-2">
+                            <label for="springCutoffSelect" class="text-slate-400">Spring Cutoff:</label>
+                            <select id="springCutoffSelect" class="bg-slate-900 border border-slate-700 text-slate-300 rounded px-2 py-0.5 font-mono">
+                                <option value="12">12.0 Å (Local Contacts)</option>
+                                <option value="20" selected>20.0 Å (Medium Range - Recommended)</option>
+                                <option value="35">35.0 Å (Extended Network)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-4 font-mono text-[11px]">
+                        <div class="text-slate-400">TM-Score (P1): <span id="tmScoreDisplay" class="text-sky-400 font-bold">--</span></div>
+                        <div class="text-slate-400">RMSD (P1): <span id="tmRmsdDisplay" class="text-sky-400 font-bold">--</span></div>
+                        <div class="text-slate-400">RMSD Energy: <span id="physicsEnergyText" class="text-emerald-400 font-bold">0.00 Å</span></div>
+                        <div class="text-slate-400">Active Springs: <span id="physicsSpringDisplay" class="text-violet-400 font-bold">0</span></div>
+                        <div class="text-slate-400">Nodes: <span id="physicsNodeCount" class="text-white font-bold">0</span></div>
+                    </div>
+                </div>
+
+            <!-- Chain Visibility Toggle Bar -->
+            <div class="bg-slate-900/60 px-5 py-2 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-slate-400 font-medium uppercase text-[10px] flex items-center gap-1.5 mr-1 tracking-wider">
+                        <i class="fa-solid fa-layer-group text-emerald-400"></i> Chain Toggles:
+                    </span>
+                    <div id="physicsChainToggles" class="flex flex-wrap items-center gap-1.5 min-w-0 flex-1 max-h-24 overflow-y-auto">
+                        <!-- Dynamic chain toggle buttons rendered here -->
+                    </div>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <button type="button" data-action-click="30" class="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-slate-200 px-2.5 py-1 rounded text-[11px] border border-slate-700 transition">
+                        Show All
+                    </button>
+                    <button type="button" data-action-click="31" class="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-slate-200 px-2.5 py-1 rounded text-[11px] border border-slate-700 transition">
+                        Hide All
+                    </button>
+                </div>
+            </div>
+
+            <!-- 3D Physics Scene Canvas Container -->
+            <div class="bg-slate-900/60 px-5 py-2 border-b border-slate-800 flex flex-wrap items-center gap-2 text-xs"><span class="text-slate-400 font-medium uppercase text-[10px] tracking-wider"><i class="fa-solid fa-layer-group text-emerald-400"> </i> Structure toggles:</span><button id="toggleHomologyStructure" type="button" data-action-click="32" class="px-2.5 py-1 rounded border border-slate-700 bg-slate-900 text-white">Homology model <i class="fa-solid fa-eye"></i></button><span id="physicsReferenceStructureToggles" class="contents"></span><button id="toggleSpringStructure" type="button" data-action-click="34" aria-pressed="false" class="px-2.5 py-1 rounded border border-dashed border-slate-800 bg-slate-950/60 text-slate-500">Springs <i class="fa-solid fa-eye-slash"></i></button></div>
+            <div class="bg-slate-900/60 px-5 py-2 border-b border-slate-800 flex flex-wrap items-center gap-2 text-xs"><span class="text-slate-400 font-medium uppercase text-[10px] tracking-wider"><i class="fa-solid fa-layer-group text-emerald-400"> </i> Aligned toggles:</span><button id="toggleAlignedResidues" type="button" data-action-click="35" class="px-2.5 py-1 rounded border border-slate-700 bg-slate-900 text-white">Aligned residues <i class="fa-solid fa-eye"></i></button><button id="toggleUnalignedResidues" type="button" data-action-click="36" class="px-2.5 py-1 rounded border border-slate-700 bg-slate-900 text-white">Unaligned residues <i class="fa-solid fa-eye"></i></button></div>
+            <div class="flex flex-wrap items-center gap-3 px-3 pt-4 text-xs text-slate-300">
+                <!--physics representation controls -->
+                <div role="group" aria-label="Physics representation" class="flex gap-1 rounded-lg bg-slate-950 p-1">
+                    <button id="physicsBackboneBtn" type="button" aria-pressed="false" data-action-click="37" class="px-3 py-1.5 rounded text-slate-300">Backbone</button>
+                    <button id="physicsBallStickBtn" type="button" aria-pressed="true" data-action-click="38" class="px-3 py-1.5 rounded bg-violet-600 text-white">Ball &amp; Stick</button>
+                    <button id="physicsCartoonBtn" type="button" aria-pressed="false" data-action-click="39" class="px-3 py-1.5 rounded text-slate-300">Ribbon</button>
+                    <button id="physicsSurfaceBtn" type="button" aria-pressed="false" data-action-click="40" class="px-3 py-1.5 rounded text-slate-300">Surface</button>
+                </div>
+                <div id="sideChainJiggleControls" class="hidden items-center gap-3">
+                    <button id="sideChainJiggleBtn" type="button" data-action-click="41" aria-pressed="true" class="bg-violet-600 hover:bg-violet-500 text-white px-3 py-1.5 rounded text-xs border border-slate-700 transition" title="Animate side-chain atoms without changing the residue simulation physics"><i class="fa-solid fa-wave-square"></i> <span id="sideChainJiggleText">Stop Jiggle</span></button>
+                    <label class="inline-flex items-center gap-2 text-xs text-slate-300 whitespace-nowrap">Jiggle speed <output id="sideChainJiggleSpeedValue">3.0×</output><input aria-label="Jiggle speed" type="range" min="0.5" max="5" step="0.1" value="3" data-action-input="4"></label>
+                </div>
+                <!-- Colour by controls -->
+                    <div class="inline-flex shrink-0 items-center gap-2 whitespace-nowrap"><label for="physicsColorSelect" class="text-slate-300">Colour proteins by</label><select id="physicsColorSelect" data-action-change="5" class="bg-slate-800 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs"><option value="chain" selected>Chain (default)</option><option value="uniform">Uniform</option><option value="protein-id">Protein ID</option><option value="element">Element</option><option value="side-chains">Side chains</option><option value="origin">Origin</option><option value="aligned">Aligned residues</option><option value="hydrophobicity">Hydrophobicity</option><option value="secondary">Secondary structure</option><option value="plddt">pLDDT (from AlphaFold)</option><option value="difference">PDB-Homology model difference</option></select></div>
+                    <div id="referenceColorControl" class="hidden inline-flex shrink-0 items-center gap-2 whitespace-nowrap"><label for="referenceColorSelect" class="text-slate-300">Colour Reference chains by</label><select id="referenceColorSelect" data-action-change="6" class="bg-slate-800 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs"><option value="same" selected>Same as homology model chains (default)</option><option value="chain">Chain (default)</option><option value="uniform">Uniform</option><option value="protein-id">Protein ID</option><option value="element">Element</option><option value="side-chains">Side chains</option><option value="origin">Origin</option><option value="aligned">Aligned residues</option><option value="hydrophobicity">Hydrophobicity</option><option value="secondary">Secondary structure</option><option value="plddt">pLDDT (from AlphaFold)</option><option value="difference">PDB-Homology model difference</option></select></div>
+                    <div id="springColorControl" class="hidden inline-flex shrink-0 items-center gap-2 whitespace-nowrap"><label for="springColorSelect" class="text-slate-300">Colour springs by</label><select id="springColorSelect" class="bg-slate-800 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs"><option value="strain" selected>Strain (default)</option><option value="origin">Origin</option></select></div>
+                    <!-- Origin Filter Buttons (visible when in Origin mode to hide/show Reference PDB or AlphaFold residues) -->
+                    <div id="originFilterBtns" class="hidden flex items-center gap-1.5">
+                        <span id="originReferenceToggles" style="display:none;gap:0.375rem;flex-wrap:wrap"></span>
+                        <button id="toggleOriginPDBBtn" data-action-click="42" class="px-2.5 py-1.5 rounded-lg text-xs font-medium border border-sky-500/50 bg-sky-950/80 text-sky-300 hover:bg-sky-900 transition flex items-center gap-1.5 shadow" title="Click to show/hide residues with Reference PDB origin">
+                            <span class="w-2 h-2 rounded-full inline-block shadow-sm" style="background-color: #3498db;"></span>
+                            <span id="originPDBBtnText">Reference PDB</span>
+                            <i class="fa-solid fa-eye text-[10px] text-sky-400" id="originPDBEyeIcon"></i>
+                        </button>
+                        <button id="toggleOriginAFBtn" data-action-click="43" class="px-2.5 py-1.5 rounded-lg text-xs font-medium border border-teal-500/50 bg-teal-950/80 text-teal-300 hover:bg-teal-900 transition flex items-center gap-1.5 shadow" title="Click to show/hide residues with AlphaFold origin">
+                            <span class="w-2 h-2 rounded-full inline-block shadow-sm" style="background-color: #2eccbf;"></span>
+                            <span id="originAFBtnText">AlphaFold</span>
+                            <i class="fa-solid fa-eye text-[10px] text-teal-400" id="originAFEyeIcon"></i>
+                        </button>
+                    </div>
+                <span id="atomRepresentationNotice" class="hidden text-slate-400">The jiggling does not affect the homology model simulation</span>
+            </div>
+            <div class="flex flex-wrap gap-5 items-center p-3 text-xs text-slate-300">
+<label id="physicsResidueSizeControl">Residue size <output id="physicsResidueValue">1.0×</output> <input aria-label="physics residue size" type="range" min="0" max="3" step="0.1" value="1" data-action-input="5"></label>
+<label id="physicsBackboneSizeControl">Backbone size <output id="physicsBackboneValue">2.0×</output> <input aria-label="physics backbone size" type="range" min="0" max="8" step="0.1" value="2" data-action-input="6"></label>
+<label id="physicsAtomSizeControl" class="hidden">Atom size <output id="physicsAtomValue">3.0×</output> <input aria-label="physics atom size" type="range" min="0" max="5" step="0.1" value="3" data-action-input="7"></label>
+<label id="physicsStickSizeControl" class="hidden">Stick size <output id="physicsStickValue">1.0×</output> <input aria-label="physics stick size" type="range" min="0" max="8" step="0.1" value="1" data-action-input="8"></label>
+<label id="physicsSurfaceSizeControl" class="hidden">Metaball size <output id="physicsSurfaceValue">0.8×</output> <input aria-label="physics metaball size" type="range" min="0" max="3" step="0.1" value="0.8" data-action-input="9"></label></div>
+            <div id="physicsContainer" class="w-full h-[520px] relative bg-slate-950 flex items-center justify-center overflow-hidden cursor-grab active:cursor-grabbing">
+                <div id="physics3dCanvas" class="w-full h-full min-w-0 overflow-hidden"></div>
+                <div class="absolute right-4 top-4 z-30 flex flex-col items-end"><button type="button" data-action-click="44" aria-label="Capture physics viewport" class="bg-slate-900/90 hover:bg-slate-800 text-white px-2.5 py-2 rounded-lg border border-slate-600 shadow"><i class="fa-solid fa-camera"></i></button><div id="physicsSnapshotPanel" class="hidden mt-2 w-60 rounded-lg border border-slate-600 bg-slate-900/95 p-2 shadow-xl"><img id="physicsSnapshotImage" alt="Captured physics viewport" class="w-full rounded bg-slate-950"><div class="mt-2 flex gap-2"><button type="button" data-action-click="45" class="flex-1 rounded bg-slate-700 hover:bg-slate-600 px-2 py-1 text-xs">Copy</button><button type="button" data-action-click="46" class="flex-1 rounded bg-slate-700 hover:bg-slate-600 px-2 py-1 text-xs">Download</button></div></div></div>
+                <div id="metaballLoading" class="hidden absolute top-4 left-1/2 -translate-x-1/2 z-20 rounded-lg border border-slate-700 bg-slate-950/85 px-3 py-2 text-sm text-cyan-200 shadow-lg pointer-events-none"><i class="fa-solid fa-circle-notch fa-spin mr-2"></i>Loading metaball surface...</div>
+
+                <!-- Active Chain Dragging Indicator Badge -->
+                <div id="physicsChainDragBadge" class="hidden absolute top-4 left-1/2 -translate-x-1/2 bg-amber-500/90 border border-amber-400 text-slate-950 font-bold px-3 py-1 rounded-full text-xs shadow-xl backdrop-blur pointer-events-none flex items-center gap-1.5 z-10 transition">
+                    <i class="fa-solid fa-hand"></i> Moving Chain <span id="physicsDragChainId" class="font-mono underline">--</span>
+                </div>
+
+                <div class="absolute bottom-4 left-4 bg-slate-900/90 border border-slate-800 p-3 rounded-lg text-xs text-slate-300 shadow-xl backdrop-blur-md flex flex-col gap-1 pointer-events-auto">
+                    <canvas id="springHistogram" class="mb-1" style="display:none; width:390px; height:161px;" width="1560" height="645" aria-label="Spring stretch histogram"></canvas>
+                    <div id="springColorKey" class="hidden"><span id="springStrainKey"><span style="color:#93c5fd">Compressed</span> · <span style="color:#a78bfa">At rest</span> · <span style="color:#fca5a5">Stretched</span> (±50% strain)</span><span id="springOriginKey" class="hidden"></span>
+                        <button id="showSpringHistogramBtn" type="button" data-action-click="47" class="ml-2 px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[10px]">Show Histogram</button>
+                    </div>
+                    <div id="physicsPulseKey" class="flex items-center gap-2"><i class="fa-solid fa-palette text-sky-400"></i> Residues with pulsing opacity are not in the Reference PDB(s) <button id="pausePhysicsPulseBtn" type="button" data-action-click="48" class="rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-0.5 text-[10px]">Pause Pulsing</button></div>
+                    <div id="physicsColourKey">Chain: each protein chain has a distinct colour.</div>
+                    <div id="physicsDifferenceKey" class="hidden">PDB–Homology Cα distance: <span style="color:#38bdf8">0 Å</span> · <span style="color:#facc15">5 Å</span> · <span style="color:#ef4444">≥10 Å</span> · Grey and pulsing: no reference equivalent</div>
+                    <div class="text-[10px] text-slate-400 mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                        <span><i class="fa-solid fa-computer-mouse text-indigo-400 mr-1"></i> Left Drag: Rotate</span>
+                        <span><i class="fa-solid fa-computer-mouse text-indigo-400 mr-1"></i> Right Drag: Pan</span>
+                        <span><i class="fa-solid fa-magnifying-glass-plus text-violet-400 mr-1"></i> Scroll: Zoom</span>
+                        <span><i class="fa-solid fa-arrows-up-down-left-right text-amber-400 mr-1"></i> Ctrl + Drag: Move Chain</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Per-model morph influence controls -->
+            <div class="bg-slate-950 px-6 py-4 border-t border-slate-800 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div id="referenceInfluenceControls"><label class="text-xs text-sky-400">Reference PDB influence on spring lengths and strengths <span id="model1InfluenceVal">100%</span><input id="model1InfluenceSlider" type="range" min="0" max="1" step="0.01" value="1" class="w-full"></label></div>
+                <label class="text-xs text-teal-400">AlphaFold influence on spring lengths and strengths <span id="model2InfluenceVal">100%</span><input id="model2InfluenceSlider" type="range" min="0" max="1" step="0.01" value="1" class="w-full"></label>
+            </div>
+
+            <!-- All-Residue Mutual Repulsion Force Controller Bar (Below Physics Simulation) -->
+            <div class="bg-slate-950 px-6 py-4 border-t border-slate-800/80 flex flex-col md:flex-row items-center justify-between gap-4">
+                <div class="flex items-center gap-3 w-full md:w-auto">
+                    <div class="w-10 h-10 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 shrink-0 shadow-inner" aria-hidden="true"><i class="fa-solid fa-shield-halved text-base"></i></div>
+                    <div>
+                        <label for="stericClashRadiusSlider" class="text-xs font-semibold text-white">Steric clash exclusion radius <output id="stericClashRadiusValue" class="text-sky-300 font-mono">3.8 Å</output></label>
+                        <p class="text-[11px] text-slate-400 mt-0.5">Residue centres closer than this distance repel each other. The Other Physics Constraints slider controls the force strength.</p>
+                    </div>
+                </div>
+                <input type="range" id="stericClashRadiusSlider" min="2" max="8" step="0.1" value="3.8" aria-label="Steric clash exclusion radius" class="w-full md:w-7/12 h-2.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/50">
+            </div>
+            <div class="bg-slate-950 px-6 py-4 border-t border-slate-800/80 flex flex-col md:flex-row items-center justify-between gap-4">
+                <div class="flex items-center gap-3 w-full md:w-auto">
+                    <div class="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0 shadow-inner">
+                        <i class="fa-solid fa-atom text-base"></i>
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs font-semibold text-white tracking-wide">All-Residue Repulsion Force</span>
+                            <span id="residueRepulsionBadge" class="bg-slate-900 border border-slate-700 text-slate-400 font-mono text-[11px] font-bold px-2.5 py-0.5 rounded-full shadow-sm">Off (0%)</span>
+                        </div>
+                        <p class="text-[11px] text-slate-400 mt-0.5">
+                            Applies an all-pairs repulsive force pushing all residues apart.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-3 w-full md:w-7/12">
+                    <span class="text-[11px] text-slate-400 font-medium whitespace-nowrap flex items-center gap-1.5 shrink-0">
+                        <i class="fa-solid fa-ban text-slate-500"></i> Off (0%)
+                    </span>
+                    <div class="relative w-full flex items-center">
+                        <input type="range" id="residueRepulsionSlider" min="0" max="1" step="0.01" value="0"
+                               class="w-full h-2.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50">
+                    </div>
+                    <span class="text-[11px] text-amber-400 font-medium whitespace-nowrap flex items-center gap-1.5 shrink-0">
+                        Max Repulsion (100%) 
+                    </span>
+                    <button type="button" data-action-click="49" class="bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 px-2.5 py-1 rounded text-[11px] border border-slate-700 transition whitespace-nowrap" title="Reset to 0% (Off)">
+                        Reset
+                    </button>
+                </div>
+            </div>
+
+            <!-- Other Physics Constraints Influence Controller Bar (Below Physics Simulation) -->
+            <div class="bg-slate-950 px-6 py-4 border-t border-slate-800/80 flex flex-col md:flex-row items-center justify-between gap-4">
+                <div class="flex items-center gap-3 w-full md:w-auto">
+                    <div class="w-10 h-10 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 shrink-0 shadow-inner">
+                        <i class="fa-solid fa-link text-base"></i>
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs font-semibold text-white tracking-wide">Other Physics Constraints Influence</span>
+                            <span id="otherConstraintsBadge" class="bg-sky-950/80 border border-sky-500/30 text-sky-400 font-mono text-[11px] font-bold px-2.5 py-0.5 rounded-full shadow-sm">100%</span>
+                        </div>
+                        <p class="text-[11px] text-slate-400 mt-0.5">
+                            Controls peptide backbone bonds and steric clash exclusion.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-3 w-full md:w-7/12">
+                    <span class="text-[11px] text-slate-400 font-medium whitespace-nowrap flex items-center gap-1.5 shrink-0">
+                        <i class="fa-solid fa-ban text-slate-500"></i> Off (0%)
+                    </span>
+                    <div class="relative w-full flex items-center">
+                        <input type="range" id="otherConstraintsSlider" min="0" max="1" step="0.01" value="1"
+                               class="w-full h-2.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/50">
+                    </div>
+                    <span class="text-[11px] text-sky-400 font-medium whitespace-nowrap flex items-center gap-1.5 shrink-0">
+                        Full (100%)
+                    </span>
+                    <button type="button" data-action-click="50" class="bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 px-2.5 py-1 rounded text-[11px] border border-slate-700 transition whitespace-nowrap" title="Reset to 100% (Full Constraints)">
+                        Reset
+                    </button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+        <!-- Section 7: View Simulation in Mol* Viewer -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl flex flex-col gap-4">
+            <div class="flex flex-wrap items-center justify-start gap-3">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center text-violet-400 shrink-0">
+                        <i class="fa-solid fa-cube text-base"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-xs font-semibold text-white tracking-wide flex items-center gap-2">
+                            Mol* Viewer
+                            <span id="modelBuildTime" role="status" class="text-[10px] bg-violet-500/20 text-violet-300 px-2 py-0.5 rounded font-mono">Model not built yet</span>
+                        </h3>
+                    </div>
+                </div>
+
+                <div id="homologyViewerToggle" class="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-700" role="group" aria-label="Homology model viewer mode">
+                    <button id="referenceViewerBtn" type="button" data-action-click="51" class="px-3 py-1.5 rounded text-xs font-semibold bg-violet-600 text-white">Reference PDB</button>
+                    <button id="homologyViewerBtn" type="button" data-action-click="52" disabled class="px-3 py-1.5 rounded text-xs font-semibold text-slate-500 cursor-not-allowed">Homology model Building…</button>
+                </div>
+                <button id="loadSimulationMolstarBtn" data-action-click="53" class="hidden ml-auto bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-medium px-4 py-2 rounded-lg text-xs shadow-lg">Update Homology Model</button>
+            </div>
+
+            <!-- Mol* Viewer Container -->
+            <div class="w-full h-[480px] bg-slate-950 rounded-xl border border-slate-800 overflow-hidden relative shadow-inner">
+                <div id="molstar-simulation-container" class="w-full h-full"></div>
+
+
+                <div id="simulationMolstarPlaceholder" class="absolute inset-0 flex flex-col items-center justify-center text-slate-500 gap-3 bg-slate-950/90 pointer-events-none transition-opacity">
+                    <div class="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-600">
+                        <i class="fa-solid fa-cube text-xl text-violet-400/60"></i>
+                    </div>
+                    <div class="text-center">
+                        <p class="text-xs text-slate-300 font-medium">Homology model Mol* Viewer</p>
+                        <p class="text-[11px] text-slate-500 mt-0.5">When the app has finished building the homology model, it will be displayed here.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 8: Export & Download Simulation Model (mmCIF) -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-wrap items-center justify-between gap-4 shadow-xl">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+                    <i class="fa-solid fa-file-export text-base"></i>
+                </div>
+                <div>
+                    <h3 class="text-xs font-semibold text-white tracking-wide flex items-center gap-2">
+                        Download Homology Model
+                    </h3>
+                    <p class="text-[11px] text-slate-400 mt-0.5">
+                        Residue origin (Reference PDB = 1.00, AlphaFold = 2.00, Both = interpolated) is stored in <span class="font-mono text-emerald-400 font-bold">_atom_site.b_iso_or_equiv</span>.
+                    </p>
+                </div>
+            </div>
+
+            <button id="downloadMmCifBtn" data-action-click="54" class="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-95 text-white font-medium px-4 py-2.5 rounded-lg text-xs transition flex items-center gap-2 shadow-lg shadow-emerald-950/40">
+                <i class="fa-solid fa-download"></i> Download Model (mmCIF)
+            </button>
+        </div>
+
+    </main>
+
+    <!-- Error Modal Alert -->
+    <div id="errorModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+        <div class="bg-slate-900 border border-red-500/50 p-6 rounded-2xl shadow-2xl max-w-md w-full">
+            <div class="flex items-center gap-3 text-red-400 mb-3">
+                <i class="fa-solid fa-triangle-exclamation text-2xl"></i>
+                <h3 class="text-base font-semibold text-white">Error Processing Request</h3>
+            </div>
+            <p id="errorMessage" class="text-slate-300 text-xs leading-relaxed mb-6">Failed to load or align requested structures.</p>
+            <div class="flex justify-end">
+                <button data-action-click="55" class="bg-slate-800 hover:bg-slate-700 text-white font-medium px-4 py-2 rounded-lg text-xs transition">
+                    Dismiss
+                </button>
+            </div>
+        </div>
+    </div>
+
+<script src="homology_modeller.js"></script>
+</template>
+<script src="homology_modeller.js"></script>
 <script id="main-script" src="script.js"></script>
 
 </body>
