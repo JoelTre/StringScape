@@ -127,6 +127,7 @@
         // Reference PDB and AlphaFold with flat matrix caching
         let modelData1 = { pdbId: '', chains: {}, caAtoms: [], currentChain: 'ALL', matrixCache: new Map() };
         let modelData2 = { pdbId: '', chains: {}, caAtoms: [], currentChain: 'ALL', matrixCache: new Map(), files: [] };
+        let referenceFiles = [], referenceAssembly = null, referenceInfluences = [];
 
         let alignmentResults = [];
         let selectedPairKey = null;
@@ -177,6 +178,7 @@
         let morphColorMode = 'distance'; // 'distance' (default) or 'origin' (Reference PDB, AlphaFold, Both, Neither)
         const BACKBONE_BOND_LEN = 3.8; // Standard peptide C-alpha to C-alpha bond distance (3.8 Å)
         const MIN_RESIDUE_DIST = 3.8;  // Van der Waals steric exclusion distance (3.8 Å)
+        let stericClashRadius = MIN_RESIDUE_DIST;
 
         // Three.js 3D Physics Scene Objects
         let physicsScene, physicsCamera, physicsRenderer;
@@ -191,13 +193,14 @@
         let dragPlane = null;
         let prevDragWorldPos = new THREE.Vector3();
         let prevMouse3dX = 0, prevMouse3dY = 0;
-        let camTheta = Math.PI / 4, camPhi = Math.PI / 6, camRadius = 90;
+        let camTheta = Math.PI / 4, camPhi = Math.PI / 6, camRadius = 180;
         let camTarget = new THREE.Vector3(0, 0, 0);
         let chainVisibility = {}; // Map of chainId -> boolean visibility
 
         // Reference PDB static overlay (purely visual reference, no effect on physics)
         let model1OverlayGroup = null;
         let showModel1Overlay = false;
+        let referenceOverlayVisibility = [];
         let homologyStructureVisible = true;
         let alignedResiduesVisible = true;
         let unalignedResiduesVisible = true;
@@ -403,7 +406,7 @@
             modelData.matrixCache.set(chainKey, matrix);
             PerfTracker.metrics.cachedCells += matrix.length;
             const elapsed = PerfTracker.end(`distMat_${chainKey}`);
-            console.log(`[StringScape Homology Modeller Perf] Matrix computed for ${chainKey} (${N} residues, ${N*N} cells) in ${elapsed.toFixed(1)}ms`);
+            // console.log(`[StringScape Homology Modeller Perf] Matrix computed for ${chainKey} (${N} residues, ${N*N} cells) in ${elapsed.toFixed(1)}ms`);
             return matrix;
         }
 
@@ -999,11 +1002,11 @@
                 await viewer.loadStructureFromData(molstarCoordinateData(file), file.format, { dataLabel: file.pdbId });
             } catch (error) {
                 if (!reference || !/^[0-9][A-Z0-9]{3}$/i.test(file.pdbId)) throw error;
-                const response = await fetch(`https://models.rcsb.org/${file.pdbId.toLowerCase()}.bcif`);
-                if (!response.ok) throw new Error(`Reference viewer failed: ${error.message}. BinaryCIF fallback returned HTTP ${response.status}.`);
-                const bytes = new Uint8Array(await response.arrayBuffer());
+                const response = await fetch(`https://files.rcsb.org/download/${file.pdbId.toUpperCase()}.cif`);
+                if (!response.ok) throw new Error(`Reference viewer failed: ${error.message}. mmCIF fallback returned HTTP ${response.status}.`);
+                const fallback = {pdbId:file.pdbId,format:'mmcif',text:await response.text()};
                 await viewer.plugin.clear();
-                await viewer.loadStructureFromData(bytes, 'mmcif', { dataLabel: file.pdbId });
+                await viewer.loadStructureFromData(molstarCoordinateData(fallback), 'mmcif', { dataLabel: file.pdbId });
             }
         }
         let alphaFoldMolstarFiles = [];
@@ -1199,18 +1202,24 @@
             };
         }
         let preferredNames = new Map(), preferredNamesJob = null, preferredNamesState = '';
+        let stringAliasStatusReference = null, stringMatchStatusReference = null;
+        function currentStringReferenceKey() {
+            return document.getElementById('pdbInput1').value.trim().toUpperCase().replace(/\s*,\s*/g, ',');
+        }
         function loadPreferredNames() {
             cancelStringMatching();
             preferredNamesJob?.terminate();preferredNamesJob=null;preferredNames.clear();
             const file=document.getElementById('stringAliasesFile').files[0];
             const status=document.getElementById('stringAliasStatus');
+            stringAliasStatusReference = currentStringReferenceKey();
             preferredNamesState=file?'loading':'';
             status.textContent=file?'Reading preferred names from aliases…':'';
+            syncStringMatchStatusVisibility();
             updatePreferredNameCells();
             if(!file)return;
             const url=URL.createObjectURL(new Blob([`(${preferredNamesWorker.toString()})();`],{type:'text/javascript'}));
             let worker;
-            try {worker=new Worker(url);} catch(error){preferredNamesState='error';status.textContent=error.message;updatePreferredNameCells();return;}
+            try {worker=new Worker(url);} catch(error){preferredNamesState='error';status.textContent=error.message;syncStringMatchStatusVisibility();updatePreferredNameCells();return;}
             finally {URL.revokeObjectURL(url);}
             preferredNamesJob=worker;
             const finish=(data)=>{
@@ -1219,6 +1228,7 @@
                 preferredNamesState=data.error?'error':'ready';
                 if(!data.error)preferredNames=new Map(data.entries);
                 status.textContent=data.error?`Could not read preferred names: ${data.error}`:'Preferred names loaded.';
+                syncStringMatchStatusVisibility();
                 updatePreferredNameCells();
             };
             worker.onmessage=({data})=>finish(data);
@@ -1264,11 +1274,21 @@
                 tbody.appendChild(row);
             }
             table.appendChild(tbody);container.appendChild(table);
+            syncStringMatchStatusVisibility();
+        }
+
+        function syncStringMatchStatusVisibility() {
+            const reference = currentStringReferenceKey();
+            for (const [id, loadedReference] of [['stringAliasStatus',stringAliasStatusReference],['stringMatchStatus',stringMatchStatusReference]]) {
+                const status = document.getElementById(id);
+                status?.classList.toggle('hidden', !status.textContent || loadedReference !== reference);
+            }
         }
 
         function hideStringMatchResults() {
             document.getElementById('stringMatchResults')?.replaceChildren();
             document.getElementById('downloadStringMatchesBtn')?.classList.add('hidden');
+            syncStringMatchStatusVisibility();
         }
 
         function appendStringUniProtIds(value, matches) {
@@ -1311,7 +1331,9 @@
             const result=document.getElementById('stringMatchResults');
             const fasta=document.getElementById('stringSequencesFile').files[0], aliases=document.getElementById('stringAliasesFile').files[0];
             const referenceInput=document.getElementById('pdbInput1').value;
-            button.disabled=true; result.textContent='';
+            stringMatchStatusReference = currentStringReferenceKey();
+            status.textContent = 'Loading reference chains…';
+            button.disabled=true; result.textContent=''; syncStringMatchStatusVisibility();
             const alphaFoldInput = document.getElementById('pdbInput2');
             alphaFoldInput.value = '';
             alphaFoldInput.classList.remove('string-id-glow');
@@ -1354,7 +1376,7 @@
                 status.textContent=`Searched ${response.count.toLocaleString()} proteins. Loaded ${added.length} unique UniProt ID(s).`;
                 renderStringMatchResults(response.matches);
                 if (added.length) void loadModelPair(document.getElementById('pdbInput1').value.trim().toUpperCase(), input.value.trim().toUpperCase());
-            } catch(error) {status.textContent=error.message;}
+            } catch(error) {status.textContent=error.message;syncStringMatchStatusVisibility();}
             finally {button.disabled=false;}
         }
 
@@ -1465,11 +1487,11 @@
             }
 
             if (!pdbText) {
-                // Prefer the legacy PDB text endpoint for reference entries. It is
-                // the most compatible input for the bundled Mol* viewer. Newer or
-                // very large entries may not publish PDB text, so retain mmCIF as
-                // the fallback (for example, 8WKK).
+                // RCSB's biological assembly 1 contains the generated, functional
+                // complex. Fall back to the deposited asymmetric unit when an
+                // assembly file is unavailable for this entry.
                 const candidateUrls = [
+                    `https://files.rcsb.org/download/${cleanId}-assembly1.cif`,
                     `https://files.rcsb.org/download/${cleanId}.pdb`,
                     `https://www.ebi.ac.uk/pdbe/entry-files/download/pdb${cleanId.toLowerCase()}.ent`,
                     `https://files.rcsb.org/download/${cleanId}.cif`,
@@ -1512,7 +1534,7 @@
         let matrixDataVersion = 0;
         function matrixContentKey(kind, extra = '') {
             return [matrixDataVersion, modelBuildGeneration, kind, extra, currentPalette,
-                morphAlpha, model1Influence, model2Influence, morphColorMode,
+                morphAlpha, model1Influence, model2Influence, referenceAssembly ? referenceInfluences.join(',') : '', morphColorMode,
                 showSpringCutoff, springCutoffVal, diffMatrixMode, selectedPairKey].join(':');
         }
         function drawMatrixViewport(ctx, cache, scale, offX, offY) {
@@ -1528,6 +1550,7 @@
             cache.overview.getContext('2d').drawImage(cache.canvas, 0, 0);
             cache.overviewKey = key;
             cache.overviewSize = N;
+            if(cache===offscreenCaches.morph)document.getElementById('morphMatrixLoading')?.classList.add('hidden');
         }
         // Show a bounded full-matrix sample immediately; refine exact extrema independently of navigation.
         async function fullMatrixRange(cache, key, N, valueAt, checkpoint) {
@@ -1607,6 +1630,7 @@
                     console.error('Matrix refinement failed:', error);
                 } finally {
                     if (cache.renderToken === token) {
+                        if(cache===offscreenCaches.morph)document.getElementById('morphMatrixLoading')?.classList.add('hidden');
                         cache.pendingRender = false;
                         requestAnimationFrame(redraw);
                     }
@@ -1671,7 +1695,7 @@
             cacheObj.dirty = false;
             cacheObj.chain = chainKey;
             const elapsed = PerfTracker.end(`offscreen_${chainKey}`);
-            console.log(`[StringScape Homology Modeller Perf] Offscreen buffer generated for ${chainKey} in ${elapsed.toFixed(1)}ms`);
+            // console.log(`[StringScape Homology Modeller Perf] Offscreen buffer generated for ${chainKey} in ${elapsed.toFixed(1)}ms`);
         }
 
         function updateMatrixResolutionNotice(id, size) {
@@ -1762,10 +1786,7 @@
                             } else {
                                 const cell=getMorphCellValue(morphMatrixPositions[i],morphMatrixPositions[j],morphAlpha);
                                 if(cell){
-                                    if(morphColorMode==='origin'){
-                                        if(cell.d1!==null&&cell.d2!==null){const r=Math.round(52*(1-morphAlpha)+46*morphAlpha),g=Math.round(152*(1-morphAlpha)+204*morphAlpha),b=Math.round(219*(1-morphAlpha)+191*morphAlpha);color=(255<<24)|(b<<16)|(g<<8)|r;}
-                                        else color=cell.d1!==null?0xffdb9834:0xffbfcc2e;
-                                    }
+                                    if(morphColorMode==='origin')color=referenceOriginColor(cell);
                                     else color=palette[norm(cell.value)];
                                     color=applyMorphOpacity(color,!showSpringCutoff||cell.value<=springCutoffVal?cell.mmsi:0);
                                 }
@@ -1790,7 +1811,7 @@
 
             const t0 = performance.now();
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.fillStyle = '#020617';
+            ctx.fillStyle = document.body.classList.contains('light-mode') ? '#f8fafc' : '#020617';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
             const chainKey = modelData.currentChain;
@@ -1940,7 +1961,7 @@
             const N = res.alignedPairs.length;
             updateMatrixResolutionNotice('diffResolutionNotice', updateMatrixViewport(offscreenCaches.diff, N, diffCanvas, diffScale, diffOffX, diffOffY));
             diffCtx.clearRect(0, 0, diffCanvas.width, diffCanvas.height);
-            diffCtx.fillStyle = '#020617';
+            diffCtx.fillStyle = document.body.classList.contains('light-mode') ? '#f8fafc' : '#020617';
             diffCtx.fillRect(0, 0, diffCanvas.width, diffCanvas.height);
 
             if (offscreenCaches.diff.dirty || offscreenCaches.diff.pairKey !== selectedPairKey || offscreenCaches.diff.mode !== diffMatrixMode) {
@@ -2015,17 +2036,7 @@
                     const posJ = morphMatrixPositions[j];
                     const cell = getMorphCellValue(posI, posJ, morphAlpha);
                     if (isOriginMode) {
-                        if (!cell) {
-                            data32[rowOffset + pixelJ] = colorNeither;
-                        } else if (cell.d1 !== null && cell.d2 !== null) {
-                            data32[rowOffset + pixelJ] = colorBoth;
-                        } else if (cell.d1 !== null) {
-                            data32[rowOffset + pixelJ] = colorPDB;
-                        } else if (cell.d2 !== null) {
-                            data32[rowOffset + pixelJ] = colorAF;
-                        } else {
-                            data32[rowOffset + pixelJ] = colorNeither;
-                        }
+                        data32[rowOffset + pixelJ] = referenceOriginColor(cell);
                     } else {
                         if (!cell) {
                             data32[rowOffset + pixelJ] = blankColor;
@@ -2063,7 +2074,7 @@
             if (!btn) return;
             if (morphColorMode === 'origin') {
                 btn.className = 'text-white font-medium px-3 py-1.5 rounded-lg text-xs transition flex items-center gap-1.5 shadow ring-2 ring-sky-400/50';
-                btn.style.background = 'linear-gradient(to right, #3498db, #2eccbf)';
+                btn.style.background = `linear-gradient(to right, ${referenceAssembly ? referenceFiles.map((_,i)=>referenceColor(i)).join(', ') + ', ' : '#3498db, '}#2eccbf)`;
                 if (legend) legend.classList.remove('hidden');
             } else {
                 btn.className = 'bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs border border-slate-700 transition flex items-center gap-1.5 shadow';
@@ -2077,12 +2088,13 @@
 
         function drawMorphMatrix() {
 
-            if (!morphCtx || !morphMatrixSize) return;
+            if (!morphCtx || !morphMatrixSize) {document.getElementById('morphMatrixLoading')?.classList.add('hidden');return;}
+            document.getElementById('morphMatrixLoading')?.classList.toggle('hidden',offscreenCaches.morph.overviewKey===matrixContentKey('morph',''));
             const N = morphMatrixSize;
             updateMatrixResolutionNotice('morphResolutionNotice', updateMatrixViewport(offscreenCaches.morph, N, morphCanvas, morphScale, morphOffX, morphOffY));
 
             morphCtx.clearRect(0, 0, morphCanvas.width, morphCanvas.height);
-            morphCtx.fillStyle = '#020617';
+            morphCtx.fillStyle = document.body.classList.contains('light-mode') ? '#f8fafc' : '#020617';
             morphCtx.fillRect(0, 0, morphCanvas.width, morphCanvas.height);
 
             if (offscreenCaches.morph.dirty || offscreenCaches.morph.lastAlpha !== morphAlpha || offscreenCaches.morph.lastColorMode !== morphColorMode) {
@@ -2231,22 +2243,24 @@
                 const posI = morphMatrixPositions[i], posJ = morphMatrixPositions[j];
                 const cell = getMorphCellValue(posI, posJ, morphAlpha);
                 const sameChain = posI.blockIdx === posJ.blockIdx;
-                document.getElementById('morphTooltipMMSI').textContent = `MMSI: ${Math.round((cell ? cell.mmsi : 0) * 100)}%`;
+                renderMorphTooltipReferences(cell);
+                document.getElementById('morphTooltipPDB').classList.toggle('hidden',!!referenceAssembly);
+                document.getElementById('morphTooltipMMSI').textContent = `Influence on sim: ${Math.round((cell ? cell.mmsi : 0) * 100)}%`;
 
                 document.getElementById('morphTooltipPos').textContent =
                     `Chain ${posI.res.c1} [${(i - morphMatrixBlocks[posI.blockIdx].offset) + 1}] × Chain ${posJ.res.c1} [${(j - morphMatrixBlocks[posJ.blockIdx].offset) + 1}]`;
 
                 if (cell) {
                     if (sameChain) {
-                        document.getElementById('morphTooltipPDB').textContent = `D1 (Reference PDB): ${cell.d1 !== null ? cell.d1.toFixed(2) + ' Å' : 'N/A (gap)'}`;
-                        document.getElementById('morphTooltipAF').textContent = `D2 (AlphaFold): ${cell.d2 !== null ? cell.d2.toFixed(2) + ' Å' : 'N/A (gap)'}`;
+                        document.getElementById('morphTooltipPDB').textContent = `${referenceAssembly?'D_ref (weighted)':'D1 (Reference PDB)'}: ${cell.d1 !== null ? cell.d1.toFixed(2) + ' Å' : 'N/A (gap)'}`;
+                        document.getElementById('morphTooltipAF').textContent = `D_AF (AlphaFold): ${cell.d2 !== null ? cell.d2.toFixed(2) + ' Å' : 'N/A (gap)'}`;
                         document.getElementById('morphTooltipInterpolated').textContent = cell.morphed
-                            ? `D_morph (α = ${morphAlpha.toFixed(2)}): ${cell.value.toFixed(2)} Å [Intra-chain]`
+                            ? `D_morph${referenceAssembly?'':` (α = ${morphAlpha.toFixed(2)})`}: ${cell.value.toFixed(2)} Å [Intra-chain]`
                             : `D_morph: ${cell.value.toFixed(2)} Å [Intra-chain]`;
                     } else {
-                        document.getElementById('morphTooltipPDB').textContent = `D1 (Reference PDB): ${cell.d1.toFixed(2)} Å`;
-                        document.getElementById('morphTooltipAF').textContent = `D2 (AlphaFold): N/A (fixed to Reference PDB)`;
-                        document.getElementById('morphTooltipInterpolated').textContent = `D_morph: ${cell.value.toFixed(2)} Å [Inter-chain, fixed]`;
+                        document.getElementById('morphTooltipPDB').textContent = `${referenceAssembly?'D_ref (weighted)':'D1 (Reference PDB)'}: ${cell.d1!==null?cell.d1.toFixed(2)+' Å':'N/A (gap)'}`;
+                        document.getElementById('morphTooltipAF').textContent = `D_AF (AlphaFold): ${cell.d2!==null?cell.d2.toFixed(2)+' Å':'N/A (gap)'}`;
+                        document.getElementById('morphTooltipInterpolated').textContent = `D_morph: ${cell.value.toFixed(2)} Å [Inter-chain]`;
                     }
                 } else {
                     document.getElementById('morphTooltipPDB').textContent = `Reference PDB: Gap Alignment`;
@@ -2258,7 +2272,12 @@
                 if (originEl) {
                     if (morphColorMode === 'origin') {
                         originEl.classList.remove('hidden');
-                        if (!cell) {
+                        if(referenceAssembly) {
+                            const sources=cell?.references?.flatMap((value,i)=>value===null?[]:[referenceFiles[i].pdbId])||[];
+                            if(cell?.d2!==null&&cell)sources.push('AlphaFold');
+                            originEl.textContent='Origin: '+(sources.length?sources.join(' + '):'Neither (alignment gap)');
+                            originEl.style.color=cell?'#e2e8f0':'#94a3b8';
+                        } else if (!cell) {
                             originEl.innerHTML = `<span class="text-slate-400 font-semibold"><i class="fa-solid fa-square mr-1" style="color: #1e293b;"></i> Origin: Neither (Dark Grey)</span>`;
                         } else if (cell.d1 !== null && cell.d2 !== null) {
                             const pct1 = Math.round((1 - morphAlpha) * 100);
@@ -2274,9 +2293,9 @@
                     }
                 }
 
-                tooltip.style.left = `${Math.min(mouseX + 15, morphCanvas.width - 240)}px`;
-                tooltip.style.top = `${Math.min(mouseY + 15, morphCanvas.height - 130)}px`;
                 tooltip.classList.remove('hidden');
+                tooltip.style.left = `${Math.max(0,Math.min(mouseX + 15, morphCanvas.width - tooltip.offsetWidth - 8))}px`;
+                tooltip.style.top = `${Math.max(0,Math.min(mouseY + 15, morphCanvas.height - tooltip.offsetHeight - 8))}px`;
                 drawMorphMatrix();
             } else {
                 if (morphHoverCell !== null) { morphHoverCell = null; tooltip.classList.add('hidden'); drawMorphMatrix(); }
@@ -2319,6 +2338,7 @@
             offscreenCaches.morph.dirty = true;
         }
 
+        // Compute Morph matrix simulation influence (MMSI)
         function getMorphMMSI(d1, d2) {
             if (d1 !== null && d2 !== null) return (model1Influence + model2Influence) / 2;
             if (d1 !== null) return model1Influence;
@@ -2345,34 +2365,26 @@
         }
 
         function getMorphCellValue(posI, posJ, alpha) {
-            const sameChain = posI.blockIdx === posJ.blockIdx;
-            const pairI = posI.pair, pairJ = posJ.pair;
-
-            if (sameChain) {
-                const res = posI.res;
-                let d1 = null, d2 = null;
-                if (pairI.idx1 !== null && pairJ.idx1 !== null) {
-                    const mat1 = getOrComputeDistanceMatrix(modelData1, res.c1, res.atoms1);
-                    d1 = mat1[pairI.idx1 * res.atoms1.length + pairJ.idx1];
-                }
-                if (pairI.idx2 !== null && pairJ.idx2 !== null) {
-                    const mat2 = getOrComputeDistanceMatrix(modelData2, res.c2, res.atoms2);
-                    d2 = mat2[pairI.idx2 * res.atoms2.length + pairJ.idx2];
-                }
-                if (d1 !== null && (!Number.isFinite(d1) || d1 < 0)) d1 = null;
-                if (d2 !== null && (!Number.isFinite(d2) || d2 < 0)) d2 = null;
-                if (d1 === null && d2 === null) return null;
-                if (d1 === null) return { value: d2, d1: null, d2, mmsi: getMorphMMSI(d1, d2), interChain: false, morphed: false };
-                if (d2 === null) return { value: d1, d1, d2: null, mmsi: getMorphMMSI(d1, d2), interChain: false, morphed: false };
-                return { value: (1 - alpha) * d1 + alpha * d2, d1, d2, mmsi: getMorphMMSI(d1, d2), interChain: false, morphed: true };
-            } else {
-                const d1 = pairI.idx1 !== null && pairJ.idx1 !== null
-                    ? dist3d(posI.res.atoms1[pairI.idx1], posJ.res.atoms1[pairJ.idx1]) : null;
-                const d2 = model2InterChainDistance(posI, posJ);
-                if (d1 === null && d2 === null) return null;
-                const value = d1 === null ? d2 : d2 === null ? d1 : (1 - alpha) * d1 + alpha * d2;
-                return { value, d1, d2, mmsi: getMorphMMSI(d1, d2), interChain: true, morphed: d1 !== null && d2 !== null };
-            }
+            const sameChain=posI.blockIdx===posJ.blockIdx;
+            const pairI=posI.pair,pairJ=posJ.pair;
+            let references=referenceCellDistances(posI,posJ);
+            let d1=null,d2=null;
+            if(references) d1=blendedReferenceDistance(references);
+            else if(sameChain && pairI.idx1!==null && pairJ.idx1!==null) {
+                const res=posI.res,mat1=getOrComputeDistanceMatrix(modelData1,res.c1,res.atoms1);
+                d1=mat1[pairI.idx1*res.atoms1.length+pairJ.idx1];
+            } else if(!sameChain && pairI.idx1!==null && pairJ.idx1!==null) d1=dist3d(posI.res.atoms1[pairI.idx1],posJ.res.atoms1[pairJ.idx1]);
+            if(sameChain && pairI.idx2!==null && pairJ.idx2!==null) {
+                const res=posI.res,mat2=getOrComputeDistanceMatrix(modelData2,res.c2,res.atoms2);
+                d2=mat2[pairI.idx2*res.atoms2.length+pairJ.idx2];
+            } else if(!sameChain) d2=model2InterChainDistance(posI,posJ);
+            if(d1!==null&&(!Number.isFinite(d1)||d1<0))d1=null;
+            if(d2!==null&&(!Number.isFinite(d2)||d2<0))d2=null;
+            if(d1===null&&d2===null)return null;
+            const value=d1===null?d2:d2===null?d1:references?blendAvailableReferenceAndAlphaFold(references,d2):(1-alpha)*d1+alpha*d2;
+            const referenceInfluence=references?references.reduce((n,v,i)=>n+(v===null?0:referenceInfluences[i]??1),0)/Math.max(1,references.filter(v=>v!==null).length):model1Influence;
+            const mmsi=d1!==null&&d2!==null?(referenceInfluence+model2Influence)/2:d1!==null?referenceInfluence:model2Influence;
+            return {value,d1,d2,mmsi,interChain:!sameChain,morphed:d1!==null&&d2!==null,references};
         }
 
         // ==========================================
@@ -2388,7 +2400,7 @@
             if (!container) return;
 
             physicsScene = new THREE.Scene();
-            physicsScene.background = new THREE.Color(0x020617);
+            physicsScene.background = new THREE.Color(document.body.classList.contains('light-mode') ? 0xffffff : 0x020617);
 
             const width = container.clientWidth || 1230;
             const height = container.clientHeight || 520;
@@ -2601,7 +2613,7 @@
             camTarget.set(0, 0, 0);
             if (!physicsCamera) return;
             physicsCamera.up.set(0, 1, 0);
-            camRadius = 90;
+            camRadius = 180;
             physicsCamera.position.set(camRadius * 0.5, camRadius * 0.6, camRadius * 0.7);
             physicsCamera.lookAt(camTarget);
         }
@@ -2945,12 +2957,12 @@
                 const simulationPairs = block.physicsPairs;
 
                 // Independent TM-align fit for this chain only
-                const tmResult = block.res.referenceOnly
+                const tmResult = block.res.nonPolymerFit || (block.res.referenceOnly
                     ? {R:[[1,0,0],[0,1,0],[0,0,1]],t:[0,0,0],numEquiv:0,tmScore:0,rmsd:0}
-                    : computeChainTmAlignment(blockAtoms1, blockAtoms2, blockPairs);
+                    : computeChainTmAlignment(blockAtoms1, blockAtoms2, blockPairs));
                 block.tmAlignment = tmResult;
                 phase1AlignmentMetrics.chainStats[block.c1] = tmResult;
-                if (tmResult.numEquiv >= 3) {
+                if (block.res.entityType!=='other' && tmResult.numEquiv >= 3) {
                     totalTmScore += tmResult.tmScore;
                     totalRmsd += tmResult.rmsd;
                     tmCount++;
@@ -2994,6 +3006,7 @@
                 model1OverlayGroup = null;
             }
             showModel1Overlay = false;
+            referenceOverlayVisibility = [];
             updateShowPDBBtnUI();
 
             // Initialize Nodes with Phase 1 TM-aligned coordinates
@@ -3058,7 +3071,7 @@
             setSimulationPhase(2); // Start Phase 2 automatically when initialization is complete
 
             const elapsed = PerfTracker.end('initPhysics');
-            console.log(`[StringScape Homology Modeller Perf] Physics initialized with Phase 1 TM-alignment (${N} nodes, TM: ${phase1AlignmentMetrics.avgTmScore.toFixed(3)}, RMSD: ${phase1AlignmentMetrics.avgRmsd.toFixed(2)} Å) in ${elapsed.toFixed(1)}ms`);
+            // console.log(`[StringScape Homology Modeller Perf] Physics initialized with Phase 1 TM-alignment (${N} nodes, TM: ${phase1AlignmentMetrics.avgTmScore.toFixed(3)}, RMSD: ${phase1AlignmentMetrics.avgRmsd.toFixed(2)} Å) in ${elapsed.toFixed(1)}ms`);
         }
 
         function rebuildCutoffSprings() {
@@ -3082,6 +3095,7 @@
                     if (isSequentialBackbone) {
                         physicsSprings.push({
                             i, j,
+                            references: referenceAssembly?referenceCellDistances(posI,posJ):null,
                             d1: resI.entityType==='nucleotide'
                                 ? posI.pair.idx1!==null&&posJ.pair.idx1!==null?dist3d(posI.res.atoms1[posI.pair.idx1],posJ.res.atoms1[posJ.pair.idx1]):null
                                 : BACKBONE_BOND_LEN,
@@ -3114,6 +3128,8 @@
                         d2 = model2InterChainDistance(posI, posJ);
                     }
 
+                    const references=referenceAssembly?referenceCellDistances(posI,posJ):null;
+                    if(references)d1=blendedReferenceDistance(references);
                     if (d1 === null && d2 === null) continue;
 
                     let springType;
@@ -3130,7 +3146,7 @@
 
                     physicsSprings.push({
                         i, j,
-                        d1, d2,
+                        d1, d2, references,
                         sameChain,
                         isBackbone: false,
                         springType
@@ -3143,12 +3159,13 @@
                 const key = `${pair.i}:${pair.j}`;
                 if (existing.has(key)) continue;
                 const a = physicsPositions[pair.i], b = physicsPositions[pair.j];
-                const d1 = a.pair.idx1 !== null && b.pair.idx1 !== null
+                let d1 = a.pair.idx1 !== null && b.pair.idx1 !== null
                     ? dist3d(a.res.atoms1[a.pair.idx1], b.res.atoms1[b.pair.idx1]) : null;
+                if(referenceAssembly)d1=blendedReferenceDistance(referenceCellDistances(a,b));
                 const d2 = !a.res.referenceOnly && !b.res.referenceOnly && a.pair.idx2 !== null && b.pair.idx2 !== null
                     ? dist3d(a.res.atoms2[a.pair.idx2], b.res.atoms2[b.pair.idx2]) : null;
                 if (d1 === null && d2 === null) continue;
-                physicsSprings.push({i:pair.i,j:pair.j,d1,d2,sameChain:a.blockIdx===b.blockIdx,
+                physicsSprings.push({i:pair.i,j:pair.j,d1,d2,references:referenceAssembly?referenceCellDistances(a,b):null,sameChain:a.blockIdx===b.blockIdx,
                     isBackbone:false,isBasePair:true,springType:d1!==null&&d2!==null?'both':d2!==null?'AF_only':'PDB_only'});
             }
             document.getElementById('physicsSpringDisplay').textContent = physicsSprings.length.toLocaleString();
@@ -3199,6 +3216,14 @@
         }
 
         // Interactive chain visibility toggles for physics 3D view
+        function physicsToggleColor(chainId,chainKeys) {
+            if(physicsColorMode==='uniform')return '#c4b5fd';
+            if(physicsColorMode==='protein-id'){
+                const node=physicsNodes.find(candidate=>candidate.res?.c1===chainId&&candidate.idx2!==null&&!candidate.res.referenceOnly);
+                return getProteinIdColor(node?.res.atoms2[node.idx2]?.sourcePdbId);
+            }
+            return getChainColor(chainId,chainKeys);
+        }
         function renderPhysicsChainToggles() {
             const container = document.getElementById('physicsChainToggles');
             if (!container) return;
@@ -3214,7 +3239,7 @@
                 keys.forEach(chainId => { if (chainVisibility[chainId] === undefined) chainVisibility[chainId] = true; });
                 const isWater = isWaterChain(keys[0]);
                 const isVis = keys.every(chainId => chainVisibility[chainId] !== false);
-                const color = getChainColor(keys[0], chainKeys);
+                const color = physicsToggleColor(keys[0],chainKeys);
                 const name = isWater ? 'Water' : `Chain ${keys[0]}`;
 
                 const btn = document.createElement('button');
@@ -3249,19 +3274,13 @@
         }
 
         function isNodeVisibleInPhysics(node) {
+            if (!node?.res) return false;
             if (!homologyStructureVisible) return false;
             if (node.usedInAlignment ? !alignedResiduesVisible : !unalignedResiduesVisible) return false;
             if (chainVisibility[node.res.c1] === false) return false;
             if (physicsOriginColorMode) {
-                const hasPDB = node.idx1 !== null;
                 const hasAF = node.idx2 !== null&&!node.res.referenceOnly;
-                if (hasPDB && !hasAF) {
-                    if (!originPDBVisible) return false;
-                } else if (!hasPDB && hasAF) {
-                    if (!originAFVisible) return false;
-                } else if (hasPDB && hasAF) {
-                    if (!originPDBVisible && !originAFVisible) return false;
-                }
+                if (!visibleOriginReferences(node).length && !(hasAF && originAFVisible)) return false;
             }
             return true;
         }
@@ -3308,23 +3327,23 @@
         // the same center-of-mass offset the physics nodes were built with, so it
         // lines up with Phase 1's TM-aligned frame. This group is never touched by
         // the physics step - it's purely a fixed visual reference.
-        function buildModel1OverlayGroup() {
+        function buildSingleReferenceOverlayGroup(sourceChains, referenceIndex) {
             const group = new THREE.Group();
-            const chainIds = Object.keys(modelData1.chains || {});
+            const chainIds = Object.keys(sourceChains || {});
             if (!chainIds.length) return group;
-            const referenceAtoms=chainIds.flatMap(chainId=>modelData1.chains[chainId]);
+            const referenceAtoms=chainIds.flatMap(chainId=>sourceChains[chainId]);
             const referenceShades=burialFactorsForNodes(referenceAtoms.map(atom=>({x:atom.x,y:atom.y,z:atom.z,blockIdx:atom.chainId})));
             group.userData.occlusionFactors=new WeakMap(referenceAtoms.map((atom,i)=>[atom,referenceShades[i]]));
 
-            const chainKeys = morphMatrixBlocks.length ? morphMatrixBlocks.map(b => b.c1) : chainIds;
+            const chainKeys = chainIds;
             const { cx, cy, cz } = physicsCenterOffset;
 
             let totalAtoms = 0;
-            chainIds.forEach(cid => { totalAtoms += modelData1.chains[cid].reduce((n, a) => n + (['ball-stick','surface'].includes(physicsRepresentation) && a.sourceAtoms?.length ? a.sourceAtoms.length : 1), 0); });
+            chainIds.forEach(cid => { totalAtoms += sourceChains[cid].reduce((n, a) => n + (['ball-stick','surface'].includes(physicsRepresentation) && a.sourceAtoms?.length ? a.sourceAtoms.length : 1), 0); });
             if (!totalAtoms) return group;
 
             const sphereGeo = new THREE.SphereGeometry(physicsRepresentation === 'surface' ? 1 : physicsRepresentation === 'ball-stick' ? 0.34 : 0.85, 10, 8);
-            const sphereMat = new THREE.MeshStandardMaterial({ roughness: 0.3, metalness: 0.2 });
+            const sphereMat = new THREE.MeshStandardMaterial({ roughness: physicsRepresentation === 'ball-stick' ? 0.9 : 0.3, metalness: physicsRepresentation === 'ball-stick' ? 0 : 0.2 });
             const mesh = new THREE.InstancedMesh(sphereGeo, sphereMat, totalAtoms);
             const dummy = new THREE.Object3D();
 
@@ -3332,7 +3351,7 @@
             let idx = 0;
             const referenceAtomEntries=[],referenceBondNodes=[];
             chainIds.forEach((cid,blockIdx) => {
-                const atoms = modelData1.chains[cid];
+                const atoms = sourceChains[cid];
                 const colorHex = getChainColor(cid, chainKeys);
                 const color = new THREE.Color(colorHex);
                 if(physicsRepresentation==='ball-stick')atoms.forEach((atom,atomIdx)=>{
@@ -3371,7 +3390,7 @@
 
             if(physicsRepresentation==='ball-stick'&&referenceAtomEntries.length){
                 const bonds=sourceAtomBonds(referenceAtomEntries,referenceBondNodes);
-                const sticks=new THREE.InstancedMesh(new THREE.CylinderGeometry(1,1,1,6),new THREE.MeshPhongMaterial({shininess:30}),bonds.length);
+                const sticks=new THREE.InstancedMesh(new THREE.CylinderGeometry(1,1,1,6),new THREE.MeshPhongMaterial({shininess:6,specular:0x080a0d}),bonds.length);
                 const a=new THREE.Vector3(),b=new THREE.Vector3(),direction=new THREE.Vector3(),up=new THREE.Vector3(0,1,0);
                 sticks.userData.referenceBonds=[];
                 bonds.forEach(([ia,ib],bondIndex)=>{
@@ -3397,7 +3416,7 @@
                 mesh.geometry.dispose(); mesh.material.dispose();
                 const pointEntries=[];
                 for(const cid of chainIds){
-                    const atoms=modelData1.chains[cid];
+                    const atoms=sourceChains[cid];
                     if(atoms[0]?.entityType==='other'||atoms.length<2){
                         atoms.forEach((atom,atomIdx)=>pointEntries.push({chainId:cid,atomIdx,source:atom.sourceAtoms?.[0]||atom,atom}));
                         continue;
@@ -3417,25 +3436,50 @@
                 }
             } else group.add(mesh);
             group.userData.isModel1Overlay = true;
+            group.userData.sourceChains = sourceChains;
+            group.userData.referenceIndex = referenceIndex;
             updateModel1AlignmentColors(group);
             return group;
         }
 
+        function buildModel1OverlayGroup() {
+            const root = new THREE.Group();
+            root.userData.referenceCollection = true;
+            const sources = referenceAssembly
+                ? referenceAssembly.structures.map(structure => Object.fromEntries(structure.entries.map(entry => [entry.chain, entry.alignedAtoms])))
+                : [modelData1.chains || {}];
+            sources.forEach((chains, index) => {
+                const child = buildSingleReferenceOverlayGroup(chains, index);
+                child.visible = referenceOverlayVisibility[index] === true;
+                root.add(child);
+            });
+            return root;
+        }
+
         function updateModel1AlignmentColors(group = model1OverlayGroup) {
             if (!group) return;
+            if (group.userData.referenceCollection) { group.children.forEach(updateModel1AlignmentColors); return; }
+            const sourceChains = group.userData.sourceChains || modelData1.chains;
             const matched = new Map();
-            const equivalentAF = new Map(), sourceByChain = new Map(), distanceByChain = new Map();
+            const equivalentAF = new Map(), sourceByGroupKey = new Map(), distanceByChain = new Map();
             for (const block of morphMatrixBlocks) {
                 if (!block.tmAlignment) continue;
                 if (!matched.has(block.c1)) matched.set(block.c1, new Set());
                 if (!equivalentAF.has(block.c1)) equivalentAF.set(block.c1, new Map());
-                sourceByChain.set(block.c1, block.res.atoms2[0]?.sourcePdbId);
+                sourceByGroupKey.set(block.c1, block.res.atoms2[0]?.sourcePdbId);
                 for (const pair of block.res.alignedPairs) {
                     if (isEquivalentPair(block.res.atoms1, block.res.atoms2, pair)) {
                         matched.get(block.c1).add(pair.idx1);
                         equivalentAF.get(block.c1).set(pair.idx1, block.res.atoms2[pair.idx2]);
                     }
                 }
+            }
+            const sourceByChain = new Map();
+            for (const chainId of Object.keys(sourceChains || {})) {
+                const groupKey = referenceAssembly
+                    ? referenceAssembly.groups.find(candidate => candidate.entries.get(group.userData.referenceIndex)?.chain === chainId)?.key
+                    : chainId;
+                sourceByChain.set(chainId, sourceByGroupKey.get(groupKey));
             }
             if (showModel1Overlay && (referenceColorMode === 'difference' || (referenceColorMode === 'same' && physicsColorMode === 'difference'))) {
                 for (const node of physicsNodes) {
@@ -3444,11 +3488,10 @@
                     distanceByChain.get(node.res.c1).set(node.idx1, physicsReferenceDistance(node));
                 }
             }
-            const chainKeys = morphMatrixBlocks.length
-                ? morphMatrixBlocks.map(b => b.c1) : Object.keys(modelData1.chains || {});
+            const chainKeys = Object.keys(sourceChains || {});
             const mode = referenceColorMode === 'same' ? physicsColorMode : referenceColorMode;
             const residueColor = (chainId, atomIdx, source) => {
-                const atom = modelData1.chains[chainId]?.[atomIdx];
+                const atom = sourceChains[chainId]?.[atomIdx];
                 const afAtom = equivalentAF.get(chainId)?.get(atomIdx);
                 const color = mode === 'chain' || mode === 'side-chains' ? getChainColor(chainId, chainKeys)
                     : mode === 'element' ? ELEMENT_COLORS.C
@@ -3511,31 +3554,41 @@
             });
         }
 
-        function toggleShowModel1() {
-            if (!modelData1 || !modelData1.chains || !Object.keys(modelData1.chains).length) return;
-
-            showModel1Overlay = !showModel1Overlay;
-
-            if (showModel1Overlay) {
-                if (!model1OverlayGroup) {
-                    model1OverlayGroup = buildModel1OverlayGroup();
-                    physicsScene.add(model1OverlayGroup);
-                }
-                model1OverlayGroup.visible = true;
-            } else if (model1OverlayGroup) {
-                model1OverlayGroup.visible = false;
+        function setReferenceOverlayVisibility(index, visible) {
+            if (!modelData1?.chains || !Object.keys(modelData1.chains).length) return;
+            referenceOverlayVisibility[index] = visible;
+            showModel1Overlay = referenceOverlayVisibility.some(Boolean);
+            if (showModel1Overlay && !model1OverlayGroup && physicsScene) {
+                model1OverlayGroup = buildModel1OverlayGroup();
+                physicsScene.add(model1OverlayGroup);
             }
-
+            model1OverlayGroup?.children.forEach((child, i) => { child.visible = referenceOverlayVisibility[i] === true; });
             updateShowPDBBtnUI();
-
-            if (physicsRenderer && physicsScene && physicsCamera) {
-                { for (const chain of backboneChains) chain.line.userData.syncBackbone?.(); physicsRenderer.render(physicsScene, physicsCamera); }
-            }
+            if (physicsRenderer && physicsScene && physicsCamera) physicsRenderer.render(physicsScene, physicsCamera);
         }
-
+        function toggleShowModel1() { setReferenceOverlayVisibility(0, referenceOverlayVisibility[0] !== true); }
+        function renderPhysicsReferenceStructureToggles() {
+            const host = document.getElementById('physicsReferenceStructureToggles');
+            if (!host) return;
+            host.replaceChildren();
+            const files = referenceFiles.length ? referenceFiles : [{pdbId:currentReferenceFile?.pdbId || modelData1?.pdbId || 'PDB'}];
+            files.forEach((file, index) => {
+                const visible = referenceOverlayVisibility[index] === true;
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.setAttribute('aria-pressed', String(visible));
+                button.className = 'px-2.5 py-1 rounded border ' + (visible ? 'border-slate-700 bg-slate-900 text-white' : 'border-dashed border-slate-800 bg-slate-950/60 text-slate-500');
+                button.append(document.createTextNode(`Reference PDB: ${file.pdbId} `));
+                const icon = document.createElement('i');
+                icon.className = `fa-solid ${visible ? 'fa-eye' : 'fa-eye-slash'}`;
+                button.append(icon);
+                button.addEventListener('click', () => setReferenceOverlayVisibility(index, !visible));
+                host.append(button);
+            });
+        }
         function updateShowPDBBtnUI() {
             document.getElementById('referenceColorControl')?.classList.toggle('hidden', !showModel1Overlay);
-            updatePhysicsToggleButton('toggleReferenceStructure', showModel1Overlay);
+            renderPhysicsReferenceStructureToggles();
         }
 
         function updatePhysicsToggleButton(id, visible) {
@@ -3665,9 +3718,10 @@
                 targetRestLen = sp.d1!==null&&sp.d2!==null
                     ? (1-morphAlpha)*sp.d1+morphAlpha*sp.d2
                     : sp.d1??sp.d2??BACKBONE_BOND_LEN;
+                if(referenceAssembly&&sp.references&&sp.d1!==null&&sp.d2!==null)targetRestLen=blendAvailableReferenceAndAlphaFold(sp.references,sp.d2);
                 weight = otherConstraintsInfluence;
             } else if (sp.springType === 'both') {
-                targetRestLen = (1 - morphAlpha) * sp.d1 + morphAlpha * sp.d2;
+                targetRestLen = referenceAssembly&&sp.references?blendAvailableReferenceAndAlphaFold(sp.references,sp.d2):(1 - morphAlpha) * sp.d1 + morphAlpha * sp.d2;
                 weight = getMorphMMSI(sp.d1, sp.d2);
             } else if (sp.springType === 'AF_only') {
                 targetRestLen = sp.d2;
@@ -3686,15 +3740,17 @@
             return { targetRestLen, weight };
         }
 
-        let showSprings = false, springDisplay = null, showSpringHistogram = false, springHistogramWidth = null;
+        let showSprings = false, springDisplay = null, showSpringHistogram = false, springHistogramWidth = null, springColorMode = 'strain';
         function toggleShowSprings() {
             showSprings = !showSprings;
             updatePhysicsToggleButton('toggleSpringStructure',showSprings);
             document.getElementById('springColorKey').classList.toggle('hidden', !showSprings);
+            updateSpringColorControls();
             if (!showSprings) { showSpringHistogram = false; const histogram=document.getElementById('springHistogram'); if(histogram) histogram.style.display='none'; const histogramButton=document.getElementById('showSpringHistogramBtn'); if(histogramButton) histogramButton.textContent='Show Histogram'; }
             updateSpringDisplay();
         }
         function toggleSpringHistogram() {
+            if(springColorMode!=='strain')return;
             showSpringHistogram = !showSpringHistogram;
             const canvas = document.getElementById('springHistogram');
             const button = document.getElementById('showSpringHistogramBtn');
@@ -3721,6 +3777,26 @@
             const base = [167, 139, 250], end = strain < 0 ? [147, 197, 253] : [252, 165, 165];
             return base.map((v, i) => (v + (end[i] - v) * Math.abs(strain)) / 255);
         }
+        function springOriginColor(sp) {
+            const references=sp.references || (referenceAssembly?referenceFiles.map((_,i)=>i===0?sp.d1:null):null);
+            const packed=referenceOriginColor({d1:sp.d1,d2:sp.d2,references});
+            return [(packed&255)/255,((packed>>>8)&255)/255,((packed>>>16)&255)/255];
+        }
+        function updateSpringColorControls() {
+            document.getElementById('springColorControl')?.classList.toggle('hidden',!showSprings);
+            document.getElementById('springStrainKey')?.classList.toggle('hidden',springColorMode!=='strain');
+            document.getElementById('showSpringHistogramBtn')?.classList.toggle('hidden',springColorMode!=='strain');
+            const origin=document.getElementById('springOriginKey');
+            if(origin){origin.classList.toggle('hidden',springColorMode!=='origin');origin.replaceChildren();
+                if(springColorMode==='origin'){
+                    for(let i=0;i<(referenceAssembly?referenceFiles.length:1);i++){
+                        const span=document.createElement('span');span.style.color=referenceColor(i);span.textContent=`● ${referenceAssembly?referenceFiles[i].pdbId:'Reference PDB'} · `;origin.append(span);
+                    }
+                    const af=document.createElement('span');af.style.color='#2eccbf';af.textContent='● AlphaFold · ';origin.append(af,document.createTextNode('Shared origins use the weighted blend.'));
+                }
+            }
+            if(springColorMode!=='strain'&&showSpringHistogram){showSpringHistogram=false;const canvas=document.getElementById('springHistogram');if(canvas)canvas.style.display='none';const button=document.getElementById('showSpringHistogramBtn');if(button)button.textContent='Show Histogram';}
+        }
         function updateSpringDisplay() {
             if (!physicsScene) return;
             if (!showSprings) { if (springDisplay) springDisplay.visible = false; return; }
@@ -3743,7 +3819,7 @@
                 if (!active || springStiffnessVal <= 0) continue;
                 const a = physicsNodes[sp.i], b = physicsNodes[sp.j];
                 if (!a || !b || !isNodeVisibleInPhysics(a) || !isNodeVisibleInPhysics(b)) continue;
-                const color = springStrainColor(Math.hypot(b.x-a.x, b.y-a.y, b.z-a.z), active.targetRestLen);
+                const color = springColorMode==='origin'?springOriginColor(sp):springStrainColor(Math.hypot(b.x-a.x, b.y-a.y, b.z-a.z), active.targetRestLen);
                 positions.setXYZ(count, a.x, a.y, a.z); colors.setXYZ(count++, ...color);
                 positions.setXYZ(count, b.x, b.y, b.z); colors.setXYZ(count++, ...color);
             }
@@ -3767,6 +3843,35 @@
             if(angle>0)quaternion.setFromAxisAngle(rotation.divideScalar(angle),angle);
             for(const i of indices){const n=physicsNodes[i];offset.set(n.x-cx,n.y-cy,n.z-cz).applyQuaternion(quaternion);
                 n.x=cx+mobility*sumFx/count+offset.x;n.y=cy+mobility*sumFy/count+offset.y;n.z=cz+mobility*sumFz/count+offset.z;}
+        }
+
+        // Visit each pair within the exclusion radius, including pairs on
+        // opposite sides of a grid-cell boundary.
+        function forEachNearbyPhysicsPair(nodes, radius, visit) {
+            const cellSize = Math.max(2, radius);
+            const grid = new Map(), cells = new Int32Array(nodes.length * 3);
+            for (let i = 0; i < nodes.length; i++) {
+                const node = nodes[i], gx = Math.floor(node.x / cellSize), gy = Math.floor(node.y / cellSize), gz = Math.floor(node.z / cellSize);
+                cells[i*3] = gx; cells[i*3+1] = gy; cells[i*3+2] = gz;
+                const key = `${gx},${gy},${gz}`;
+                let bucket = grid.get(key);
+                if (!bucket) { bucket = []; grid.set(key, bucket); }
+                bucket.push(i);
+            }
+            for (let i = 0; i < nodes.length; i++) {
+                const x = cells[i*3], y = cells[i*3+1], z = cells[i*3+2], a = nodes[i];
+                for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) for (let oz = -1; oz <= 1; oz++) {
+                    for (const j of grid.get(`${x+ox},${y+oy},${z+oz}`) || []) {
+                        if (j <= i) continue;
+                        const b = nodes[j];
+                        let dx = b.x-a.x, dy = b.y-a.y, dz = b.z-a.z;
+                        let distance = Math.hypot(dx,dy,dz);
+                        if (distance >= radius) continue;
+                        if (distance < 1e-6) { dx = 0.001; dy = 0; dz = 0; distance = 0.001; }
+                        visit(i,j,distance,dx,dy,dz);
+                    }
+                }
+            }
         }
 
         // Ultra-fast physics step with spatial hash for steric repulsion and in-place buffer updates
@@ -3820,48 +3925,19 @@
                 activeSpringCount++;
             }
 
-            // 2. Optimized Steric Repulsion via lightweight 3D Spatial Grid (O(N) instead of O(N^2)!)
+            // 2. Steric exclusion radius, independent of the backbone constraint strength.
             if (otherConstraintsInfluence > 0.0001) {
-                const cellSize = 5.0; // 5.0 Å grid cells
-                const grid = new Map();
-                for (let i = 0; i < N; i++) {
-                    const n = physicsNodes[i];
-                    const gx = Math.floor(n.x / cellSize);
-                    const gy = Math.floor(n.y / cellSize);
-                    const gz = Math.floor(n.z / cellSize);
-                    const hash = `${gx},${gy},${gz}`;
-                    let bucket = grid.get(hash);
-                    if (!bucket) { bucket = []; grid.set(hash, bucket); }
-                    bucket.push(i);
-                }
-
-                grid.forEach(bucket => {
-                    const bLen = bucket.length;
-                    if (bLen < 2) return;
-                    for (let a = 0; a < bLen; a++) {
-                        const i = bucket[a];
-                        const nI = physicsNodes[i];
-                        for (let b = a + 1; b < bLen; b++) {
-                            const j = bucket[b];
-                            // Skip directly bonded backbone residues
-                            if (Math.abs(i - j) === 1 && physicsNodes[i].blockIdx === physicsNodes[j].blockIdx) continue;
-                            if(nI.res.entityType==='other'&&nI.blockIdx===physicsNodes[j].blockIdx)continue;
-                            // In rigid body simulation, intra-chain steric collisions have no effect on rigid shape
-                            if (rigidBodySimulation && physicsNodes[i].blockIdx === physicsNodes[j].blockIdx) continue;
-
-                            const nJ = physicsNodes[j];
-                            const dx = nJ.x - nI.x, dy = nJ.y - nI.y, dz = nJ.z - nI.z;
-                            const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) || 0.001;
-
-                            const stericLimit=nI.res.entityType==='other'||nJ.res.entityType==='other'?2.2:MIN_RESIDUE_DIST;
-                            if (dist < stericLimit) {
-                                const overlap = stericLimit - dist;
-                                const repelForce = kBase * 15.0 * (overlap / dist) * otherConstraintsInfluence;
-                                fx[i] -= repelForce * dx; fy[i] -= repelForce * dy; fz[i] -= repelForce * dz;
-                                fx[j] += repelForce * dx; fy[j] += repelForce * dy; fz[j] += repelForce * dz;
-                            }
-                        }
-                    }
+                forEachNearbyPhysicsPair(physicsNodes, stericClashRadius, (i,j,dist,dx,dy,dz) => {
+                    const nI = physicsNodes[i], nJ = physicsNodes[j];
+                    if (j === i + 1 && nI.blockIdx === nJ.blockIdx) return;
+                    if (nI.res.entityType === 'other' && nI.blockIdx === nJ.blockIdx) return;
+                    if (rigidBodySimulation && nI.blockIdx === nJ.blockIdx) return;
+                    const stericLimit = nI.res.entityType === 'other' || nJ.res.entityType === 'other'
+                        ? stericClashRadius * (2.2 / MIN_RESIDUE_DIST) : stericClashRadius;
+                    if (dist >= stericLimit) return;
+                    const repelForce = kBase * 15.0 * ((stericLimit - dist) / dist) * otherConstraintsInfluence;
+                    fx[i] -= repelForce * dx; fy[i] -= repelForce * dy; fz[i] -= repelForce * dz;
+                    fx[j] += repelForce * dx; fy[j] += repelForce * dy; fz[j] += repelForce * dz;
                 });
             }
 
@@ -4117,6 +4193,94 @@
         // ==========================================
         // 10. ALIGNMENT PIPELINE & TABLE
         // ==========================================
+        function nonPolymerAtomKey(atom) {
+            const source=atom.sourceAtoms?.[0]||atom;
+            return `${String(source.atomName||'').toUpperCase()}:${String(source.element||'').toUpperCase()}`;
+        }
+        function nonPolymerSignature(atoms) {
+            const name=String(atoms[0]?.resName||'').toUpperCase();
+            const normalized=['HOH','WAT','H2O','DOD'].includes(name)?'WATER':name;
+            return `${normalized}|${atoms.map(nonPolymerAtomKey).sort().join('|')}`;
+        }
+        function nonPolymerPairs(reference,model) {
+            const byKey=new Map(model.map((atom,i)=>[nonPolymerAtomKey(atom),i]));
+            return reference.map((atom,idx1)=>({idx1,idx2:byKey.get(nonPolymerAtomKey(atom))??null}));
+        }
+        function transformedPoint(point,fit) {
+            const R=fit.R,t=fit.t;
+            return {x:R[0][0]*point.x+R[0][1]*point.y+R[0][2]*point.z+t[0],
+                y:R[1][0]*point.x+R[1][1]*point.y+R[1][2]*point.z+t[1],
+                z:R[2][0]*point.x+R[2][1]*point.y+R[2][2]*point.z+t[2]};
+        }
+        function addNonPolymerAlignments(chains1,chains2) {
+            const identityFit={R:[[1,0,0],[0,1,0],[0,0,1]],t:[0,0,0],numEquiv:0,tmScore:0,rmsd:0};
+            // Fit each coordinate file as a whole using its strongest polymer matches.
+            // A ligand is then compared in that common reference frame, never by
+            // name alone (many waters and ions have the same chemical identity).
+            const bestByModelChain=new Map();
+            for(const result of alignmentResults) {
+                if(result.referenceOnly||!result.isEquivalent||result.entityType==='other')continue;
+                const prior=bestByModelChain.get(result.c2);
+                if(!prior||result.score>prior.score)bestByModelChain.set(result.c2,result);
+            }
+            const anchors=new Map();
+            for(const result of bestByModelChain.values()) {
+                const fileIndex=result.atoms2[0]?.fileIndex;
+                if(fileIndex===undefined)continue;
+                const points=anchors.get(fileIndex)||{P:[],Q:[]};
+                for(const pair of result.alignedPairs)if(isEquivalentPair(result.atoms1,result.atoms2,pair)) {
+                    points.P.push(result.atoms1[pair.idx1]);points.Q.push(result.atoms2[pair.idx2]);
+                }
+                anchors.set(fileIndex,points);
+            }
+            const fits=new Map();
+            for(const [index,{P,Q}] of anchors)if(P.length>=3)fits.set(index,superposeWeightedIterative(P,Q));
+            const references=chains1.filter(key=>modelData1.chains[key][0]?.entityType==='other');
+            const models=chains2.filter(key=>modelData2.chains[key][0]?.entityType==='other');
+            const candidates=[];
+            for(const c1 of references)for(const c2 of models) {
+                const a=modelData1.chains[c1],b=modelData2.chains[c2];
+                if(nonPolymerSignature(a)!==nonPolymerSignature(b))continue;
+                const fit=fits.get(b[0].fileIndex);
+                if(!fit)continue; // Without structural anchors, identical names are ambiguous.
+                const pairs=nonPolymerPairs(a,b);
+                if(pairs.some(pair=>pair.idx2===null))continue;
+                const squared=pairs.map(pair=>{
+                    const p=a[pair.idx1],q=transformedPoint(b[pair.idx2],fit);
+                    return (p.x-q.x)**2+(p.y-q.y)**2+(p.z-q.z)**2;
+                });
+                const rmsd=Math.sqrt(squared.reduce((sum,value)=>sum+value,0)/squared.length);
+                const centerDistance=dist3d(referenceCenter(a),transformedPoint(referenceCenter(b),fit));
+                if(centerDistance<=4&&rmsd<=3)candidates.push({c1,c2,pairs,fit,score:centerDistance+rmsd});
+            }
+            candidates.sort((a,b)=>a.score-b.score);
+            const matchedRef=new Set(),matchedModel=new Set();
+            for(const {c1,c2,pairs,fit} of candidates) {
+                if(matchedRef.has(c1)||matchedModel.has(c2))continue;
+                matchedRef.add(c1);matchedModel.add(c2);
+                const atoms1=modelData1.chains[c1],atoms2=modelData2.chains[c2];
+                alignmentResults.push({c1,c2,atoms1,atoms2,entityType:'other',nonPolymerFit:fit,
+                    seq1:'',seq2:'',align1:'',align2:'',identity:100,similarity:100,score:0,
+                    map1To2:new Map(pairs.map(p=>[p.idx1,p.idx2])),map2To1:new Map(pairs.map(p=>[p.idx2,p.idx1])),
+                    alignedPairs:pairs,isEquivalent:true});
+            }
+            for(const c1 of references)if(!matchedRef.has(c1)) {
+                const atoms1=modelData1.chains[c1];
+                alignmentResults.push({c1,c2:null,atoms1,atoms2:atoms1,referenceOnly:true,entityType:'other',
+                    seq1:'',seq2:'',align1:'',align2:'',identity:0,similarity:0,score:0,
+                    map1To2:new Map(),map2To1:new Map(),isEquivalent:false,
+                    alignedPairs:atoms1.map((_,i)=>({idx1:i,idx2:null}))});
+            }
+            for(const c2 of models)if(!matchedModel.has(c2)) {
+                const atoms2=modelData2.chains[c2];
+                let c1=`AF:${c2}`;while(modelData1.chains[c1]||alignmentResults.some(result=>result.c1===c1))c1+='+';
+                alignmentResults.push({c1,c2,atoms1:[],atoms2,entityType:'other',
+                    nonPolymerFit:fits.get(atoms2[0].fileIndex)||identityFit,
+                    seq1:'',seq2:'',align1:'',align2:'',identity:0,similarity:0,score:0,
+                    map1To2:new Map(),map2To1:new Map(),isEquivalent:false,
+                    alignedPairs:atoms2.map((_,i)=>({idx1:null,idx2:i}))});
+            }
+        }
         function computeAllChainAlignments() {
             matrixDataVersion++;
             PerfTracker.start('alignments');
@@ -4130,6 +4294,7 @@
                 const atoms1 = modelData1.chains[c1];
                 const seq1 = atoms1.map(a => a.singleChar).join('');
                 const entityType=atoms1[0]?.entityType||'protein';
+                if(entityType==='other')return;
 
                 let bestMatch = null;
                 let maxRank = -Infinity;
@@ -4170,11 +4335,13 @@
                 }
             });
 
+            addNonPolymerAlignments(chains1,chains2);
+
             renderAlignmentTable();
             buildMorphMatrixBlocks();
             const elapsed = PerfTracker.end('alignments');
             PerfTracker.metrics.alignTime = elapsed;
-            console.log(`[StringScape Homology Modeller Perf] All chain alignments computed in ${elapsed.toFixed(1)}ms`);
+            //console.log(`[StringScape Homology Modeller Perf] All chain alignments computed in ${elapsed.toFixed(1)}ms`);
         }
 
         function alignmentMetricColor(value, low, middle, high, lowerIsBetter = false) {
@@ -4276,10 +4443,10 @@
             (window.requestIdleCallback || (callback => setTimeout(callback, 0)))(run, { timeout: 100 });
         }
 
-        const viewerSizes = { alignment: { residue: 1, backbone: 2 }, physics: { residue: 1, backbone: 2, atom: 1, stick: 1, surface: 0.8 } };
+        const viewerSizes = { alignment: { residue: 1, backbone: 2 }, physics: { residue: 1, backbone: 2, atom: 3, stick: 1, surface: 0.8 } };
         function setViewerSize(viewer, kind, value) {
             if(!(kind in viewerSizes[viewer]))return;
-            viewerSizes[viewer][kind] = Math.max(0, Math.min(['residue','atom','surface'].includes(kind) ? 3 : 8, Number(value)));
+            viewerSizes[viewer][kind] = Math.max(0, Math.min(kind === 'atom' ? 5 : ['residue','surface'].includes(kind) ? 3 : 8, Number(value)));
             document.getElementById(viewer + kind[0].toUpperCase() + kind.slice(1) + 'Value').textContent = viewerSizes[viewer][kind].toFixed(1) + '×';
             if (viewer === 'alignment') alignmentTmViewer?.updateSizes();
             else {
@@ -4447,7 +4614,7 @@
             let radius = 1;
             chains.forEach(chain => chain.forEach(v => { v.sub(center); radius = Math.max(radius, v.length() + 1); }));
             const scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x020617);
+            scene.background = new THREE.Color(document.body.classList.contains('light-mode') ? 0xffffff : 0x020617);
             const camera = new THREE.PerspectiveCamera(45, 1, 0.1, Math.max(1000, radius * 30));
             let renderer;
             try { renderer = new THREE.WebGLRenderer({ antialias: true }); }
@@ -4550,7 +4717,9 @@
                 draw();
             }, { passive: false });
             document.getElementById('alignmentTmMetrics').textContent = `TM-score: ${fit.tmScore.toFixed(3)} · RMSD: ${fit.rmsd.toFixed(2)} Å`;
-            alignmentTmViewer = { reset, updateColors, updateSizes, dispose() {
+            alignmentTmViewer = { reset, updateColors, updateSizes,
+                setBackground(light) { scene.background = new THREE.Color(light ? 0xffffff : 0x020617); draw(); },
+                dispose() {
                 observer.disconnect();
                 group.children.forEach(child => { if (child.geometry !== geometry) child.geometry.dispose(); child.material.dispose(); });
                 geometry.dispose(); renderer.dispose(); renderer.forceContextLoss(); canvas.remove();
@@ -4569,7 +4738,7 @@
         }
 
         function isWaterChain(chainId) {
-            const atoms = modelData1.chains?.[chainId] || modelData2.chains?.[chainId];
+            const atoms = modelData1.chains?.[chainId] || modelData2.chains?.[chainId] || morphMatrixBlocks.find(block=>block.c1===chainId)?.res.atoms2;
             return !!atoms?.length && ['HOH','WAT','H2O','DOD'].includes(atoms[0].resName?.toUpperCase());
         }
 
@@ -4729,6 +4898,7 @@
         }
 
         function clearModelUI() {
+            document.getElementById('morphMatrixLoading')?.classList.add('hidden');
             cancelPendingSimulationRender();
             resetHomologyRecommendation();
             disposeAtomRepresentation();
@@ -4774,6 +4944,7 @@
             if (springDisplay) springDisplay.visible = false;
             if (model1OverlayGroup) model1OverlayGroup.visible = false;
             showModel1Overlay = false;
+            referenceOverlayVisibility = [];
             updateShowPDBBtnUI();
             isDraggingChain = false; chainVisibility = {};
             document.getElementById('simulationMolstarPlaceholder')?.classList.remove('hidden');
@@ -4785,6 +4956,7 @@
             if (uploadedStructureFiles.reference && pdbId1.toUpperCase() !== uploadedStructureFiles.reference.inputValue) clearUploadedStructure('reference');
             if (uploadedStructureFiles.alphaFold && pdbId2Raw.toUpperCase() !== uploadedStructureFiles.alphaFold.inputValue) clearUploadedStructure('alphaFold');
             document.getElementById('pdbInput1').value = pdbId1;
+            syncStringMatchStatusVisibility();
             updateFindMatchesReady();
             document.getElementById('pdbInput2').value = pdbId2Raw;
             updateExampleSelection();
@@ -4815,9 +4987,10 @@
             try {
                 const entries1 = modelInputEntries(pdbId1, 'reference');
                 const entries2 = modelInputEntries(pdbId2Raw, 'alphaFold');
-                if (entries1.length !== 1) throw new Error('Enter one Reference PDB ID.');
+                if (!entries1.length) throw new Error('Enter at least one Reference PDB ID.');
                 if (!entries2.length) throw new Error('Enter at least one AlphaFold ID or sequence.');
-                if (entries1[0].uploadFile) document.getElementById('referenceStructureName').textContent = `Reference: ${entries1[0].id}`;
+                if (entries1.length > 1) document.getElementById('referenceStructureName').textContent = `References: ${entries1.map(entry=>entry.id).join(' + ')}`;
+                else if (entries1[0].uploadFile) document.getElementById('referenceStructureName').textContent = `Reference: ${entries1[0].id}`;
                 else void updateReferenceStructureName(entries1[0], modelBuildGeneration);
                 const id2List = entries2.map(entry => entry.id);
                 PerfTracker.start('loadModels');
@@ -4832,17 +5005,28 @@
                 PerfTracker.metrics.cachedCells = 0;
                 chainVisibility = {};
 
-                const [file1, fileResults2] = await Promise.all([
-                    loadModelInput(entries1[0],true),
-                    Promise.all(entries2.map(entry=>loadModelInput(entry,false)))
+                const [files1, fileResults2] = await Promise.all([
+                    Promise.all(entries1.map(entry=>loadModelInput(entry,true))),
+                    Promise.all(entries2.map(entry=>loadModelInput(entry,true)))
                 ]);
                 if (generation !== modelBuildGeneration) return;
+                const file1 = files1[0];
+                referenceFiles = files1;
+                referenceOverlayVisibility = files1.map(() => false);
+                originReferenceVisibility = files1.map(() => true);
+                updateShowPDBBtnUI();
+                updateOriginFilterBtnsUI();
+                updateHomologyViewerToggle();
+                if(referenceComparisonScene){referenceComparisonScene.stop();referenceComparisonScene.controls.dispose();referenceComparisonScene.renderer.dispose();referenceComparisonScene=null;}
+                referenceAssembly = files1.length > 1 ? buildReferenceAssembly(files1) : null;
+                referenceComparisonVisibility={structures:new Map(),chains:new Map(),links:true};
                 const txt1 = file1.text;
                 const txt2List = fileResults2.map(file => file.text);
                 currentReferenceFile = file1;
                 pdbId1 = file1.pdbId;
                 const parsed1 = file1.parsed;
-                if (parsed1.title) document.getElementById('referenceStructureName').textContent = parsed1.title;
+                if (files1.length > 1) document.getElementById('referenceStructureName').textContent = `References: ${files1.map(file=>file.parsed.title||file.pdbId).join(' + ')}`;
+                else if (parsed1.title) document.getElementById('referenceStructureName').textContent = parsed1.title;
                 updateProgressBar(45);
                 const sequenceCount = fileResults2.filter(file => file.sequenceOnly).length;
                 const fallbackIds = fileResults2.filter(file => file.sequenceFallback).map(file => file.pdbId);
@@ -4852,14 +5036,19 @@
                 if (fallbackIds.length) notice.textContent = `No AlphaFold model found for ${fallbackIds.join(', ')}; using UniProt sequences. ` + notice.textContent;
                 notice.classList.toggle('hidden', !notice.textContent);
 
-                modelData1.pdbId = pdbId1;
-                modelData1.chains = parsed1.chains;
-                modelData1.caAtoms = parsed1.allAtoms;
-                document.getElementById('PDBTitle').textContent = pdbId1;
+                modelData1.pdbId = files1.map(file=>file.pdbId).join(' + ');
+                modelData1.chains = referenceAssembly ? referenceAssembly.chains : parsed1.chains;
+                modelData1.caAtoms = referenceAssembly ? Object.values(referenceAssembly.chains).flat() : parsed1.allAtoms;
+                renderReferenceComparison();
+                renderReferenceInfluenceControls();
+                if (physicsOriginColorMode) setPhysicsColorMode('origin');
+                renderReferenceOriginLegend();
+                updateSpringColorControls();
+                document.getElementById('PDBTitle').textContent = modelData1.pdbId;
                 const referenceTypes={protein:0,nucleotide:0,other:0};
-                parsed1.allAtoms.forEach(atom=>referenceTypes[atom.entityType||'protein']++);
+                modelData1.caAtoms.forEach(atom=>referenceTypes[atom.entityType||'protein']++);
                 document.getElementById('PDBResCount').textContent = referenceTypes.nucleotide||referenceTypes.other
-                    ? `${referenceTypes.protein} protein · ${referenceTypes.nucleotide} nucleotide · ${referenceTypes.other} other atoms`
+                    ? `${referenceTypes.protein} Residues · ${referenceTypes.nucleotide} nucleotides · ${referenceTypes.other} other atoms`
                     : `${referenceTypes.protein} Residues`;
 
                 // Parse AlphaFold
@@ -4872,9 +5061,11 @@
                 document.getElementById('AFTitle').textContent = id2List.join(' + ');
                 const fileWord = id2List.length > 1 ? `${id2List.length} files` : '1 file';
                 const model2Nucleotides=built2.caAtoms.filter(atom=>atom.entityType==='nucleotide').length;
-                document.getElementById('AFResCount').textContent = model2Nucleotides
-                    ? `${built2.caAtoms.length-model2Nucleotides} protein · ${model2Nucleotides} nucleotide (${fileWord})`
-                    : `${built2.caAtoms.length} Residues (${fileWord})`;
+                const model2Others=built2.caAtoms.filter(atom=>atom.entityType==='other').length;
+                const model2Proteins=built2.caAtoms.length-model2Nucleotides-model2Others;
+                document.getElementById('AFResCount').textContent = model2Nucleotides||model2Others
+                    ? `${model2Proteins} Residues · ${model2Nucleotides} nucleotides · ${model2Others} other atoms (${fileWord})`
+                    : `${model2Proteins} Residues (${fileWord})`;
 
                 updateProgressBar(70);
 
@@ -4883,7 +5074,7 @@
                 if (molstarViewer2 && molstarViewer2.plugin) await molstarViewer2.plugin.clear();
 
                 if (molstarViewer1) {
-                    await loadFetchedStructureIntoMolstar(molstarViewer1, file1, true);
+                    await loadReferenceFilesIntoMolstar(molstarViewer1);
                 }
                 if (molstarViewer2) {
                     for (let f = 0; f < txt2List.length; f++) {
@@ -4921,7 +5112,7 @@
 
                 updateProgressBar(100);
                 const totalElapsed = PerfTracker.end('loadModels');
-                console.log(`[StringScape Homology Modeller Perf] Full model pair load & initialization completed in ${totalElapsed.toFixed(1)}ms`);
+                //console.log(`[StringScape Homology Modeller Perf] Full model pair load & initialization completed in ${totalElapsed.toFixed(1)}ms`);
 
             } catch (err) {
                 if (generation !== modelBuildGeneration) return;
@@ -5302,17 +5493,21 @@
                     setOtherConstraintsInfluence(parseFloat(e.target.value));
                 });
             }
+            document.getElementById('stericClashRadiusSlider')?.addEventListener('input', e => {
+                setStericClashRadius(e.target.value);
+            });
 
             setModelInfluence(1, model1Influence); setModelInfluence(2, model2Influence);
             updateResidueRepulsionDisplay();
             updateOtherConstraintsDisplay();
+            setStericClashRadius(stericClashRadius);
         }
 
         function setModelInfluence(model, value) {
             value = Math.max(0, Math.min(1, Number(value) || 0));
             if (model === 1) model1Influence = value;
             else model2Influence = value;
-            const total = model1Influence + model2Influence;
+            const total = (referenceAssembly ? referenceInfluences.reduce((a,b)=>a+b,0) : model1Influence) + model2Influence;
             morphAlpha = total ? model2Influence / total : 0.5;
             for (const n of [1, 2]) {
                 const influence = n === 1 ? model1Influence : model2Influence;
@@ -5377,6 +5572,16 @@
         window.setOtherConstraintsInfluence = setOtherConstraintsInfluence;
         window.updateOtherConstraintsDisplay = updateOtherConstraintsDisplay;
 
+        function setStericClashRadius(value) {
+            const parsed = Number(value);
+            if (!Number.isFinite(parsed)) return;
+            stericClashRadius = Math.max(2, Math.min(8, parsed));
+            const slider = document.getElementById('stericClashRadiusSlider');
+            const output = document.getElementById('stericClashRadiusValue');
+            if (slider) slider.value = stericClashRadius;
+            if (output) output.textContent = `${stericClashRadius.toFixed(1)} Å`;
+        }
+
         function toggleRigidBodySimulation() {
             rigidBodySimulation = !rigidBodySimulation;
             updateRigidBodyBtnUI();
@@ -5402,7 +5607,30 @@
         window.updateRigidBodyBtnUI = updateRigidBodyBtnUI;
 
         let originPDBVisible = true;
+        let originReferenceVisibility = [];
         let originAFVisible = true;
+
+        function originReferenceIndices(node) {
+            if (node.idx1 === null) return [];
+            if (!referenceAssembly) return [0];
+            const indices = [];
+            for (let index = 0; index < referenceFiles.length; index++) {
+                const match = referenceAssembly.residueMaps.get(`${node.res.c1}\u0000${index}`);
+                if (match?.map.has(node.idx1)) indices.push(index);
+            }
+            return indices;
+        }
+        function visibleOriginReferences(node) {
+            return originReferenceIndices(node).filter(index => referenceAssembly
+                ? originReferenceVisibility[index] !== false : originPDBVisible);
+        }
+        function setOriginReferenceVisible(index, visible) {
+            originReferenceVisibility[index] = visible;
+            updateOriginFilterBtnsUI();
+            applyPhysicsVisibility();
+            updatePhysicsNodeColors();
+            updateAtomRepresentation();
+        }
 
         function toggleOriginModelFilter(modelNum) {
             if (modelNum === 1) {
@@ -5414,6 +5642,7 @@
             applyPhysicsVisibility();
             updatePhysicsNodeColors();
             updateModel1AlignmentColors();
+            updateAtomRepresentation();
         }
 
         function updateOriginFilterBtnsUI() {
@@ -5421,6 +5650,30 @@
             const icon1 = document.getElementById('originPDBEyeIcon');
             const btn2 = document.getElementById('toggleOriginAFBtn');
             const icon2 = document.getElementById('originAFEyeIcon');
+            const perReference = document.getElementById('originReferenceToggles');
+            const multiple = referenceFiles.length > 1;
+            if (btn1) btn1.style.display = multiple ? 'none' : '';
+            if (perReference) {
+                perReference.replaceChildren();
+                perReference.style.display = multiple ? 'inline-flex' : 'none';
+                if (multiple) referenceFiles.forEach((file, index) => {
+                    const visible = originReferenceVisibility[index] !== false;
+                    const button = document.createElement('button');
+                    button.type = 'button';
+                    button.setAttribute('aria-pressed', String(visible));
+                    button.className = visible
+                        ? 'px-2.5 py-1.5 rounded-lg text-xs font-medium border border-sky-500/50 bg-sky-950/80 text-sky-300 hover:bg-sky-900 transition flex items-center gap-1.5 shadow'
+                        : 'px-2.5 py-1.5 rounded-lg text-xs font-medium border border-dashed border-slate-700 bg-slate-900/60 text-slate-500 hover:text-slate-400 transition flex items-center gap-1.5';
+                    const swatch = document.createElement('span');
+                    swatch.className = 'w-2 h-2 rounded-full inline-block shadow-sm';
+                    swatch.style.backgroundColor = referenceColor(index);
+                    const icon = document.createElement('i');
+                    icon.className = `fa-solid ${visible ? 'fa-eye' : 'fa-eye-slash'} text-[10px]`;
+                    button.append(swatch, document.createTextNode(file.pdbId), icon);
+                    button.addEventListener('click', () => setOriginReferenceVisible(index, !visible));
+                    perReference.append(button);
+                });
+            }
 
             if (btn1 && icon1) {
                 if (originPDBVisible) {
@@ -5441,6 +5694,7 @@
                     icon2.className = 'fa-solid fa-eye-slash text-[10px] text-slate-600';
                 }
             }
+            if (btn1) btn1.style.display = multiple ? 'none' : '';
         }
 
         window.toggleOriginModelFilter = toggleOriginModelFilter;
@@ -5512,9 +5766,7 @@
             const N = physicsNodes.length;
             const chainKeys = morphMatrixBlocks.map(b => b.c1);
 
-            const PDBColor = new THREE.Color('#3498db');
             const AFColor = new THREE.Color('#2eccbf');
-            const blendedColor = new THREE.Color('#3498db').lerp(new THREE.Color('#2eccbf'), morphAlpha);
 
             for (let i = 0; i < N; i++) {
                 const node = physicsNodes[i];
@@ -5522,22 +5774,17 @@
                 if (physicsDifferenceMode) {
                     color = new THREE.Color(alignmentDistanceColor(physicsReferenceDistance(node)));
                 } else if (physicsOriginColorMode) {
-                    const hasPDB = node.idx1 !== null;
-                    const hasAF = node.idx2 !== null&&!node.res.referenceOnly;
-                    if (hasPDB && !hasAF) {
-                        color = PDBColor;
-                    } else if (!hasPDB && hasAF) {
-                        color = AFColor;
-                    } else {
-                        // Aligned residue: if one model origin is filtered off, show the contributing origin color
-                        if (originPDBVisible && !originAFVisible) {
-                            color = PDBColor;
-                        } else if (!originPDBVisible && originAFVisible) {
-                            color = AFColor;
-                        } else {
-                            color = blendedColor;
-                        }
+                    const references = visibleOriginReferences(node);
+                    const hasAF = node.idx2 !== null && !node.res.referenceOnly && originAFVisible;
+                    color = new THREE.Color(0, 0, 0);
+                    let weight = 0;
+                    for (const index of references) {
+                        const influence = referenceAssembly ? referenceInfluences[index] ?? 1 : 1;
+                        color.add(new THREE.Color(referenceColor(index)).multiplyScalar(influence));
+                        weight += influence;
                     }
+                    if (hasAF) { color.add(AFColor.clone().multiplyScalar(model2Influence)); weight += model2Influence; }
+                    if (weight) color.multiplyScalar(1 / weight);
                 } else if (physicsColorMode === 'chain' || physicsColorMode === 'side-chains') {
                     const chainId = (node.res && (node.res.c1 || node.res.c2)) || 'A';
                     color = new THREE.Color(getChainColor(chainId, chainKeys));
@@ -5625,13 +5872,27 @@
                 plddt:'AlphaFold pLDDT: <span style="color:#ff7d45">&lt;50</span> · <span style="color:#ffdb13">50–70</span> · <span style="color:#65cbf3">70–90</span> · <span style="color:#1964b0">≥90</span> · grey: unavailable',
                 difference:''
             };
-            document.getElementById('physicsColourKey').innerHTML = keys[mode];
+            const colourKey = document.getElementById('physicsColourKey');
+            colourKey.innerHTML = keys[mode];
+            if (mode === 'origin' && referenceFiles.length > 1) {
+                colourKey.replaceChildren(document.createTextNode('Origin: '));
+                referenceFiles.forEach((file, index) => {
+                    const label = document.createElement('span');
+                    label.style.color = referenceColor(index);
+                    label.textContent = `${file.pdbId} · `;
+                    colourKey.append(label);
+                });
+                const af = document.createElement('span');
+                af.style.color = '#2eccbf';
+                af.textContent = 'AlphaFold';
+                colourKey.append(af, document.createTextNode(' · Shared origins use a weighted colour blend.'));
+            }
             physicsPulseUniform.value = physicsPulseOpacity(performance.now(), physicsOriginColorMode);
             lastSurfaceUpdate = 0;
-            applyPhysicsVisibility(); updatePhysicsNodeColors(); updateModel1AlignmentColors(); updateAtomRepresentation(); updateCartoonRepresentation();
+            applyPhysicsVisibility(); updatePhysicsNodeColors(); updateModel1AlignmentColors(); updateAtomRepresentation(); updateCartoonRepresentation(); renderPhysicsChainToggles();
         }
 
-        let physicsRepresentation = 'backbone';
+        let physicsRepresentation = 'ball-stick';
         let sideChainJiggleEnabled = true;
         let sideChainJiggleSpeed = 3.0;
         let atomRepresentation = null;
@@ -6222,8 +6483,8 @@
                 const surface = physicsRepresentation === 'surface';
                 const entries = simulationAtomEntries(), bonds = surface ? [] : sourceAtomBonds(entries);
                 const surfaceSegments = entries.length > 12000 ? 6 : entries.length > 5000 ? 8 : 12;
-                const balls = new THREE.InstancedMesh(surface ? new THREE.SphereGeometry(1,surfaceSegments,Math.max(5,surfaceSegments-2)) : new THREE.SphereGeometry(0.34,10,8),surface ? new THREE.MeshPhongMaterial({shininess:45,specular:0x525f69}) : new THREE.MeshPhongMaterial({shininess:50}),entries.length);
-                const sticks = surface ? null : new THREE.InstancedMesh(new THREE.CylinderGeometry(1,1,1,6),new THREE.MeshPhongMaterial({shininess:30}),bonds.length);
+                const balls = new THREE.InstancedMesh(surface ? new THREE.SphereGeometry(1,surfaceSegments,Math.max(5,surfaceSegments-2)) : new THREE.SphereGeometry(0.34,10,8),surface ? new THREE.MeshPhongMaterial({shininess:45,specular:0x525f69}) : new THREE.MeshPhongMaterial({shininess:6,specular:0x080a0d}),entries.length);
+                const sticks = surface ? null : new THREE.InstancedMesh(new THREE.CylinderGeometry(1,1,1,6),new THREE.MeshPhongMaterial({shininess:6,specular:0x080a0d}),bonds.length);
                 if (!surface) addPhysicsPulse(balls,entries.flatMap(e=>isModel2Only(physicsNodes[e.nodeIndex])?[1,1]:[0,0]));
                 if (sticks) addPhysicsPulse(sticks,bonds.flatMap(([a,b])=>[isModel2Only(physicsNodes[entries[a].nodeIndex])?1:0,isModel2Only(physicsNodes[entries[b].nodeIndex])?1:0]),true);
                 balls.frustumCulled = false;if(sticks)sticks.frustumCulled=false;
@@ -6465,6 +6726,7 @@
             const reference = document.getElementById('referenceViewerBtn');
             const homology = document.getElementById('homologyViewerBtn');
             if (!reference || !homology) return;
+            reference.textContent = referenceFiles.length > 1 ? 'Reference PDBs' : 'Reference PDB';
             const ready = readyModelGeneration === modelBuildGeneration && !modelLoading;
             homology.disabled = !ready;
             homology.textContent = ready ? 'Homology Model' : 'Homology model Building…';
@@ -6478,12 +6740,12 @@
             homologyViewerMode = mode;
             updateHomologyViewerToggle();
             if (!simulationMolstarViewer && typeof molstar !== 'undefined' && molstar.Viewer) {
-                simulationMolstarViewer = await molstar.Viewer.create('molstar-simulation-container', { disabledExtensions: ['volseg', 'mp4-export'], layoutIsExpanded: false, layoutShowControls: false, layoutShowRemoteState: false, layoutShowSequence: false, layoutShowLog: false, viewportShowExpand: false, viewportShowSelectionMode: false, viewportShowAnimation: false });
+                simulationMolstarViewer = await molstar.Viewer.create('molstar-simulation-container', { extensions: [], disabledExtensions: ['volseg', 'mp4-export'], layoutIsExpanded: false, layoutShowControls: false, layoutShowRemoteState: false, layoutShowSequence: false, layoutShowLog: false, viewportShowExpand: false, viewportShowSelectionMode: false, viewportShowAnimation: false });
             }
             if (!simulationMolstarViewer?.plugin) return;
             await simulationMolstarViewer.plugin.clear();
             if (mode === 'reference') {
-                await loadFetchedStructureIntoMolstar(simulationMolstarViewer, currentReferenceFile, true);
+                await loadReferenceFilesIntoMolstar(simulationMolstarViewer);
                 document.getElementById('simulationMolstarPlaceholder')?.classList.add('hidden');
             } else {
                 await renderCurrentSimulation();
@@ -6510,6 +6772,7 @@
             try {
                 if (!simulationMolstarViewer && typeof molstar !== 'undefined' && molstar.Viewer) {
                     simulationMolstarViewer = await molstar.Viewer.create('molstar-simulation-container', {
+                        extensions: [],
                         disabledExtensions: ['volseg', 'mp4-export'],
                         layoutIsExpanded: false, layoutShowControls: false, layoutShowRemoteState: false,
                         layoutShowSequence: false, layoutShowLog: false, viewportShowExpand: false,
@@ -6560,12 +6823,14 @@
             try {
                 if (typeof molstar !== 'undefined' && molstar.Viewer) {
                     molstarViewer1 = await molstar.Viewer.create('molstar-container-1', {
+                        extensions: [],
                         disabledExtensions: ['volseg', 'mp4-export'],
                         layoutIsExpanded: false, layoutShowControls: false, layoutShowRemoteState: false,
                         layoutShowSequence: false, layoutShowLog: false, viewportShowExpand: false,
                         viewportShowSelectionMode: false, viewportShowAnimation: false
                     });
                     molstarViewer2 = await molstar.Viewer.create('molstar-container-2', {
+                        extensions: ['ma-quality-assessment'],
                         disabledExtensions: ['volseg', 'mp4-export'],
                         layoutIsExpanded: false, layoutShowControls: false, layoutShowRemoteState: false,
                         layoutShowSequence: false, layoutShowLog: false, viewportShowExpand: false,
@@ -6664,6 +6929,7 @@
                 function() { acknowledgeHomologyRecommendation(); loadSimulationIntoMolstar() },
                 function() { downloadSimulationAsMmCif() },
                 function() { closeErrorModal() },
+                function() { loadModelPair('6YKM, 8UCS', 'P09348, P0AF06, P0ABZ1') },
             ],
             input: [
                 function() { clearUploadedStructure('reference'); cancelStringMatching(); hideStringMatchResults(); scheduleReferenceSpeciesLookup(this.value); updateBuildButtonState(); updateFindMatchesReady(); updateExampleSelection() },
@@ -6702,17 +6968,652 @@
             const index = Number(button.dataset.inspectAlignment);
             if (Number.isInteger(index) && index >= 0 && index < alignmentResults.length) inspectAlignment(index);
         });
+        function setLightMode(enabled) {
+            document.body.classList.toggle('light-mode',enabled);
+            if (physicsScene) physicsScene.background = new THREE.Color(enabled ? 0xffffff : 0x020617);
+            if (referenceComparisonScene?.scene) {
+                referenceComparisonScene.scene.background = new THREE.Color(enabled ? 0xffffff : 0x020617);
+                referenceComparisonScene.render();
+            }
+            if (physicsScene) { drawIndividualMatrices(); drawDifferenceMatrix(); drawMorphMatrix(); }
+            const button=document.getElementById('themeToggle'),icon=document.getElementById('themeToggleIcon');
+            button.setAttribute('aria-pressed',String(enabled));
+            button.setAttribute('aria-label',enabled?'Switch to dark mode':'Switch to light mode');
+            button.title=button.getAttribute('aria-label');
+            icon.className=`fa-solid fa-${enabled?'moon':'sun'}`;
+            try { localStorage.setItem('stringscape-light-mode',enabled?'1':'0'); } catch (_) { /* Storage may be disabled. */ }
+        }
         window.addEventListener('DOMContentLoaded', async () => {
+            let savedLightMode=false;
+            try { savedLightMode=localStorage.getItem('stringscape-light-mode')==='1'; } catch (_) { /* Use dark mode. */ }
+            setLightMode(savedLightMode);
+            document.getElementById('themeToggle').addEventListener('click',()=>setLightMode(!document.body.classList.contains('light-mode')));
             initCanvases();
             initThreeJSPhysicsScene();
             setupEventListeners();
+            setPhysicsRepresentation('ball-stick');
             updateDiffLegendGradient();
             await initMolstarViewers();
 
             animateLoop();
 
             // Default models to load on page open, for demonstration purposes.
-            // Reference PDB: 6YKM
-            // UniProt: P09348, P0AF06
             loadModelPair('6YKM', 'P09348, P0AF06');
         });
+
+        // Multiple reference structures are compared as whole complexes. Sequence
+        // determines a chain's type; the topology of chain centres resolves copies.
+        const REFERENCE_COLORS = ['#3498db', '#e8a64a', '#b68af6', '#ef7380', '#72d59e', '#e6d468'];
+        function referenceColor(i) { return REFERENCE_COLORS[i] || new THREE.Color().setHSL((i*0.61803398875)%1,0.7,0.65).getStyle(); }
+        function referenceCenter(atoms) {
+            const source = atoms.flatMap(a => a.sourceAtoms?.length ? a.sourceAtoms : [a]);
+            const masses = {H:1,C:12,N:14,O:16,P:31,S:32,FE:56,MG:24,ZN:65};
+            let x=0,y=0,z=0,m=0;
+            for (const a of source) {const w=masses[String(a.element||'C').toUpperCase()]||12;x+=a.x*w;y+=a.y*w;z+=a.z*w;m+=w;}
+            return {x:x/m,y:y/m,z:z/m};
+        }
+        function referenceSequence(atoms) { return atoms.map(a=>a.singleChar).join(''); }
+        function referenceIsWaterEntry(entry) {
+            return entry.entityType === 'other' && ['HOH','WAT','H2O','DOD'].includes(String(entry.atoms[0]?.resName || '').toUpperCase());
+        }
+        function referenceAlignment(a,b) {
+            const type=a[0]?.entityType;
+            if (!type || type==='other' || type!==b[0]?.entityType) return null;
+            return alignProteinSequences(referenceSequence(a),referenceSequence(b),'semiglobal',type==='nucleotide'?(x,y)=>x===y?4:-3:getBLOSUM62Score);
+        }
+        function referenceTypeCompatible(a,b) {
+            const alignment=referenceAlignment(a,b);
+            if(!alignment)return false;
+            const paired=alignment.alignedPairs.filter(p=>p.idx1!==null&&p.idx2!==null);
+            const identical=paired.filter(p=>a[p.idx1].singleChar===b[p.idx2].singleChar).length;
+            const shorter=Math.min(a.length,b.length);
+            return paired.length>=Math.min(8,shorter) && paired.length/shorter>=0.55 && identical/paired.length>=(a[0].entityType==='nucleotide'?0.6:0.3);
+        }
+        function referenceFingerprint(entry, entries) {
+            const byType=new Map();
+            if (referenceIsWaterEntry(entry)) return byType;
+            for(const other of entries) {
+                if(other===entry || referenceIsWaterEntry(other))continue;
+                const list=byType.get(other.type)||[];
+                list.push(dist3d(entry.center,other.center));byType.set(other.type,list);
+            }
+            for(const list of byType.values())list.sort((a,b)=>a-b);
+            return byType;
+        }
+        function referenceFingerprintCost(a,b) {
+            let sum=0,count=0;
+            for(const type of new Set([...a.fingerprint.keys(),...b.fingerprint.keys()])) {
+                const x=a.fingerprint.get(type)||[],y=b.fingerprint.get(type)||[];
+                for(let i=0;i<Math.min(x.length,y.length);i++){sum+=Math.min(40,Math.abs(x[i]-y[i]));count++;}
+                sum+=Math.abs(x.length-y.length)*8;
+            }
+            return sum/Math.max(1,count);
+        }
+        function referenceAssign(candidates) {
+            // Exact one-to-one minimum-cost assignment for small repeated subunits.
+            const rows=candidates.length, cols=candidates[0]?.length||0;
+            if(!rows||!cols)return [];
+            if(rows<=9&&cols<=9) {
+                let best=Infinity,bestPairs=[];
+                function visit(i,used,cost,pairs) {
+                    if(i===rows){if(pairs.length===Math.min(rows,cols)&&cost<best){best=cost;bestPairs=pairs.slice();}return;}
+                    if(rows>cols && (rows-i)>cols-pairs.length)visit(i+1,used,cost,pairs);
+                    for(let j=0;j<cols;j++)if(!(used&(1<<j))&&Number.isFinite(candidates[i][j])){
+                        const next=cost+candidates[i][j];if(next>=best)continue;
+                        pairs.push([i,j]);visit(i+1,used|(1<<j),next,pairs);pairs.pop();
+                    }
+                }
+                visit(0,0,0,[]);return bestPairs;
+            }
+            const edges=[];for(let i=0;i<rows;i++)for(let j=0;j<cols;j++)if(Number.isFinite(candidates[i][j]))edges.push([candidates[i][j],i,j]);
+            edges.sort((a,b)=>a[0]-b[0]);const usedI=new Set(),usedJ=new Set(),pairs=[];
+            for(const [,i,j] of edges)if(!usedI.has(i)&&!usedJ.has(j)){usedI.add(i);usedJ.add(j);pairs.push([i,j]);}
+            return pairs;
+        }
+        // Distance fingerprints cannot resolve symmetric copies on their own.
+        // Re-score one-to-one assignments after a single rigid fit of the entire
+        // complex, considering all repeated copies and missing chains together.
+        function refineReferenceChainAssignments(groups,structureIndex) {
+            const anchorGroups=groups.filter(group=>group.entries.has(0));
+            const pairPenalty=new WeakMap();
+            function matchingPenalty(a,b) {
+                let byTarget=pairPenalty.get(a);
+                if(!byTarget){byTarget=new WeakMap();pairPenalty.set(a,byTarget);}
+                if(!byTarget.has(b)){const alignment=referenceAlignment(a.atoms,b.atoms);
+                    byTarget.set(b,{fingerprint:referenceFingerprintCost(a,b),sequence:alignment?100-alignment.identity:100});}
+                return byTarget.get(b);
+            }
+            function score() {
+                const paired=anchorGroups.filter(group=>group.entries.has(structureIndex));
+                if(!paired.length)return Infinity;
+                const P=paired.map(group=>group.entries.get(0).center);
+                const Q=paired.map(group=>group.entries.get(structureIndex).center);
+                let geometry=0;
+                if(paired.length>=3){
+                    const fit=hornQuaternionSuperposition(P,Q,new Float64Array(paired.length).fill(1));
+                    for(let i=0;i<paired.length;i++){const transformed=referenceTransformPoint(Q[i],fit);const distance=dist3d(P[i],transformed);geometry+=distance*distance;}
+                    geometry/=paired.length;
+                }
+                let fingerprint=0,sequence=0;
+                for(const group of paired){const a=group.entries.get(0),b=group.entries.get(structureIndex);
+                    const penalty=matchingPenalty(a,b);
+                    fingerprint+=penalty.fingerprint;sequence+=penalty.sequence;
+                }
+                return geometry+0.03*fingerprint/paired.length+0.01*sequence/paired.length;
+            }
+            for(let pass=0;pass<3;pass++){
+                let improved=false;
+                for(const type of new Set(anchorGroups.map(group=>group.type))){
+                    const slots=anchorGroups.filter(group=>group.type===type);
+                    if(slots.length<2)continue;
+                    const original=slots.map(group=>group.entries.get(structureIndex)||null);
+                    if(original.filter(Boolean).length<2)continue;
+                    let best=score(),bestOrder=original.slice();
+                    const apply=order=>order.forEach((entry,i)=>entry?slots[i].entries.set(structureIndex,entry):slots[i].entries.delete(structureIndex));
+                    if(slots.length<=7){
+                        const used=new Array(slots.length).fill(false),order=[];
+                        function visit(){
+                            if(order.length===slots.length){apply(order);const value=score();if(value+1e-6<best){best=value;bestOrder=order.slice();}return;}
+                            const seen=new Set();
+                            for(let i=0;i<original.length;i++){const entry=original[i];if(used[i]||seen.has(entry))continue;seen.add(entry);used[i]=true;order.push(entry);visit();order.pop();used[i]=false;}
+                        }
+                        visit();
+                    } else {
+                        let order=original.slice();apply(order);
+                        for(let iteration=0;iteration<3;iteration++){
+                            let changed=false;
+                            for(let i=0;i<order.length;i++)for(let j=i+1;j<order.length;j++){
+                                if(order[i]===order[j])continue;
+                                [order[i],order[j]]=[order[j],order[i]];apply(order);
+                                const value=score();
+                                if(value+1e-6<best){best=value;bestOrder=order.slice();changed=true;}
+                                else {[order[i],order[j]]=[order[j],order[i]];apply(order);}
+                            }
+                            if(!changed)break;
+                        }
+                    }
+                    apply(bestOrder);
+                    if(bestOrder.some((entry,i)=>entry!==original[i]))improved=true;
+                }
+                if(!improved)break;
+            }
+        }
+        function referenceTransformPoint(p,fit) {
+            const {R,t}=fit;return {x:R[0][0]*p.x+R[0][1]*p.y+R[0][2]*p.z+t[0],y:R[1][0]*p.x+R[1][1]*p.y+R[1][2]*p.z+t[1],z:R[2][0]*p.x+R[2][1]*p.y+R[2][2]*p.z+t[2]};
+        }
+        function buildReferenceAssembly(files) {
+            const structures=files.map((file,fileIndex)=>({file,fileIndex,entries:Object.entries(file.parsed.chains).map(([chain,atoms])=>({chain,atoms,center:referenceCenter(atoms),type:-1,entityType:atoms[0]?.entityType}))}));
+            const prototypes=[];
+            for(const structure of structures)for(const entry of structure.entries) {
+                if(referenceIsWaterEntry(entry)) {
+                    let type=prototypes.findIndex(referenceIsWaterEntry);
+                    if(type<0){type=prototypes.length;prototypes.push(entry);}
+                    entry.type=type;continue;
+                }
+                if(entry.entityType==='other'){
+                    let type=prototypes.findIndex(proto=>proto.entityType==='other'&&nonPolymerSignature(proto.atoms)===nonPolymerSignature(entry.atoms));
+                    if(type<0){type=prototypes.length;prototypes.push(entry);}entry.type=type;continue;
+                }
+                let type=prototypes.findIndex(proto=>referenceTypeCompatible(proto.atoms,entry.atoms));
+                if(type<0){type=prototypes.length;prototypes.push(entry);}entry.type=type;
+            }
+            for(const structure of structures)for(const entry of structure.entries)entry.fingerprint=referenceFingerprint(entry,structure.entries);
+            const groups=structures[0].entries.map((entry,index)=>({key:entry.chain,type:entry.type,entries:new Map([[0,entry]]),index}));
+            const usedKeys=new Set(groups.map(g=>g.key));
+            for(let s=1;s<structures.length;s++) {
+                const current=structures[s].entries;
+                for(const type of new Set(current.map(e=>e.type))) {
+                    const available=groups.filter(g=>g.type===type&&!g.entries.has(s));
+                    const incoming=current.filter(e=>e.type===type);
+                    if(available.length&&incoming.length&&incoming[0].entityType!=='other'){
+                        const matrix=incoming.map(e=>available.map(g=>{
+                            const exemplar=g.entries.get(0)||g.entries.values().next().value;
+                            const fp=referenceFingerprintCost(e,exemplar);
+                            const align=referenceAlignment(exemplar.atoms,e.atoms);
+                            return fp+(100-align.identity)*0.08;
+                        }));
+                        for(const [i,j] of referenceAssign(matrix))incoming[i].matchedGroup=available[j],available[j].entries.set(s,incoming[i]);
+                    }
+                    for(const entry of incoming)if(!entry.matchedGroup){
+                        let key=`${entry.chain}@${s+1}`;while(usedKeys.has(key))key+='+';usedKeys.add(key);
+                        groups.push({key,type,entries:new Map([[s,entry]]),index:groups.length});
+                    }
+                }
+            }
+            for(let s=1;s<structures.length;s++)refineReferenceChainAssignments(groups,s);
+            const fits=[{R:[[1,0,0],[0,1,0],[0,0,1]],t:[0,0,0],tmScore:1,rmsd:0,numEquiv:0}];
+            for(let s=1;s<structures.length;s++) {
+                const P=[],Q=[];
+                for(const group of groups){const a=group.entries.get(0),b=group.entries.get(s);if(!a||!b)continue;
+                    const alignment=referenceAlignment(a.atoms,b.atoms);if(!alignment)continue;
+                    for(const pair of alignment.alignedPairs)if(pair.idx1!==null&&pair.idx2!==null){P.push(a.atoms[pair.idx1]);Q.push(b.atoms[pair.idx2]);}
+                }
+                fits.push(superposeWeightedIterative(P,Q));
+            }
+            for(let s=1;s<structures.length;s++)for(const entry of structures[s].entries){
+                entry.alignedAtoms=entry.atoms.map(atom=>({...atom,...referenceTransformPoint(atom,fits[s]),sourceAtoms:(atom.sourceAtoms||[]).map(source=>({...source,...referenceTransformPoint(source,fits[s])}))}));
+                entry.alignedCenter=referenceTransformPoint(entry.center,fits[s]);
+            }
+            for(const entry of structures[0].entries){entry.alignedAtoms=entry.atoms;entry.alignedCenter=entry.center;}
+            // Match ligands, ions, and waters only after the polymer-derived rigid
+            // fit. Chemical identity alone cannot distinguish repeated molecules.
+            for(let s=1;s<structures.length;s++) {
+                const waters=structures[s].entries.filter(entry=>entry.entityType==='other');
+                const targets=groups.filter(group=>!group.entries.has(s) &&
+                    [...group.entries].some(([index,entry])=>index<s && entry.entityType==='other'));
+                const edges=[];
+                for(const water of waters)for(const group of targets) {
+                    if(water.type!==group.type)continue;
+                    const closest=Math.min(...[...group.entries.values()].map(entry=>dist3d(water.alignedCenter,entry.alignedCenter)));
+                    if(closest<=4)edges.push({water,group,distance:closest});
+                }
+                edges.sort((a,b)=>a.distance-b.distance);
+                const usedWaters=new Set(),usedGroups=new Set();
+                for(const {water,group} of edges) {
+                    if(usedWaters.has(water)||usedGroups.has(group))continue;
+                    const singleton=groups.find(candidate=>candidate.entries.get(s)===water);
+                    if(!singleton||singleton===group)continue;
+                    group.entries.set(s,water);
+                    groups.splice(groups.indexOf(singleton),1);
+                    usedWaters.add(water);usedGroups.add(group);
+                }
+            }
+            // Keep each structure's matrix provenance even after rigid alignment.
+            structures.forEach((structure,s)=>structure.entries.forEach(entry=>entry.alignedAtoms.forEach(atom=>{atom.fileIndex=s;atom.sourcePdbId=structure.file.pdbId;})));
+            const chains={};
+            for(const group of groups){const representative=group.entries.get(0)||group.entries.values().next().value;chains[group.key]=representative.alignedAtoms;}
+            const residueMaps=new Map();
+            for(const group of groups){const representative=group.entries.get(0)||group.entries.values().next().value;
+                for(const [s,entry] of group.entries){const alignment=referenceAlignment(representative.atoms,entry.atoms);
+                    const map=new Map();for(const pair of alignment?.alignedPairs||[])if(pair.idx1!==null&&pair.idx2!==null)map.set(pair.idx1,pair.idx2);
+                    if(entry.entityType==='other'&&representative.entityType==='other')
+                        for(const pair of nonPolymerPairs(representative.atoms,entry.atoms))if(pair.idx2!==null)map.set(pair.idx1,pair.idx2);
+                    residueMaps.set(`${group.key}\u0000${s}`,{entry,map});
+                }
+            }
+            return {structures,groups,chains,fits,residueMaps};
+        }
+        function renderReferenceInfluenceControls() {
+            const host=document.getElementById('referenceInfluenceControls');if(!host)return;
+            if(!referenceAssembly){host.querySelector('label')?.classList.remove('hidden');host.querySelectorAll('.extra-reference-slider').forEach(el=>el.remove());referenceInfluences=[model1Influence];return;}
+            host.querySelector('label')?.classList.add('hidden');host.querySelectorAll('.extra-reference-slider').forEach(el=>el.remove());
+            referenceInfluences=referenceFiles.map(()=>1);
+            referenceFiles.forEach((file,i)=>{const label=document.createElement('label');label.className='extra-reference-slider block text-xs mt-2';label.style.color=referenceColor(i);
+                const value=document.createElement('span');value.textContent=' 100%';const range=document.createElement('input');range.type='range';range.min='0';range.max='1';range.step='0.01';range.value='1';range.className='w-full';
+                label.append(document.createTextNode(`${file.pdbId} influence on spring lengths and strengths`),value,range);host.append(label);
+                range.addEventListener('input',()=>{referenceInfluences[i]=Number(range.value);value.textContent=` ${Math.round(referenceInfluences[i]*100)}%`;model1Influence=referenceInfluences.reduce((a,b)=>a+b,0)/referenceInfluences.length;const total=referenceInfluences.reduce((a,b)=>a+b,0)+model2Influence;morphAlpha=total?model2Influence/total:0.5;offscreenCaches.morph.dirty=true;drawMorphMatrix();rebuildCutoffSprings();});
+            });
+        }
+        function referenceCellDistances(posI,posJ) {
+            if(!referenceAssembly)return null;
+            const result=[];
+            for(let s=0;s<referenceFiles.length;s++){
+                const x=referenceAssembly.residueMaps.get(`${posI.res.c1}\u0000${s}`),y=referenceAssembly.residueMaps.get(`${posJ.res.c1}\u0000${s}`);
+                if(!x||!y||posI.pair.idx1===null||posJ.pair.idx1===null){result.push(null);continue;}
+                const a=x.entry.alignedAtoms[x.map.get(posI.pair.idx1)],b=y.entry.alignedAtoms[y.map.get(posJ.pair.idx1)];
+                result.push(a&&b?dist3d(a,b):null);
+            }
+            return result;
+        }
+        function blendedReferenceDistance(values) {
+            let sum=0,weight=0;values.forEach((distance,i)=>{if(distance!==null){const w=referenceInfluences[i]??1;sum+=distance*w;weight+=w;}});
+            if(weight)return sum/weight;
+            const available=values.find(v=>v!==null);return available===undefined?null:available;
+        }
+        function blendAvailableReferenceAndAlphaFold(references,afDistance) {
+            let numerator=0,denominator=0;
+            references.forEach((distance,i)=>{if(distance!==null&&Number.isFinite(distance)){const weight=referenceInfluences[i]??1;numerator+=weight*distance;denominator+=weight;}});
+            if(afDistance!==null&&Number.isFinite(afDistance)){numerator+=model2Influence*afDistance;denominator+=model2Influence;}
+            if(denominator>0)return numerator/denominator;
+            const ref=blendedReferenceDistance(references);return ref===null?afDistance:afDistance===null?ref:(ref+afDistance)/2;
+        }
+        async function loadReferenceFilesIntoMolstar(viewer) {
+            if(!referenceAssembly){await loadFetchedStructureIntoMolstar(viewer,currentReferenceFile,true);return;}
+            for(let s=0;s<referenceFiles.length;s++)await loadFetchedStructureIntoMolstar(viewer,referenceAlignedMolstarFile(s));
+        }
+        // Mol* does not support multiple models in a single mmCIF file, so we generate a separate file for each reference structure.
+        function referenceAlignedMolstarFile(s) {
+            const structure=referenceAssembly.structures[s];
+            const lines=[`data_reference_${s+1}`,'#','loop_',
+                '_atom_site.group_PDB','_atom_site.id','_atom_site.type_symbol','_atom_site.label_atom_id',
+                '_atom_site.label_alt_id','_atom_site.label_comp_id','_atom_site.label_asym_id',
+                '_atom_site.label_seq_id','_atom_site.Cartn_x','_atom_site.Cartn_y','_atom_site.Cartn_z',
+                '_atom_site.occupancy','_atom_site.B_iso_or_equiv','_atom_site.auth_asym_id','_atom_site.auth_seq_id'];
+            const token=value=>{const text=String(value||'?');return /^[A-Za-z0-9_+.-]+$/.test(text)?text:`'${text.replace(/'/g,"''")}'`;};
+            let serial=1;
+            structure.entries.forEach((entry,entryIndex)=>{
+                const labelAsym=`R${s+1}C${entryIndex+1}`,authAsym=token(entry.chain);
+                entry.alignedAtoms.forEach((residue,residueIndex)=>{
+                    for(const atom of residue.sourceAtoms?.length?residue.sourceAtoms:[residue]){
+                        if(!Number.isFinite(atom.x+atom.y+atom.z))continue;
+                        const atomName=token(atom.atomName||'CA'),resName=token(residue.resName||'UNK');
+                        const element=token(String(atom.element||'C').toUpperCase());
+                        const occupancy=Number.isFinite(Number(atom.occupancy))?Number(atom.occupancy).toFixed(2):'1.00';
+                        lines.push(`${residue.entityType==='other'?'HETATM':'ATOM'} ${serial++} ${element} ${atomName} . ${resName} ${labelAsym} ${residueIndex+1} ${atom.x.toFixed(3)} ${atom.y.toFixed(3)} ${atom.z.toFixed(3)} ${occupancy} 0.00 ${authAsym} ${residueIndex+1}`);
+                    }
+                });
+            });
+            lines.push('#');
+            return {pdbId:structure.file.pdbId,text:lines.join('\n')+'\n',format:'mmcif'};
+        }
+
+        let referenceComparisonScene=null;
+        let referenceComparisonVisibility={structures:new Map(),chains:new Map(),links:true};
+        function maximumReferenceCentreDistance(structures) {
+            let maximum=1;
+            for(const structure of structures)for(let i=0;i<structure.entries.length;i++)
+                for(let j=i+1;j<structure.entries.length;j++)
+                    maximum=Math.max(maximum,dist3d(structure.entries[i].center,structure.entries[j].center));
+            return maximum;
+        }
+        function renderReferenceComparison() {
+            const section=document.getElementById('referenceComparison');if(!section)return;
+            section.classList.toggle('hidden',!referenceAssembly);
+            if(!referenceAssembly)return;
+            const {structures,groups,fits}=referenceAssembly;
+            const matrixHost=document.getElementById('referenceDistanceMatrices');matrixHost.replaceChildren();
+            const maxCentreDistance=maximumReferenceCentreDistance(structures);
+            document.getElementById('referenceCentreDistanceLegend').textContent=`Chain letters from the same type of protein are coloured the same. Distance key: 0 Å (blue) → ${maxCentreDistance.toFixed(1)} Å (red), shared scale`;
+            structures.forEach(structure=>{
+                const box=document.createElement('div');box.className='min-w-0 bg-slate-950/50 border border-slate-800 rounded-lg overflow-hidden';
+                const title=document.createElement('h3');title.className='text-sm text-indigo-300 font-semibold px-4 py-2 border-b border-slate-800';title.textContent=structure.file.pdbId;box.append(title);
+                const scroll=document.createElement('div');scroll.className='overflow-x-auto';
+                const table=document.createElement('table');table.className='reference-comparison-table font-mono';
+                const thead=table.createTHead(),header=thead.insertRow();
+                const first=document.createElement('th');first.textContent='Chain';header.append(first);
+                structure.entries.forEach(entry=>{const th=document.createElement('th');th.textContent=entry.chain;th.style.color=proteinTypeColor(entry.type);header.append(th);});
+                const tbody=table.createTBody();
+                for(const a of structure.entries){const row=tbody.insertRow();const label=row.insertCell();label.textContent=a.chain;label.style.color=proteinTypeColor(a.type);label.style.fontWeight='600';
+                    for(const b of structure.entries){const cell=row.insertCell();const distance=dist3d(a.center,b.center);cell.textContent=distance.toFixed(1);cell.style.color=alignmentDistanceColor(distance/maxCentreDistance*10);cell.title=`${distance.toFixed(2)} Å centre-of-mass distance`;}
+                }
+                scroll.append(table);box.append(scroll);matrixHost.append(box);
+            });
+            const tableHost=document.getElementById('referenceCorrespondenceTable');tableHost.replaceChildren();
+            const table=document.createElement('table');table.className='reference-comparison-table font-mono';
+            const thead=table.createTHead(),header=thead.insertRow();
+            for(const structure of structures){const th=document.createElement('th');th.textContent=`${structure.file.pdbId} chain`;header.append(th);}
+            for(const name of ['Protein type','Matched residues','Mean aligned Cα distance (Å)','Centre fingerprint difference (Å)']){const th=document.createElement('th');th.textContent=name;header.append(th);}
+            const tbody=table.createTBody();
+            groups.forEach(group=>{const row=tbody.insertRow();const anchor=group.entries.get(0)||group.entries.values().next().value;const distances=[],fingerprints=[];let pairs=0;
+                structures.forEach((structure,s)=>{const cell=row.insertCell();cell.textContent=group.entries.get(s)?.chain||'—';if(group.entries.has(s)){cell.style.color=referenceColor(s);cell.style.fontWeight='600';}});
+                row.insertCell().textContent=`Type ${group.type+1}`;
+                for(let s=1;s<structures.length;s++){const current=group.entries.get(s);if(!current||current===anchor)continue;
+                    fingerprints.push(referenceFingerprintCost(anchor,current));const alignment=referenceAlignment(anchor.atoms,current.atoms);
+                    for(const pair of alignment?.alignedPairs||[])if(pair.idx1!==null&&pair.idx2!==null){pairs++;distances.push(dist3d(anchor.alignedAtoms[pair.idx1],current.alignedAtoms[pair.idx2]));}
+                }
+                row.insertCell().textContent=String(pairs);
+                const mean=distances.length?distances.reduce((a,b)=>a+b,0)/distances.length:null;
+                const meanCell=row.insertCell();meanCell.textContent=mean===null?'—':mean.toFixed(2);meanCell.style.color=alignmentDistanceColor(mean);
+                row.insertCell().textContent=fingerprints.length?(fingerprints.reduce((a,b)=>a+b,0)/fingerprints.length).toFixed(2):'—';
+            });
+            tableHost.append(table);
+            document.getElementById('referenceComparisonMetrics').textContent=fits.slice(1).map((fit,i)=>`${structures[i+1].file.pdbId} → ${structures[0].file.pdbId}: TM-score ${fit.tmScore.toFixed(3)} · RMSD ${fit.rmsd.toFixed(2)} Å · ${fit.numEquiv} aligned residues`).join('  |  ');
+            renderReferenceVisibilityControls();
+            renderReferenceComparisonKey();
+            requestAnimationFrame(renderReferenceComparison3d);
+        }
+        function referenceDifferenceMap() {
+            const differences=new Map();if(!referenceAssembly)return differences;
+            for(const group of referenceAssembly.groups){for(const [s,entry] of group.entries){const distances=new Array(entry.atoms.length).fill(0),counts=new Array(entry.atoms.length).fill(0);
+                for(const [t,other] of group.entries){if(t===s)continue;
+                    const alignment=referenceAlignment(entry.atoms,other.atoms);
+                    for(const pair of alignment?.alignedPairs||[])if(pair.idx1!==null&&pair.idx2!==null){distances[pair.idx1]+=dist3d(entry.alignedAtoms[pair.idx1],other.alignedAtoms[pair.idx2]);counts[pair.idx1]++;}
+                }
+                differences.set(entry,{distances:distances.map((v,i)=>counts[i]?v/counts[i]:null),aligned:counts.map(Boolean)});
+            }}return differences;
+        }
+        const PROTEIN_TYPE_COLORS = ['#f97316','#38bdf8','#a3e635','#d946ef','#ef4444','#facc15','#14b8a6','#a78bfa','#fb7185','#84cc16','#fb923c','#22d3ee'];
+        function proteinTypeColor(type) { return PROTEIN_TYPE_COLORS[type] || new THREE.Color().setHSL((type*0.61803398875)%1,.85,.58).getStyle(); }
+        function getReferenceComparisonDifferences() { return referenceAssembly.differenceMap ||= referenceDifferenceMap(); }
+        function referenceEntryIsWater(entry) { return ['HOH','WAT','H2O','DOD'].includes(entry.atoms[0]?.resName?.toUpperCase()); }
+        function referenceIndividualChainColor(structureIndex,entry) {
+            const ordinal = referenceAssembly.structures.slice(0,structureIndex).reduce((n,structure)=>n+structure.entries.length,0) + referenceAssembly.structures[structureIndex].entries.indexOf(entry);
+            return proteinTypeColor(ordinal);
+        }
+        function referenceComparisonChainColor(structureIndex,entry) {
+            const mode=document.getElementById('referenceComparisonColor')?.value||'reference';
+            if(mode==='chain')return referenceIndividualChainColor(structureIndex,entry);
+            if(mode==='reference')return referenceColor(structureIndex);
+            if(mode==='protein')return proteinTypeColor(entry.type);
+            if(mode==='equivalent'){
+                const index=referenceAssembly.groups.findIndex(group=>group.entries.get(structureIndex)===entry);
+                return proteinTypeColor(index>=0?index:entry.type);
+            }
+            const difference=getReferenceComparisonDifferences().get(entry);
+            if(mode==='aligned')return difference?.aligned.some(Boolean)?'#ef4444':'#64748b';
+            const values=difference?.distances.filter(value=>value!==null)||[];
+            return values.length?alignmentDistanceColor(values.reduce((a,b)=>a+b,0)/values.length):'#64748b';
+        }
+        function renderReferenceComparison3d() {
+            const host=document.getElementById('referenceComparison3d');if(!host||!referenceAssembly||typeof THREE==='undefined')return;
+            const previousCamera = referenceComparisonScene && {
+                position: referenceComparisonScene.camera.position.clone(),
+                up: referenceComparisonScene.camera.up.clone(),
+                target: referenceComparisonScene.target.clone()
+            };
+            if(referenceComparisonScene){referenceComparisonScene.stop();referenceComparisonScene.controls.dispose();referenceComparisonScene.renderer.dispose();host.replaceChildren();}
+            const width=Math.max(1,host.clientWidth),height=Math.max(1,host.clientHeight);
+            const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));renderer.setSize(width,height,false);
+            renderer.domElement.style.width='100%';renderer.domElement.style.height='100%';host.append(renderer.domElement);
+            const scene=new THREE.Scene();scene.background=new THREE.Color(document.body.classList.contains('light-mode') ? 0xffffff : 0x020617);
+            scene.add(new THREE.AmbientLight(0xffffff,.6));
+            const light1=new THREE.DirectionalLight(0xffffff,.8);light1.position.set(50,100,50);scene.add(light1);
+            const light2=new THREE.DirectionalLight(0x6366f1,.4);light2.position.set(-50,-50,-50);scene.add(light2);
+            const camera=new THREE.PerspectiveCamera(45,width/height,.1,5000);
+            const atoms=referenceAssembly.structures.flatMap(s=>s.entries.flatMap(e=>e.alignedAtoms));
+            if(!atoms.length){renderer.dispose();host.replaceChildren();return;}
+            const box=new THREE.Box3().setFromPoints(atoms.map(a=>new THREE.Vector3(a.x,a.y,a.z)));
+            const target=box.getCenter(new THREE.Vector3()),radius=Math.max(20,box.getSize(new THREE.Vector3()).length());
+            if (previousCamera) {
+                target.copy(previousCamera.target);
+                camera.position.copy(previousCamera.position);
+                camera.up.copy(previousCamera.up);
+            } else camera.position.copy(target).add(new THREE.Vector3(radius*.35,radius*.4,radius*1.2));
+            camera.lookAt(target);
+            const canvas=renderer.domElement;
+            let dragging=false,lastX=0,lastY=0,button=0;
+            const render=()=>renderer.render(scene,camera);
+            canvas.addEventListener('contextmenu',event=>event.preventDefault());
+            canvas.addEventListener('pointerdown',event=>{dragging=true;button=event.button;lastX=event.clientX;lastY=event.clientY;canvas.setPointerCapture(event.pointerId);});
+            canvas.addEventListener('pointerup',()=>{dragging=false;});
+            canvas.addEventListener('pointercancel',()=>{dragging=false;});
+            canvas.addEventListener('pointermove',event=>{
+                if(!dragging)return;
+                const dx=event.clientX-lastX,dy=event.clientY-lastY;lastX=event.clientX;lastY=event.clientY;
+                camera.updateMatrixWorld();
+                if(button===2||event.shiftKey){
+                    const right=new THREE.Vector3(),up=new THREE.Vector3();camera.matrixWorld.extractBasis(right,up,new THREE.Vector3());
+                    const speed=camera.position.distanceTo(target)*.0016;
+                    const shift=right.multiplyScalar(-dx*speed).add(up.multiplyScalar(dy*speed));target.add(shift);camera.position.add(shift);
+                } else {
+                    const right=new THREE.Vector3(),up=new THREE.Vector3();camera.matrixWorld.extractBasis(right,up,new THREE.Vector3());
+                    const offset=camera.position.clone().sub(target),pitch=-dy*.008;
+                    offset.applyAxisAngle(right,pitch);camera.up.applyAxisAngle(right,pitch);
+                    offset.applyAxisAngle(camera.up,-dx*.008);camera.position.copy(target).add(offset);
+                }
+                camera.lookAt(target);render();
+            });
+            canvas.addEventListener('wheel',event=>{event.preventDefault();const offset=camera.position.clone().sub(target);
+                offset.setLength(Math.max(5,Math.min(5000,offset.length()+event.deltaY*.05)));
+                camera.position.copy(target).add(offset);camera.lookAt(target);render();
+            },{passive:false});
+            const sphereGeometry=new THREE.SphereGeometry(.85,10,8);
+            const sphereMaterial=new THREE.MeshPhongMaterial({color:0xffffff,shininess:50});
+            const rodGeometry=new THREE.CylinderGeometry(1,1,1,12);
+            const rodMaterial=new THREE.MeshPhongMaterial({color:0xffffff,shininess:50,specular:0x111111});
+            const linkGeometry=new THREE.CylinderGeometry(.48,.48,1,12),linkBallGeometry=new THREE.SphereGeometry(.95,12,8);
+            const linkMaterial=new THREE.MeshPhongMaterial({color:0xe2e8f0,shininess:35,transparent:true,opacity:.78});
+            const dummy=new THREE.Object3D(),upAxis=new THREE.Vector3(0,1,0),delta=new THREE.Vector3();
+            const differences=getReferenceComparisonDifferences(),mode=document.getElementById('referenceComparisonColor').value;
+            const structureGroups=new Map(),chainGroups=new Map(),linkRecords=[];
+            const entryToStructure=new Map(),equivalence=new Map();
+            referenceAssembly.groups.forEach((group,i)=>{for(const entry of group.entries.values())equivalence.set(entry,i);});
+            referenceAssembly.structures.forEach((structure,s)=>{
+                const structureGroup=new THREE.Group();scene.add(structureGroup);structureGroups.set(s,structureGroup);
+                structure.entries.forEach(entry=>{
+                    entryToStructure.set(entry,s);
+                    const chainGroup=new THREE.Group();structureGroup.add(chainGroup);
+                    chainGroups.set(referenceChainVisibilityKey(s,entry),chainGroup);
+                    const difference=differences.get(entry),positions=[],colors=[];
+                    const spheres=new THREE.InstancedMesh(sphereGeometry,sphereMaterial,entry.alignedAtoms.length);spheres.frustumCulled=false;chainGroup.add(spheres);
+                    entry.alignedAtoms.forEach((atom,i)=>{
+                        let color;
+                        if(mode==='chain')color=referenceIndividualChainColor(s,entry);
+                        else if(mode==='reference')color=referenceColor(s);
+                        else if(mode==='protein')color=proteinTypeColor(entry.type);
+                        else if(mode==='equivalent')color=proteinTypeColor(equivalence.get(entry));
+                        else if(mode==='aligned')color=difference?.aligned[i]?'#ef4444':'#64748b';
+                        else color=alignmentDistanceColor(difference?.distances[i]??null);
+                        const tint=new THREE.Color(color);colors.push(tint);
+                        dummy.position.set(atom.x,atom.y,atom.z);dummy.scale.setScalar(viewerSizes.physics.residue);dummy.quaternion.identity();dummy.updateMatrix();
+                        spheres.setMatrixAt(i,dummy.matrix);spheres.setColorAt(i,tint);positions.push(dummy.position.clone());
+                    });
+                    spheres.instanceMatrix.needsUpdate=true;if(spheres.instanceColor)spheres.instanceColor.needsUpdate=true;
+                    if(positions.length>1 && entry.entityType!=='other'){
+                        const rods=new THREE.InstancedMesh(rodGeometry,rodMaterial,positions.length-1);rods.frustumCulled=false;chainGroup.add(rods);
+                        for(let i=0;i<positions.length-1;i++){
+                            const length=delta.subVectors(positions[i+1],positions[i]).length();
+                            dummy.position.copy(positions[i]).add(positions[i+1]).multiplyScalar(.5);
+                            dummy.quaternion.setFromUnitVectors(upAxis,length?delta.divideScalar(length):upAxis);
+                            dummy.scale.set(.15*viewerSizes.physics.backbone,length,.15*viewerSizes.physics.backbone);dummy.updateMatrix();
+                            rods.setMatrixAt(i,dummy.matrix);rods.setColorAt(i,colors[i].clone().lerp(colors[i+1],.5));
+                        }
+                        rods.instanceMatrix.needsUpdate=true;if(rods.instanceColor)rods.instanceColor.needsUpdate=true;
+                    }
+                });
+            });
+            for(const group of referenceAssembly.groups){const anchor=group.entries.get(0)||group.entries.values().next().value;
+                for(const entry of group.entries.values())if(entry!==anchor){
+                    const from=anchor.alignedCenter,to=entry.alignedCenter;
+                    const a=new THREE.Vector3(from.x,from.y,from.z),b=new THREE.Vector3(to.x,to.y,to.z);
+                    const direction=b.clone().sub(a),length=direction.length();if(length<.001)continue;
+                    const object=new THREE.Group();scene.add(object);
+                    const connector=new THREE.Mesh(linkGeometry,linkMaterial);connector.position.copy(a).add(b).multiplyScalar(.5);
+                    connector.quaternion.setFromUnitVectors(upAxis,direction.normalize());connector.scale.set(1,length,1);object.add(connector);
+                    for(const [point,source] of [[a,anchor],[b,entry]]){
+                        const sourceIndex=entryToStructure.get(source);
+                        const cap=new THREE.Mesh(linkBallGeometry,new THREE.MeshPhongMaterial({color:referenceComparisonChainColor(sourceIndex,source),shininess:35}));
+                        cap.position.copy(point);object.add(cap);
+                    }
+                    const fromStructure=entryToStructure.get(anchor),toStructure=entryToStructure.get(entry);
+                    linkRecords.push({object,fromStructure,toStructure,fromKey:referenceChainVisibilityKey(fromStructure,anchor),toKey:referenceChainVisibilityKey(toStructure,entry)});
+                }
+            }
+            const resizeObserver=new ResizeObserver(()=>{const w=Math.max(1,host.clientWidth),h=Math.max(1,host.clientHeight);
+                camera.aspect=w/h;camera.updateProjectionMatrix();renderer.setSize(w,h,false);render();});resizeObserver.observe(host);
+            render();
+            referenceComparisonScene={renderer,scene,camera,target,controls:{dispose(){}},structureGroups,chainGroups,linkRecords,render,stop(){resizeObserver.disconnect();scene.traverse(object=>{
+                object.geometry?.dispose();if(Array.isArray(object.material))object.material.forEach(material=>material.dispose());else object.material?.dispose();
+            });}};
+            applyReferenceComparisonVisibility();
+        }
+        document.getElementById('referenceComparisonColor')?.addEventListener('change',()=>{renderReferenceComparisonKey();renderReferenceVisibilityControls();renderReferenceComparison3d();});
+        function renderMorphTooltipReferences(cell) {
+            const host=document.getElementById('morphTooltipReferences');if(!host)return;
+            host.classList.toggle('hidden',!referenceAssembly);host.replaceChildren();
+            if(!referenceAssembly)return;
+            referenceFiles.forEach((file,i)=>{
+                const row=document.createElement('div');row.style.color=referenceColor(i);
+                const distance=cell?.references?.[i];
+                row.textContent=`${file.pdbId}: ${distance===null||distance===undefined?'N/A (gap)':distance.toFixed(2)+' Å'}`;
+                host.append(row);
+            });
+        }
+        function referenceOriginColor(cell) {
+            if(!cell)return 0xff3b291e;
+            if(!referenceAssembly)return cell.d1!==null&&cell.d2!==null
+                ?(255<<24)|(Math.round(219*(1-morphAlpha)+191*morphAlpha)<<16)|(Math.round(152*(1-morphAlpha)+204*morphAlpha)<<8)|Math.round(52*(1-morphAlpha)+46*morphAlpha)
+                :cell.d1!==null?0xffdb9834:0xffbfcc2e;
+            let r=0,g=0,b=0,total=0;
+            cell.references?.forEach((distance,i)=>{if(distance===null)return;const w=referenceInfluences[i]??1;const c=new THREE.Color(referenceColor(i));r+=c.r*w;g+=c.g*w;b+=c.b*w;total+=w;});
+            if(cell.d2!==null){const w=model2Influence;const c=new THREE.Color('#2eccbf');r+=c.r*w;g+=c.g*w;b+=c.b*w;total+=w;}
+            if(!total)return 0xff3b291e;
+            return (255<<24)|(Math.round(b/total*255)<<16)|(Math.round(g/total*255)<<8)|Math.round(r/total*255);
+        }
+
+        function renderReferenceOriginLegend() {
+            const host=document.getElementById('originLegendEntries');if(!host)return;
+            if(!referenceAssembly){host.replaceChildren();for(const [name,color] of [['Reference PDB','#3498db'],['AlphaFold','#2eccbf'],['Both (blend by sliders)','#65b5ce'],['Neither (alignment gap)','#1e293b']]){const item=document.createElement('span');item.textContent=`● ${name}`;item.style.color=color;host.append(item);}return;}
+            host.replaceChildren();referenceFiles.forEach((file,i)=>{const item=document.createElement('span');item.textContent=`● ${file.pdbId}`;item.style.color=referenceColor(i);host.append(item);});
+            for(const [name,color] of [['AlphaFold','#2eccbf'],['Shared origins (weighted blend)','#a2c3d0'],['Neither (alignment gap)','#1e293b']]){const item=document.createElement('span');item.textContent=`● ${name}`;item.style.color=color;host.append(item);}
+        }
+        function referenceChainVisibilityKey(structureIndex,entry) { return `${structureIndex}\u0000${entry.chain}`; }
+        function makeReferenceVisibilityButton(label,color,visible,onClick) {
+            const button=document.createElement('button');button.type='button';button.setAttribute('aria-pressed',String(visible));
+            button.className=visible
+                ?'flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-mono font-medium transition border shadow-sm bg-slate-900 border-slate-700 text-white hover:bg-slate-800'
+                :'flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-mono font-medium transition border border-dashed border-slate-800 text-slate-500 bg-slate-950/60 hover:text-slate-400';
+            const swatch=document.createElement('span');swatch.className='w-2.5 h-2.5 rounded-full inline-block';swatch.style.backgroundColor=color;swatch.style.opacity=visible?'1':'.3';
+            const icon=document.createElement('i');icon.className=`fa-solid ${visible?'fa-eye text-emerald-400':'fa-eye-slash text-slate-600'} text-[10px]`;
+            button.append(swatch,document.createTextNode(label),icon);button.addEventListener('click',onClick);return button;
+        }
+        function renderReferenceVisibilityControls() {
+            if(!referenceAssembly)return;
+            const structures=document.getElementById('referenceStructureToggles'),chains=document.getElementById('referenceChainToggles');
+            structures.replaceChildren();chains.replaceChildren();
+            const heading=document.createElement('span');heading.className='reference-visibility-heading';heading.textContent='Structure toggles:';structures.append(heading);
+            structures.append(makeReferenceVisibilityButton('Lines between centres of equavalent entities','#cbd5e1',referenceComparisonVisibility.links,()=>{
+                referenceComparisonVisibility.links=!referenceComparisonVisibility.links;renderReferenceVisibilityControls();renderReferenceComparisonKey();applyReferenceComparisonVisibility();
+            }));
+            referenceAssembly.structures.forEach((structure,s)=>{
+                const visible=referenceComparisonVisibility.structures.get(s)!==false;
+                structures.append(makeReferenceVisibilityButton(structure.file.pdbId,referenceColor(s),visible,()=>{
+                    referenceComparisonVisibility.structures.set(s,!visible);renderReferenceVisibilityControls();applyReferenceComparisonVisibility();
+                }));
+            });
+            const chainHeading=document.createElement('span');chainHeading.className='reference-visibility-heading';chainHeading.textContent='Chain toggles:';chains.append(chainHeading);
+            const water=[];
+            referenceAssembly.structures.forEach((structure,s)=>structure.entries.forEach(entry=>{
+                const key=referenceChainVisibilityKey(s,entry);
+                if(referenceEntryIsWater(entry)){water.push(key);return;}
+                const visible=referenceComparisonVisibility.chains.get(key)!==false;
+                chains.append(makeReferenceVisibilityButton(`${structure.file.pdbId}: ${entry.chain}`,referenceComparisonChainColor(s,entry),visible,()=>{
+                    referenceComparisonVisibility.chains.set(key,!visible);renderReferenceVisibilityControls();applyReferenceComparisonVisibility();
+                }));
+            }));
+            if(water.length){const visible=water.every(key=>referenceComparisonVisibility.chains.get(key)!==false);
+                chains.append(makeReferenceVisibilityButton('Water','#7dd3fc',visible,()=>{
+                    water.forEach(key=>referenceComparisonVisibility.chains.set(key,!visible));renderReferenceVisibilityControls();applyReferenceComparisonVisibility();
+                }));
+            }
+        }
+        function applyReferenceComparisonVisibility() {
+            const view=referenceComparisonScene;if(!view)return;
+            for(const [s,group] of view.structureGroups)group.visible=referenceComparisonVisibility.structures.get(s)!==false;
+            for(const [key,group] of view.chainGroups)group.visible=referenceComparisonVisibility.chains.get(key)!==false;
+            for(const link of view.linkRecords)link.object.visible=referenceComparisonVisibility.links;
+            view.render();
+        }
+        function renderReferenceComparisonKey() {
+            const host=document.getElementById('referenceComparisonKey');if(!host||!referenceAssembly)return;
+            host.replaceChildren();const heading=document.createElement('strong');heading.textContent='Key:';host.append(heading);
+            const mode=document.getElementById('referenceComparisonColor').value;
+            function item(label,color){const part=document.createElement('span');const swatch=document.createElement('span');swatch.className='reference-key-swatch';swatch.style.background=color;part.append(swatch,document.createTextNode(label));host.append(part);}
+            item(referenceComparisonVisibility.links?'Equivalent chain-centre lines':'Centre lines hidden',referenceComparisonVisibility.links?'#cbd5e1':'#64748b');
+            if(mode==='chain')referenceAssembly.structures.forEach((structure,s)=>structure.entries.forEach(entry=>item(`${structure.file.pdbId}: ${entry.chain}`,referenceIndividualChainColor(s,entry))));
+            else if(mode==='reference')referenceAssembly.structures.forEach((structure,s)=>item(structure.file.pdbId,referenceColor(s)));
+            else if(mode==='protein')for(const type of new Set(referenceAssembly.groups.map(group=>group.type)))item(`Protein type ${type+1}`,proteinTypeColor(type));
+            else if(mode==='equivalent')referenceAssembly.groups.forEach((group,i)=>item([...group.entries].map(([s,entry])=>`${referenceAssembly.structures[s].file.pdbId}:${entry.chain}`).join(' ↔ '),proteinTypeColor(i)));
+            else if(mode==='aligned'){item('Equivalent residue','#ef4444');item('No equivalent residue','#64748b');}
+            else {
+                const label=document.createElement('span');label.textContent='Mean aligned residue distance: 0 Å';host.append(label);
+                const gradient=document.createElement('span');gradient.style.cssText='display:inline-block;width:130px;height:8px;border-radius:8px;background:linear-gradient(to right,#38bdf8,#facc15,#ef4444)';host.append(gradient);
+                const end=document.createElement('span');end.textContent='10 Å or more';host.append(end);item('No equivalent residue','#64748b');
+            }
+        }
+
+        document.getElementById('springColorSelect')?.addEventListener('change',event=>{
+            springColorMode=event.target.value==='origin'?'origin':'strain';
+            updateSpringColorControls();updateSpringDisplay();
+        });
+
+        for(const [id,visible] of [['referenceShowAllChains',true],['referenceHideAllChains',false]]){
+            document.getElementById(id)?.addEventListener('click',()=>{
+                if(!referenceAssembly)return;
+                referenceAssembly.structures.forEach((structure,s)=>structure.entries.forEach(entry=>{
+                    referenceComparisonVisibility.chains.set(referenceChainVisibilityKey(s,entry),visible);
+                }));
+                renderReferenceVisibilityControls();applyReferenceComparisonVisibility();
+            });
+        }
