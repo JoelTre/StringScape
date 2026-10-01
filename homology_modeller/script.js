@@ -2431,6 +2431,42 @@
 
             const el = physicsRenderer.domElement;
             el.style.cursor = 'grab';
+            el.style.touchAction = 'none';
+            let touchView = null;
+            const touchPoint = touch => ({x:touch.clientX,y:touch.clientY});
+            const touchGesture = touches => {
+                if (touches.length >= 2) {
+                    const a=touchPoint(touches[0]),b=touchPoint(touches[1]);
+                    return {count:2,x:(a.x+b.x)/2,y:(a.y+b.y)/2,distance:Math.hypot(a.x-b.x,a.y-b.y)};
+                }
+                if (touches.length === 1) return {count:1,...touchPoint(touches[0])};
+                return null;
+            };
+            el.addEventListener('touchstart', e => { e.preventDefault(); touchView=touchGesture(e.touches); }, {passive:false});
+            el.addEventListener('touchmove', e => {
+                e.preventDefault();
+                const next=touchGesture(e.touches);
+                if (!next || !touchView || next.count!==touchView.count) { touchView=next; return; }
+                const dx=next.x-touchView.x,dy=next.y-touchView.y;
+                if (next.count===1) rotatePhysicsCamera(dx,dy);
+                else {
+                    physicsCamera.updateMatrixWorld();
+                    const right=new THREE.Vector3(),up=new THREE.Vector3();
+                    physicsCamera.matrixWorld.extractBasis(right,up,new THREE.Vector3());
+                    const distance=physicsCamera.position.distanceTo(camTarget);
+                    const pan=right.multiplyScalar(-dx*distance*.0016).add(up.multiplyScalar(dy*distance*.0016));
+                    camTarget.add(pan);physicsCamera.position.add(pan);
+                    const ratio=touchView.distance>0?next.distance/touchView.distance:1;
+                    const offset=physicsCamera.position.clone().sub(camTarget);
+                    offset.setLength(Math.max(10,Math.min(500,offset.length()/Math.max(.1,ratio))));
+                    physicsCamera.position.copy(camTarget).add(offset);
+                    physicsCamera.lookAt(camTarget);
+                }
+                touchView=next;
+            }, {passive:false});
+            const finishTouch=e=>{e.preventDefault();touchView=touchGesture(e.touches);};
+            el.addEventListener('touchend',finishTouch,{passive:false});
+            el.addEventListener('touchcancel',finishTouch,{passive:false});
 
             // Prevent browser context menu on right click everywhere in physics box
             el.addEventListener('contextmenu', (e) => { e.preventDefault(); });
@@ -3225,17 +3261,22 @@
             return getChainColor(chainId,chainKeys);
         }
         function renderPhysicsChainToggles() {
-            const container = document.getElementById('physicsChainToggles');
-            if (!container) return;
-            container.innerHTML = '';
+            const proteinContainer = document.getElementById('physicsChainToggles');
+            const nonProteinContainer = document.getElementById('physicsNonProteinToggles');
+            const nonProteinSection = document.getElementById('physicsNonProteinToggleSection');
+            if (!proteinContainer || !nonProteinContainer) return;
+            proteinContainer.replaceChildren();
+            nonProteinContainer.replaceChildren();
 
             const chainKeys = morphMatrixBlocks.map(b => b.c1);
-            if (!chainKeys.length) return;
-
-            const waterKeys = chainKeys.filter(isWaterChain);
-            const groups = chainKeys.filter(chainId => !isWaterChain(chainId)).map(chainId => [chainId]);
-            if (waterKeys.length) groups.push(waterKeys);
-            groups.forEach(keys => {
+            const proteinKeys = morphMatrixBlocks.filter(block => block.res.entityType === 'protein').map(block => block.c1);
+            const nonProteinKeys = morphMatrixBlocks.filter(block => block.res.entityType !== 'protein').map(block => block.c1);
+            const waterKeys = nonProteinKeys.filter(isWaterChain);
+            const proteinGroups = proteinKeys.map(chainId => [chainId]);
+            const nonProteinGroups = nonProteinKeys.filter(chainId => !isWaterChain(chainId)).map(chainId => [chainId]);
+            if (waterKeys.length) nonProteinGroups.push(waterKeys);
+            nonProteinSection?.classList.toggle('hidden',nonProteinGroups.length===0);
+            for (const [container,groups] of [[proteinContainer,proteinGroups],[nonProteinContainer,nonProteinGroups]]) groups.forEach(keys => {
                 keys.forEach(chainId => { if (chainVisibility[chainId] === undefined) chainVisibility[chainId] = true; });
                 const isWater = isWaterChain(keys[0]);
                 const isVis = keys.every(chainId => chainVisibility[chainId] !== false);
@@ -3264,8 +3305,8 @@
             });
         }
 
-        function setAllChainsVisibility(visible) {
-            const chainKeys = morphMatrixBlocks.map(b => b.c1);
+        function setAllChainsVisibility(visible,proteinOnly=true) {
+            const chainKeys = morphMatrixBlocks.filter(block => proteinOnly ? block.res.entityType==='protein' : block.res.entityType!=='protein').map(block => block.c1);
             chainKeys.forEach(chainId => {
                 chainVisibility[chainId] = visible;
             });
@@ -4934,7 +4975,8 @@
             alphaFoldMolstarFiles = [];
             for (const canvas of [canvas1, canvas2, diffCanvas, morphCanvas]) if (canvas) canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);
             closeInspector(); inspectedAlignmentIndex = null; alignmentDistanceData = null;
-            for (const id of ['PDBLegend','AFLegend','PDBChainSelect','AFChainSelect','comparedPairSelect','alignmentTableBody','alignmentCodeBox','physicsChainToggles']) document.getElementById(id)?.replaceChildren();
+            for (const id of ['PDBLegend','AFLegend','PDBChainSelect','AFChainSelect','comparedPairSelect','alignmentTableBody','alignmentCodeBox','physicsChainToggles','physicsNonProteinToggles']) document.getElementById(id)?.replaceChildren();
+            document.getElementById('physicsNonProteinToggleSection')?.classList.add('hidden');
             for (const id of ['tooltip1','tooltip2','diffTooltip','morphTooltip','PDBResolutionNotice','AFResolutionNotice','diffResolutionNotice','morphResolutionNotice','physicsChainDragBadge']) document.getElementById(id)?.classList.add('hidden');
             for (const id of ['PDBTitle','AFTitle','PDBResCount','AFResCount','physicsNodeCount','physicsSpringDisplay','physicsEnergyText','tmScoreDisplay','tmRmsdDisplay']) {
                 const el = document.getElementById(id); if (el) el.textContent = '—';
@@ -5137,6 +5179,36 @@
             canvas2 = document.getElementById('matrixCanvas2'); ctx2 = canvas2.getContext('2d');
             diffCanvas = document.getElementById('diffMatrixCanvas'); diffCtx = diffCanvas.getContext('2d');
             morphCanvas = document.getElementById('morphMatrixCanvas'); morphCtx = morphCanvas.getContext('2d');
+
+            const installMatrixTouch = (canvas,getView,setView,redraw) => {
+                canvas.style.touchAction='none';
+                let previous=null;
+                const gesture=touches=>{
+                    if (!touches.length) return null;
+                    const rect=canvas.getBoundingClientRect();
+                    const points=Array.from(touches).slice(0,2).map(t=>({x:t.clientX-rect.left,y:t.clientY-rect.top}));
+                    if (points.length===1) return {count:1,...points[0]};
+                    return {count:2,x:(points[0].x+points[1].x)/2,y:(points[0].y+points[1].y)/2,
+                        distance:Math.hypot(points[0].x-points[1].x,points[0].y-points[1].y)};
+                };
+                canvas.addEventListener('touchstart',event=>{event.preventDefault();previous=gesture(event.touches);},{passive:false});
+                canvas.addEventListener('touchmove',event=>{
+                    event.preventDefault();
+                    const current=gesture(event.touches);
+                    if (!current||!previous||current.count!==previous.count){previous=current;return;}
+                    const view=getView();
+                    const zoom=current.count===2&&previous.distance>0?Math.max(.5,Math.min(2,current.distance/previous.distance)):1;
+                    setView(current.x-(previous.x-view.x)*zoom,current.y-(previous.y-view.y)*zoom,view.scale*zoom);
+                    previous=current;redraw();
+                },{passive:false});
+                const finish=event=>{event.preventDefault();previous=gesture(event.touches);};
+                canvas.addEventListener('touchend',finish,{passive:false});
+                canvas.addEventListener('touchcancel',finish,{passive:false});
+            };
+            installMatrixTouch(canvas1,()=>({x:offX1,y:offY1,scale:scale1}),(x,y,scale)=>{offX1=x;offY1=y;scale1=scale;},drawIndividualMatrices);
+            installMatrixTouch(canvas2,()=>({x:offX2,y:offY2,scale:scale2}),(x,y,scale)=>{offX2=x;offY2=y;scale2=scale;},drawIndividualMatrices);
+            installMatrixTouch(diffCanvas,()=>({x:diffOffX,y:diffOffY,scale:diffScale}),(x,y,scale)=>{diffOffX=x;diffOffY=y;diffScale=scale;},drawDifferenceMatrix);
+            installMatrixTouch(morphCanvas,()=>({x:morphOffX,y:morphOffY,scale:morphScale}),(x,y,scale)=>{morphOffX=x;morphOffY=y;morphScale=scale;},drawMorphMatrix);
 
             for (const canvas of [canvas1, canvas2, diffCanvas, morphCanvas]) {
                 canvas.addEventListener('contextmenu', event => event.preventDefault());
@@ -5855,7 +5927,7 @@
             physicsColorMode = mode;
             physicsOriginColorMode = mode === 'origin';
             physicsDifferenceMode = mode === 'difference';
-            document.getElementById('physicsPulseKey')?.classList.toggle('hidden', physicsOriginColorMode || physicsDifferenceMode);
+            document.getElementById('physicsPulseKey')?.classList.toggle('hidden', physicsOriginColorMode);
             document.getElementById('physicsDifferenceKey')?.classList.toggle('hidden', !physicsDifferenceMode);
             document.getElementById('physicsColourKey')?.classList.toggle('hidden', physicsDifferenceMode);
             document.getElementById('originFilterBtns')?.classList.toggle('hidden', !physicsOriginColorMode);
@@ -6991,6 +7063,8 @@
             initCanvases();
             initThreeJSPhysicsScene();
             setupEventListeners();
+            document.getElementById('showAllNonProteinBtn').addEventListener('click',()=>setAllChainsVisibility(true,false));
+            document.getElementById('hideAllNonProteinBtn').addEventListener('click',()=>setAllChainsVisibility(false,false));
             setPhysicsRepresentation('ball-stick');
             updateDiffLegendGradient();
             await initMolstarViewers();
