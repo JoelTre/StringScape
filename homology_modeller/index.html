@@ -6,6 +6,7 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com; script-src-attr 'none'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com; connect-src 'self' blob: https://alphafold.ebi.ac.uk https://data.rcsb.org https://models.rcsb.org https://files.rcsb.org https://www.ebi.ac.uk https://rest.uniprot.org; img-src 'self' data: blob: https:; worker-src 'self' blob:; child-src blob:">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>StringScape Homology Modeller - Comparative Protein & Distance Matrix Visualizer</title>
+    <link rel="icon" type="image/jpeg" href="https://stringscape.net/images_for_website/StringScape_logo.jpg">
     <meta name="description" content="Comparative 3D Structure, Distance Matrix & Elastic Network Simulation with Multi-Chain Alignment." />
     <meta property="og:title" content="StringScape Homology Modeller - Comparative Protein & Distance Matrix Visualizer" />
     <meta property="og:description" content="Comparative 3D Structure, Distance Matrix & Elastic Network Simulation with Multi-Chain Alignment." />
@@ -27,6 +28,21 @@
             color: #F3F4F6;
             font-family: system-ui, -apple-system, sans-serif;
         }
+        .structure-id-input { font-family: Arial, Helvetica, sans-serif; font-variant-numeric: proportional-nums; letter-spacing: .035em; }
+        .reference-comparison-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
+        .reference-comparison-table thead { background: rgba(2,6,23,.8); color: #94a3b8; text-transform: uppercase; letter-spacing: .04em; font-size: 11px; }
+        .reference-comparison-table th { padding: 12px 16px; border-bottom: 1px solid #1e293b; white-space: nowrap; }
+        .reference-comparison-table td { padding: 10px 16px; border-bottom: 1px solid rgba(30,41,59,.6); white-space: nowrap; color: #cbd5e1; }
+        .reference-comparison-table tbody tr:hover { background: rgba(15,23,42,.7); }
+        #referenceDistanceMatrices > div { min-width: 0; }
+        #referenceComparison:not(.hidden) { display: flex; flex-direction: column; gap: 16px; }
+        #referenceComparison3d canvas { display: block; width: 100%; height: 100%; }
+        #morphTooltipReferences { max-height: 9rem; overflow-y: auto; }
+        .reference-visibility-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid #1e293b; background: rgba(15,23,42,.6); }
+        .reference-visibility-row.chain-row { max-height: 108px; overflow-y: auto; }
+        .reference-visibility-heading { color: #94a3b8; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; }
+        .reference-key { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; max-height: 140px; overflow-y: auto; padding: 10px 16px; background: rgba(2,6,23,.7); border-top: 1px solid #1e293b; color: #cbd5e1; font-size: 11px; }
+        .reference-key-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; }
         .font-mono-code { font-family: 'Fira Code', monospace; }
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: #0f172a; }
@@ -108,6 +124,54 @@
         @keyframes string-id-glow { 0% { color:#facc15; text-shadow:0 0 18px #facc15,0 0 7px #fef08a; } 100% { color:white; text-shadow:none; } }
         #pdbInput2.string-id-glow { animation:string-id-glow 3s ease-out forwards; }
         @media (prefers-reduced-motion: reduce) { #pdbInput2.string-id-glow { animation:none; } }
+        header { --header-link-color:#9ca3af; }
+        header nav.text-gray-400, #themeToggle { color:var(--header-link-color); }
+        #themeToggle { width:2.5rem; height:2.5rem; flex:none; display:grid; place-items:center; border:1px solid rgba(150,150,150,.4); border-radius:50%; background:transparent; transition:background .2s,transform .2s; }
+        #themeToggle:hover { transform:scale(1.08); }
+        body.light-mode { color-scheme:light; background:#f1f5f9; color:#172033; }
+        body.light-mode header { --header-link-color:#475569; background:rgba(248,250,252,.95); border-color:#cbd5e1; }
+        body.light-mode header nav.text-gray-400, body.light-mode #themeToggle { color:var(--header-link-color); }
+        body.light-mode [class~="bg-slate-950"], body.light-mode [class~="bg-slate-900"] { background-color:#fff; }
+        body.light-mode [class~="bg-slate-800"], body.light-mode [class~="bg-slate-700"], body.light-mode [class~="bg-gray-800"] { background-color:#e2e8f0; }
+        body.light-mode [class~="text-white"]:not([class*="bg-teal"]):not([class*="bg-indigo"]):not([class*="bg-violet"]):not([class*="bg-emerald"]):not([class*="bg-amber"]):not([class*="bg-sky"]):not([class*="bg-blue"]):not([class*="bg-red"]), body.light-mode [class~="text-slate-100"], body.light-mode [class~="text-slate-200"], body.light-mode [class~="text-slate-300"] { color:#172033; }
+        body.light-mode [class~="text-slate-400"], body.light-mode [class~="text-gray-400"] { color:#475569; }
+        body.light-mode [class~="border-slate-800"], body.light-mode [class~="border-slate-700"], body.light-mode [class~="border-gray-800"], body.light-mode [class~="border-gray-700"] { border-color:#cbd5e1; }
+        body.light-mode input, body.light-mode textarea, body.light-mode select { color:#172033; }
+        body.light-mode .reference-comparison-table thead, body.light-mode .reference-key, body.light-mode .reference-visibility-row { background:#e2e8f0; color:#334155; }
+        body.light-mode .reference-comparison-table td { color:#334155; border-color:#cbd5e1; }
+        body.light-mode #stringUploadBox { background:#dff5f1; border-color:#5eead4; }
+        body.light-mode .string-file-name { color:#0f766e; }
+        body.light-mode label[for="pdbInput1"] { color:#075985; }
+        body.light-mode label[for="pdbInput2"] { color:#0f766e; }
+        body.light-mode #stringFinderToggle { color:#0f766e; }
+        body.light-mode .string-file-picker, body.light-mode .string-file-picker.has-file { background:#ccfbf1; }
+        body.light-mode [class*="bg-slate-900/"], body.light-mode [class*="bg-slate-800/"] { background-color:#e8eef5; }
+        body.light-mode #physicsContainer, body.light-mode #physics3dCanvas { background:#fff; }
+        body.light-mode #physicsContainer button[aria-label="Capture physics viewport"] { background:#f8fafc; border-color:#cbd5e1; color:#334155; }
+        body.light-mode #physicsSnapshotPanel, body.light-mode #physicsContainer .absolute.bottom-4.left-4 { background:#f8fafc; border-color:#cbd5e1; color:#334155; }
+        body.light-mode #loadSimulationMolstarBtn, body.light-mode #downloadMmCifBtn { color:#fff; }
+        body.light-mode #referenceComparison3d, body.light-mode #molstar-container-1, body.light-mode #molstar-container-2,
+        body.light-mode #canvasParent1, body.light-mode #canvasParent2, body.light-mode #diffCanvasParent,
+        body.light-mode #morphCanvasParent { background:#f8fafc; }
+        body.light-mode table thead tr, body.light-mode .reference-comparison-table thead { background:#e2e8f0; color:#334155; }
+        body.light-mode button.border-dashed[class*="bg-slate-950/"] { background:#e2e8f0; border-color:#94a3b8; color:#475569; }
+        body.light-mode button.border-dashed[class*="bg-slate-950/"]:hover { background:#cbd5e1; color:#1e293b; }
+        body.light-mode input[type=range]::-webkit-slider-runnable-track { background:#cbd5e1; border-color:#94a3b8; }
+        body.light-mode input[type=range]::-moz-range-track { background:#cbd5e1; border:1px solid #94a3b8; border-radius:4px; height:8px; }
+        body.light-mode { scrollbar-color:#94a3b8 #e2e8f0; }
+        body.light-mode ::-webkit-scrollbar-track { background:#e2e8f0; }
+        body.light-mode ::-webkit-scrollbar-thumb { background:#94a3b8; }
+        body.light-mode ::-webkit-scrollbar-thumb:hover { background:#64748b; }
+        body.light-mode #simulationMolstarPlaceholder { background:rgba(248,250,252,.96); color:#475569; }
+        body.light-mode #simulationMolstarPlaceholder > div:first-child { background:#e2e8f0; border-color:#cbd5e1; }
+        body.light-mode #alignmentTableBody tr { background:#fff; }
+        body.light-mode #alignmentTableBody tr:hover { background:#f1f5f9; }
+        body.light-mode #alignmentTmViewer { background:#fff; }
+        body.light-mode #residueRepulsionBadge, body.light-mode #otherConstraintsBadge { background:#e2e8f0; border-color:#cbd5e1; color:#334155; }
+        body.light-mode #residueRepulsionBadge[class*="bg-amber"] { background:#fef3c7; border-color:#fcd34d; color:#92400e; }
+        body.light-mode #otherConstraintsBadge[class*="bg-sky"] { background:#e0f2fe; border-color:#7dd3fc; color:#075985; }
+        body.light-mode #physicsStatusBadge, body.light-mode #matchSummaryBadge, body.light-mode #modelBuildTime { background:#e0e7ff; border-color:#c7d2fe; color:#3730a3; }
+        body.light-mode #physicsStatusBadge[class*="bg-red"] { background:#fee2e2; border-color:#fca5a5; color:#991b1b; }
     </style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col">
@@ -126,7 +190,9 @@
 
             <span class="text-3xl font-black tracking-tight gradient-text ml-0.5 py-1 leading-normal">StringScape</span>
             <span class="bg-gray-800 text-xs text-gray-400 px-2 py-0.5 rounded-full border border-gray-700">Beta 1.0</span>
+            </a>
         </div>
+        <div class="ml-auto flex items-center gap-6">
         <nav class="hidden md:flex space-x-8 text-sm font-medium text-gray-400">
             <a href="https://stringscape.net/homology_modeller" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-solid fa-circle-nodes mr-1"></i> Homology Modeller</a>
             <a href="https://joeltre.github.io/StringScape/Articles" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-solid fa-book-open mr-1"></i> Articles</a>
@@ -135,6 +201,8 @@
             <a href="https://x.com/StringScapeApp" target="_blank" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-brands fa-x-twitter mr-1"></i> X</a>
             <a href="https://www.youtube.com/@StringScape_app" target="_blank" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-brands fa-youtube mr-1"></i> YouTube</a>
         </nav>
+        <button id="themeToggle" type="button" aria-label="Switch to light mode" aria-pressed="false" title="Switch to light mode"><i id="themeToggleIcon" class="fa-solid fa-moon" aria-hidden="true"></i></button>
+        </div>
     </header>
 
 
@@ -146,23 +214,24 @@
             <section id="Introduction" class="bg-slate-900 border border-indigo-500/30 rounded-xl p-5 shadow-sm text-sm text-slate-300 leading-relaxed" aria-label="Modelling workflow">
                 <p class="mb-3" style="font-size: 3.0rem; font-weight: bold;"><i class="fa-solid fa-circle-nodes mr-1"></i> StringScape Homology Modeller</p>
                 <p class="mb-3" style="font-size: 1.0rem; font-weight: semibold;">This app builds homology models of protein complexes (including DNA, RNA, small molecule ligands, and ions) by aligning AlphaFold models onto a reference structure from the Protein Data Bank. Simply enter a PDB ID to use as a reference structure (i.e. template) and the AlphaFold/UniProt IDs of the proteins to be aligned. You can also upload two files from the STRING database to allow this app to automatically find the AlphaFold models to align (though it can make mistakes).</p>
-                <p class="mb-3" style="font-size: 1.0rem; font-weight: semibold;">This app has been specifically built to be easy to use to democritise access to homology modelling. Send feedback to <a href="stringscape.net/contact" target="_blank" rel="noopener noreferrer" class="text-sky-400 hover:underline">stringscape.net/contact<i class="fa-solid fa-arrow-up-right-from-square ml-1" aria-label="Open source code in a new tab"></i></a></p>
+                <p class="mb-3" style="font-size: 1.0rem; font-weight: semibold;">This app has been specifically built to be easy to use to democritise access to all-atom homology modelling. Send feedback to <a href="stringscape.net/contact" target="_blank" rel="noopener noreferrer" class="text-sky-400 hover:underline">stringscape.net/contact<i class="fa-solid fa-arrow-up-right-from-square ml-1" aria-label="Open source code in a new tab"></i></a></p>
                 <p class="mb-3" style="font-size: 1.0rem; font-weight: semibold;">This app is open source under an Apache-2.0 licence. <a href="https://github.com/JoelTre/StringScape/tree/main" target="_blank" rel="noopener noreferrer" class="text-sky-400 hover:underline">View source code<i class="fa-solid fa-arrow-up-right-from-square ml-1" aria-label="Open source code in a new tab"></i></a> </p>
             </section>
 
             <!-- Quick Examples -->
             <div id="examplePresets" class="flex flex-wrap items-center gap-1.5 text-xs bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-sm">
-                <span class="text-slate-400 text-[11px] mr-1 hidden sm:inline">Examples:</span>
+                <span class="text-slate-300 text-sm font-semibold mr-1 hidden sm:inline">Examples:</span>
                 <button data-reference="6YKM" data-alphafold="P09348, P0AF06" data-action-click="0" class="bg-blue-600/30 hover:bg-blue-600/50 text-xs px-2.5 py-1 rounded text-indigo-200 font-mono border border-indigo-500/40 transition"><i>E. coli</i> MotAB (Default) </button>
+                <button data-reference="6YKM, 8UCS" data-alphafold="P09348, P0AF06, P0ABZ1" data-action-click="56" class="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded text-slate-300 font-mono border border-slate-700 transition">MotAB + FliG (Dual reference)</button>
                 <button data-reference="5T4P" data-alphafold="P0ABB0, P0ABB4, P0ABA6, P0A6E6, P0ABA0, P0AB98, P0ABA4, P68699" data-action-click="1" class="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded text-slate-300 font-mono border border-slate-700 transition"><i>E. coli</i> ATP synthase </button>
                 <button data-reference="1C17" data-alphafold="P68699, P0AB98" data-action-click="2" class="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded text-slate-300 font-mono border border-slate-700 transition">Subcomplex of <i>E. coli</i> ATP synthase </button>
-                <button data-reference="5DUD" data-alphafold="P77611, P0A7Z4, P0A8V2, P0A8T7, P0A7R5, P0AFG0, P0A780, P0AFF6, P0A800" data-action-click="3" class="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded text-slate-300 font-mono border border-slate-700 transition"><i>E. coli</i> RNA polymerase lambda-based antitermination complex </button>
+                <button data-reference="5DUD" data-alphafold="P77611, P0A7Z4, P0A8V2, P0A8T7, P0A7R5, P0AFG0, P0A780, P0AFF6, P0A800" data-action-click="3" class="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded text-slate-300 font-mono border border-slate-700 transition"><i>E. coli</i> RNA polymerase antitermination complex </button>
             </div>
 
             <!-- Reference PDB input -->
             <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-2 w-full">
-                <div class="flex items-center justify-between gap-2"><label for="pdbInput1" class="block text-base font-semibold text-sky-300">Reference Protein Data Bank ID</label><label class="structure-file-picker"><input id="referenceStructureUpload" type="file" accept=".pdb,.ent,.cif,.mmcif" data-action-change="0"><i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> Upload structure</label></div>
-                <textarea rows="3" id="pdbInput1" data-action-input="0" class="w-full bg-slate-950 text-white rounded-lg p-3 focus:outline-none uppercase font-mono text-xl font-semibold" style="border: 1px solid #3498db66;">6YKM</textarea>
+                <div class="flex items-center justify-between gap-2"><label for="pdbInput1" class="block text-base font-semibold text-sky-300">Reference Protein Data Bank IDs (comma-separated)</label><label class="structure-file-picker"><input id="referenceStructureUpload" type="file" accept=".pdb,.ent,.cif,.mmcif" data-action-change="0"><i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> Upload structure</label></div>
+                <textarea rows="3" id="pdbInput1" data-action-input="0" class="w-full bg-slate-950 text-white rounded-lg p-3 focus:outline-none uppercase structure-id-input text-xl font-semibold" style="border: 1px solid #3498db66;">6YKM</textarea>
             </div>
 
             <!-- STRING file search -->
@@ -182,9 +251,8 @@
                 </div>
                 <p class="text-s text-slate-400">The app will search for matches for each of the chains in the reference PDB typed above using a top-500 k-mer shortlist and local BLOSUM62 Smith-Waterman alignment with the gap penalties set in the Alignment Settings (see build process below).</p>
                 <button id="findStringMatchesBtn" type="button" data-action-click="5" class="bg-teal-700 hover:bg-teal-600 disabled:opacity-50 text-white rounded-lg px-4 py-2 text-sm"><i class="fa-solid fa-magnifying-glass mr-2" aria-hidden="true"></i>Find matches for Reference PDB chains</button>
-                <p id="stringAliasStatus" role="status" class="text-xs text-slate-400"></p>
-                <p id="stringMatchStatus" role="status" class="text-xs text-teal-200"></p>
-                <button id="downloadStringMatchesBtn" type="button" data-action-click="6" class="hidden self-end bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded text-xs border border-slate-700"><i class="fa-solid fa-download"></i> Download CSV</button>
+                <p id="stringAliasStatus" role="status" class="hidden text-xs text-slate-400"></p>
+                <p id="stringMatchStatus" role="status" class="hidden text-xs text-teal-200"></p> <button id="downloadStringMatchesBtn" type="button" data-action-click="6" class="hidden self-end bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded text-xs border border-slate-700"><i class="fa-solid fa-download"></i> Download CSV</button>
                 <div id="stringMatchResults" class="rounded-lg border border-slate-800 text-xs text-slate-300 max-h-80 overflow-auto empty:hidden"></div>
                 </div>
             </div>
@@ -192,7 +260,7 @@
             <!-- AlphaFold / UniProt input -->
             <form id="dualPdbForm" class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3 w-full">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div class="md:col-span-2"><div class="flex items-center justify-between gap-2 mb-2"><label for="pdbInput2" class="block text-base font-semibold text-teal-300">AlphaFold IDs, UniProt IDs, or PDB IDs</label><label class="structure-file-picker"><input id="alphaFoldStructureUpload" type="file" accept=".pdb,.ent,.cif,.mmcif" data-action-change="3"><i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> Upload structures</label></div><textarea id="pdbInput2" rows="3" data-action-input="1" class="w-full bg-slate-950 text-white rounded-lg p-3 focus:outline-none uppercase font-mono text-xl font-semibold resize-y" style="border: 1px solid #2eccbf66;">P09348, P0AF06</textarea></div>
+                    <div class="md:col-span-2"><div class="flex items-center justify-between gap-2 mb-2"><label for="pdbInput2" class="block text-base font-semibold text-teal-300">AlphaFold IDs, UniProt IDs, or PDB IDs</label><label class="structure-file-picker"><input id="alphaFoldStructureUpload" type="file" accept=".pdb,.ent,.cif,.mmcif" data-action-change="3"><i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> Upload structures</label></div><textarea id="pdbInput2" rows="3" data-action-input="1" class="w-full bg-slate-950 text-white rounded-lg p-3 focus:outline-none uppercase structure-id-input text-xl font-semibold resize-y" style="border: 1px solid #2eccbf66;">P09348, P0AF06</textarea></div>
                 </div>
                 <button type="submit" id="loadBtn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-4 py-2.5 rounded-lg transition-all flex items-center gap-2 text-xs"><i class="fa-solid fa-code-compare"></i> Build Homology model</button>
                 <p id="sequenceOnlyNotice" class="text-xs text-amber-300 hidden"></p>
@@ -207,23 +275,37 @@
         <!-- Homology build process UI -->
         <div id="detailsPanels" class="hidden space-y-6" aria-hidden="true">
 
+        <!--Overview box-->
         <section id="workflowOverview" class="bg-slate-900 border border-indigo-500/30 rounded-xl p-5 shadow-sm text-sm text-slate-300 leading-relaxed" aria-label="Modelling workflow">
             <p class="mb-3" style="font-size: 1.2rem; font-weight: bold;">This app builds homology models of protein complexes by aligning AlphaFold models onto a reference structure from the Protein Data Bank. This involves multiple steps:</p>
             <ol class="list-decimal pl-5 space-y-2">
                 <li>
-                    <strong class="text-slate-100">Load the reference structure from the Protein Data Bank and load the AlphaFold structures from the AlphaFold database.</strong> If no AlphaFold model is available, the app just uses the protein sequence without any structural information.
+                    <strong class="text-slate-100">Load one or more reference structures from the Protein Data Bank and load the AlphaFold structures from the AlphaFold database.</strong> If no AlphaFold model is available, the app just uses the protein sequence without any structural information.
                     <ul class="list-disc pl-5 mt-2 space-y-1">
                         <li><strong class="text-slate-100">Optional:</strong> If STRING files have been uploaded, the app searches each of the reference PDB chain sequences in the FASTA file for matches and then uses the alias file to get the UniProt IDs for each match, which are then used to fetch the AlphaFold models.</li>
                     </ul>
                 </li>
-                <li><strong class="text-slate-100">Align each of the chain sequences from the reference with each of the AlphaFold sequences.</strong> Semi-global alignment fits each reference chain within an AlphaFold sequence, allowing for extra AlphaFold residues at either end. Alignment Settings also offers local Smith–Waterman and global Needleman–Wunsch as alignment methods.</li>
-                <li><strong class="text-slate-100">Calculate distance matrices.</strong> The distance matrix captures the spatial relationships between residues within each chain and, for the reference structure, between each chain.</li>
-                <li><strong class="text-slate-100">Build the morph distance matrix.</strong> The distance matrices of the reference structure and the AlphaFold models are combined to create the morph distance matrix. The Reference PDB and AlphaFold sliders determine the blend of shared intra-chain distances and each values influence on the simulation.</li>
-                <li><strong class="text-slate-100">Align AlphaFold models onto the reference structure.</strong> This has two phases: In phase 1, the AlphaFold structures are aligned to the reference structure via rigid-body Template Modelling alignment. In phase 2, an overdamped elastic simulation is run to mould the AlphaFold structures to the reference structure.</li>
+                <li><strong class="text-slate-100">Optional: If multiple reference files are loaded, identify equivalent chains/molecules between reference files.</strong> Sequence alignments between all chains/polynucleotides within and between reference PDBs are performed to find chains/polynucleotides of the same type. Then, a matrix is calculated of the distances between the centres of the chains/polynucleotides/molecules within each reference PDB. The distance matrixes are then uses to identify which chains/polynuclotides/molecules between the references are equavalent.</li>
+                <li><strong class="text-slate-100">Align each of the chain/polynucleotide sequences from the reference with each of the AlphaFold sequences.</strong> Semi-global alignment fits each reference chain/polynucleotide within an AlphaFold sequence, allowing for extra AlphaFold residues at either end. Alignment Settings also offers local Smith–Waterman and global Needleman–Wunsch as alignment methods.</li>
+                <li><strong class="text-slate-100">Calculate distance matrices.</strong> The distance matrix captures the spatial relationships between residues/nucleotides/atoms within each chain/polynucleotide/molecule and, for the reference structure, between each chain/polynucleotide/molecule.</li>
+                <li><strong class="text-slate-100">Build the morph distance matrix.</strong> The distance matrices of the aligned reference structures and the AlphaFold models are combined to create the morph distance matrix. The per-reference PDB and AlphaFold sliders determine the blend of shared intra-chain distances and each values influence on the simulation.</li>
+                <li><strong class="text-slate-100">Align AlphaFold models onto the reference structure.</strong> This has two phases: In phase 1, the AlphaFold structures are aligned to the reference structure via rigid-body Template Modelling alignment. In phase 2, an overdamped elastic simulation is run to relax the springs between each residue/nucleotide/atom. The spring lengths are determined by the morph matrix (each cell of the matrix corresponds to one spring in the simulation).</li>
                 <li><strong class="text-slate-100">Convert the simulation result into a mmCIF format and display in a Mol* viewer.</strong> The mmCIF file can then be downloaded.</li>
             </ol>
         </section>
 
+
+        <section id="referenceComparison" class="hidden space-y-4 mb-6" aria-label="Reference structure comparison">
+            <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
+                <div class="bg-slate-800/80 px-5 py-3 border-b border-slate-700 flex flex-wrap items-center justify-between gap-2"><h2 class="font-semibold text-sm text-white flex items-center gap-2"><i class="fa-solid fa-table-cells text-indigo-400"></i> Reference chain-centre distances</h2><span id="referenceCentreDistanceLegend" class="text-[11px] text-slate-300"></span></div>
+                <div id="referenceDistanceMatrices" class="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4" style="max-height:840px;min-height:0;overflow-y:auto"></div>
+            </div>
+            <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
+                <div class="bg-slate-800/80 px-5 py-3 border-b border-slate-700"><h2 class="font-semibold text-sm text-white flex items-center gap-2"><i class="fa-solid fa-link text-indigo-400"></i> Equivalent reference chains</h2></div>
+                <div id="referenceCorrespondenceTable" style="max-height:840px;min-height:0;overflow:auto"></div>
+            </div>
+            <div class="bg-slate-900 border border-sky-800 rounded-xl p-4"><div class="flex flex-wrap justify-between gap-3 mb-2"><h2 class="text-sky-300 font-semibold">Rigidly TM-aligned reference complexes</h2><label for="referenceComparisonColor" class="inline-flex shrink-0 items-center gap-2 whitespace-nowrap text-xs text-slate-300">Colour proteins by <select id="referenceComparisonColor" class="bg-slate-800 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs"><option value="reference">Reference PDB</option><option value="chain">Chains</option><option value="protein">Protein ID</option><option value="equivalent">Equivalent chains</option><option value="aligned">Aligned residues</option><option value="distance">Distance difference</option></select></label></div><div id="referenceComparisonMetrics" class="text-xs text-slate-300 mb-2"></div><div id="referenceStructureToggles" class="reference-visibility-row"></div><div id="referenceChainToggles" class="reference-visibility-row chain-row"></div><div class="reference-visibility-row"><button id="referenceShowAllChains" type="button" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded text-xs border border-slate-700">Show all</button><button id="referenceHideAllChains" type="button" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded text-xs border border-slate-700">Hide all</button></div><div id="referenceComparison3d" class="bg-black rounded" style="height:420px"></div><div id="referenceComparisonKey" class="reference-key"></div><p class="text-xs text-slate-400 mt-2">Lines connect equivalent chain centres. Drag to rotate, right-drag to pan, scroll to zoom.</p></div>
+        </section>
 
         <!-- Section 1: Dual 3D Structure Viewers -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -442,7 +524,7 @@
                         <i class="fa-solid fa-sliders text-violet-400"></i> Morph Distance Matrix
                     </h2>
                     <p class="text-xs text-slate-400">This combines the Reference PDB distance matrix and the AlphaFold distance matrix into a combined matrix used to set the spring lengths in the physics simulation. </p>
-                    <p class="text-xs text-slate-400">Intra-chain: <span class="font-mono text-violet-300">D_morph = (PDB · D1 + AF · D2) / (PDB + AF)</span>. Inter-chain distances come from the Reference PDB, and also from AlphaFold when distinct chains are present in the same multi-chain structure.</p>
+                    <p class="text-xs text-slate-400">Intra-chain: <span class="font-mono text-violet-300">D_morph = (Σ w_ref,i · D_ref,i + w_AF · D_AF) / (Σ w_ref,i + w_AF)</span> for available distances. If only one origin has a distance, its value is used. Inter-chain distances can come from each reference PDB and from a multi-chain AlphaFold structure.</p>
                 </div>
 
                 <!-- Colour by controls -->
@@ -463,6 +545,7 @@
             <p id="morphResolutionNotice" class="hidden shrink-0 px-4 py-2 text-xs text-slate-400">To reduce memory use, this box displays a lower-resolution version of the matrix. Zoom in to see full resolution.</p>
             <div id="morphCanvasParent" class="w-full h-[480px] relative bg-slate-950 flex items-center justify-center overflow-hidden">
                 <canvas id="morphMatrixCanvas" class="cursor-crosshair"></canvas>
+                <div id="morphMatrixLoading" role="status" class="hidden absolute top-4 left-1/2 -translate-x-1/2 z-20 rounded-lg border border-slate-700 bg-slate-950/85 px-3 py-2 text-sm text-violet-200 shadow-lg pointer-events-none"><i class="fa-solid fa-circle-notch fa-spin mr-2"></i>Loading morph distance matrix...</div>
 
                 <!-- Morph Hover Tooltip -->
                 <div id="morphTooltip" class="absolute hidden bg-slate-900/95 border border-violet-500/40 text-white text-xs p-3 rounded-lg shadow-2xl pointer-events-none z-20 backdrop-blur-md max-w-xs">
@@ -470,7 +553,8 @@
                     <div id="morphTooltipPos" class="text-slate-400 font-mono mb-1">Position: --</div>
                     <div id="morphTooltipMMSI" class="text-slate-200 font-mono">MMSI: --</div>
                     <div id="morphTooltipPDB" class="font-mono" style="color: #3498db;">D1 (Reference PDB): -- Å</div>
-                    <div id="morphTooltipAF" class="font-mono" style="color: #2eccbf;">D2 (AlphaFold): -- Å</div>
+                    <div id="morphTooltipReferences" class="hidden max-h-36 overflow-y-auto font-mono"></div>
+                    <div id="morphTooltipAF" class="font-mono" style="color: #2eccbf;">D_AF (AlphaFold): -- Å</div>
                     <div id="morphTooltipInterpolated" class="text-violet-300 font-bold font-mono mt-1 pt-1 border-t border-slate-800">D_morph: -- Å</div>
                     <div id="morphTooltipOrigin" class="hidden text-[11px] font-mono mt-1 pt-1 border-t border-slate-800"></div>
                 </div>
@@ -481,7 +565,7 @@
                 <span class="font-semibold text-white flex items-center gap-1.5">
                     <i class="fa-solid fa-palette text-sky-400"></i> Origin Mode Key:
                 </span>
-                <div class="flex flex-wrap items-center gap-4 font-mono text-[10px]">
+                <div id="originLegendEntries" class="flex flex-wrap items-center gap-4 font-mono text-[10px]">
                     <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full shadow-sm" style="background-color: #3498db;"></span> Reference PDB</span>
                     <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full shadow-sm" style="background-color: #2eccbf;"></span> AlphaFold</span>
                     <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full shadow-sm" style="background: linear-gradient(to right, #3498db, #2eccbf);"></span> Both (Blend based on slider values below physics simulation)</span>
@@ -583,14 +667,14 @@
             </div>
 
             <!-- 3D Physics Scene Canvas Container -->
-            <div class="bg-slate-900/60 px-5 py-2 border-b border-slate-800 flex flex-wrap items-center gap-2 text-xs"><span class="text-slate-400 font-medium uppercase text-[10px] tracking-wider"><i class="fa-solid fa-layer-group text-emerald-400"> </i> Structure toggles:</span><button id="toggleHomologyStructure" type="button" data-action-click="32" class="px-2.5 py-1 rounded border border-slate-700 bg-slate-900 text-white">Homology model <i class="fa-solid fa-eye"></i></button><button id="toggleReferenceStructure" type="button" data-action-click="33" class="px-2.5 py-1 rounded border border-dashed border-slate-800 text-slate-500">Reference PDB <i class="fa-solid fa-eye-slash"></i></button><button id="toggleSpringStructure" type="button" data-action-click="34" aria-pressed="false" class="px-2.5 py-1 rounded border border-dashed border-slate-800 bg-slate-950/60 text-slate-500">Springs <i class="fa-solid fa-eye-slash"></i></button></div>
+            <div class="bg-slate-900/60 px-5 py-2 border-b border-slate-800 flex flex-wrap items-center gap-2 text-xs"><span class="text-slate-400 font-medium uppercase text-[10px] tracking-wider"><i class="fa-solid fa-layer-group text-emerald-400"> </i> Structure toggles:</span><button id="toggleHomologyStructure" type="button" data-action-click="32" class="px-2.5 py-1 rounded border border-slate-700 bg-slate-900 text-white">Homology model <i class="fa-solid fa-eye"></i></button><span id="physicsReferenceStructureToggles" class="contents"></span><button id="toggleSpringStructure" type="button" data-action-click="34" aria-pressed="false" class="px-2.5 py-1 rounded border border-dashed border-slate-800 bg-slate-950/60 text-slate-500">Springs <i class="fa-solid fa-eye-slash"></i></button></div>
             <div class="bg-slate-900/60 px-5 py-2 border-b border-slate-800 flex flex-wrap items-center gap-2 text-xs"><span class="text-slate-400 font-medium uppercase text-[10px] tracking-wider"><i class="fa-solid fa-layer-group text-emerald-400"> </i> Aligned toggles:</span><button id="toggleAlignedResidues" type="button" data-action-click="35" class="px-2.5 py-1 rounded border border-slate-700 bg-slate-900 text-white">Aligned residues <i class="fa-solid fa-eye"></i></button><button id="toggleUnalignedResidues" type="button" data-action-click="36" class="px-2.5 py-1 rounded border border-slate-700 bg-slate-900 text-white">Unaligned residues <i class="fa-solid fa-eye"></i></button></div>
             <div class="flex flex-wrap items-center gap-3 px-3 pt-4 text-xs text-slate-300">
                 <!--physics representation controls -->
                 <div role="group" aria-label="Physics representation" class="flex gap-1 rounded-lg bg-slate-950 p-1">
-                    <button id="physicsBackboneBtn" type="button" aria-pressed="true" data-action-click="37" class="px-3 py-1.5 rounded bg-violet-600 text-white">Backbone</button>
-                    <button id="physicsBallStickBtn" type="button" aria-pressed="false" data-action-click="38" class="px-3 py-1.5 rounded text-slate-300">Ball &amp; Stick</button>
-                    <button id="physicsCartoonBtn" type="button" aria-pressed="false" data-action-click="39" class="px-3 py-1.5 rounded text-slate-300">Cartoon</button>
+                    <button id="physicsBackboneBtn" type="button" aria-pressed="false" data-action-click="37" class="px-3 py-1.5 rounded text-slate-300">Backbone</button>
+                    <button id="physicsBallStickBtn" type="button" aria-pressed="true" data-action-click="38" class="px-3 py-1.5 rounded bg-violet-600 text-white">Ball &amp; Stick</button>
+                    <button id="physicsCartoonBtn" type="button" aria-pressed="false" data-action-click="39" class="px-3 py-1.5 rounded text-slate-300">Ribbon</button>
                     <button id="physicsSurfaceBtn" type="button" aria-pressed="false" data-action-click="40" class="px-3 py-1.5 rounded text-slate-300">Surface</button>
                 </div>
                 <div id="sideChainJiggleControls" class="hidden items-center gap-3">
@@ -600,8 +684,10 @@
                 <!-- Colour by controls -->
                     <div class="inline-flex shrink-0 items-center gap-2 whitespace-nowrap"><label for="physicsColorSelect" class="text-slate-300">Colour proteins by</label><select id="physicsColorSelect" data-action-change="5" class="bg-slate-800 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs"><option value="chain" selected>Chain (default)</option><option value="uniform">Uniform</option><option value="protein-id">Protein ID</option><option value="element">Element</option><option value="side-chains">Side chains</option><option value="origin">Origin</option><option value="aligned">Aligned residues</option><option value="hydrophobicity">Hydrophobicity</option><option value="secondary">Secondary structure</option><option value="plddt">pLDDT (from AlphaFold)</option><option value="difference">PDB-Homology model difference</option></select></div>
                     <div id="referenceColorControl" class="hidden inline-flex shrink-0 items-center gap-2 whitespace-nowrap"><label for="referenceColorSelect" class="text-slate-300">Colour Reference chains by</label><select id="referenceColorSelect" data-action-change="6" class="bg-slate-800 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs"><option value="same" selected>Same as homology model chains (default)</option><option value="chain">Chain (default)</option><option value="uniform">Uniform</option><option value="protein-id">Protein ID</option><option value="element">Element</option><option value="side-chains">Side chains</option><option value="origin">Origin</option><option value="aligned">Aligned residues</option><option value="hydrophobicity">Hydrophobicity</option><option value="secondary">Secondary structure</option><option value="plddt">pLDDT (from AlphaFold)</option><option value="difference">PDB-Homology model difference</option></select></div>
+                    <div id="springColorControl" class="hidden inline-flex shrink-0 items-center gap-2 whitespace-nowrap"><label for="springColorSelect" class="text-slate-300">Colour springs by</label><select id="springColorSelect" class="bg-slate-800 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs"><option value="strain" selected>Strain (default)</option><option value="origin">Origin</option></select></div>
                     <!-- Origin Filter Buttons (visible when in Origin mode to hide/show Reference PDB or AlphaFold residues) -->
                     <div id="originFilterBtns" class="hidden flex items-center gap-1.5">
+                        <span id="originReferenceToggles" style="display:none;gap:0.375rem;flex-wrap:wrap"></span>
                         <button id="toggleOriginPDBBtn" data-action-click="42" class="px-2.5 py-1.5 rounded-lg text-xs font-medium border border-sky-500/50 bg-sky-950/80 text-sky-300 hover:bg-sky-900 transition flex items-center gap-1.5 shadow" title="Click to show/hide residues with Reference PDB origin">
                             <span class="w-2 h-2 rounded-full inline-block shadow-sm" style="background-color: #3498db;"></span>
                             <span id="originPDBBtnText">Reference PDB</span>
@@ -618,7 +704,7 @@
             <div class="flex flex-wrap gap-5 items-center p-3 text-xs text-slate-300">
 <label id="physicsResidueSizeControl">Residue size <output id="physicsResidueValue">1.0×</output> <input aria-label="physics residue size" type="range" min="0" max="3" step="0.1" value="1" data-action-input="5"></label>
 <label id="physicsBackboneSizeControl">Backbone size <output id="physicsBackboneValue">2.0×</output> <input aria-label="physics backbone size" type="range" min="0" max="8" step="0.1" value="2" data-action-input="6"></label>
-<label id="physicsAtomSizeControl" class="hidden">Atom size <output id="physicsAtomValue">1.0×</output> <input aria-label="physics atom size" type="range" min="0" max="3" step="0.1" value="1" data-action-input="7"></label>
+<label id="physicsAtomSizeControl" class="hidden">Atom size <output id="physicsAtomValue">3.0×</output> <input aria-label="physics atom size" type="range" min="0" max="5" step="0.1" value="3" data-action-input="7"></label>
 <label id="physicsStickSizeControl" class="hidden">Stick size <output id="physicsStickValue">1.0×</output> <input aria-label="physics stick size" type="range" min="0" max="8" step="0.1" value="1" data-action-input="8"></label>
 <label id="physicsSurfaceSizeControl" class="hidden">Metaball size <output id="physicsSurfaceValue">0.8×</output> <input aria-label="physics metaball size" type="range" min="0" max="3" step="0.1" value="0.8" data-action-input="9"></label></div>
             <div id="physicsContainer" class="w-full h-[520px] relative bg-slate-950 flex items-center justify-center overflow-hidden cursor-grab active:cursor-grabbing">
@@ -633,10 +719,10 @@
 
                 <div class="absolute bottom-4 left-4 bg-slate-900/90 border border-slate-800 p-3 rounded-lg text-xs text-slate-300 shadow-xl backdrop-blur-md flex flex-col gap-1 pointer-events-auto">
                     <canvas id="springHistogram" class="mb-1" style="display:none; width:390px; height:161px;" width="1560" height="645" aria-label="Spring stretch histogram"></canvas>
-                    <div id="springColorKey" class="hidden"><span style="color:#93c5fd">Compressed</span> · <span style="color:#a78bfa">At rest</span> · <span style="color:#fca5a5">Stretched</span> (±50% strain)
+                    <div id="springColorKey" class="hidden"><span id="springStrainKey"><span style="color:#93c5fd">Compressed</span> · <span style="color:#a78bfa">At rest</span> · <span style="color:#fca5a5">Stretched</span> (±50% strain)</span><span id="springOriginKey" class="hidden"></span>
                         <button id="showSpringHistogramBtn" type="button" data-action-click="47" class="ml-2 px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[10px]">Show Histogram</button>
                     </div>
-                    <div id="physicsPulseKey" class="flex items-center gap-2"><i class="fa-solid fa-palette text-sky-400"></i> Residues with pulsing opacity are not in the Reference PDB <button id="pausePhysicsPulseBtn" type="button" data-action-click="48" class="rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-0.5 text-[10px]">Pause Pulsing</button></div>
+                    <div id="physicsPulseKey" class="flex items-center gap-2"><i class="fa-solid fa-palette text-sky-400"></i> Residues with pulsing opacity are not in the Reference PDB(s) <button id="pausePhysicsPulseBtn" type="button" data-action-click="48" class="rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-0.5 text-[10px]">Pause Pulsing</button></div>
                     <div id="physicsColourKey">Chain: each protein chain has a distinct colour.</div>
                     <div id="physicsDifferenceKey" class="hidden">PDB–Homology Cα distance: <span style="color:#38bdf8">0 Å</span> · <span style="color:#facc15">5 Å</span> · <span style="color:#ef4444">≥10 Å</span> · Grey and pulsing: no reference equivalent</div>
                     <div class="text-[10px] text-slate-400 mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
@@ -650,11 +736,21 @@
 
             <!-- Per-model morph influence controls -->
             <div class="bg-slate-950 px-6 py-4 border-t border-slate-800 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <label class="text-xs text-sky-400">Reference PDB influence on spring lengths and strengths <span id="model1InfluenceVal">100%</span><input id="model1InfluenceSlider" type="range" min="0" max="1" step="0.01" value="1" class="w-full"></label>
+                <div id="referenceInfluenceControls"><label class="text-xs text-sky-400">Reference PDB influence on spring lengths and strengths <span id="model1InfluenceVal">100%</span><input id="model1InfluenceSlider" type="range" min="0" max="1" step="0.01" value="1" class="w-full"></label></div>
                 <label class="text-xs text-teal-400">AlphaFold influence on spring lengths and strengths <span id="model2InfluenceVal">100%</span><input id="model2InfluenceSlider" type="range" min="0" max="1" step="0.01" value="1" class="w-full"></label>
             </div>
 
             <!-- All-Residue Mutual Repulsion Force Controller Bar (Below Physics Simulation) -->
+            <div class="bg-slate-950 px-6 py-4 border-t border-slate-800/80 flex flex-col md:flex-row items-center justify-between gap-4">
+                <div class="flex items-center gap-3 w-full md:w-auto">
+                    <div class="w-10 h-10 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 shrink-0 shadow-inner" aria-hidden="true"><i class="fa-solid fa-shield-halved text-base"></i></div>
+                    <div>
+                        <label for="stericClashRadiusSlider" class="text-xs font-semibold text-white">Steric clash exclusion radius <output id="stericClashRadiusValue" class="text-sky-300 font-mono">3.8 Å</output></label>
+                        <p class="text-[11px] text-slate-400 mt-0.5">Residue centres closer than this distance repel each other. The Other Physics Constraints slider controls the force strength.</p>
+                    </div>
+                </div>
+                <input type="range" id="stericClashRadiusSlider" min="2" max="8" step="0.1" value="3.8" aria-label="Steric clash exclusion radius" class="w-full md:w-7/12 h-2.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/50">
+            </div>
             <div class="bg-slate-950 px-6 py-4 border-t border-slate-800/80 flex flex-col md:flex-row items-center justify-between gap-4">
                 <div class="flex items-center gap-3 w-full md:w-auto">
                     <div class="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0 shadow-inner">
