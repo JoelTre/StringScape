@@ -8,7 +8,7 @@ The app is available here: https://stringscape.net/app
 
 The StringScape home page: https://stringscape.net
 
-StringScape all-atom homology builder: https://stringscape.net/homology_builder
+StringScape all-atom homology builder: https://stringscape.net/homology_modeller
 
 The source code (look in the folder 'app' above): https://github.com/JoelTre/StringScape/tree/main/app
 
