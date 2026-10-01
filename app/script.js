@@ -351,6 +351,7 @@
     let proteinComplexStructuresRenderToken = 0;
     let proteinComplexStructuresObserver = null;
     let proteinComplexStructuresSearchQuery = '';
+    let proteinComplexStructuresSort = 'least';
     let proteinComplexStructuresLoading = false;
     let proteinComplexStructuresPinnedPdbIds = new Set();
     let proteinComplexStructuresPlaceholderSrc = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stop-color="#293546"/><stop offset="100%" stop-color="#111822"/></linearGradient></defs><rect width="800" height="500" rx="32" fill="url(#g)"/><g fill="none" stroke="#6f8ca9" stroke-width="10" stroke-linecap="round" opacity="0.6"><line x1="296" y1="140" x2="318" y2="125"/><line x1="430" y1="135" x2="475" y2="170"/><line x1="360" y1="170" x2="340" y2="240"/><line x1="480" y1="220" x2="380" y2="270"/><line x1="275" y1="190" x2="310" y2="245"/></g><g fill="none" stroke="#6f8ca9" stroke-width="10" opacity="0.8"><circle cx="250" cy="150" r="46"/><circle cx="374" cy="120" r="56"/><circle cx="510" cy="190" r="42"/><circle cx="330" cy="300" r="62"/></g><text x="50%" y="88%" text-anchor="middle" font-family="Arial, sans-serif" font-size="28" fill="#a9c3da">Protein Complex Preview</text></svg>');    let nodeHoverTooltipTimer = null;
@@ -17670,13 +17671,16 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         if (overlay) overlay.style.display = 'none';
     }
 
-    async function renderProteinComplexStructureOverlay(entry) {
+    async function renderProteinComplexStructureOverlay(entry, inlineDetail = null) {
         const renderToken = ++proteinComplexStructureOverlayRenderToken;
         const overlay = ensureProteinComplexStructureOverlay();
-        const title = overlay.querySelector('.protein-complex-structure-title');
-        const subtitle = overlay.querySelector('.protein-complex-structure-subtitle');
-        const status = overlay.querySelector('.protein-complex-structure-status');
-        const host = overlay.querySelector('#protein-complex-structure-viewer-host');
+        const target = inlineDetail || overlay;
+        const title = target.querySelector('.protein-complex-structure-title');
+        const subtitle = target.querySelector('.protein-complex-structure-subtitle');
+        const status = target.querySelector('.protein-complex-structure-status');
+        const host = inlineDetail
+            ? target.querySelector('.protein-complex-structure-viewer-host')
+            : target.querySelector('#protein-complex-structure-viewer-host');
         if (!title || !subtitle || !status || !host) return;
 
         title.textContent = String(entry?.title || entry?.pdbId || 'Protein Complex Structures').trim();
@@ -17684,7 +17688,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         status.style.display = 'block';
         status.textContent = 'Loading structure from RCSB PDB...';
         host.innerHTML = '';
-        overlay.style.display = 'flex';
+        if (!inlineDetail) overlay.style.display = 'flex';
 
         disposeProteinComplexStructureOverlayViewer();
 
@@ -17771,6 +17775,64 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         renderProteinComplexStructureOverlay(entry);
     }
 
+    function createProteinComplexStructureDetail(entry) {
+        const detail = document.createElement('div');
+        detail.className = 'protein-complex-card-detail';
+        detail.setAttribute('aria-hidden', 'true');
+        detail.innerHTML = '<div class="protein-complex-homology-host"></div>';
+        return detail;
+    }
+
+    function toggleProteinComplexStructureDetails(entry, card, detail) {
+        const isExpanded = detail.classList.contains('expanded');
+        document.querySelectorAll('#protein-complex-structures-view .protein-complex-card.selected').forEach(selectedCard => {
+            selectedCard.classList.remove('selected');
+            selectedCard.setAttribute('aria-expanded', 'false');
+        });
+        document.querySelectorAll('#protein-complex-structures-view .protein-complex-card-detail.expanded').forEach(openDetail => {
+            openDetail.classList.remove('expanded');
+            openDetail.setAttribute('aria-hidden', 'true');
+            openDetail.remove();
+        });
+        disposeProteinComplexStructureOverlayViewer();
+        if (isExpanded) return;
+        const grid = card.closest('.protein-complex-card-grid');
+        const cardItems = Array.from(grid?.querySelectorAll(':scope > .protein-complex-card-item') || []);
+        const selectedItem = card.closest('.protein-complex-card-item');
+        const rowTop = selectedItem?.offsetTop;
+        const lastItemInRow = cardItems.filter(item => item.offsetTop === rowTop).pop() || selectedItem;
+        grid?.insertBefore(detail, lastItemInRow?.nextElementSibling || null);
+        card.classList.add('selected');
+        card.setAttribute('aria-expanded', 'true');
+        detail.classList.add('expanded');
+        detail.setAttribute('aria-hidden', 'false');
+        const nodeIds = Array.isArray(entry.nodeIds) ? entry.nodeIds : [];
+        const uniprotIds = [...new Set(nodeIds.map(getPreferredUniProtAliasForProtein).filter(Boolean))];
+        const fileCache = new Map();
+        const getFiles = () => {
+            const taxon = String(nodeIds[0] || '').split('.')[0];
+            const uploads = Object.entries(uploadedFileViewerData);
+            const select = pattern => {
+                const candidates = uploads.filter(([name, value]) => pattern.test(name) && typeof value.text === 'string');
+                const selected = candidates.find(([name]) => name.startsWith(taxon + '.')) || (candidates.length === 1 ? candidates[0] : null);
+                if (!selected) return null;
+                const [name, value] = selected;
+                if (fileCache.get(name)?.text !== value.text) fileCache.set(name, { text: value.text, file: new File([value.text], name, { type: 'text/plain' }) });
+                return fileCache.get(name).file;
+            };
+            return { sequences: select(/\.protein\.sequences\..*\.(fa|fasta)$/i), aliases: select(/\.protein\.aliases\..*\.txt$/i) };
+        };
+        window.StringScapeHomologyModeller.mount(detail.querySelector('.protein-complex-homology-host'), {
+            pdbId: entry.pdbId, uniprotIds, getFiles,
+            isLightMode: () => currentUiMode === 'light',
+            close: () => toggleProteinComplexStructureDetails(entry, card, detail),
+            missingProteins: nodeIds.filter(id => !getPreferredUniProtAliasForProtein(id)).map(id => proteinMetadata.get(id)?.preferred_name || id)
+        });
+        requestAnimationFrame(() => {
+            detail.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+    }
+
     function ensureProteinComplexStructuresView() {
         let view = document.getElementById('protein-complex-structures-view');
         if (!view) {
@@ -17792,11 +17854,14 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     function buildProteinComplexStructureCard(entry, speciesLabel, isPinned, onTogglePin) {
+        const cardItem = document.createElement('div');
+        cardItem.className = 'protein-complex-card-item';
         const card = document.createElement('article');
         card.className = 'protein-complex-card';
         card.dataset.pdbId = entry.pdbId;
         card.tabIndex = 0;
         card.setAttribute('role', 'button');
+        card.setAttribute('aria-expanded', 'false');
         card.setAttribute('aria-label', `Open ${entry.title || entry.pdbId}`);
 
         const pinButton = document.createElement('button');
@@ -17891,16 +17956,20 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         card.appendChild(body);
         card.appendChild(pinButton);
 
+        const detail = createProteinComplexStructureDetail(entry);
+        cardItem.appendChild(card);
+        detail._proteinComplexCard = card;
+
         card.addEventListener('click', event => {
             if (event.target.closest('a, button, input, textarea, select, label')) return;
-            openProteinComplexStructureOverlay(entry);
+            toggleProteinComplexStructureDetails(entry, card, detail);
         });
         card.addEventListener('keydown', event => {
             if (event.key !== 'Enter' && event.key !== ' ') return;
             event.preventDefault();
-            openProteinComplexStructureOverlay(entry);
+            toggleProteinComplexStructureDetails(entry, card, detail);
         });
-        return card;
+        return cardItem;
     }
 
     function clearProteinComplexStructuresLoadingState(view) {
@@ -18015,6 +18084,31 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         searchWrap.appendChild(searchLabel);
         searchWrap.appendChild(searchInput);
         toolbar.appendChild(searchWrap);
+        const sortMenu = document.createElement('details');
+        sortMenu.className = 'structures-sort';
+        const sortSummary = document.createElement('summary');
+        sortSummary.textContent = `Sort by: Number of proteins (${proteinComplexStructuresSort === 'most' ? 'most' : 'least'} first) ▾`;
+        sortMenu.appendChild(sortSummary);
+        const sortOptions = document.createElement('div');
+        sortOptions.className = 'structures-sort-menu';
+        for (const [value, label] of [['most', 'Number of proteins (most first)'], ['least', 'Number of proteins (least first)']]) {
+            const option = document.createElement('button');
+            option.type = 'button';
+            option.textContent = label;
+            option.classList.toggle('active', value === proteinComplexStructuresSort);
+            option.setAttribute('aria-pressed', String(value === proteinComplexStructuresSort));
+            option.addEventListener('click', () => {
+                proteinComplexStructuresSort = value;
+                sortMenu.open = false;
+                renderProteinComplexStructuresView();
+            });
+            sortOptions.appendChild(option);
+        }
+        sortMenu.appendChild(sortOptions);
+        sortMenu.addEventListener('keydown', event => { if (event.key === 'Escape') { sortMenu.open = false; sortSummary.focus(); } });
+        sortMenu.addEventListener('focusout', event => { if (!sortMenu.contains(event.relatedTarget)) sortMenu.open = false; });
+        toolbar.appendChild(sortMenu);
+
 
         hero.appendChild(heroCopy);
         hero.appendChild(toolbar);
@@ -18056,10 +18150,6 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
         const structureEntries = getProteinComplexStructureEntries();
         const renderLoadingSkeletons = () => {
-            const loadingOverlay = document.createElement('div');
-            loadingOverlay.className = 'structures-loading-overlay';
-            loadingOverlay.innerHTML = '<span>Loading dashboard...</span>';
-            shell.appendChild(loadingOverlay);
 
             const skeletonCount = Math.max(4, Math.min(8, Math.ceil((structureEntries.length || 6) / 2)));
             for (let index = 0; index < skeletonCount; index += 1) {
@@ -18099,6 +18189,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             ...entry,
             meta: proteinComplexStructuresMetadataById.get(entry.pdbId) || { title: '', species: [] }
         }));
+
+        records.sort((a, b) => {
+            const difference = new Set(a.nodeIds).size - new Set(b.nodeIds).size;
+            return (proteinComplexStructuresSort === 'least' ? difference : -difference) || a.pdbId.localeCompare(b.pdbId);
+        });
 
         const speciesCounts = new Map();
         records.forEach(record => {
@@ -18147,7 +18242,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     renderProteinComplexStructuresView();
                 }
             });
-            card.dataset.searchText = searchText;
+            card.querySelector('.protein-complex-card').dataset.searchText = searchText;
             if (!firstRealCardRendered) {
                 clearProteinComplexStructuresLoadingState(view);
                 firstRealCardRendered = true;
