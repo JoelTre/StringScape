@@ -169,6 +169,7 @@
         let springCutoffVal = 20.0;
 
         let allResidueRepulsionVal = 0.0; // 0.0 = off (acts as default), > 0 = all residues repel one another
+        let membraneRepulsionVal = 1.0;
         let otherConstraintsInfluence = 1.0; // 0.0 = off, 1.0 = full effect (backbone bonds, steric exclusion)
         let rigidBodySimulation = false; // true = protein chains act as rigid bodies
         let physicsOriginColorMode = false;
@@ -204,6 +205,7 @@
         let homologyStructureVisible = true;
         let alignedResiduesVisible = true;
         let unalignedResiduesVisible = true;
+        let nonProteinAtomsVisible = true;
         let physicsPulsePaused = false;
         let referenceColorMode = 'same';
         let physicsCenterOffset = { cx: 0, cy: 0, cz: 0 };
@@ -1368,6 +1370,7 @@
                 const {value, added}=appendStringUniProtIds(input.value,response.matches);
                 if(added.length) {
                     input.value=value;
+                    resizeStructureIdInputs();
                     input.classList.remove('string-id-glow');
                     void input.offsetWidth;
                     input.classList.add('string-id-glow');
@@ -2945,6 +2948,7 @@
 
         function initPhysicsSimulation() {
             cancelPendingSimulationRender();
+            disposeMembrane();
             disposeAtomRepresentation();
             disposeCartoonRepresentation();
             disposeBasePairLines();
@@ -3253,7 +3257,7 @@
 
         // Interactive chain visibility toggles for physics 3D view
         function physicsToggleColor(chainId,chainKeys) {
-            if(physicsColorMode==='uniform')return '#c4b5fd';
+            if(physicsColorMode==='uniform')return '#94a3b8';
             if(physicsColorMode==='protein-id'){
                 const node=physicsNodes.find(candidate=>candidate.res?.c1===chainId&&candidate.idx2!==null&&!candidate.res.referenceOnly);
                 return getProteinIdColor(node?.res.atoms2[node.idx2]?.sourcePdbId);
@@ -3317,7 +3321,9 @@
         function isNodeVisibleInPhysics(node) {
             if (!node?.res) return false;
             if (!homologyStructureVisible) return false;
-            if (node.usedInAlignment ? !alignedResiduesVisible : !unalignedResiduesVisible) return false;
+            if (node.res.entityType !== 'protein') {
+                if (!nonProteinAtomsVisible) return false;
+            } else if (node.usedInAlignment ? !alignedResiduesVisible : !unalignedResiduesVisible) return false;
             if (chainVisibility[node.res.c1] === false) return false;
             if (physicsOriginColorMode) {
                 const hasAF = node.idx2 !== null&&!node.res.referenceOnly;
@@ -3347,7 +3353,8 @@
 
             for (let b = 0; b < backboneChains.length; b++) {
                 const chain = backboneChains[b];
-                const isVisible = homologyStructureVisible && chainVisibility[chain.chainId] !== false;
+                const isVisible = homologyStructureVisible && chainVisibility[chain.chainId] !== false &&
+                    (physicsNodes[chain.start].res.entityType==='protein'||nonProteinAtomsVisible);
                 chain.line.visible = isVisible;
             }
 
@@ -3494,7 +3501,35 @@
                 child.visible = referenceOverlayVisibility[index] === true;
                 root.add(child);
             });
+            applyReferenceNonProteinVisibility(root);
             return root;
+        }
+        function applyReferenceNonProteinVisibility(root=model1OverlayGroup){
+            if(!root)return;
+            root.traverse(object=>{
+                if(object.isLine&&object.userData.chainId){
+                    const sourceChains=object.parent?.userData.sourceChains;
+                    object.visible=nonProteinAtomsVisible||sourceChains?.[object.userData.chainId]?.[0]?.entityType==='protein';
+                }
+                if(!object.isInstancedMesh||(!object.userData.residues&&!object.userData.referenceBonds))return;
+                const owner=object.parent?.userData.referenceCollection?object:object.parent;
+                const sourceChains=owner?.userData.sourceChains;
+                if(!sourceChains)return;
+                if(!object.userData.membraneVisibilityMatrices){
+                    const originals=[];
+                    for(let i=0;i<object.count;i++){const matrix=new THREE.Matrix4();object.getMatrixAt(i,matrix);originals.push(matrix);}
+                    object.userData.membraneVisibilityMatrices=originals;
+                }
+                const entries=object.userData.residues||object.userData.referenceBonds;
+                entries.forEach((entry,i)=>{
+                    const ends=Array.isArray(entry)?entry:[entry];
+                    const isNonProtein=ends.some(end=>sourceChains[end.chainId]?.[end.atomIdx]?.entityType!=='protein');
+                    const matrix=object.userData.membraneVisibilityMatrices[i].clone();
+                    if(isNonProtein&&!nonProteinAtomsVisible){matrix.elements[0]=matrix.elements[1]=matrix.elements[2]=0;matrix.elements[4]=matrix.elements[5]=matrix.elements[6]=0;matrix.elements[8]=matrix.elements[9]=matrix.elements[10]=0;}
+                    object.setMatrixAt(i,matrix);
+                });
+                object.instanceMatrix.needsUpdate=true;
+            });
         }
 
         function updateModel1AlignmentColors(group = model1OverlayGroup) {
@@ -3515,12 +3550,18 @@
                     }
                 }
             }
-            const sourceByChain = new Map();
+            const sourceByChain = new Map(),groupKeyByChain=new Map();
             for (const chainId of Object.keys(sourceChains || {})) {
                 const groupKey = referenceAssembly
                     ? referenceAssembly.groups.find(candidate => candidate.entries.get(group.userData.referenceIndex)?.chain === chainId)?.key
                     : chainId;
                 sourceByChain.set(chainId, sourceByGroupKey.get(groupKey));
+                groupKeyByChain.set(chainId,groupKey);
+            }
+            const referenceNodeByResidue=new Map();
+            for(let i=0;i<physicsNodes.length;i++){
+                const node=physicsNodes[i];
+                if(node.idx1!==null)referenceNodeByResidue.set(`${node.res.c1}:${node.idx1}`,i);
             }
             if (showModel1Overlay && (referenceColorMode === 'difference' || (referenceColorMode === 'same' && physicsColorMode === 'difference'))) {
                 for (const node of physicsNodes) {
@@ -3534,9 +3575,14 @@
             const residueColor = (chainId, atomIdx, source) => {
                 const atom = sourceChains[chainId]?.[atomIdx];
                 const afAtom = equivalentAF.get(chainId)?.get(atomIdx);
+                const referenceNodeIndex=referenceNodeByResidue.get(`${groupKeyByChain.get(chainId)}:${atomIdx}`);
                 const color = mode === 'chain' || mode === 'side-chains' ? getChainColor(chainId, chainKeys)
+                    : mode === 'membrane' ? membraneResidueDisplayColor(referenceNodeIndex)
+                    : mode === 'membrane-placement' ? membranePlacementResidueColor(referenceNodeIndex,atom)
+                    : mode === 'membrane-repelled' ? (referenceNodeIndex!==undefined&&isMembraneRepelledResidue(
+                        physicsNodes[referenceNodeIndex],referenceNodeIndex,inferredMembrane,membraneRepulsionVal)?'#f97316':'#94a3b8')
                     : mode === 'element' ? ELEMENT_COLORS.C
-                    : mode === 'uniform' ? '#c4b5fd'
+                    : mode === 'uniform' ? '#94a3b8'
                     : mode === 'protein-id' ? getProteinIdColor(sourceByChain.get(chainId))
                     : mode === 'origin' ? '#3498db'
                     : mode === 'plddt' ? physicsResidueColor(afAtom, 'plddt')
@@ -3582,7 +3628,7 @@
             }
         }
         function setReferenceColorMode(mode) {
-            if (!['same','chain','uniform','protein-id','element','side-chains','origin','aligned','hydrophobicity','secondary','plddt','difference'].includes(mode)) return;
+            if (!['same','chain','uniform','protein-id','element','side-chains','origin','aligned','membrane','membrane-placement','membrane-repelled','charge','hydrophobicity','secondary','plddt','difference'].includes(mode)) return;
             referenceColorMode = mode;
             updateModel1AlignmentColors();
             if (physicsRenderer && physicsScene && physicsCamera) physicsRenderer.render(physicsScene, physicsCamera);
@@ -3662,7 +3708,8 @@
         function updateBackboneLines() {
             for (let b = 0; b < backboneChains.length; b++) {
                 const chain = backboneChains[b];
-                const isVisible = homologyStructureVisible && chainVisibility[chain.chainId] !== false;
+                const isVisible = homologyStructureVisible && chainVisibility[chain.chainId] !== false &&
+                    (physicsNodes[chain.start].res.entityType==='protein'||nonProteinAtomsVisible);
                 chain.line.visible = isVisible;
                 if (!isVisible) continue;
 
@@ -4040,6 +4087,12 @@
                 }
             }
 
+            // Only unaligned AlphaFold protein residues outside the inferred
+            // membrane set feel this weak visual-environment constraint.
+            if (inferredMembrane && membraneRepulsionVal > 0) {
+                applyMembraneRepulsion(physicsNodes, fx, fy, fz, inferredMembrane, membraneRepulsionVal);
+            }
+
             // 3. Integration Step: Rigid Body vs Flexible Particles
             if (rigidBodySimulation) {
                 // Protein chains act as rigid bodies (inter-chain forces move & rotate entire chains as solid entities)
@@ -4213,6 +4266,839 @@
             PerfTracker.metrics.physicsStepTime = performance.now() - t0;
         }
 
+        // Membrane inference is independent of the elastic network. The detector returns
+        // plain geometry; only the renderer below knows about Three.js.
+        let inferredMembrane = null;
+        let membraneMeshes = null;
+        let membraneLipids = null;
+        let membraneLastInference = 0;
+        let membraneDisplayedExtent = null;
+        let membraneExtentLastFrame = 0;
+        let membraneVisible = false;
+        let membraneSliced = false;
+        let membraneSliceAngle = 0;
+        let membraneSizeScale = 1;
+        let lipidsVisible = true;
+        let membraneDetectionStats = null;
+        let membranePlacementExposureCache = null;
+        let membraneRepelledColorMask = null;
+        const membraneRepulsionActive = new Set();
+        function renderMembraneDetectionStats(){
+            const label=document.getElementById('membraneDetectionStats');
+            if(!label)return;
+            const s=membraneDetectionStats;
+            if(!s){label.textContent='Membrane: waiting for structure.';return;}
+            const parts=[`Membrane: ${s.detected?'detected':`not detected${s.reason?` (${s.reason})`:''}`}`,
+                `${s.samples} residues sampled`,`${s.candidates??0} orientations`,
+                `${s.helixWindows??0} hydrophobic helix windows`];
+            if(s.axis){parts.push(`axis [${s.axis.map(v=>v.toFixed(2)).join(', ')}]`,`coherence ${s.coherence.toFixed(2)}`);}
+            if(s.score!==undefined)parts.push(`score ${s.score.toFixed(3)}`,`hydrophobic inside/outside ${s.insideDensity.toFixed(2)}/${s.outsideDensity.toFixed(2)}`,
+                `effective hydrophobic/inside residues ${s.effectiveHydrophobicCount.toFixed(1)}/${s.effectiveInsideCount.toFixed(1)}`,
+                `mean exposure ${s.meanExposure.toFixed(3)}`,`candidate half-thickness ${s.halfThickness.toFixed(1)} Å`);
+            if(s.curvatureGain!==undefined)parts.push(`curvature ${s.curved?'accepted':'rejected'} (gain ${s.curvatureGain.toFixed(3)})`);
+            if(s.detected)parts.push(`${s.members} associated residues`,
+                `${s.transmembraneHelices??0} spanning helices · ${s.transmembraneSheets??0} spanning sheets`,
+                `${s.curved?'curved':'flat'} · ${s.thickness.toFixed(1)} Å thick`);
+            parts.push(`${s.durationMs.toFixed(1)} ms`);
+            label.textContent=parts.join(' · ');
+        }
+        function membraneCoordinates(point,geometry){
+            const d=[point.x-geometry.center[0],point.y-geometry.center[1],point.z-geometry.center[2]];
+            const dot=axis=>d[0]*axis[0]+d[1]*axis[1]+d[2]*axis[2];
+            const x=dot(geometry.u),y=dot(geometry.v);
+            const [a,b,c]=geometry.curvature;
+            return {x,y,signed:dot(geometry.normal)-(a*x*x+b*x*y+c*y*y)};
+        }
+        function membraneResidueDisplayColor(index,nodes=physicsNodes,geometry=inferredMembrane){
+            if(!geometry||!nodes[index])return '#7dd3fc';
+            if(geometry.transmembraneSet?.has(index)){
+                const p=membraneCoordinates(nodes[index],geometry);
+                return Math.abs(p.signed)<=geometry.halfThickness&&
+                    Math.abs(p.x)<=geometry.extent&&Math.abs(p.y)<=geometry.extent?'#ef4444':'#7dd3fc';
+            }
+            return geometry.memberSet?.has(index)?'#f97316':'#7dd3fc';
+        }
+        function completeMembraneMembers(geometry,nodes){
+            const members=new Set(geometry.memberIndices);
+            for(let i=0;i<nodes.length;i++){
+                const residue=membraneResidue(nodes[i]);
+                if(!residue)continue;
+                const hydro=Math.max(0,Math.min(1,(HYDROPHOBICITY[residue.aa]+1.5)/5));
+                if(hydro<=.35)continue;
+                const p=membraneCoordinates(nodes[i],geometry);
+                if(Math.abs(p.signed)<geometry.halfThickness+3&&Math.abs(p.x)<=geometry.extent&&Math.abs(p.y)<=geometry.extent)members.add(i);
+            }
+            geometry.memberIndices=[...members];
+            geometry.memberSet=members;
+            classifyTransmembraneSegments(geometry,nodes);
+        }
+        function classifyTransmembraneSegments(geometry,nodes){
+            const detected=new Set();
+            let helices=0,sheets=0;
+            const assess=(start,end,type)=>{
+                const length=end-start,minLength=type==='helix'?10:5;
+                if(length<minLength)return;
+                const positions=[];
+                for(let i=start;i<end;i++)positions.push(membraneCoordinates(nodes[i],geometry));
+                const inside=positions.filter(p=>Math.abs(p.signed)<=geometry.halfThickness+3&&
+                    Math.abs(p.x)<=geometry.extent&&Math.abs(p.y)<=geometry.extent).length;
+                if(inside<minLength*.65||inside/length<.45)return;
+                const signed=positions.map(p=>p.signed),min=Math.min(...signed),max=Math.max(...signed);
+                if(min>=-geometry.halfThickness*.25||max<=geometry.halfThickness*.25||
+                    max-min<geometry.halfThickness*(type==='helix'?1.1:.65))return;
+                const first=nodes[start],last=nodes[end-1];
+                const dx=last.x-first.x,dy=last.y-first.y,dz=last.z-first.z;
+                const alignment=Math.abs((dx*geometry.normal[0]+dy*geometry.normal[1]+dz*geometry.normal[2])/(Math.hypot(dx,dy,dz)||1));
+                if(alignment<.45)return;
+                for(let i=start;i<end;i++)detected.add(i);
+                if(type==='helix')helices++;else sheets++;
+            };
+            for(let i=0;i<nodes.length;){
+                const node=nodes[i],type=membraneResidue(node)?.secondary;
+                if(type!=='helix'&&type!=='sheet'){i++;continue;}
+                let j=i+1;
+                while(j<nodes.length&&nodes[j].blockIdx===node.blockIdx&&membraneResidue(nodes[j])?.secondary===type)j++;
+                assess(i,j,type);i=j;
+            }
+            geometry.transmembraneSet=detected;
+            geometry.transmembraneHelices=helices;
+            geometry.transmembraneSheets=sheets;
+        }
+        function membraneRepulsionFactor(node,index,geometry,strength,record=false){
+            if(!geometry||strength<=0||node.res?.entityType!=='protein'||node.usedInAlignment||
+                !isModel2Only(node)||((geometry.memberSet?.has(index)||geometry.transmembraneSet?.has(index))&&
+                !membraneRepulsionActive.has(index)))return 0;
+            const p=membraneCoordinates(node,geometry);
+            const outside=Math.abs(p.signed)-geometry.halfThickness;
+            const lateral=Math.hypot(Math.max(0,Math.abs(p.x)-geometry.extent),Math.max(0,Math.abs(p.y)-geometry.extent));
+            if(outside<0&&lateral===0){
+                if(record)membraneRepulsionActive.add(index);
+                return Math.min(8,1-outside);
+            }
+            const distance=Math.hypot(Math.max(0,outside),lateral);
+            if(record&&distance<=6)membraneRepulsionActive.add(index);
+            if(!membraneRepulsionActive.has(index))return 0;
+            return 1/(1+distance/4)**2;
+        }
+        function isMembraneRepelledResidue(node,index,geometry,strength){
+            return membraneRepulsionFactor(node,index,geometry,strength)>0;
+        }
+        function membraneRepelledColorsChanged(){
+            const next=new Uint8Array(physicsNodes.length);
+            let changed=!membraneRepelledColorMask||membraneRepelledColorMask.length!==next.length;
+            for(let i=0;i<physicsNodes.length;i++){
+                next[i]=Number(isMembraneRepelledResidue(physicsNodes[i],i,inferredMembrane,membraneRepulsionVal));
+                if(!changed&&next[i]!==membraneRepelledColorMask[i])changed=true;
+            }
+            membraneRepelledColorMask=next;
+            return changed;
+        }
+        function applyMembraneRepulsion(nodes,fx,fy,fz,geometry,strength){
+            if(!geometry||strength<=0)return 0;
+            let affected=0;
+            for(let i=0;i<nodes.length;i++){
+                const node=nodes[i];
+                const factor=membraneRepulsionFactor(node,i,geometry,strength,true);
+                if(factor<=0)continue;
+                const p=membraneCoordinates(node,geometry);
+                const [a,b,c]=geometry.curvature;
+                const gx=2*a*p.x+b*p.y,gy=b*p.x+2*c*p.y;
+                const normal=geometry.normal.map((v,k)=>v-gx*geometry.u[k]-gy*geometry.v[k]);
+                const edgeX=Math.sign(p.x)*Math.max(0,Math.abs(p.x)-geometry.extent);
+                const edgeY=Math.sign(p.y)*Math.max(0,Math.abs(p.y)-geometry.extent);
+                const beyond=Math.sign(p.signed)*Math.max(0,Math.abs(p.signed)-geometry.halfThickness);
+                const direction=edgeX||edgeY||beyond
+                    ? normal.map((v,k)=>v*beyond+geometry.u[k]*edgeX+geometry.v[k]*edgeY)
+                    : normal.map(v=>v*(p.signed<0?-1:1));
+                const length=Math.hypot(...direction)||1,force=130*strength*factor/length;
+                fx[i]+=direction[0]*force;fy[i]+=direction[1]*force;fz[i]+=direction[2]*force;
+                affected++;
+            }
+            return affected;
+        }
+        function updateMembraneToggleUI(){
+            const button=document.getElementById('toggleMembraneStructure');
+            const lipidButton=document.getElementById('toggleLipidStructure');
+            const absent=document.getElementById('noMembraneDetected');
+            if(!button||!absent)return;
+            const detected=Boolean(inferredMembrane);
+            button.classList.toggle('hidden',!detected);
+            lipidButton?.classList.toggle('hidden',!detected);
+            absent.classList.toggle('hidden',detected);
+            if(detected){updatePhysicsToggleButton('toggleMembraneStructure',membraneVisible);if(lipidButton)updatePhysicsToggleButton('toggleLipidStructure',lipidsVisible);}
+            const sliceButton=document.getElementById('sliceMembraneBtn');
+            if(sliceButton){sliceButton.disabled=!detected;sliceButton.textContent=membraneSliced?'Show full membrane':'Slice membrane';sliceButton.setAttribute('aria-pressed',String(membraneSliced));}
+            document.getElementById('membraneSliceAngleControl')?.classList.toggle('hidden',!detected||!membraneSliced);
+            const sizeSlider=document.getElementById('membraneSizeSlider');if(sizeSlider)sizeSlider.disabled=!detected;
+        }
+        const MEMBRANE_DIRECTIONS = (() => {
+            const dirs=[];
+            for(let i=0;i<26;i++){
+                const z=1-2*(i+.5)/26, theta=i*2.399963229728653;
+                const r=Math.sqrt(1-z*z);dirs.push([r*Math.cos(theta),r*Math.sin(theta),z]);
+            }
+            return dirs;
+        })();
+        function membraneResidue(node) {
+            if(node.res?.entityType==='other'||node.res?.entityType==='nucleotide')return null;
+            const atom=node.idx2!==null?node.res.atoms2?.[node.idx2]:node.res.atoms1?.[node.idx1];
+            const aa=atom?.singleChar;
+            return Object.prototype.hasOwnProperty.call(HYDROPHOBICITY,aa) ? {aa,secondary:atom.secondaryType||'coil'} : null;
+        }
+        function membraneSamples(includeAll=false) {
+            const eligible=[];
+            for(let i=0;i<physicsNodes.length;i++){
+                const residue=membraneResidue(physicsNodes[i]);
+                if(residue)eligible.push({index:i,node:physicsNodes[i],...residue});
+            }
+            if(!includeAll&&eligible.length<35)return [];
+            const stride=includeAll?1:Math.max(1,Math.ceil(eligible.length/600));
+            const samples=eligible.filter((_,i)=>i%stride===0);
+            // Residue-level accessibility proxy: combine open directions on a C-alpha
+            // probe shell with local packing. A C-alpha is inside the backbone, so
+            // shell visibility alone badly underestimates exposed side chains.
+            const cell=11,grid=new Map();
+            for(let i=0;i<eligible.length;i++){
+                const p=eligible[i].node,key=`${Math.floor(p.x/cell)}:${Math.floor(p.y/cell)}:${Math.floor(p.z/cell)}`;
+                if(!grid.has(key))grid.set(key,[]);grid.get(key).push(i);
+            }
+            let cx=0,cy=0,cz=0;
+            for(const item of eligible){cx+=item.node.x;cy+=item.node.y;cz+=item.node.z;}
+            cx/=eligible.length;cy/=eligible.length;cz/=eligible.length;
+            for(const item of samples){
+                const p=item.node,gx=Math.floor(p.x/cell),gy=Math.floor(p.y/cell),gz=Math.floor(p.z/cell),neighbors=[];
+                for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)for(let dz=-1;dz<=1;dz++)
+                    for(const j of grid.get(`${gx+dx}:${gy+dy}:${gz+dz}`)||[])if(eligible[j].index!==item.index)neighbors.push(eligible[j].node);
+                let open=0,outward=0;
+                const radial=[p.x-cx,p.y-cy,p.z-cz],radialLength=Math.hypot(...radial)||1;
+                for(const d of MEMBRANE_DIRECTIONS){
+                    const sx=p.x+5*d[0],sy=p.y+5*d[1],sz=p.z+5*d[2];
+                    let blocked=false;
+                    for(const q of neighbors)if((sx-q.x)**2+(sy-q.y)**2+(sz-q.z)**2<23){blocked=true;break;}
+                    if(!blocked){open++;outward+=Math.max(0,(d[0]*radial[0]+d[1]*radial[1]+d[2]*radial[2])/radialLength);}
+                }
+                let packed=0;
+                for(const q of neighbors)if((p.x-q.x)**2+(p.y-q.y)**2+(p.z-q.z)**2<81)packed++;
+                const shellAccessibility=open/MEMBRANE_DIRECTIONS.length;
+                const packingAccessibility=1/(1+packed/10);
+                item.sasa=Math.max(shellAccessibility,packingAccessibility);
+                // An accessible direction pointing away from the complex centre
+                // is evidence of exterior exposure. Do not divide by all probes:
+                // doing so reduced a genuine MotAB belt almost to zero weight.
+                item.exterior=open?outward/open:.5;
+                item.exposure=item.sasa*item.sasa*(.5+.5*item.exterior);
+                const hydro=HYDROPHOBICITY[item.aa];
+                item.hydrophobic=Math.max(0,Math.min(1,(hydro+1.5)/5));
+                item.polar=['D','E','K','R','H'].includes(item.aa)?1:.5*(1-item.hydrophobic);
+                item.charge=['D','E','K','R'].includes(item.aa)?1:item.aa==='H'?.35:0;
+            }
+            return samples;
+        }
+        function membranePlacementExposure(index) {
+            if(!membranePlacementExposureCache||membranePlacementExposureCache.nodes!==physicsNodes||
+                membranePlacementExposureCache.count!==physicsNodes.length){
+                membranePlacementExposureCache={nodes:physicsNodes,count:physicsNodes.length,
+                    values:new Map(membraneSamples(true).map(sample=>[sample.index,sample.exposure]))};
+            }
+            return membranePlacementExposureCache.values.get(index)??0;
+        }
+        function membranePlacementResidueColor(index,atom=null) {
+            const residue=index===undefined?null:membraneResidue(physicsNodes[index]);
+            const aa=residue?.aa??atom?.singleChar;
+            if(!aa)return '#94a3b8';
+            const exposure=index===undefined?0.5:membranePlacementExposure(index);
+            const charge=['D','E','K','R'].includes(aa)?1:aa==='H'?.35:0;
+            const hydrophobicity=Math.max(0,HYDROPHOBICITY[aa]??0)/4.5;
+            const strength=Math.min(1,1.6*Math.sqrt(exposure)*(charge||hydrophobicity));
+            if(strength<=0)return '#94a3b8';
+            return new THREE.Color('#94a3b8').lerp(new THREE.Color(charge?'#2563eb':'#ef4444'),strength);
+        }
+        function membraneBasis(normal){
+            const n=new THREE.Vector3(...normal).normalize();
+            const u=new THREE.Vector3(0,1,0);
+            if(Math.abs(n.dot(u))>.9)u.set(1,0,0);
+            u.addScaledVector(n,-u.dot(n)).normalize();
+            const v=new THREE.Vector3().crossVectors(n,u).normalize();
+            return {n,u,v};
+        }
+        function membraneAxisEvidence(samples){
+            const source=physicsNodes.length?physicsNodes.map((node,index)=>({node,index,...(membraneResidue(node)||{})})):samples;
+            const chains=new Map();
+            for(const item of source){
+                if(!item.aa)continue;
+                const key=item.node.blockIdx;
+                if(!chains.has(key))chains.set(key,[]);
+                chains.get(key).push(item);
+            }
+            const axes=[];
+            for(const chain of chains.values())for(let i=0;i+18<chain.length;i+=3){
+                const window=chain.slice(i,i+19);
+                if(window[18].index-window[0].index!==18)continue;
+                const hydrophobicity=window.reduce((sum,item)=>sum+Math.max(0,Math.min(1,(HYDROPHOBICITY[item.aa]+1.5)/5)),0)/window.length;
+                if(hydrophobicity<.58)continue;
+                const a=window[0].node,b=window[18].node;
+                const dx=b.x-a.x,dy=b.y-a.y,dz=b.z-a.z,len=Math.hypot(dx,dy,dz);
+                if(len<20||len>40)continue;
+                axes.push({direction:[dx/len,dy/len,dz/len],weight:hydrophobicity*len/27});
+            }
+            if(axes.length<3)return null;
+            const matrix=Array.from({length:3},()=>[0,0,0]);
+            let total=0;
+            for(const {direction:d,weight:w} of axes){total+=w;for(let i=0;i<3;i++)for(let j=0;j<3;j++)matrix[i][j]+=w*d[i]*d[j];}
+            let axis=[0,1,0];
+            const largest=[0,1,2].sort((a,b)=>matrix[b][b]-matrix[a][a])[0];axis=[0,0,0];axis[largest]=1;
+            for(let step=0;step<16;step++){
+                const next=matrix.map(row=>row[0]*axis[0]+row[1]*axis[1]+row[2]*axis[2]);
+                const length=Math.hypot(...next)||1;axis=next.map(v=>v/length);
+            }
+            const coherence=axes.reduce((sum,{direction:d,weight:w})=>sum+w*(d[0]*axis[0]+d[1]*axis[1]+d[2]*axis[2])**2,0)/total;
+            return {axis,coherence,count:axes.length};
+        }
+        function membraneCandidateNormals(samples,evidence){
+            const normals=[];
+            const add=d=>{
+                const len=Math.hypot(...d);if(len<1e-5)return;
+                const n=d.map(x=>x/len);
+                if(!normals.some(q=>Math.abs(q[0]*n[0]+q[1]*n[1]+q[2]*n[2])>.97))normals.push(n);
+            };
+            if(evidence?.coherence>.55)add(evidence.axis);
+            // Long hydrophobic helices provide transmembrane-axis candidates.
+            const byChain=new Map();
+            for(const s of samples){const k=s.node.blockIdx;if(!byChain.has(k))byChain.set(k,[]);byChain.get(k).push(s);}
+            for(const chain of byChain.values()){
+                let run=[];
+                const flush=()=>{if(run.length>=12&&run.reduce((sum,s)=>sum+s.hydrophobic,0)/run.length>.43){
+                    const a=run[0].node,b=run[run.length-1].node;add([b.x-a.x,b.y-a.y,b.z-a.z]);
+                }run=[];};
+                for(const s of chain){if(s.secondary==='helix'&&s.hydrophobic>.22)run.push(s);else flush();}flush();
+            }
+            // A barrel's strands surround its axis. Their long directions supply
+            // a starting axis; the spherical fallback handles imperfect assignments.
+            const sheets=samples.filter(s=>s.secondary==='sheet'&&s.hydrophobic>.25);
+            if(sheets.length>=12){
+                let dx=0,dy=0,dz=0;
+                for(let i=1;i<sheets.length;i++)if(sheets[i].node.blockIdx===sheets[i-1].node.blockIdx){
+                    const a=sheets[i-1].node,b=sheets[i].node;dx+=b.x-a.x;dy+=b.y-a.y;dz+=b.z-a.z;
+                }add([dx,dy,dz]);
+            }
+            // Deterministic coarse sphere, used when motifs are absent or incomplete.
+            for(let i=0;i<42;i++){
+                const z=1-2*(i+.5)/42,a=i*2.399963229728653,r=Math.sqrt(1-z*z);
+                add([r*Math.cos(a),r*Math.sin(a),z]);
+            }
+            return normals;
+        }
+        function scoreMembrane(samples,center,normal,halfThickness,curvature=null){
+            const {n,u,v}=membraneBasis(normal),o=new THREE.Vector3(...center);
+            let reward=0,insideHydro=0,insidePolar=0,outsideHydro=0,insideExposure=0,outsideExposure=0;
+            for(const s of samples){
+                const p=s.node,d=new THREE.Vector3(p.x-o.x,p.y-o.y,p.z-o.z);
+                const x=d.dot(u),y=d.dot(v),z=d.dot(n);
+                const curve=curvature?curvature[0]*x*x+curvature[1]*x*y+curvature[2]*y*y:0;
+                const inside=Math.max(0,Math.min(1,(halfThickness+2-Math.abs(z-curve))/4));
+                const e=s.exposure,h=s.hydrophobic,polar=s.polar,charge=s.charge??0;
+                reward+=e*(inside*(1.55*h-1.6*polar-2*charge)+
+                    (1-inside)*(.45*polar+charge-.8*h));
+                insideHydro+=e*inside*h;insidePolar+=e*inside*polar;insideExposure+=e*inside;
+                outsideHydro+=e*(1-inside)*h;outsideExposure+=e*(1-inside);
+            }
+            const insideDensity=insideHydro/Math.max(1e-6,insideExposure);
+            const outsideDensity=outsideHydro/Math.max(1e-6,outsideExposure);
+            return {score:reward/Math.max(1,samples.length),insideHydro,insidePolar,insideExposure,insideDensity,outsideDensity};
+        }
+        function inferMembraneGeometry(samples,diagnostics={}){
+            if(samples.length<35){diagnostics.reason='too few protein residues';return null;}
+            const meanExposure=samples.reduce((sum,s)=>sum+s.exposure,0)/samples.length;
+            let best=null;
+            const center=[0,0,0];for(const s of samples){center[0]+=s.node.x;center[1]+=s.node.y;center[2]+=s.node.z;}
+            for(let j=0;j<3;j++)center[j]/=samples.length;
+            const evidence=membraneAxisEvidence(samples);
+            diagnostics.helixWindows=evidence?.count??0;
+            if(evidence){diagnostics.axis=evidence.axis;diagnostics.coherence=evidence.coherence;}
+            const rank=(result,normal)=>{
+                if(!evidence||evidence.coherence<=.55)return result.score;
+                const alignment=Math.abs(normal[0]*evidence.axis[0]+normal[1]*evidence.axis[1]+normal[2]*evidence.axis[2]);
+                return result.score+.045*evidence.coherence*(alignment*alignment-1/3);
+            };
+            const test=(normal,offset,halfThickness)=>{
+                const origin=center.map((c,i)=>c+normal[i]*offset);
+                const result=scoreMembrane(samples,origin,normal,halfThickness);
+                const candidateRank=rank(result,normal);
+                if(!best||candidateRank>best.rank)best={...result,rank:candidateRank,center:origin,normal,halfThickness};
+            };
+            const normals=membraneCandidateNormals(samples,evidence);
+            diagnostics.candidates=normals.length;
+            for(const normal of normals)for(const offset of [-36,-24,-12,0,12,24,36])for(const half of [11,14,17])test(normal,offset,half);
+            if(!best)return null;
+            // Local angular, position, and thickness refinement.
+            for(const step of [.24,.1,.04]){
+                const {u,v}=membraneBasis(best.normal);
+                const current={...best};
+                for(const axis of [u,v])for(const sign of [-1,1]){
+                    const n=new THREE.Vector3(...current.normal).addScaledVector(axis,sign*step).normalize();
+                    for(const shift of [-4,0,4])for(const half of [current.halfThickness-2,current.halfThickness,current.halfThickness+2]){
+                        if(half<10||half>19)continue;
+                        const origin=current.center.map((c,i)=>c+n.getComponent(i)*shift);
+                        const result=scoreMembrane(samples,origin,n.toArray(),half);
+                        const candidateRank=rank(result,n.toArray());
+                        if(candidateRank>best.rank)best={...result,rank:candidateRank,center:origin,normal:n.toArray(),halfThickness:half};
+                    }
+                }
+            }
+            // Reject a hydrophobic patch masquerading as a continuous belt.
+            const effectiveHydrophobicCount=best.insideHydro/Math.max(.01,meanExposure);
+            const effectiveInsideCount=best.insideExposure/Math.max(.01,meanExposure);
+            Object.assign(diagnostics,{score:best.score,insideDensity:best.insideDensity,outsideDensity:best.outsideDensity,
+                effectiveHydrophobicCount,effectiveInsideCount,meanExposure,halfThickness:best.halfThickness});
+            if(effectiveHydrophobicCount<15||effectiveInsideCount<30||best.insideDensity<.46||
+                best.insideDensity-best.outsideDensity<.13||best.insideHydro<best.insidePolar*.8){
+                diagnostics.reason='no convincing exposed hydrophobic belt';
+                return null;
+            }
+            const {n,u,v}=membraneBasis(best.normal),origin=new THREE.Vector3(...best.center);
+            const associated=[];let maxR=0;
+            for(const s of samples){
+                const d=new THREE.Vector3(s.node.x-origin.x,s.node.y-origin.y,s.node.z-origin.z);
+                const x=d.dot(u),y=d.dot(v),z=d.dot(n);
+                if(Math.abs(z)<best.halfThickness+3&&s.hydrophobic>.35){associated.push({index:s.index,x,y,z,weight:s.exposure*s.hydrophobic,initial:[s.node.x,s.node.y,s.node.z]});maxR=Math.max(maxR,Math.hypot(x,y));}
+            }
+            if(associated.length<18){diagnostics.reason='too few membrane-associated residues';return null;}
+            // Fit a shallow quadratic around the selected midplane, without an
+            // intercept that would duplicate the fitted plane offset.
+            let curvature=[0,0,0];
+            if(associated.length>=30&&maxR>12){
+                const terms=associated.map(p=>[p.x*p.x,p.x*p.y,p.y*p.y]);
+                const A=Array.from({length:3},()=>[0,0,0]),b=[0,0,0];
+                for(let i=0;i<associated.length;i++)for(let j=0;j<3;j++){
+                    const w=associated[i].weight; b[j]+=w*terms[i][j]*associated[i].z;
+                    for(let k=0;k<3;k++)A[j][k]+=w*terms[i][j]*terms[i][k];
+                }
+                for(let j=0;j<3;j++)A[j][j]+=maxR**4*.02;
+                for(let j=0;j<3;j++){
+                    let pivot=j;for(let k=j+1;k<3;k++)if(Math.abs(A[k][j])>Math.abs(A[pivot][j]))pivot=k;
+                    [A[j],A[pivot]]=[A[pivot],A[j]];[b[j],b[pivot]]=[b[pivot],b[j]];
+                    if(Math.abs(A[j][j])<1e-9)break;
+                    const scale=A[j][j];for(let k=j;k<3;k++)A[j][k]/=scale;b[j]/=scale;
+                    for(let row=0;row<3;row++)if(row!==j){const f=A[row][j];for(let k=j;k<3;k++)A[row][k]-=f*A[j][k];b[row]-=f*b[j];}
+                }
+                const candidate=b.map(c=>Math.max(-8/maxR**2,Math.min(8/maxR**2,c)));
+                const curved=scoreMembrane(samples,best.center,best.normal,best.halfThickness,candidate);
+                // Demand a meaningful gain and resist overfitting a nearly flat belt.
+                if(curved.score>best.score*1.08&&curved.score-best.score>.012)curvature=candidate;
+                diagnostics.curvatureGain=curved.score-best.score;
+            }
+            diagnostics.curved=curvature.some(Boolean);
+            const extent=Math.min(110,Math.max(22,maxR+12));
+            const anchorMean=[0,0,0];
+            for(const p of associated){anchorMean[0]+=p.x;anchorMean[1]+=p.y;anchorMean[2]+=p.z;}
+            for(let i=0;i<3;i++)anchorMean[i]/=associated.length;
+            return {center:best.center,normal:best.normal,u:u.toArray(),v:v.toArray(),halfThickness:best.halfThickness,
+                curvature,extent,memberIndices:associated.map(p=>p.index),anchors:associated.map(p=>({index:p.index,x:p.x-anchorMean[0],y:p.y-anchorMean[1],initial:p.initial})),anchorMean,
+                trackingFrame:{center:best.center.slice(),u:u.toArray(),v:v.toArray(),normal:n.toArray()},
+                confidence:best.insideDensity-best.outsideDensity};
+        }
+        function trackMembraneGeometry(geometry){
+            if(!geometry?.anchors?.length)return geometry;
+            let count=0,cx=0,cy=0,cz=0,xx=0,xy=0,yy=0;
+            const ux=[0,0,0],vx=[0,0,0];
+            for(const a of geometry.anchors){const p=physicsNodes[a.index];if(!p)continue;
+                const dx=p.x-a.initial[0],dy=p.y-a.initial[1],dz=p.z-a.initial[2];
+                count++;cx+=dx;cy+=dy;cz+=dz;xx+=a.x*a.x;xy+=a.x*a.y;yy+=a.y*a.y;
+                ux[0]+=a.x*dx;ux[1]+=a.x*dy;ux[2]+=a.x*dz;
+                vx[0]+=a.y*dx;vx[1]+=a.y*dy;vx[2]+=a.y*dz;
+            }
+            if(count<3)return geometry;
+            const det=xx*yy-xy*xy;
+            if(det<1e-5)return geometry;
+            const frame=geometry.trackingFrame;
+            const u=new THREE.Vector3(...frame.u.map((base,i)=>base+(ux[i]*yy-vx[i]*xy)/det)).normalize();
+            const v0=new THREE.Vector3(...frame.v.map((base,i)=>base+(vx[i]*xx-ux[i]*xy)/det));
+            const n=new THREE.Vector3().crossVectors(u,v0).normalize();
+            if(n.dot(new THREE.Vector3(...frame.normal))<0)n.negate();
+            const v=new THREE.Vector3().crossVectors(n,u).normalize();
+            const center=new THREE.Vector3(...frame.center).add(new THREE.Vector3(cx/count,cy/count,cz/count));
+            return {...geometry,center:center.toArray(),normal:n.toArray(),u:u.toArray(),v:v.toArray()};
+        }
+        function disposeMembrane(){
+            if(membraneMeshes){physicsScene?.remove(membraneMeshes);membraneMeshes.traverse(child=>{child.geometry?.dispose();child.material?.dispose();});membraneMeshes=null;}
+            disposeMembraneLipids();
+            inferredMembrane=null;membraneLastInference=0;
+            membraneDisplayedExtent=null;membraneExtentLastFrame=0;
+            membraneRepulsionActive.clear();membraneRepelledColorMask=null;
+            membraneDetectionStats=null;renderMembraneDetectionStats();
+            membraneVisible=false;lipidsVisible=true;membraneSliced=false;membraneSliceAngle=0;
+            const sliceSlider=document.getElementById('membraneSliceAngleSlider');if(sliceSlider)sliceSlider.value='0';
+            const sliceValue=document.getElementById('membraneSliceAngleValue');if(sliceValue)sliceValue.textContent='0°';
+            updateMembraneToggleUI();
+        }
+        function membranePlatePoint(geometry,x,y,side,offset={cx:0,cy:0,cz:0}){
+            const z=geometry.curvature[0]*x*x+geometry.curvature[1]*x*y+geometry.curvature[2]*y*y+side*geometry.halfThickness;
+            return [geometry.center[0]+geometry.u[0]*x+geometry.v[0]*y+geometry.normal[0]*z+offset.cx,
+                geometry.center[1]+geometry.u[1]*x+geometry.v[1]*y+geometry.normal[1]*z+offset.cy,
+                geometry.center[2]+geometry.u[2]*x+geometry.v[2]*y+geometry.normal[2]*z+offset.cz];
+        }
+        function membranePlateMeshData(geometry,side,grid=18,offset={cx:0,cy:0,cz:0},includeIndices=true,excludeProteins=false){
+            const positions=new Float32Array((grid+1)*(grid+1)*3);
+            for(let iy=0;iy<=grid;iy++)for(let ix=0;ix<=grid;ix++){
+                const x=(ix/grid*2-1)*geometry.extent,y=(iy/grid*2-1)*geometry.extent;
+                const point=membranePlatePoint(geometry,x,y,side,offset),k=(iy*(grid+1)+ix)*3;
+                positions[k]=point[0];positions[k+1]=point[1];positions[k+2]=point[2];
+            }
+            const indices=includeIndices?membranePlateCutoutIndices(geometry,side,grid,
+                excludeProteins?membraneLipidFootprints(geometry,side):null):[];
+            return {positions,indices};
+        }
+        function membranePlateCutoutIndices(geometry,side,grid,footprints,sliceAngle=null){
+            const indices=[],cellWidth=2*geometry.extent/grid;
+            const cutoff=6.2+cellWidth*Math.SQRT2/2;
+            const sliceCos=sliceAngle===null?0:Math.cos(sliceAngle),sliceSin=sliceAngle===null?0:Math.sin(sliceAngle);
+            for(let y=0;y<grid;y++)for(let x=0;x<grid;x++){
+                const px=((x+.5)/grid*2-1)*geometry.extent;
+                const py=((y+.5)/grid*2-1)*geometry.extent;
+                if(sliceAngle!==null&&px*sliceCos+py*sliceSin<0)continue;
+                if(footprints){
+                    const nearest=nearestMembraneProtein(px,py,footprints);
+                    if(nearest&&nearest.distance<cutoff)continue;
+                }
+                const i=y*(grid+1)+x;
+                indices.push(i,i+1,i+grid+1,i+1,i+grid+2,i+grid+1);
+            }
+            return indices;
+        }
+        function membraneVisualGeometry(geometry,now){
+            if(!geometry){membraneDisplayedExtent=null;membraneExtentLastFrame=0;return null;}
+            const targetExtent=geometry.extent*membraneSizeScale;
+            if(membraneDisplayedExtent===null){membraneDisplayedExtent=targetExtent;membraneExtentLastFrame=now;}
+            const dt=Math.max(0,Math.min(.1,(now-membraneExtentLastFrame)/1000));
+            membraneExtentLastFrame=now;
+            membraneDisplayedExtent+=(targetExtent-membraneDisplayedExtent)*(1-Math.exp(-dt/1.8));
+            if(Math.abs(targetExtent-membraneDisplayedExtent)<.01)membraneDisplayedExtent=targetExtent;
+            return {...geometry,extent:membraneDisplayedExtent};
+        }
+        function membraneLipidFootprints(geometry,side,nodes=physicsNodes){
+            const cell=8,grid=new Map();
+            for(const node of nodes){
+                if(node.res?.entityType!=='protein')continue;
+                const p=membraneCoordinates(node,geometry);
+                if(Math.abs(p.signed-side*geometry.halfThickness)>7||
+                    Math.abs(p.x)>geometry.extent+8||Math.abs(p.y)>geometry.extent+8)continue;
+                const key=`${Math.floor(p.x/cell)}:${Math.floor(p.y/cell)}`;
+                if(!grid.has(key))grid.set(key,[]);
+                grid.get(key).push({x:p.x,y:p.y});
+            }
+            return {cell,grid};
+        }
+        function nearestMembraneProtein(x,y,footprints){
+            const {cell,grid}=footprints,gx=Math.floor(x/cell),gy=Math.floor(y/cell);
+            let nearest=null,best=Infinity;
+            for(let dx=-2;dx<=2;dx++)for(let dy=-2;dy<=2;dy++)
+                for(const p of grid.get(`${gx+dx}:${gy+dy}`)||[]){
+                    const d2=(x-p.x)**2+(y-p.y)**2;
+                    if(d2<best){best=d2;nearest=p;}
+                }
+            return nearest?{x:nearest.x,y:nearest.y,distance:Math.sqrt(best)}:null;
+        }
+        function membraneLipidTargetCount(geometry,footprints){
+            const extent=Math.max(2,geometry.extent-2),samples=24,spacing=extent*2/samples;
+            let free=0;
+            for(let row=0;row<samples;row++)for(let column=0;column<samples;column++){
+                const x=-extent+(column+.5)*spacing,y=-extent+(row+.5)*spacing;
+                if((nearestMembraneProtein(x,y,footprints)?.distance??Infinity)>=6.2)free++;
+            }
+            return Math.min(420,Math.floor(free*spacing*spacing/28));
+        }
+        function seedMembraneLipids(geometry,footprints,rng=Math.random,desired=membraneLipidTargetCount(geometry,footprints),existing=[]){
+            const particles=[],extent=geometry.extent-2;
+            const cell=4,grid=new Map(),minGap=3.8;
+            for(let attempt=0;attempt<desired*22&&particles.length<desired;attempt++){
+                const x=(rng()*2-1)*extent,y=(rng()*2-1)*extent;
+                if(nearestMembraneProtein(x,y,footprints)?.distance<6.2)continue;
+                if(existing.some(other=>(x-other.x)**2+(y-other.y)**2<minGap**2))continue;
+                const gx=Math.floor(x/cell),gy=Math.floor(y/cell);
+                let crowded=false;
+                for(let dx=-1;dx<=1&&!crowded;dx++)for(let dy=-1;dy<=1&&!crowded;dy++)
+                    for(const index of grid.get(`${gx+dx}:${gy+dy}`)||[]){
+                        const other=particles[index];
+                        if((x-other.x)**2+(y-other.y)**2<minGap**2){crowded=true;break;}
+                    }
+                if(crowded)continue;
+                const index=particles.length;
+                particles.push({x,y,vx:(rng()-.5)*4,vy:(rng()-.5)*4,world:null});
+                const key=`${gx}:${gy}`;if(!grid.has(key))grid.set(key,[]);grid.get(key).push(index);
+            }
+            return particles;
+        }
+        function disposeMembraneLipids(){
+            if(!membraneLipids)return;
+            for(const mesh of [membraneLipids.mesh,membraneLipids.atomMesh,membraneLipids.stickMesh]){
+                physicsScene?.remove(mesh);mesh.geometry.dispose();mesh.material.dispose();
+            }
+            membraneLipids=null;
+        }
+        // Heavy-atom DLPC (dilauroylphosphatidylcholine, 12:0/12:0).
+        // A generated, idealised conformer: bonded atoms are ~1.2–1.6 Å apart;
+        // the two lauroyl chains point into the bilayer. Hydrogens are implicit.
+        const {atoms:LIPID_ATOMS,bonds:LIPID_BONDS}=(()=>{
+            const atoms=[],bonds=[];
+            const add=(element,x,y,z,parent=null)=>{const index=atoms.length;atoms.push({element,x,y,z});if(parent!==null)bonds.push([parent,index]);return index;};
+            const p=add('P',0,0,0);
+            add('O',1.38,0,0,p);add('O',-.7,1.18,0,p);
+            const outerO=add('O',-.7,-1.18,0,p);
+            const cholineC1=add('C',-1.75,-1.45,-.9,outerO);
+            const cholineC2=add('C',-2.75,-2.15,-.05,cholineC1);
+            const nitrogen=add('N',-3.85,-2.45,-.95,cholineC2);
+            add('C',-4.95,-3.25,-.45,nitrogen);add('C',-4.15,-1.2,-1.65,nitrogen);add('C',-3.5,-3.15,-2.15,nitrogen);
+            const innerO=add('O',-.7,0,1.18,p);
+            const glycerol1=add('C',-.2,0,2.45,innerO);
+            const glycerol2=add('C',.9,.2,3.4,glycerol1);
+            const glycerol3=add('C',1.85,.8,2.45,glycerol2);
+            const esterO1=add('O',.9,-.95,4.15,glycerol2);
+            const esterO2=add('O',2.95,.95,3.25,glycerol3);
+            for(const [ester,sign,xStart,yStart,zStart] of [[esterO1,-1,.15,-1.1,5.3],[esterO2,1,3.6,1.8,4.3]]){
+                const carbonyl=add('C',xStart,yStart,zStart,ester);
+                add('O',xStart+sign*.7,yStart-.35,zStart+.9,carbonyl);
+                let previous=carbonyl;
+                for(let carbon=1;carbon<12;carbon++){
+                    const z=zStart+(carbon*1.27),x=xStart+sign*(carbon%2?.7:1.35),y=yStart+(carbon%2)*.45;
+                    previous=add('C',x,y,z,previous);
+                }
+            }
+            atoms[2].charge=-1;atoms[nitrogen].charge=1;
+            return {atoms,bonds};
+        })();
+        function lipidAtomColor(mode,atom,index){
+            const head=index<16,dark='#4b5563';
+            if(mode==='element')return ELEMENT_COLORS[atom.element]||dark;
+            if(mode==='membrane')return head?'#7dd3fc':'#ef4444';
+            if(mode==='membrane-placement')return head?'#7498a8':'#a76969';
+            if(mode==='charge')return atom.charge>0?'#2563eb':atom.charge<0?'#ef4444':'#94a3b8';
+            if(mode==='hydrophobicity')return head?'#38bdf8':'#f97316';
+            if(mode==='chain'||mode==='side-chains')return head?dark:'#94a3b8';
+            return dark;
+        }
+        function updateLipidColors(){
+            if(!membraneLipids)return;
+            const {atomMesh,stickMesh,particles}=membraneLipids,colors=LIPID_ATOMS.map((atom,index)=>new THREE.Color(lipidAtomColor(physicsColorMode,atom,index)));
+            const blended=new THREE.Color();
+            for(let i=0;i<particles.length;i++){
+                for(let j=0;j<LIPID_ATOMS.length;j++)atomMesh.setColorAt(i*LIPID_ATOMS.length+j,colors[j]);
+                for(let j=0;j<LIPID_BONDS.length;j++){
+                    const [a,b]=LIPID_BONDS[j];blended.copy(colors[a]).lerp(colors[b],.5);
+                    stickMesh.setColorAt(i*LIPID_BONDS.length+j,blended);
+                }
+            }
+            atomMesh.instanceColor.needsUpdate=true;stickMesh.instanceColor.needsUpdate=true;
+        }
+        function lipidMoleculeAxes(geometry,x,y,side){
+            const [a,b,c]=geometry.curvature,dx=2*a*x+b*y,dy=b*x+2*c*y;
+            const normalize=v=>{const length=Math.hypot(...v)||1;return v.map(n=>n/length);};
+            const normal=normalize(geometry.normal.map((n,i)=>n-dx*geometry.u[i]-dy*geometry.v[i]));
+            const inward=normal.map(n=>-side*n);
+            const tangent=normalize(geometry.u.map((n,i)=>n+dx*geometry.normal[i]));
+            const bitangent=[inward[1]*tangent[2]-inward[2]*tangent[1],inward[2]*tangent[0]-inward[0]*tangent[2],inward[0]*tangent[1]-inward[1]*tangent[0]];
+            return {inward,tangent,bitangent};
+        }
+        function createMembraneLipids(geometry,now,retainedParticles=null,previousExtent=null){
+            const leaves=[-1,1].map(side=>({side,footprints:membraneLipidFootprints(geometry,side)}));
+            const particles=retainedParticles||leaves.flatMap(leaf=>seedMembraneLipids(geometry,leaf.footprints).map(p=>({...p,side:leaf.side})));
+            if(!particles.length)return;
+            const mesh=new THREE.InstancedMesh(new THREE.SphereGeometry(1.5,10,8),
+                new THREE.MeshPhongMaterial({color:0xffffff,shininess:24,specular:0x252525}),particles.length);
+            mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+            particles.forEach((p,i)=>mesh.setColorAt(i,new THREE.Color(p.side<0?'#66c6dd':'#74d6c3').multiplyScalar(.87+Math.random()*.26)));
+            if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;
+            const atomMesh=new THREE.InstancedMesh(new THREE.SphereGeometry(.34,10,8),
+                new THREE.MeshPhongMaterial({color:0xffffff,shininess:6,specular:0x080a0d}),particles.length*LIPID_ATOMS.length);
+            const stickMesh=new THREE.InstancedMesh(new THREE.CylinderGeometry(1,1,1,6),
+                new THREE.MeshPhongMaterial({color:0xffffff,shininess:6,specular:0x080a0d}),particles.length*LIPID_BONDS.length);
+            for(const instanced of [atomMesh,stickMesh]){instanced.instanceMatrix.setUsage(THREE.DynamicDrawUsage);instanced.renderOrder=2;physicsScene.add(instanced);}
+            mesh.renderOrder=2;physicsScene.add(mesh);
+            membraneLipids={mesh,atomMesh,stickMesh,particles,leaves,dummy:new THREE.Object3D(),bondDummy:new THREE.Object3D(),lastFrame:now,lastFootprints:now,lastRecount:now,extent:previousExtent??geometry.extent};
+            updateLipidColors();
+        }
+        function reconcileMembraneLipids(geometry,now,force=false){
+            const system=membraneLipids;if(!system||(!force&&now-system.lastRecount<10000))return;
+            system.lastRecount=now;
+            const next=[];let changed=false;
+            for(const leaf of system.leaves){
+                const footprints=membraneLipidFootprints(geometry,leaf.side);
+                const target=membraneLipidTargetCount(geometry,footprints);
+                let current=system.particles.filter(p=>p.side===leaf.side);
+                if(current.length>target){
+                    changed=true;
+                    for(let i=current.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[current[i],current[j]]=[current[j],current[i]];}
+                    current=current.slice(0,target);
+                }else if(current.length<target){
+                    const coordinateScale=Math.max(2,system.extent-2)/Math.max(2,geometry.extent-2);
+                    const existingAtTarget=current.map(p=>({x:p.x/coordinateScale,y:p.y/coordinateScale}));
+                    const added=seedMembraneLipids(geometry,footprints,Math.random,target-current.length,existingAtTarget);
+                    if(added.length)changed=true;
+                    current.push(...added.map(p=>({...p,x:p.x*coordinateScale,y:p.y*coordinateScale,side:leaf.side})));
+                }
+                next.push(...current);
+            }
+            if(!changed)return;
+            const previousExtent=system.extent;
+            disposeMembraneLipids();createMembraneLipids(geometry,now,next,previousExtent);
+        }
+        function lipidMotionScale(speed=sideChainJiggleSpeed){
+            return 1.8*Math.max(.5,Math.min(5,speed))/3;
+        }
+        function updateMembraneLipids(geometry,now){
+            if(!geometry){disposeMembraneLipids();return;}
+            if(!membraneLipids)createMembraneLipids(geometry,now);
+            reconcileMembraneLipids(geometry,now);
+            const system=membraneLipids;if(!system)return;
+            const molecular=lipidsVisible&&physicsRepresentation==='ball-stick';
+            system.mesh.visible=lipidsVisible&&!molecular;
+            system.atomMesh.visible=molecular;system.stickMesh.visible=molecular;
+            const dt=Math.max(.001,Math.min(.05,(now-system.lastFrame)/1000||.016));system.lastFrame=now;
+            const motionDt=dt*lipidMotionScale();
+            if(now-system.lastFootprints>400){
+                for(const leaf of system.leaves)leaf.footprints=membraneLipidFootprints(geometry,leaf.side);
+                system.lastFootprints=now;
+            }
+            const previousExtent=system.extent;
+            system.extent+=(geometry.extent-system.extent)*(1-Math.exp(-dt/3.5));
+            const extent=Math.max(2,system.extent-2),scale=extent/Math.max(2,previousExtent-2);
+            if(Math.abs(scale-1)>1e-6)for(const p of system.particles){p.x*=scale;p.y*=scale;}
+            for(const p of system.particles){p.previousX=p.x;p.previousY=p.y;}
+            for(const leaf of system.leaves){
+                const indices=[],grid=new Map(),cell=4;
+                for(let i=0;i<system.particles.length;i++)if(system.particles[i].side===leaf.side){
+                    indices.push(i);const p=system.particles[i],key=`${Math.floor(p.x/cell)}:${Math.floor(p.y/cell)}`;
+                    if(!grid.has(key))grid.set(key,[]);grid.get(key).push(i);
+                }
+                for(const i of indices){
+                    const p=system.particles[i],gx=Math.floor(p.x/cell),gy=Math.floor(p.y/cell);
+                    for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)for(const j of grid.get(`${gx+dx}:${gy+dy}`)||[]){
+                        if(j<=i)continue;const q=system.particles[j],rx=p.x-q.x,ry=p.y-q.y;
+                        const distance=Math.max(.01,Math.hypot(rx,ry));
+                        if(distance>=3.8)continue;
+                        const impulse=(3.8-distance)*7*motionDt/distance;
+                        p.vx+=rx*impulse;p.vy+=ry*impulse;q.vx-=rx*impulse;q.vy-=ry*impulse;
+                    }
+                    const protein=nearestMembraneProtein(p.x,p.y,leaf.footprints);
+                    if(protein&&protein.distance<6.2){
+                        const angle=i*2.399963229728653;
+                        const nx=protein.distance>.01?(p.x-protein.x)/protein.distance:Math.cos(angle);
+                        const ny=protein.distance>.01?(p.y-protein.y)/protein.distance:Math.sin(angle);
+                        const overlap=6.2-protein.distance;
+                        p.vx+=nx*overlap*12*motionDt;p.vy+=ny*overlap*12*motionDt;
+                        p.x+=nx*overlap*Math.min(1,motionDt*4);
+                        p.y+=ny*overlap*Math.min(1,motionDt*4);
+                    }
+                }
+            }
+            const follow=1-Math.exp(-dt/3),damping=Math.exp(-motionDt*1.5);
+            for(let i=0;i<system.particles.length;i++){
+                const p=system.particles[i];
+                const oldX=p.previousX,oldY=p.previousY;
+                p.vx=p.vx*damping+(Math.random()-.5)*4*Math.sqrt(motionDt);
+                p.vy=p.vy*damping+(Math.random()-.5)*4*Math.sqrt(motionDt);
+                const speed=Math.hypot(p.vx,p.vy);
+                if(speed>4){p.vx*=4/speed;p.vy*=4/speed;}
+                p.x+=p.vx*motionDt;p.y+=p.vy*motionDt;
+                if(Math.abs(p.x)>extent){p.x=Math.sign(p.x)*extent;p.vx*=-.65;}
+                if(Math.abs(p.y)>extent){p.y=Math.sign(p.y)*extent;p.vy*=-.65;}
+                const target=new THREE.Vector3(...membranePlatePoint(geometry,p.x,p.y,p.side));
+                if(!p.world)p.world=target.clone();
+                else {
+                    const previousLocal=new THREE.Vector3(...membranePlatePoint(geometry,oldX,oldY,p.side));
+                    p.world.add(target.clone().sub(previousLocal)).lerp(target,follow);
+                }
+                if(p.lipidPhase===undefined)p.lipidPhase=Math.random()*Math.PI*2;
+                const axes=lipidMoleculeAxes(geometry,p.x,p.y,p.side);
+                const bob=.85*Math.sin(now*.0015*lipidMotionScale()+p.lipidPhase);
+                const displayX=p.world.x+axes.inward[0]*bob,displayY=p.world.y+axes.inward[1]*bob,displayZ=p.world.z+axes.inward[2]*bob;
+                const sliceVisible=!membraneSliced||p.x*Math.cos(membraneSliceAngle)+p.y*Math.sin(membraneSliceAngle)>=0;
+                system.dummy.position.set(displayX,displayY,displayZ);system.dummy.scale.setScalar(sliceVisible?1:0);system.dummy.updateMatrix();system.mesh.setMatrixAt(i,system.dummy.matrix);
+                if(molecular){
+                    if(p.lipidAngle===undefined){p.lipidAngle=Math.random()*Math.PI*2;p.lipidSpin=(Math.random()-.5)*.5;}
+                    p.lipidAngle+=p.lipidSpin*dt*lipidMotionScale();
+                    const angle=p.lipidAngle,cos=Math.cos(angle),sin=Math.sin(angle);
+                    const tx=axes.tangent.map((v,k)=>v*cos+axes.bitangent[k]*sin);
+                    const ty=axes.tangent.map((v,k)=>-v*sin+axes.bitangent[k]*cos);
+                    const tiltX=.10*Math.sin(now*.0025*lipidMotionScale()+p.lipidPhase);
+                    const tiltY=.10*Math.sin(now*.0021*lipidMotionScale()+p.lipidPhase*1.7);
+                    const depthScale=Math.min(1,Math.max(.5,(geometry.halfThickness-1)/20));
+                    const positions=LIPID_ATOMS.map(atom=>{
+                        const z=atom.z*depthScale,x=atom.x+tiltX*Math.max(0,z),y=atom.y+tiltY*Math.max(0,z);
+                        return new THREE.Vector3(
+                            displayX+tx[0]*x+ty[0]*y+axes.inward[0]*z,
+                            displayY+tx[1]*x+ty[1]*y+axes.inward[1]*z,
+                            displayZ+tx[2]*x+ty[2]*y+axes.inward[2]*z);
+                    });
+                    for(let j=0;j<LIPID_ATOMS.length;j++){
+                        system.dummy.position.copy(positions[j]);system.dummy.scale.setScalar(sliceVisible?viewerSizes.physics.atom:0);system.dummy.updateMatrix();
+                        system.atomMesh.setMatrixAt(i*LIPID_ATOMS.length+j,system.dummy.matrix);
+                    }
+                    for(let j=0;j<LIPID_BONDS.length;j++){
+                        const [from,to]=LIPID_BONDS[j],start=positions[from],end=positions[to];
+                        const direction=end.clone().sub(start),length=direction.length();
+                        system.bondDummy.position.copy(start).add(end).multiplyScalar(.5);
+                        system.bondDummy.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),direction.normalize());
+                        const radius=sliceVisible ? .07*viewerSizes.physics.stick : 0;
+                        system.bondDummy.scale.set(radius,length,radius);system.bondDummy.updateMatrix();
+                        system.stickMesh.setMatrixAt(i*LIPID_BONDS.length+j,system.bondDummy.matrix);
+                    }
+                }
+            }
+            system.mesh.instanceMatrix.needsUpdate=true;
+            if(molecular){system.atomMesh.instanceMatrix.needsUpdate=true;system.stickMesh.instanceMatrix.needsUpdate=true;}
+        }
+        function renderMembraneGeometry(geometry){
+            if(!physicsScene)return;
+            if(!geometry){if(membraneMeshes){physicsScene.remove(membraneMeshes);membraneMeshes.traverse(child=>{child.geometry?.dispose();child.material?.dispose();});membraneMeshes=null;}disposeMembraneLipids();return;}
+            const grid=64;
+            if(!membraneMeshes){membraneMeshes=new THREE.Group();physicsScene.add(membraneMeshes);
+                for(const side of [-1,1]){
+                    const positions=new Float32Array((grid+1)*(grid+1)*3);
+                    const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(positions,3));
+                    geo.setIndex(new THREE.BufferAttribute(new Uint16Array(grid*grid*6),1));geo.setDrawRange(0,0);
+                    const mat=new THREE.MeshPhongMaterial({color:side<0?0x38bdf8:0x2dd4bf,transparent:true,opacity:.24,side:THREE.DoubleSide,depthWrite:false,shininess:20});
+                    const mesh=new THREE.Mesh(geo,mat);mesh.userData.side=side;mesh.userData.lastCutout=0;mesh.renderOrder=1;membraneMeshes.add(mesh);
+                }
+            }
+            membraneMeshes.visible=membraneVisible;
+            for(const mesh of membraneMeshes.children){const arr=mesh.geometry.attributes.position.array,side=mesh.userData.side;
+                arr.set(membranePlateMeshData(geometry,side,grid,undefined,false).positions);
+                if(!mesh.userData.lastCutout||performance.now()-mesh.userData.lastCutout>=350){
+                    const faces=membranePlateCutoutIndices(geometry,side,grid,membraneLipidFootprints(geometry,side),membraneSliced?membraneSliceAngle:null);
+                    mesh.geometry.index.array.fill(0);mesh.geometry.index.array.set(faces);
+                    mesh.geometry.index.needsUpdate=true;mesh.geometry.setDrawRange(0,faces.length);
+                    mesh.userData.lastCutout=performance.now();
+                }
+                mesh.geometry.attributes.position.needsUpdate=true;mesh.geometry.computeVertexNormals();mesh.geometry.computeBoundingSphere();
+            }
+        }
+        function updateInferredMembrane(now){
+            if(!physicsNodes.length||!physicsScene)return;
+            if(!membraneLastInference||now-membraneLastInference>=1000){
+                membraneLastInference=now;
+                const started=performance.now(),samples=membraneSamples();
+                const diagnostics={samples:samples.length};
+                inferredMembrane=inferMembraneGeometry(samples,diagnostics);
+                if(inferredMembrane)completeMembraneMembers(inferredMembrane,physicsNodes);
+                if(physicsColorMode==='membrane'){updatePhysicsNodeColors();if(showModel1Overlay)updateModel1AlignmentColors();}
+                diagnostics.detected=Boolean(inferredMembrane);
+                diagnostics.durationMs=performance.now()-started;
+                if(inferredMembrane)Object.assign(diagnostics,{members:inferredMembrane.memberIndices.length,
+                    transmembraneHelices:inferredMembrane.transmembraneHelices,
+                    transmembraneSheets:inferredMembrane.transmembraneSheets,
+                    curved:inferredMembrane.curvature.some(Boolean),thickness:inferredMembrane.halfThickness*2});
+                membraneDetectionStats=diagnostics;
+                renderMembraneDetectionStats();
+                updateMembraneToggleUI();
+            }else if(inferredMembrane){
+                inferredMembrane=trackMembraneGeometry(inferredMembrane);
+            }
+            if(physicsColorMode==='membrane-repelled'&&membraneRepelledColorsChanged())updatePhysicsNodeColors();
+            const visualGeometry=membraneVisualGeometry(inferredMembrane,now);
+            renderMembraneGeometry(visualGeometry);
+            updateMembraneLipids(visualGeometry,now);
+        }
+
         // Render animation loop
         function animateLoop() {
             requestAnimationFrame(animateLoop);
@@ -4220,6 +5106,7 @@
             physicsPulseUniform.value = physicsPulseOpacity(performance.now(), physicsOriginColorMode);
 
             stepPhysicsSimulation();
+            updateInferredMembrane(performance.now());
             if (!physicsRunning) homologyEnergyStableSince = null;
             updateSpringDisplay();
             updateAtomRepresentation();
@@ -4229,6 +5116,8 @@
             if (physicsRenderer && physicsScene && physicsCamera) {
                 { for (const chain of backboneChains) chain.line.userData.syncBackbone?.(); physicsRenderer.render(physicsScene, physicsCamera); }
             }
+            if(physicsNodes.length&&readyModelGeneration===modelBuildGeneration)hidePhysicsViewerLoading();
+            renderMolstarMembraneOverlay();
         }
 
         // ==========================================
@@ -4412,10 +5301,10 @@
                 if (isMatch) matchCount++;
 
                 const statusBadge = res.referenceOnly
-                    ? `<span class="bg-sky-500/10 text-sky-300 border border-sky-500/30 px-2 py-0.5 rounded text-[10px] font-semibold">REFERENCE ONLY</span>`
+                    ? `<span class="text-sky-300 text-[10px] font-semibold">REFERENCE ONLY</span>`
                     : isMatch 
-                    ? `<span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded text-[10px] font-semibold">MATCHED</span>`
-                    : `<span class="bg-slate-800 text-slate-400 border border-slate-700 px-2 py-0.5 rounded text-[10px]">UNMATCHED</span>`;
+                    ? `<span class="text-emerald-400 text-[10px] font-semibold">MATCHED</span>`
+                    : `<span class="text-slate-400 text-[10px]">UNMATCHED</span>`;
 
                 tr.innerHTML = `
                     <td class="py-2.5 px-4 font-bold" style="color: #3498db;">Chain ${escapeHtml(res.c1)}</td>
@@ -4430,8 +5319,8 @@
                     <td class="py-2.5 px-4 font-mono" style="color:${res.tmMetrics ? alignmentDistanceColor(res.tmMetrics.averageDistance) : '#94a3b8'}">${res.tmMetrics ? res.tmMetrics.averageDistance.toFixed(2) + ' Å' : res.referenceOnly?'—':'Calculating…'}</td>
                     <td class="py-2.5 px-4 text-center">${statusBadge}</td>
                     <td class="py-2.5 px-4 text-right">
-                        <button type="button" data-inspect-alignment="${idx}" class="hover:bg-slate-800 text-slate-300 border border-slate-700 px-2.5 py-1 rounded text-[11px] transition">
-                            <i class="fa-solid fa-eye mr-1 text-sky-400"></i> Alignment
+                        <button type="button" data-inspect-alignment="${idx}" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded-lg text-[11px] transition">
+                            <i class="fa-solid fa-eye mr-1"></i> Alignment
                         </button>
                     </td>
                 `;
@@ -4829,7 +5718,7 @@
                 for (const c of members) {
                     const atoms = modelData.chains[c];
                     const badge = document.createElement('span');
-                    badge.className = 'inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-[11px] font-mono text-slate-200';
+                    badge.className = 'inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-slate-900 text-[11px] font-mono text-slate-200';
                     const dot = document.createElement('span');
                     dot.className = 'w-2.5 h-2.5 rounded-full inline-block';
                     dot.style.backgroundColor = getChainColor(c, allChains);
@@ -4916,17 +5805,27 @@
         let modelBuildGeneration = 0;
         let currentReferenceFile = null;
         let homologyViewerMode = 'reference';
+        let simulationViewerInteracted = false;
         let modelLoading = false;
         let modelLoadQueue = Promise.resolve();
         let simulationRenderTask = null;
         let readyModelGeneration = -1;
+        function showPhysicsViewerLoading(){document.getElementById('physicsInitialLoading')?.classList.remove('hidden');}
+        function hidePhysicsViewerLoading(){document.getElementById('physicsInitialLoading')?.classList.add('hidden');}
         function toggleStringFinder() {
             const content = document.getElementById('stringFinderContent');
             const expanded = content.classList.toggle('hidden') === false;
             document.getElementById('stringFinderToggle').setAttribute('aria-expanded', String(expanded));
             document.getElementById('stringFinderChevron').className = 'fa-solid fa-chevron-' + (expanded ? 'up' : 'down');
         }
+        function resizeStructureIdInputs() {
+            for(const id of ['pdbInput1','pdbInput2']){
+                const input=document.getElementById(id);
+                if(input){input.style.height='auto';input.style.height=Math.max(56,input.scrollHeight)+'px';}
+            }
+        }
         function updateExampleSelection() {
+            resizeStructureIdInputs();
             const reference = document.getElementById('pdbInput1').value.trim().toUpperCase();
             const alphaFold = document.getElementById('pdbInput2').value.trim().toUpperCase().replace(/\s*,\s*/g, ',');
             document.querySelectorAll('#examplePresets button[data-reference]').forEach(button => {
@@ -4939,6 +5838,9 @@
         }
 
         function clearModelUI() {
+            simulationViewerInteracted = false;
+            disposeMembrane();
+            disposeMolstarMembraneOverlay();
             document.getElementById('morphMatrixLoading')?.classList.add('hidden');
             cancelPendingSimulationRender();
             resetHomologyRecommendation();
@@ -4948,10 +5850,11 @@
             readyModelGeneration = -1;
             currentReferenceFile = null;
             homologyViewerMode = 'reference';
-            homologyStructureVisible = true; alignedResiduesVisible = true; unalignedResiduesVisible = true; physicsPulsePaused = false;
+            homologyStructureVisible = true; alignedResiduesVisible = true; unalignedResiduesVisible = true; nonProteinAtomsVisible = true; physicsPulsePaused = false;
             updatePhysicsToggleButton('toggleHomologyStructure', true);
             updatePhysicsToggleButton('toggleAlignedResidues', true);
             updatePhysicsToggleButton('toggleUnalignedResidues', true);
+            updatePhysicsToggleButton('toggleNonProteinAtoms', true);
             document.getElementById('pausePhysicsPulseBtn').textContent = 'Pause Pulsing';
             physicsNodes = []; physicsSprings = []; physicsPositions = [];
             physicsBasePairs = []; disposeBasePairLines();
@@ -5009,11 +5912,12 @@
             modelBuildInputKey = currentModelInputKey();
             completedModelInputKey = null;
             updateBuildButtonState();
+            showPhysicsViewerLoading();
             clearModelUI();
             document.getElementById('modelBuildTime').textContent = 'Building model…';
             modelLoadQueue = modelLoadQueue.catch(() => {}).then(async () => {
                 if (generation !== modelBuildGeneration) return;
-                if (simulationRenderTask) await simulationRenderTask;
+                if (simulationRenderTask) await simulationRenderTask.catch(() => {});
                 if (generation !== modelBuildGeneration) return;
                 await Promise.all([molstarViewer1, molstarViewer2, simulationMolstarViewer].map(viewer => viewer?.plugin?.clear()));
                 if (generation !== modelBuildGeneration) return;
@@ -5140,6 +6044,7 @@
                 drawDifferenceMatrix();
 
                 initPhysicsSimulation();
+                if(!physicsNodes.length)hidePhysicsViewerLoading();
                 if (backboneLinesGroup) backboneLinesGroup.visible = true;
                 readyModelGeneration = generation;
                 modelLoading = false;
@@ -5147,7 +6052,7 @@
                 updateHomologyViewerToggle();
                 drawMorphMatrix();
                 // Automatically switch the lower viewer to the completed model.
-                void setHomologyViewerMode('homology');
+                void loadSimulationIntoMolstar();
                 // TM metrics are secondary work: start only after the homology
                 // model and physics scene are fully initialized.
                 calculateAllPairTmMetricsInBackground(generation);
@@ -5159,6 +6064,7 @@
             } catch (err) {
                 if (generation !== modelBuildGeneration) return;
                 modelLoading = false;
+                hidePhysicsViewerLoading();
                 updateBuildButtonState();
                 document.getElementById("modelBuildTime").textContent = "Model build failed";
                 console.error("Error loading models:", err);
@@ -5452,6 +6358,37 @@
         // 14. EVENT LISTENERS SETUP
         // ==========================================
         function setupEventListeners() {
+            document.getElementById('molstar-simulation-container')?.addEventListener('pointerdown',()=>{simulationViewerInteracted=true;},true);
+            document.getElementById('homologyViewerToggle')?.addEventListener('click',()=>{simulationViewerInteracted=true;});
+            document.getElementById('toggleMembraneStatsBtn')?.addEventListener('click',event=>{
+                const stats=document.getElementById('membraneDetectionStats');
+                const shown=stats.classList.toggle('hidden')===false;
+                event.currentTarget.setAttribute('aria-expanded',String(shown));
+                event.currentTarget.textContent=shown?'Hide membrane stats':'View membrane stats';
+            });
+            document.getElementById('sliceMembraneBtn')?.addEventListener('click',()=>{
+                if(!inferredMembrane)return;
+                membraneSliced=!membraneSliced;
+                if(membraneSliced){membraneVisible=true;if(membraneMeshes)membraneMeshes.visible=true;}
+                if(membraneMeshes)for(const mesh of membraneMeshes.children)mesh.userData.lastCutout=0;
+                updateMembraneToggleUI();
+            });
+            document.getElementById('membraneSliceAngleSlider')?.addEventListener('input',event=>{
+                const degrees=Number(event.target.value)||0;
+                membraneSliceAngle=degrees*Math.PI/180;
+                document.getElementById('membraneSliceAngleValue').textContent=`${degrees}°`;
+                if(membraneMeshes)for(const mesh of membraneMeshes.children)mesh.userData.lastCutout=0;
+            });
+            document.getElementById('membraneSizeSlider')?.addEventListener('input',event=>{
+                membraneSizeScale=Math.max(.5,Math.min(2,Number(event.target.value)||1));
+                document.getElementById('membraneSizeValue').textContent=`${membraneSizeScale.toFixed(2)}×`;
+                if(inferredMembrane){
+                    const targetGeometry={...inferredMembrane,extent:inferredMembrane.extent*membraneSizeScale};
+                    if(!membraneLipids)createMembraneLipids(targetGeometry,performance.now());
+                    else reconcileMembraneLipids(targetGeometry,performance.now(),true);
+                }
+                if(membraneMeshes)for(const mesh of membraneMeshes.children)mesh.userData.lastCutout=0;
+            });
             document.getElementById('dualPdbForm').addEventListener('submit', (e) => {
                 e.preventDefault();
                 const id1 = document.getElementById('pdbInput1').value.trim().toUpperCase();
@@ -5857,13 +6794,19 @@
                     }
                     if (hasAF) { color.add(AFColor.clone().multiplyScalar(model2Influence)); weight += model2Influence; }
                     if (weight) color.multiplyScalar(1 / weight);
+                } else if (physicsColorMode === 'membrane') {
+                    color = new THREE.Color(membraneResidueDisplayColor(i));
+                } else if (physicsColorMode === 'membrane-placement') {
+                    color = new THREE.Color(membranePlacementResidueColor(i));
+                } else if (physicsColorMode === 'membrane-repelled') {
+                    color = new THREE.Color(isMembraneRepelledResidue(node,i,inferredMembrane,membraneRepulsionVal)?'#f97316':'#94a3b8');
                 } else if (physicsColorMode === 'chain' || physicsColorMode === 'side-chains') {
                     const chainId = (node.res && (node.res.c1 || node.res.c2)) || 'A';
                     color = new THREE.Color(getChainColor(chainId, chainKeys));
                 } else if (physicsColorMode === 'element') {
                     color = new THREE.Color(ELEMENT_COLORS.C);
                 } else if (physicsColorMode === 'uniform') {
-                    color = new THREE.Color('#c4b5fd');
+                    color = new THREE.Color('#94a3b8');
                 } else if (physicsColorMode === 'protein-id') {
                     const atom = node.idx2 !== null ? node.res.atoms2[node.idx2] : null;
                     color = new THREE.Color(getProteinIdColor(atom?.sourcePdbId));
@@ -5909,6 +6852,10 @@
         }
         function physicsResidueColor(atom, mode, aligned = false) {
             if (mode === 'aligned') return aligned ? '#ef4444' : '#64748b';
+            if (mode === 'charge') {
+                const aa=atom?.singleChar;
+                return aa==='D'||aa==='E'?'#ef4444':aa==='K'||aa==='R'?'#2563eb':aa==='H'?'#93c5fd':'#94a3b8';
+            }
             if (mode === 'secondary') return atom?.secondaryType === 'helix' ? '#d946ef' : atom?.secondaryType === 'sheet' ? '#facc15' : '#94a3b8';
             if (mode === 'hydrophobicity') {
                 const value = HYDROPHOBICITY[atom?.singleChar];
@@ -5923,8 +6870,10 @@
             return '#94a3b8';
         }
         function setPhysicsColorMode(mode) {
-            if (!['chain','uniform','protein-id','element','side-chains','origin','aligned','hydrophobicity','secondary','plddt','difference'].includes(mode)) return;
+            if (!['chain','uniform','protein-id','element','side-chains','origin','aligned','membrane','membrane-placement','membrane-repelled','charge','hydrophobicity','secondary','plddt','difference'].includes(mode)) return;
             physicsColorMode = mode;
+            updateLipidColors();
+            membraneRepelledColorMask=null;
             physicsOriginColorMode = mode === 'origin';
             physicsDifferenceMode = mode === 'difference';
             document.getElementById('physicsPulseKey')?.classList.toggle('hidden', physicsOriginColorMode);
@@ -5939,6 +6888,10 @@
                 'side-chains':'Backbone: chain colour · Side chains: <span style="color:#f59e0b">nonpolar</span> · <span style="color:#c084fc">aromatic</span> · <span style="color:#38bdf8">polar</span> · <span style="color:#fb7185">basic</span> · <span style="color:#4ade80">acidic</span>.',
                 origin:'Origin: <span style="color:#3498db">Reference PDB</span> · <span style="color:#2eccbf">AlphaFold</span> · <span style="color:#31b2cd">Both</span>',
                 aligned:'<span style="color:#ef4444">Red</span>: aligned residue · <span style="color:#94a3b8">Grey</span>: not aligned',
+                membrane:'<span style="color:#ef4444">Red</span>: helix or sheet residue inside the membrane plates · <span style="color:#f97316">Orange</span>: other membrane-associated residue · <span style="color:#7dd3fc">Light blue</span>: other residues, including helix and sheet portions outside the membrane',
+                'membrane-placement':'Membrane placement influence: <span style="color:#ef4444">red</span> hydrophobic · <span style="color:#2563eb">blue</span> charged · <span style="color:#94a3b8">grey</span> other. Stronger colour means greater exposed-surface influence.',
+                'membrane-repelled':'<span style="color:#f97316">Orange</span>: currently repelled from the detected membrane · <span style="color:#94a3b8">Grey</span>: not repelled.',
+                charge:'Charge: <span style="color:#2563eb">blue</span> positive (Lys/Arg) · <span style="color:#93c5fd">pale blue</span> His · <span style="color:#ef4444">red</span> negative (Asp/Glu) · <span style="color:#94a3b8">grey</span> neutral.',
                 hydrophobicity:'Hydrophobicity: <span style="color:#38bdf8">hydrophilic</span> → <span style="color:#f97316">hydrophobic</span>',
                 secondary:'Secondary structure: <span style="color:#d946ef">helix</span> · <span style="color:#facc15">sheet</span> · <span style="color:#94a3b8">coil</span>',
                 plddt:'AlphaFold pLDDT: <span style="color:#ff7d45">&lt;50</span> · <span style="color:#ffdb13">50–70</span> · <span style="color:#65cbf3">70–90</span> · <span style="color:#1964b0">≥90</span> · grey: unavailable',
@@ -5975,10 +6928,6 @@
             sideChainJiggleEnabled = !sideChainJiggleEnabled;
             document.getElementById('sideChainJiggleBtn').setAttribute('aria-pressed',String(sideChainJiggleEnabled));
             document.getElementById('sideChainJiggleText').textContent=sideChainJiggleEnabled?'Stop Jiggle':'Add Jiggle';
-            document.getElementById('sideChainJiggleBtn').classList.toggle('bg-violet-600',sideChainJiggleEnabled);
-            document.getElementById('sideChainJiggleBtn').classList.toggle('bg-slate-800',!sideChainJiggleEnabled);
-            document.getElementById('sideChainJiggleBtn').classList.toggle('hover:bg-violet-500',sideChainJiggleEnabled);
-            document.getElementById('sideChainJiggleBtn').classList.toggle('hover:bg-slate-700',!sideChainJiggleEnabled);
             lastSurfaceUpdate=-Infinity;
             updateAtomRepresentation();
         }
@@ -6593,7 +7542,7 @@
         }
 
         // Generates compliant PDBx/mmCIF v5 string representing the complete active simulation model
-        function generateSimulationMmCifString() {
+        function generateSimulationMmCifString(membraneGeometry = inferredMembrane) {
             if (!physicsNodes || !physicsNodes.length) return null;
 
             const lines = [];
@@ -6672,6 +7621,34 @@
             }
 
             lines.push(`#`);
+            if(membraneGeometry){
+                // Non-atomic membrane geometry lives in its own category. It must
+                // never be mistaken for simulated atoms or chemical bonds.
+                lines.push('_stringscape_membrane_geometry.kind two_leaflet_surface');
+                lines.push('_stringscape_membrane_geometry.units angstrom');
+                lines.push(`_stringscape_membrane_geometry.half_thickness ${membraneGeometry.halfThickness.toFixed(3)}`);
+                lines.push('loop_','_stringscape_membrane_vertex.id','_stringscape_membrane_vertex.leaflet',
+                    '_stringscape_membrane_vertex.row','_stringscape_membrane_vertex.column',
+                    '_stringscape_membrane_vertex.Cartn_x','_stringscape_membrane_vertex.Cartn_y','_stringscape_membrane_vertex.Cartn_z');
+                // Export in the same centred coordinates as simulationAtomCoordinates.
+                const plates=[membranePlateMeshData(membraneGeometry,-1,18,undefined,true,true),
+                    membranePlateMeshData(membraneGeometry,1,18,undefined,true,true)];
+                let vertexId=1;
+                for(let plate=0;plate<plates.length;plate++)for(let i=0;i<plates[plate].positions.length;i+=3){
+                    const row=Math.floor(i/3/19),column=i/3%19,p=plates[plate].positions;
+                    lines.push(`${vertexId++} ${plate+1} ${row} ${column} ${p[i].toFixed(3)} ${p[i+1].toFixed(3)} ${p[i+2].toFixed(3)}`);
+                }
+                lines.push('#','loop_','_stringscape_membrane_triangle.id','_stringscape_membrane_triangle.leaflet',
+                    '_stringscape_membrane_triangle.vertex_id_1','_stringscape_membrane_triangle.vertex_id_2','_stringscape_membrane_triangle.vertex_id_3');
+                let triangleId=1;
+                for(let plate=0;plate<plates.length;plate++){
+                    const offset=plate*19*19;
+                    for(let i=0;i<plates[plate].indices.length;i+=3){const f=plates[plate].indices;
+                        lines.push(`${triangleId++} ${plate+1} ${f[i]+offset+1} ${f[i+1]+offset+1} ${f[i+2]+offset+1}`);
+                    }
+                }
+                lines.push('#');
+            }
             lines.push(`# END`);
             return lines.join('\n');
         }
@@ -6732,6 +7709,51 @@
         window.toggleDetailsPanels = toggleDetailsPanels;
 
         let simulationMolstarViewer = null;
+        let molstarMembraneOverlay = null;
+        function disposeMolstarMembraneOverlay(){
+            if(!molstarMembraneOverlay)return;
+            const {renderer,scene}=molstarMembraneOverlay;
+            scene.traverse(object=>{object.geometry?.dispose();object.material?.dispose();});
+            renderer.domElement.remove();renderer.dispose();
+            molstarMembraneOverlay=null;
+        }
+        function showMolstarMembraneOverlay(geometry){
+            disposeMolstarMembraneOverlay();
+            if(!geometry)return;
+            const host=document.getElementById('molstar-simulation-container');
+            if(!host)return;
+            host.style.position='relative';
+            const renderer=new THREE.WebGLRenderer({alpha:true,antialias:true,powerPreference:'low-power'});
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
+            renderer.setSize(host.clientWidth||1,host.clientHeight||1,false);
+            renderer.setClearColor(0x000000,0);
+            renderer.domElement.style.cssText='position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3';
+            const scene=new THREE.Scene(),camera=new THREE.Camera();
+            camera.matrixAutoUpdate=false;
+            for(const side of [-1,1]){
+                const data=membranePlateMeshData(geometry,side,48,undefined,true,false);
+                const meshGeometry=new THREE.BufferGeometry();
+                meshGeometry.setAttribute('position',new THREE.BufferAttribute(data.positions,3));
+                meshGeometry.setIndex(data.indices);meshGeometry.computeVertexNormals();
+                scene.add(new THREE.Mesh(meshGeometry,new THREE.MeshBasicMaterial({color:side<0?0x38bdf8:0x2dd4bf,transparent:true,opacity:.22,side:THREE.DoubleSide,depthWrite:false})));
+            }
+            host.appendChild(renderer.domElement);
+            molstarMembraneOverlay={renderer,scene,camera,host};
+            renderMolstarMembraneOverlay();
+        }
+        function renderMolstarMembraneOverlay(){
+            const overlay=molstarMembraneOverlay,molCamera=simulationMolstarViewer?.plugin?.canvas3d?.camera;
+            if(!overlay||!molCamera||homologyViewerMode!=='homology')return;
+            const {host,renderer,camera,scene}=overlay;
+            const width=host.clientWidth,height=host.clientHeight;
+            if(!width||!height)return;
+            if(renderer.domElement.width!==Math.round(width*renderer.getPixelRatio())||renderer.domElement.height!==Math.round(height*renderer.getPixelRatio()))renderer.setSize(width,height,false);
+            camera.matrixWorldInverse.fromArray(molCamera.view);
+            camera.matrixWorld.copy(camera.matrixWorldInverse).invert();
+            camera.projectionMatrix.fromArray(molCamera.projection);
+            camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
+            renderer.render(scene,camera);
+        }
         let simulationAutoRendered = false;
         let simulationAutoRenderTimer = null;
         function cancelPendingSimulationRender() {
@@ -6793,6 +7815,15 @@
             homologyEnergyNotified = true;
             button.textContent = 'Update Homology Model (recommended)';
             button.classList.add('homology-update-glow');
+            if(!simulationViewerInteracted){
+                clearHomologyRecommendationLabel();
+                const generation=modelBuildGeneration;
+                void (async()=>{
+                    if(simulationRenderTask)await simulationRenderTask.catch(()=>{});
+                    if(simulationViewerInteracted||generation!==modelBuildGeneration)return;
+                    await loadSimulationIntoMolstar();
+                })().catch(error=>console.error('Automatic homology model update failed:',error));
+            }
         }
         function updateHomologyViewerToggle() {
             const reference = document.getElementById('referenceViewerBtn');
@@ -6810,6 +7841,7 @@
             if (mode === 'homology' && (modelLoading || readyModelGeneration !== modelBuildGeneration)) return;
             if (mode === 'reference' && !currentReferenceFile) return;
             homologyViewerMode = mode;
+            disposeMolstarMembraneOverlay();
             updateHomologyViewerToggle();
             if (!simulationMolstarViewer && typeof molstar !== 'undefined' && molstar.Viewer) {
                 simulationMolstarViewer = await molstar.Viewer.create('molstar-simulation-container', { extensions: [], disabledExtensions: ['volseg', 'mp4-export'], layoutIsExpanded: false, layoutShowControls: false, layoutShowRemoteState: false, layoutShowSequence: false, layoutShowLog: false, viewportShowExpand: false, viewportShowSelectionMode: false, viewportShowAnimation: false });
@@ -6819,17 +7851,25 @@
             if (mode === 'reference') {
                 await loadReferenceFilesIntoMolstar(simulationMolstarViewer);
                 document.getElementById('simulationMolstarPlaceholder')?.classList.add('hidden');
-            } else {
-                await renderCurrentSimulation();
-            }
+            } else return renderCurrentSimulation();
+            return true;
         }
         function loadSimulationIntoMolstar() {
-            if (modelLoading || readyModelGeneration !== modelBuildGeneration) return Promise.resolve();
-            return setHomologyViewerMode('homology');
+            if (modelLoading || readyModelGeneration !== modelBuildGeneration) return Promise.resolve(false);
+            if(simulationRenderTask)return simulationRenderTask;
+            const task=setHomologyViewerMode('homology');
+            simulationRenderTask=task;
+            void task.then(()=>{if(simulationRenderTask===task)simulationRenderTask=null;},
+                ()=>{if(simulationRenderTask===task)simulationRenderTask=null;});
+            return task;
         }
         async function renderCurrentSimulation() {
             const buildGeneration = modelBuildGeneration;
-            const cifContent = generateSimulationMmCifString();
+            const membraneSnapshot=inferredMembrane?{
+                center:inferredMembrane.center.slice(),normal:inferredMembrane.normal.slice(),u:inferredMembrane.u.slice(),v:inferredMembrane.v.slice(),
+                curvature:inferredMembrane.curvature.slice(),halfThickness:inferredMembrane.halfThickness,extent:inferredMembrane.extent
+            }:null;
+            const cifContent = generateSimulationMmCifString(membraneSnapshot);
             if (!cifContent) {
                 showError('No simulation structure available. Please load a structure first.');
                 return;
@@ -6862,6 +7902,7 @@
                     try {
                         await simulationMolstarViewer.loadStructureFromUrl(url, 'mmcif', false);
                         if (buildGeneration !== modelBuildGeneration) return;
+                        showMolstarMembraneOverlay(membraneSnapshot);
                         document.getElementById('molstar-simulation-container').style.visibility = '';
                         if (placeholder) placeholder.classList.add('hidden');
                         // Allow the completed viewer to paint before recording end-to-end time.
@@ -6879,6 +7920,7 @@
                 if (buildGeneration !== modelBuildGeneration) return;
                 if (btnText) btnText.textContent = 'Update Homology Model';
                 if (icon) icon.className = 'fa-solid fa-arrows-rotate';
+                return true;
             } catch (err) {
                 if (buildGeneration !== modelBuildGeneration) return;
                 document.getElementById("modelBuildTime").textContent = "Model display failed — retry rendering";
@@ -6886,6 +7928,7 @@
                 showError("Failed to render simulation in Mol* viewer: " + (err.message || err));
                 if (btnText) btnText.textContent = 'Render in Mol* Viewer';
                 if (icon) icon.className = 'fa-solid fa-play';
+                return false;
             }
         }
 
@@ -7063,6 +8106,7 @@
             initCanvases();
             initThreeJSPhysicsScene();
             setupEventListeners();
+            updateExampleSelection();
             document.getElementById('showAllNonProteinBtn').addEventListener('click',()=>setAllChainsVisibility(true,false));
             document.getElementById('hideAllNonProteinBtn').addEventListener('click',()=>setAllChainsVisibility(false,false));
             setPhysicsRepresentation('ball-stick');
@@ -7680,6 +8724,39 @@
         document.getElementById('springColorSelect')?.addEventListener('change',event=>{
             springColorMode=event.target.value==='origin'?'origin':'strain';
             updateSpringColorControls();updateSpringDisplay();
+        });
+        document.getElementById('toggleMembraneStructure')?.addEventListener('click',()=>{
+            if(!inferredMembrane)return;
+            membraneVisible=!membraneVisible;
+            if(membraneMeshes)membraneMeshes.visible=membraneVisible;
+            updateMembraneToggleUI();
+        });
+        document.getElementById('physicsControlsToggle')?.addEventListener('click',event=>{
+            const panel=document.getElementById('physicsControlsPanel');
+            const expanded=event.currentTarget.getAttribute('aria-expanded')!=='true';
+            panel.classList.toggle('hidden',!expanded);
+            event.currentTarget.setAttribute('aria-expanded',String(expanded));
+            document.getElementById('physicsControlsChevron').className='fa-solid fa-chevron-'+(expanded?'up':'down')+' ml-2';
+        });
+        document.getElementById('toggleLipidStructure')?.addEventListener('click',()=>{
+            if(!inferredMembrane)return;
+            lipidsVisible=!lipidsVisible;
+            if(membraneLipids){
+                const molecular=lipidsVisible&&physicsRepresentation==='ball-stick';
+                membraneLipids.mesh.visible=lipidsVisible&&!molecular;
+                membraneLipids.atomMesh.visible=molecular;membraneLipids.stickMesh.visible=molecular;
+            }
+            updateMembraneToggleUI();
+        });
+        document.getElementById('toggleNonProteinAtoms')?.addEventListener('click',()=>{
+            nonProteinAtomsVisible=!nonProteinAtomsVisible;
+            updatePhysicsToggleButton('toggleNonProteinAtoms',nonProteinAtomsVisible);
+            applyPhysicsVisibility();updateAtomRepresentation();updateCartoonRepresentation();
+            applyReferenceNonProteinVisibility();
+        });
+        document.getElementById('membraneRepulsionSlider')?.addEventListener('input',event=>{
+            membraneRepulsionVal=Math.max(0,Math.min(1,Number(event.target.value)||0));
+            document.getElementById('membraneRepulsionValue').textContent=`${Math.round(membraneRepulsionVal*100)}%`;
         });
 
         for(const [id,visible] of [['referenceShowAllChains',true],['referenceHideAllChains',false]]){
