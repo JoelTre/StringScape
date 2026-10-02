@@ -148,6 +148,28 @@
         body.light-mode .string-file-picker, body.light-mode .string-file-picker.has-file { background:#ccfbf1; }
         body.light-mode [class*="bg-slate-900/"], body.light-mode [class*="bg-slate-800/"] { background-color:#e8eef5; }
         body.light-mode #physicsContainer, body.light-mode #physics3dCanvas { background:#fff; }
+        body.light-mode #physicsInitialLoading { background:rgba(248,250,252,.88); color:#075985; }
+        body.light-mode #physicsInitialLoading > div { background:#fff; border-color:#cbd5e1; }
+        #physicsInitialLoading .physics-loading-card { min-width:min(20rem, calc(100vw - 3rem)); padding:1.5rem 1.5rem; box-sizing:border-box; display:flex; flex-direction:column; align-items:center; gap:1.25rem; }
+        #physicsContainer { position:relative; overflow:hidden; }
+        #physicsInitialLoading { position:absolute; inset:0; }
+        #physicsViewerKey { position:absolute; left:1rem; bottom:1rem; z-index:10; }
+        #pausePhysicsPulseBtn { border:0 !important; border-radius:.5rem !important; }
+        .physics-simulation-panel .physics-toggle-row button,
+        .reference-visibility-row button { border:0 !important; border-radius:.5rem !important; background-color:#1e293b !important; }
+        body.light-mode .physics-simulation-panel .physics-toggle-row button,
+        body.light-mode .reference-visibility-row button { background-color:#e2e8f0 !important; }
+        #toggleRigidBodyBtn, #resetPhysicsSimulationBtn, #resetPhysicsViewBtn,
+        #resetResidueRepulsionBtn, #resetOtherConstraintsBtn,
+        .physics-simulation-panel #toggleMembraneStatsBtn,
+        .responsive-viewer-header button, .aligned-matrix-header button,
+        #sideChainJiggleBtn, #sequenceAlignmentDownloadBtn, #alignmentDistanceBtn { border:0 !important; border-radius:.5rem !important; }
+        #examplePresets button { border:0 !important; }
+        #physicsChainToggles i.fa-eye, #physicsChainToggles i.fa-eye-slash,
+        #physicsNonProteinToggles i.fa-eye, #physicsNonProteinToggles i.fa-eye-slash { color:#fff !important; }
+        #simPhase1Btn, #simPhase2Btn, #referenceViewerBtn, #homologyViewerBtn { border-radius:.5rem !important; }
+        #loadSimulationMolstarBtn, #downloadMmCifBtn { border-radius:.75rem !important; }
+        #pdbInput1, #pdbInput2 { min-height:3.5rem; overflow-y:hidden; resize:none; }
         body.light-mode #physicsContainer button[aria-label="Capture physics viewport"] { background:#f8fafc; border-color:#cbd5e1; color:#334155; }
         body.light-mode #physicsSnapshotPanel, body.light-mode #physicsContainer .absolute.bottom-4.left-4 { background:#f8fafc; border-color:#cbd5e1; color:#334155; }
         body.light-mode #loadSimulationMolstarBtn, body.light-mode #downloadMmCifBtn { color:#fff; }
@@ -192,7 +214,7 @@
 
     <header class="w-full py-5 px-6 flex justify-between items-center border-b border-gray-800 backdrop-blur-md sticky top-0 z-50 bg-[#0B0F19]/60">
         <div class="flex items-center space-x-2">
-            <a href="index.html" class="flex items-center space-x-3 group">
+            <a href="https://stringscape.net" class="flex items-center space-x-3 group">
             <svg width="36" height="36" viewBox="0 0 100 100" class="flex-shrink-0 ml-2.5 transition-transform duration-300 group-hover:scale-105" xmlns="http://www.w3.org/2000/svg"> 
                 <line x1="27" y1="50" x2="75" y2="22" stroke="#888" stroke-width="11" stroke-linecap="round"/>
                 <line x1="75" y1="22" x2="75" y2="78" stroke="#888" stroke-width="11" stroke-linecap="round"/>
@@ -227,14 +249,14 @@
             <!--Introduction text-->
             <section id="Introduction" class="bg-slate-900 border border-indigo-500/30 rounded-xl p-5 shadow-sm text-sm text-slate-300 leading-relaxed" aria-label="Modelling workflow">
                 <p class="mb-3" style="font-size: 3.0rem; font-weight: bold;"><i class="fa-solid fa-circle-nodes mr-1"></i> StringScape Homology Modeller</p>
-                <p class="mb-3" style="font-size: 1.0rem; font-weight: semibold;">This app builds homology models of protein complexes (including DNA, RNA, small molecule ligands, and ions) by aligning AlphaFold models onto a reference structure from the Protein Data Bank. Simply enter a PDB ID to use as a reference structure (i.e. template) and the AlphaFold/UniProt IDs of the proteins to be aligned. You can also upload two files from the STRING database to allow this app to automatically find the AlphaFold models to align (though it can make mistakes).</p>
-                <p class="mb-3" style="font-size: 1.0rem; font-weight: semibold;">This app has been specifically built to be easy to use to democritise access to all-atom homology modelling. Send feedback to <a href="stringscape.net/contact" target="_blank" rel="noopener noreferrer" class="text-sky-400 hover:underline">stringscape.net/contact<i class="fa-solid fa-arrow-up-right-from-square ml-1" aria-label="Open source code in a new tab"></i></a></p>
-                <p class="mb-3" style="font-size: 1.0rem; font-weight: semibold;">This app is open source under an Apache-2.0 licence. <a href="https://github.com/JoelTre/StringScape/tree/main" target="_blank" rel="noopener noreferrer" class="text-sky-400 hover:underline">View source code<i class="fa-solid fa-arrow-up-right-from-square ml-1" aria-label="Open source code in a new tab"></i></a> </p>
+                <p class="mb-3" style="font-size: 1.0rem; font-weight: semibold;">This app builds all-atom homology models of protein complexes (including DNA, RNA, small molecules, ions, and lipid membranes) by aligning AlphaFold models onto a reference structure from the Protein Data Bank and computing membrane positions. Simply enter a PDB ID to use as a reference structure (i.e. template) and the AlphaFold/UniProt IDs of the proteins to be aligned. You can also upload two files from the STRING database to allow this app to automatically find the AlphaFold models to align (though it can make mistakes).</p>
+                <p class="mb-3" style="font-size: 1.0rem; font-weight: semibold;">This app has been specifically built to be easy to use to democratise access to all-atom homology modelling. Send feedback to <a href="stringscape.net/contact" target="_blank" rel="noopener noreferrer" class="text-sky-400 hover:underline">stringscape.net/contact<i class="fa-solid fa-arrow-up-right-from-square ml-1" aria-label="Open source code in a new tab"></i></a></p>
+                <p class="mb-3" style="font-size: 1.0rem; font-weight: semibold;">This app is also available as a feature within the main StringScape application (in the Structures view, where all PDB files from a species are displayed and any can be clicked on to build a homology model). This app is open source under an Apache-2.0 licence. <a href="https://github.com/JoelTre/StringScape/tree/main" target="_blank" rel="noopener noreferrer" class="text-sky-400 hover:underline">View source code<i class="fa-solid fa-arrow-up-right-from-square ml-1" aria-label="Open source code in a new tab"></i></a> </p>
             </section>
 
             <!-- Quick Examples -->
             <div id="examplePresets" class="flex flex-wrap items-center gap-1.5 text-xs bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-sm">
-                <span class="text-slate-300 text-sm font-semibold mr-1 hidden sm:inline">Examples:</span>
+                <span class="text-slate-300 text-sm font-semibold mr-1">Examples:</span>
                 <button data-reference="6YKM" data-alphafold="P09348, P0AF06" data-action-click="0" class="bg-blue-600/30 hover:bg-blue-600/50 text-xs px-2.5 py-1 rounded text-indigo-200 font-mono border border-indigo-500/40 transition"><i>E. coli</i> MotAB (Default) </button>
                 <button data-reference="6YKM, 8UCS" data-alphafold="P09348, P0AF06, P0ABZ1" data-action-click="56" class="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded text-slate-300 font-mono border border-slate-700 transition">MotAB + FliG (Dual reference)</button>
                 <button data-reference="5T4P" data-alphafold="P0ABB0, P0ABB4, P0ABA6, P0A6E6, P0ABA0, P0AB98, P0ABA4, P68699" data-action-click="1" class="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded text-slate-300 font-mono border border-slate-700 transition"><i>E. coli</i> ATP synthase </button>
@@ -245,7 +267,7 @@
             <!-- Reference PDB input -->
             <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-2 w-full">
                 <div class="flex items-center justify-between gap-2"><label for="pdbInput1" class="block text-base font-semibold text-sky-300">Reference Protein Data Bank IDs (comma-separated)</label><label class="structure-file-picker"><input id="referenceStructureUpload" type="file" accept=".pdb,.ent,.cif,.mmcif" data-action-change="0"><i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> Upload structure</label></div>
-                <textarea rows="3" id="pdbInput1" data-action-input="0" class="w-full bg-slate-950 text-white rounded-lg p-3 focus:outline-none uppercase structure-id-input text-xl font-semibold" style="border: 1px solid #3498db66;">6YKM</textarea>
+                <textarea rows="1" id="pdbInput1" data-action-input="0" class="w-full bg-slate-950 text-white rounded-lg p-3 focus:outline-none uppercase structure-id-input text-xl font-semibold" style="border: 1px solid #3498db66;">6YKM</textarea>
             </div>
 
             <!-- STRING file search -->
@@ -274,7 +296,7 @@
             <!-- AlphaFold / UniProt input -->
             <form id="dualPdbForm" class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3 w-full">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div class="md:col-span-2"><div class="flex items-center justify-between gap-2 mb-2"><label for="pdbInput2" class="block text-base font-semibold text-teal-300">AlphaFold IDs, UniProt IDs, or PDB IDs</label><label class="structure-file-picker"><input id="alphaFoldStructureUpload" type="file" accept=".pdb,.ent,.cif,.mmcif" data-action-change="3"><i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> Upload structures</label></div><textarea id="pdbInput2" rows="3" data-action-input="1" class="w-full bg-slate-950 text-white rounded-lg p-3 focus:outline-none uppercase structure-id-input text-xl font-semibold resize-y" style="border: 1px solid #2eccbf66;">P09348, P0AF06</textarea></div>
+                    <div class="md:col-span-2"><div class="flex items-center justify-between gap-2 mb-2"><label for="pdbInput2" class="block text-base font-semibold text-teal-300">AlphaFold IDs, UniProt IDs, or PDB IDs</label><label class="structure-file-picker"><input id="alphaFoldStructureUpload" type="file" accept=".pdb,.ent,.cif,.mmcif" data-action-change="3"><i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> Upload structures</label></div><textarea id="pdbInput2" rows="1" data-action-input="1" class="w-full bg-slate-950 text-white rounded-lg p-3 focus:outline-none uppercase structure-id-input text-xl font-semibold" style="border: 1px solid #2eccbf66;">P09348, P0AF06</textarea></div>
                 </div>
                 <button type="submit" id="loadBtn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-4 py-2.5 rounded-lg transition-all flex items-center gap-2 text-xs"><i class="fa-solid fa-code-compare"></i> Build Homology model</button>
                 <p id="sequenceOnlyNotice" class="text-xs text-amber-300 hidden"></p>
@@ -291,7 +313,7 @@
 
         <!--Overview box-->
         <section id="workflowOverview" class="bg-slate-900 border border-indigo-500/30 rounded-xl p-5 shadow-sm text-sm text-slate-300 leading-relaxed" aria-label="Modelling workflow">
-            <p class="mb-3" style="font-size: 1.2rem; font-weight: bold;">This app builds homology models of protein complexes by aligning AlphaFold models onto a reference structure from the Protein Data Bank. This involves multiple steps:</p>
+            <p class="mb-3" style="font-size: 1.2rem; font-weight: bold; color:#3498db;">This app builds homology models of protein complexes by aligning AlphaFold models onto a reference structure from the Protein Data Bank. This involves multiple steps:</p>
             <ol class="list-decimal pl-5 space-y-2">
                 <li>
                     <strong class="text-slate-100">Load one or more reference structures from the Protein Data Bank and load the AlphaFold structures from the AlphaFold database.</strong> If no AlphaFold model is available, the app just uses the protein sequence without any structural information.
@@ -303,7 +325,12 @@
                 <li><strong class="text-slate-100">Align each of the chain/polynucleotide sequences from the reference with each of the AlphaFold sequences.</strong> Semi-global alignment fits each reference chain/polynucleotide within an AlphaFold sequence, allowing for extra AlphaFold residues at either end. Alignment Settings also offers local Smith–Waterman and global Needleman–Wunsch as alignment methods.</li>
                 <li><strong class="text-slate-100">Calculate distance matrices.</strong> The distance matrix captures the spatial relationships between residues/nucleotides/atoms within each chain/polynucleotide/molecule and, for the reference structure, between each chain/polynucleotide/molecule.</li>
                 <li><strong class="text-slate-100">Build the morph distance matrix.</strong> The distance matrices of the aligned reference structures and the AlphaFold models are combined to create the morph distance matrix. The per-reference PDB and AlphaFold sliders determine the blend of shared intra-chain distances and each values influence on the simulation.</li>
-                <li><strong class="text-slate-100">Align AlphaFold models onto the reference structure.</strong> This has two phases: In phase 1, the AlphaFold structures are aligned to the reference structure via rigid-body Template Modelling alignment. In phase 2, an overdamped elastic simulation is run to relax the springs between each residue/nucleotide/atom. The spring lengths are determined by the morph matrix (each cell of the matrix corresponds to one spring in the simulation).</li>
+                <li>
+                    <strong class="text-slate-100">Align AlphaFold models onto the reference structure.</strong> This has two phases: In phase 1, the AlphaFold structures are aligned to the reference structure via rigid-body Template Modelling alignment. In phase 2, an overdamped elastic simulation is run to relax the springs between each residue/nucleotide/atom. The spring lengths are determined by the morph matrix (each cell of the matrix corresponds to one spring in the simulation).</li>
+                    <ul class="list-disc pl-5 mt-2 space-y-1">
+                        <li><strong class="text-slate-100">Adding membranes:</strong> The app also calculates weather a protein structure likely resides in a lipid membrane, and calculates the position and curvature of the membrane. The app adjusts the shape of the protein complex to move non-membrane-associated portions of the proteins out of the membrane.</li>
+                    </ul>
+                </li>
                 <li><strong class="text-slate-100">Convert the simulation result into a mmCIF format and display in a Mol* viewer.</strong> The mmCIF file can then be downloaded.</li>
             </ol>
         </section>
@@ -329,7 +356,7 @@
                     <h2 class="font-semibold text-xs flex items-center gap-2" style="color: #3498db;">
                         <span class="w-2.5 h-2.5 rounded-full inline-block" style="background-color: #3498db;"></span> Reference PDB: <span id="PDBTitle" class="text-white font-mono">6YKM</span>
                     </h2>
-                    <div id="PDBResCount" class="text-[11px] px-2 py-0.5 rounded font-mono" style="background-color: #3498db1a; color: #3498db; border: 1px solid #3498db33;">0 Residues</div>
+                    <div id="PDBResCount" class="text-[11px] font-mono" style="color: #3498db;">0 Residues</div>
                 </div>
                 <div id="molstar-container-1" class="w-full flex-1 relative bg-black"></div>
             </div>
@@ -340,7 +367,7 @@
                     <h2 class="font-semibold text-xs flex items-center gap-2" style="color: #2eccbf;">
                         <span class="w-2.5 h-2.5 rounded-full inline-block" style="background-color: #2eccbf;"></span> AlphaFold: <span id="AFTitle" class="text-white font-mono">P09348 + P0AF06</span>
                     </h2>
-                    <div class="flex items-center gap-2"><label for="afMolstarColorSelect" class="text-[11px] text-slate-300">Colour</label><select id="afMolstarColorSelect" data-action-change="4" class="bg-slate-950 border border-teal-700/50 text-slate-200 rounded px-2 py-1 text-[11px]"><option value="chain">Colour by chain</option><option value="plddt">Colour by pLDDT</option></select><div id="AFResCount" class="text-[11px] px-2 py-0.5 rounded font-mono" style="background-color: #2eccbf1a; color: #2eccbf; border: 1px solid #2eccbf33;">0 Residues</div></div>
+                    <div class="flex items-center gap-2"><label for="afMolstarColorSelect" class="text-[11px] text-slate-300">Colour</label><select id="afMolstarColorSelect" data-action-change="4" class="bg-slate-950 border border-teal-700/50 text-slate-200 rounded px-2 py-1 text-[11px]"><option value="chain">Colour by chain</option><option value="plddt">Colour by pLDDT</option></select><div id="AFResCount" class="text-[11px] font-mono" style="color: #2eccbf;">0 Residues</div></div>
                 </div>
                 <div id="molstar-container-2" class="w-full flex-1 relative bg-black"></div>
             </div>
@@ -425,7 +452,7 @@
                         <i class="fa-solid fa-align-left text-indigo-400"></i> Sequence Alignment & Equivalent Chains
                     </h2>
                 </div>
-                <div class="flex items-center gap-2"><button type="button" data-action-click="12" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded text-xs border border-slate-700"><i class="fa-solid fa-download"></i> Download CSV</button><div id="matchSummaryBadge" class="text-xs bg-indigo-500/10 text-indigo-300 px-3 py-1 rounded-full border border-indigo-500/20 font-medium">
+                <div class="flex items-center gap-2"><button id="sequenceAlignmentDownloadBtn" type="button" data-action-click="12" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded text-xs border border-slate-700"><i class="fa-solid fa-download"></i> Download CSV</button><div id="matchSummaryBadge" class="text-xs bg-indigo-500/10 text-indigo-300 px-3 py-1 rounded-full border border-indigo-500/20 font-medium">
                     Calculating matches...
                 </div></div>
             </div>
@@ -482,7 +509,7 @@
 
         <!-- Section 4: Aligned Difference Matrix Comparison -->
         <div class="bg-slate-900 border border-indigo-500/30 rounded-xl flex flex-col overflow-hidden shadow-xl">
-            <div class="bg-slate-900/90 px-5 py-3 border-b border-indigo-500/20 flex flex-wrap justify-between items-center gap-3">
+            <div class="aligned-matrix-header bg-slate-900/90 px-5 py-3 border-b border-indigo-500/20 flex flex-wrap justify-between items-center gap-3">
                 <div>
                     <h2 class="font-semibold text-sm text-white flex items-center gap-2">
                         <i class="fa-solid fa-code-compare text-indigo-400"></i> Aligned Distance Matrix Comparison
@@ -491,12 +518,12 @@
                 </div>
 
                 <div class="flex flex-wrap items-center gap-3 text-xs">
-                    <div class="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1 rounded border border-slate-800">
-                        <span class="text-slate-400">Active Match:</span>
-                        <select id="comparedPairSelect" class="bg-slate-900 border border-slate-700 text-indigo-300 font-semibold rounded px-2 py-0.5 focus:outline-none"></select>
+                    <div class="inline-flex shrink-0 items-center gap-2 whitespace-nowrap">
+                        <label for="comparedPairSelect" class="text-slate-300">Active Match:</label>
+                        <select id="comparedPairSelect" class="bg-slate-800 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs"></select>
                     </div>
 
-                    <div class="flex items-center gap-1 bg-slate-950 p-1 rounded border border-slate-800">
+                    <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
                         <button id="modeDiffBtn" data-action-click="16" class="px-2.5 py-1 rounded text-xs font-medium bg-indigo-600 text-white transition">Absolute Difference (|D1 - D2|)</button>
                         <button id="modeOverlayBtn" data-action-click="17" class="px-2.5 py-1 rounded text-xs font-medium text-slate-400 hover:text-white transition">Split Triangle Overlay</button>
                     </div>
@@ -588,80 +615,24 @@
             </div>
         </div>
 
+        </div><!-- End minimisable homology model build process -->
+
         <!-- Section 6: Real-time Physics Elastic Network Simulation -->
-        <div class="bg-slate-900 border border-emerald-500/40 rounded-xl flex flex-col overflow-hidden shadow-2xl">
+        <div class="physics-simulation-panel bg-slate-900 border border-emerald-500/40 rounded-xl flex flex-col overflow-hidden shadow-2xl mt-6 mb-6">
             <div class="bg-slate-900/90 px-5 py-3 border-b border-emerald-500/20 flex flex-wrap justify-between items-center gap-3">
                 <div>
                     <h2 class="font-semibold text-sm text-white flex items-center gap-2">
-                        <i class="fa-solid fa-atom text-emerald-400"></i> Real-time Elastic Physics Simulation
+                        <i class="fa-solid fa-atom text-emerald-400"></i> Homology Model Physics Simulation
                         <span id="physicsStatusBadge" class="text-[10px] bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded font-mono border border-indigo-500/30">Phase 1: TM-Aligned AlphaFold</span>
                     </h2>
-                    <p class="text-xs text-slate-400">Phase 1 aligns each AlphaFold chain to to the Reference PDB via rigid-body TM-alignment. Phase 2 runs dynamic elastic network relaxation from these starting positions.</p>
                 </div>
 
-                <div class="flex flex-wrap items-center gap-2 text-xs">
-                    <!-- Two Phase Switcher -->
-                    <div class="inline-flex rounded-lg p-0.5 bg-slate-950 border border-slate-700 text-xs shadow-inner">
-                        <button id="simPhase1Btn" data-action-click="24" class="px-2.5 py-1.5 rounded-md font-medium text-xs transition flex items-center gap-1.5 bg-indigo-600 text-white shadow ring-2 ring-indigo-400/30" title="Phase 1: Each chain matching AlphaFold distances and TM-aligned to Reference PDB coordinates">
-                            <i class="fa-solid fa-circle-nodes text-sky-300"></i> <span>Phase 1: TM-Align</span>
-                        </button>
-                        <button id="simPhase2Btn" data-action-click="25" class="px-2.5 py-1.5 rounded-md font-medium text-xs transition flex items-center gap-1.5 text-slate-400 hover:text-slate-200" title="Phase 2: Full active elastic network simulation from TM-aligned starting positions">
-                            <i class="fa-solid fa-circle-nodes text-emerald-400"></i> <span>Phase 2: Dynamic Sim</span>
-                        </button>
-                    </div>
 
-                    <button id="togglePhysicsBtn" data-action-click="26" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3 py-1.5 rounded-lg text-xs transition flex items-center gap-1.5 shadow">
-                        <i class="fa-solid fa-play" id="physicsPauseIcon"></i> <span id="physicsPauseText">Start Phase 2 Simulation</span>
-                    </button>
-                    <button id="toggleRigidBodyBtn" data-action-click="27" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs border border-slate-700 transition flex items-center gap-1.5 shadow" title="Toggle Rigid Body Simulation (protein chains act as rigid bodies)">
-                        <i class="fa-solid fa-cubes text-amber-400" id="rigidBodyIcon"></i> <span id="rigidBodyBtnText">Rigid Body: Off</span>
-                    </button>
-                    <button data-action-click="28" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded text-xs border border-slate-700 transition flex items-center gap-1" title="Reset all nodes back to Phase 1 TM-aligned coordinates">
-                        <i class="fa-solid fa-arrows-rotate"></i> Reset Simulation
-                    </button>
-                    <button data-action-click="29" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded text-xs border border-slate-700 transition" title="Reset Camera">
-                        <i class="fa-solid fa-camera"></i> Reset View
-                    </button>
-                </div>
             </div>
 
 
-                <!-- Physics Controls & Stats Bar -->
-                <div class="bg-slate-950 px-5 py-3 border-b border-slate-800 flex flex-wrap items-center justify-between gap-4 text-xs">
-                    <div class="flex flex-wrap items-center gap-4">
-                        <div class="flex items-center gap-2">
-                            <label for="springStiffness" class="text-slate-400">Spring Stiffness (k):</label>
-                            <input type="range" id="springStiffness" min="0.1" max="20" step="0.1" value="2.0" class="w-24 h-1.5 bg-slate-800 rounded">
-                            <span id="stiffnessVal" class="text-emerald-400 font-mono font-bold">2.0</span>
-                        </div>
-
-                        <div class="flex items-center gap-2">
-                            <label for="mobilitySlider" class="text-slate-400">Mobility / Step Size (μ):</label>
-                            <input type="range" id="mobilitySlider" min="0.001" max="0.02" step="0.001" value="0.005" class="w-24 h-1.5 bg-slate-800 rounded">
-                            <span id="mobilityDisplay" class="text-emerald-400 font-mono font-bold">0.005</span>
-                        </div>
-
-                        <div class="flex items-center gap-2">
-                            <label for="springCutoffSelect" class="text-slate-400">Spring Cutoff:</label>
-                            <select id="springCutoffSelect" class="bg-slate-900 border border-slate-700 text-slate-300 rounded px-2 py-0.5 font-mono">
-                                <option value="12">12.0 Å (Local Contacts)</option>
-                                <option value="20" selected>20.0 Å (Medium Range - Recommended)</option>
-                                <option value="35">35.0 Å (Extended Network)</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="flex items-center gap-4 font-mono text-[11px]">
-                        <div class="text-slate-400">TM-Score (P1): <span id="tmScoreDisplay" class="text-sky-400 font-bold">--</span></div>
-                        <div class="text-slate-400">RMSD (P1): <span id="tmRmsdDisplay" class="text-sky-400 font-bold">--</span></div>
-                        <div class="text-slate-400">RMSD Energy: <span id="physicsEnergyText" class="text-emerald-400 font-bold">0.00 Å</span></div>
-                        <div class="text-slate-400">Active Springs: <span id="physicsSpringDisplay" class="text-violet-400 font-bold">0</span></div>
-                        <div class="text-slate-400">Nodes: <span id="physicsNodeCount" class="text-white font-bold">0</span></div>
-                    </div>
-                </div>
-
             <!-- Chain Visibility Toggle Bar -->
-            <div class="bg-slate-900/60 px-5 py-2 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div class="physics-toggle-row bg-slate-900/60 px-5 py-2 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
                 <div class="flex flex-wrap items-center gap-2">
                     <span class="text-slate-400 font-medium uppercase text-[10px] flex items-center gap-1.5 mr-1 tracking-wider">
                         <i class="fa-solid fa-layer-group text-emerald-400"></i> Chain Toggles:
@@ -680,7 +651,7 @@
                 </div>
             </div>
 
-            <div id="physicsNonProteinToggleSection" class="hidden bg-slate-900/60 px-5 py-2 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div id="physicsNonProteinToggleSection" class="hidden physics-toggle-row bg-slate-900/60 px-5 py-2 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
                 <div class="flex flex-wrap items-center gap-2 min-w-0">
                     <span class="text-slate-400 font-medium uppercase text-[10px] flex items-center gap-1.5 mr-1 tracking-wider"><i class="fa-solid fa-layer-group text-emerald-400"></i> Non protein toggles:</span>
                     <div id="physicsNonProteinToggles" class="flex flex-wrap items-center gap-1.5 min-w-0 flex-1 max-h-24 overflow-y-auto"></div>
@@ -692,8 +663,8 @@
             </div>
 
             <!-- 3D Physics Scene Canvas Container -->
-            <div class="bg-slate-900/60 px-5 py-2 border-b border-slate-800 flex flex-wrap items-center gap-2 text-xs"><span class="text-slate-400 font-medium uppercase text-[10px] tracking-wider"><i class="fa-solid fa-layer-group text-emerald-400"> </i> Structure toggles:</span><button id="toggleHomologyStructure" type="button" data-action-click="32" class="px-2.5 py-1 rounded border border-slate-700 bg-slate-900 text-white">Homology model <i class="fa-solid fa-eye"></i></button><span id="physicsReferenceStructureToggles" class="contents"></span><button id="toggleSpringStructure" type="button" data-action-click="34" aria-pressed="false" class="px-2.5 py-1 rounded border border-dashed border-slate-800 bg-slate-950/60 text-slate-500">Springs <i class="fa-solid fa-eye-slash"></i></button></div>
-            <div class="bg-slate-900/60 px-5 py-2 border-b border-slate-800 flex flex-wrap items-center gap-2 text-xs"><span class="text-slate-400 font-medium uppercase text-[10px] tracking-wider"><i class="fa-solid fa-layer-group text-emerald-400"> </i> Aligned toggles:</span><button id="toggleAlignedResidues" type="button" data-action-click="35" class="px-2.5 py-1 rounded border border-slate-700 bg-slate-900 text-white">Aligned residues <i class="fa-solid fa-eye"></i></button><button id="toggleUnalignedResidues" type="button" data-action-click="36" class="px-2.5 py-1 rounded border border-slate-700 bg-slate-900 text-white">Unaligned residues <i class="fa-solid fa-eye"></i></button></div>
+            <div class="physics-toggle-row bg-slate-900/60 px-5 py-2 border-b border-slate-800 flex flex-wrap items-center gap-2 text-xs"><span class="text-slate-400 font-medium uppercase text-[10px] tracking-wider"><i class="fa-solid fa-layer-group text-emerald-400"> </i> Structure toggles:</span><button id="toggleHomologyStructure" type="button" data-action-click="32" class="px-2.5 py-1 rounded border border-slate-700 bg-slate-900 text-white">Homology model <i class="fa-solid fa-eye"></i></button><span id="physicsReferenceStructureToggles" class="contents"></span><button id="toggleMembraneStructure" type="button" aria-pressed="false" class="hidden px-2.5 py-1 rounded border border-dashed border-slate-800 bg-slate-950/60 text-slate-500">Membrane plane <i class="fa-solid fa-eye-slash"></i></button><button id="toggleLipidStructure" type="button" aria-pressed="true" class="hidden px-2.5 py-1 rounded border border-slate-700 bg-slate-900 text-white">Membrane lipids <i class="fa-solid fa-eye"></i></button><span id="noMembraneDetected" class="text-slate-400">No membrane detected.</span><button id="toggleSpringStructure" type="button" data-action-click="34" aria-pressed="false" class="px-2.5 py-1 rounded border border-dashed border-slate-800 bg-slate-950/60 text-slate-500">Springs <i class="fa-solid fa-eye-slash"></i></button></div>
+            <div class="physics-toggle-row bg-slate-900/60 px-5 py-2 border-b border-slate-800 flex flex-wrap items-center gap-2 text-xs"><span class="text-slate-400 font-medium uppercase text-[10px] tracking-wider"><i class="fa-solid fa-layer-group text-emerald-400"> </i> Residue toggles:</span><button id="toggleAlignedResidues" type="button" data-action-click="35" class="px-2.5 py-1 rounded border border-slate-700 bg-slate-900 text-white">Aligned residues <i class="fa-solid fa-eye"></i></button><button id="toggleUnalignedResidues" type="button" data-action-click="36" class="px-2.5 py-1 rounded border border-slate-700 bg-slate-900 text-white">Unaligned residues <i class="fa-solid fa-eye"></i></button><button id="toggleNonProteinAtoms" type="button" aria-pressed="true" class="px-2.5 py-1 rounded border border-slate-700 bg-slate-900 text-white">Non-protein atoms <i class="fa-solid fa-eye"></i></button></div>
             <div class="flex flex-wrap items-center gap-3 px-3 pt-4 text-xs text-slate-300">
                 <!--physics representation controls -->
                 <div role="group" aria-label="Physics representation" class="flex gap-1 rounded-lg bg-slate-950 p-1">
@@ -703,12 +674,12 @@
                     <button id="physicsSurfaceBtn" type="button" aria-pressed="false" data-action-click="40" class="px-3 py-1.5 rounded text-slate-300">Surface</button>
                 </div>
                 <div id="sideChainJiggleControls" class="hidden items-center gap-3">
-                    <button id="sideChainJiggleBtn" type="button" data-action-click="41" aria-pressed="true" class="bg-violet-600 hover:bg-violet-500 text-white px-3 py-1.5 rounded text-xs border border-slate-700 transition" title="Animate side-chain atoms without changing the residue simulation physics"><i class="fa-solid fa-wave-square"></i> <span id="sideChainJiggleText">Stop Jiggle</span></button>
+                    <button id="sideChainJiggleBtn" type="button" data-action-click="41" aria-pressed="true" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded text-xs border border-slate-700 transition" title="Animate side-chain atoms without changing the residue simulation physics"><i class="fa-solid fa-wave-square"></i> <span id="sideChainJiggleText">Stop Jiggle</span></button>
                     <label class="inline-flex items-center gap-2 text-xs text-slate-300 whitespace-nowrap">Jiggle speed <output id="sideChainJiggleSpeedValue">3.0×</output><input aria-label="Jiggle speed" type="range" min="0.5" max="5" step="0.1" value="3" data-action-input="4"></label>
                 </div>
                 <!-- Colour by controls -->
-                    <div class="inline-flex shrink-0 items-center gap-2 whitespace-nowrap"><label for="physicsColorSelect" class="text-slate-300">Colour proteins by</label><select id="physicsColorSelect" data-action-change="5" class="bg-slate-800 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs"><option value="chain" selected>Chain (default)</option><option value="uniform">Uniform</option><option value="protein-id">Protein ID</option><option value="element">Element</option><option value="side-chains">Side chains</option><option value="origin">Origin</option><option value="aligned">Aligned residues</option><option value="hydrophobicity">Hydrophobicity</option><option value="secondary">Secondary structure</option><option value="plddt">pLDDT (from AlphaFold)</option><option value="difference">PDB-Homology model difference</option></select></div>
-                    <div id="referenceColorControl" class="hidden inline-flex shrink-0 items-center gap-2 whitespace-nowrap"><label for="referenceColorSelect" class="text-slate-300">Colour Reference chains by</label><select id="referenceColorSelect" data-action-change="6" class="bg-slate-800 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs"><option value="same" selected>Same as homology model chains (default)</option><option value="chain">Chain (default)</option><option value="uniform">Uniform</option><option value="protein-id">Protein ID</option><option value="element">Element</option><option value="side-chains">Side chains</option><option value="origin">Origin</option><option value="aligned">Aligned residues</option><option value="hydrophobicity">Hydrophobicity</option><option value="secondary">Secondary structure</option><option value="plddt">pLDDT (from AlphaFold)</option><option value="difference">PDB-Homology model difference</option></select></div>
+                    <div class="inline-flex shrink-0 items-center gap-2 whitespace-nowrap"><label for="physicsColorSelect" class="text-slate-300">Colour proteins by</label><select id="physicsColorSelect" data-action-change="5" class="bg-slate-800 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs"><option value="chain" selected>Chain (default)</option><option value="uniform">Uniform</option><option value="protein-id">Protein ID</option><option value="element">Element</option><option value="side-chains">Side chains</option><option value="origin">Origin</option><option value="aligned">Aligned residues</option><option value="membrane">Membrane</option><option value="membrane-placement">Membrane placement residues</option><option value="membrane-repelled">Repelled from membrane</option><option value="charge">Charge</option><option value="hydrophobicity">Hydrophobicity</option><option value="secondary">Secondary structure</option><option value="plddt">pLDDT (from AlphaFold)</option><option value="difference">PDB-Homology model difference</option></select></div>
+                    <div id="referenceColorControl" class="hidden inline-flex shrink-0 items-center gap-2 whitespace-nowrap"><label for="referenceColorSelect" class="text-slate-300">Colour Reference chains by</label><select id="referenceColorSelect" data-action-change="6" class="bg-slate-800 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs"><option value="same" selected>Same as homology model chains (default)</option><option value="chain">Chain (default)</option><option value="uniform">Uniform</option><option value="protein-id">Protein ID</option><option value="element">Element</option><option value="side-chains">Side chains</option><option value="origin">Origin</option><option value="aligned">Aligned residues</option><option value="membrane">Membrane</option><option value="membrane-placement">Membrane placement residues</option><option value="membrane-repelled">Repelled from membrane</option><option value="charge">Charge</option><option value="hydrophobicity">Hydrophobicity</option><option value="secondary">Secondary structure</option><option value="plddt">pLDDT (from AlphaFold)</option><option value="difference">PDB-Homology model difference</option></select></div>
                     <div id="springColorControl" class="hidden inline-flex shrink-0 items-center gap-2 whitespace-nowrap"><label for="springColorSelect" class="text-slate-300">Colour springs by</label><select id="springColorSelect" class="bg-slate-800 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs"><option value="strain" selected>Strain (default)</option><option value="origin">Origin</option></select></div>
                     <!-- Origin Filter Buttons (visible when in Origin mode to hide/show Reference PDB or AlphaFold residues) -->
                     <div id="originFilterBtns" class="hidden flex items-center gap-1.5">
@@ -724,7 +695,10 @@
                             <i class="fa-solid fa-eye text-[10px] text-teal-400" id="originAFEyeIcon"></i>
                         </button>
                     </div>
-                <span id="atomRepresentationNotice" class="hidden text-slate-400">The jiggling does not affect the homology model simulation</span>
+                    <button id="resetPhysicsViewBtn" data-action-click="29" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded text-xs border border-slate-700 transition" title="Reset Camera">
+                        <i class="fa-solid fa-camera"></i> Reset View
+                    </button>
+                <span id="atomRepresentationNotice" class="hidden text-slate-400">The jiggling does not affect the homology model simulation</span><button id="toggleMembraneStatsBtn" type="button" aria-expanded="false" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded text-[11px] border border-slate-700">View membrane stats</button><button id="sliceMembraneBtn" type="button" aria-pressed="false" disabled class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded-lg text-[11px] disabled:opacity-50">Slice membrane</button><label class="inline-flex items-center gap-2 text-[11px] text-slate-300">Membrane size <output id="membraneSizeValue">1.00×</output><input id="membraneSizeSlider" type="range" min="0.5" max="2" step="0.05" value="1" disabled aria-label="Membrane size" style="width:7rem" class="accent-sky-500"></label><label id="membraneSliceAngleControl" class="hidden inline-flex items-center gap-2 text-[11px] text-slate-300">Slice angle <output id="membraneSliceAngleValue">0°</output><input id="membraneSliceAngleSlider" type="range" min="0" max="360" step="1" value="0" aria-label="Slice angle"></label><span id="membraneDetectionStats" class="hidden min-w-0 break-words text-[11px] text-cyan-200/90 leading-relaxed" aria-live="polite">Membrane: waiting for structure.</span>
             </div>
             <div class="flex flex-wrap gap-5 items-center p-3 text-xs text-slate-300">
 <label id="physicsResidueSizeControl">Residue size <output id="physicsResidueValue">1.0×</output> <input aria-label="physics residue size" type="range" min="0" max="3" step="0.1" value="1" data-action-input="5"></label>
@@ -732,8 +706,9 @@
 <label id="physicsAtomSizeControl" class="hidden">Atom size <output id="physicsAtomValue">3.0×</output> <input aria-label="physics atom size" type="range" min="0" max="5" step="0.1" value="3" data-action-input="7"></label>
 <label id="physicsStickSizeControl" class="hidden">Stick size <output id="physicsStickValue">1.0×</output> <input aria-label="physics stick size" type="range" min="0" max="8" step="0.1" value="1" data-action-input="8"></label>
 <label id="physicsSurfaceSizeControl" class="hidden">Metaball size <output id="physicsSurfaceValue">0.8×</output> <input aria-label="physics metaball size" type="range" min="0" max="3" step="0.1" value="0.8" data-action-input="9"></label></div>
-            <div id="physicsContainer" class="w-full h-[520px] relative bg-slate-950 flex items-center justify-center overflow-hidden cursor-grab active:cursor-grabbing">
+            <div id="physicsContainer" class="w-full relative bg-slate-950 flex items-center justify-center overflow-hidden cursor-grab active:cursor-grabbing" style="height:560px">
                 <div id="physics3dCanvas" class="w-full h-full min-w-0 overflow-hidden"></div>
+                <div id="physicsInitialLoading" role="status" aria-live="polite" class="absolute inset-0 z-40 flex items-center justify-center bg-slate-950/85 text-cyan-200 pointer-events-none"><div class="physics-loading-card rounded-2xl border border-slate-700 bg-slate-900/95 text-center text-lg font-semibold shadow-xl"><i class="fa-solid fa-cube text-4xl text-cyan-300" aria-hidden="true"></i><span><i class="fa-solid fa-circle-notch fa-spin mr-2" aria-hidden="true"></i>Building homology model</span></div></div>
                 <div class="absolute right-4 top-4 z-30 flex flex-col items-end"><button type="button" data-action-click="44" aria-label="Capture physics viewport" class="bg-slate-900/90 hover:bg-slate-800 text-white px-2.5 py-2 rounded-lg border border-slate-600 shadow"><i class="fa-solid fa-camera"></i></button><div id="physicsSnapshotPanel" class="hidden mt-2 w-60 rounded-lg border border-slate-600 bg-slate-900/95 p-2 shadow-xl"><img id="physicsSnapshotImage" alt="Captured physics viewport" class="w-full rounded bg-slate-950"><div class="mt-2 flex gap-2"><button type="button" data-action-click="45" class="flex-1 rounded bg-slate-700 hover:bg-slate-600 px-2 py-1 text-xs">Copy</button><button type="button" data-action-click="46" class="flex-1 rounded bg-slate-700 hover:bg-slate-600 px-2 py-1 text-xs">Download</button></div></div></div>
                 <div id="metaballLoading" class="hidden absolute top-4 left-1/2 -translate-x-1/2 z-20 rounded-lg border border-slate-700 bg-slate-950/85 px-3 py-2 text-sm text-cyan-200 shadow-lg pointer-events-none"><i class="fa-solid fa-circle-notch fa-spin mr-2"></i>Loading metaball surface...</div>
 
@@ -742,12 +717,12 @@
                     <i class="fa-solid fa-hand"></i> Moving Chain <span id="physicsDragChainId" class="font-mono underline">--</span>
                 </div>
 
-                <div class="absolute bottom-4 left-4 bg-slate-900/90 border border-slate-800 p-3 rounded-lg text-xs text-slate-300 shadow-xl backdrop-blur-md flex flex-col gap-1 pointer-events-auto">
-                    <canvas id="springHistogram" class="mb-1" style="display:none; width:390px; height:161px;" width="1560" height="645" aria-label="Spring stretch histogram"></canvas>
+                <div id="physicsViewerKey" class="absolute bottom-4 left-4 bg-slate-900/90 border border-slate-800 p-3 rounded-lg text-xs text-slate-300 shadow-xl backdrop-blur-md flex flex-col gap-1 pointer-events-auto" style="max-width:min(28rem,calc(100% - 2rem)); overflow-wrap:anywhere;">
+                    <canvas id="springHistogram" class="mb-1" style="display:none; width:min(390px,100%); height:161px;" width="1560" height="645" aria-label="Spring stretch histogram"></canvas>
                     <div id="springColorKey" class="hidden"><span id="springStrainKey"><span style="color:#93c5fd">Compressed</span> · <span style="color:#a78bfa">At rest</span> · <span style="color:#fca5a5">Stretched</span> (±50% strain)</span><span id="springOriginKey" class="hidden"></span>
                         <button id="showSpringHistogramBtn" type="button" data-action-click="47" class="ml-2 px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[10px]">Show Histogram</button>
                     </div>
-                    <div id="physicsPulseKey" class="flex items-center gap-2"><i class="fa-solid fa-palette text-sky-400"></i> Residues with pulsing opacity are not in the Reference PDB(s) <button id="pausePhysicsPulseBtn" type="button" data-action-click="48" class="rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-0.5 text-[10px]">Pause Pulsing</button></div>
+                    <div id="physicsPulseKey" class="flex flex-wrap items-center gap-2"><i class="fa-solid fa-palette text-sky-400"></i> Residues with pulsing opacity are not in the Reference PDB(s) <button id="pausePhysicsPulseBtn" type="button" data-action-click="48" class="rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-0.5 text-[10px]">Pause Pulsing</button></div>
                     <div id="physicsColourKey">Chain: each protein chain has a distinct colour.</div>
                     <div id="physicsDifferenceKey" class="hidden">PDB–Homology Cα distance: <span style="color:#38bdf8">0 Å</span> · <span style="color:#facc15">5 Å</span> · <span style="color:#ef4444">≥10 Å</span> · Grey and pulsing: no reference equivalent</div>
                     <div id="physicsMouseGestureHint" class="text-[10px] text-slate-400 mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
@@ -759,10 +734,78 @@
                 </div>
             </div>
 
+            <button id="physicsControlsToggle" type="button" aria-expanded="false" aria-controls="physicsControlsPanel" class="w-full bg-slate-900/90 hover:bg-slate-800 border-t border-slate-800 px-5 py-3 text-left text-sm font-semibold text-white"><i class="fa-solid fa-atom text-emerald-400 mr-2" aria-hidden="true"></i>Physics Controls <i id="physicsControlsChevron" class="fa-solid fa-chevron-down ml-2" aria-hidden="true"></i></button>
+            <div id="physicsControlsPanel" class="hidden">
+                <div class="bg-slate-950 px-5 py-3 border-b border-slate-800 text-xs text-slate-400"><p class="text-xs text-slate-400">Phase 1 aligns each AlphaFold chain to the Reference PDB via rigid-body TM-alignment. Phase 2 runs dynamic elastic network relaxation from these starting positions.</p></div>
+                <div class="bg-slate-950 px-5 py-3 border-b border-slate-800 flex flex-wrap items-center gap-2 text-xs">
+                    <!-- Two Phase Switcher -->
+                    <div class="inline-flex rounded-xl p-0.5 bg-slate-950 border border-slate-700 text-xs shadow-inner">
+                        <button id="simPhase1Btn" data-action-click="24" class="px-2.5 py-1.5 rounded-md font-medium text-xs transition flex items-center gap-1.5 bg-indigo-600 text-white shadow ring-2 ring-indigo-400/30" title="Phase 1: Each chain matching AlphaFold distances and TM-aligned to Reference PDB coordinates">
+                            <i class="fa-solid fa-circle-nodes text-sky-300"></i> <span>Phase 1: TM-Align</span>
+                        </button>
+                        <button id="simPhase2Btn" data-action-click="25" class="px-2.5 py-1.5 rounded-md font-medium text-xs transition flex items-center gap-1.5 text-slate-400 hover:text-slate-200" title="Phase 2: Full active elastic network simulation from TM-aligned starting positions">
+                            <i class="fa-solid fa-circle-nodes text-emerald-400"></i> <span>Phase 2: Dynamic Sim</span>
+                        </button>
+                    </div>
+
+                    <button id="togglePhysicsBtn" data-action-click="26" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3 py-1.5 rounded-lg text-xs transition flex items-center gap-1.5 shadow">
+                        <i class="fa-solid fa-play" id="physicsPauseIcon"></i> <span id="physicsPauseText">Start Phase 2 Simulation</span>
+                    </button>
+                    <button id="toggleRigidBodyBtn" data-action-click="27" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs border border-slate-700 transition flex items-center gap-1.5 shadow" title="Toggle Rigid Body Simulation (protein chains act as rigid bodies)">
+                        <i class="fa-solid fa-cubes text-amber-400" id="rigidBodyIcon"></i> <span id="rigidBodyBtnText">Rigid Body: Off</span>
+                    </button>
+                    <button id="resetPhysicsSimulationBtn" data-action-click="28" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded text-xs border border-slate-700 transition flex items-center gap-1" title="Reset all nodes back to Phase 1 TM-aligned coordinates">
+                        <i class="fa-solid fa-arrows-rotate"></i> Reset Simulation
+                    </button>
+
+                </div>
+                <!-- Physics Controls & Stats Bar -->
+                <div class="bg-slate-950 px-5 py-3 border-b border-slate-800 flex flex-wrap items-center justify-between gap-4 text-xs">
+                    <div class="flex flex-wrap items-center gap-4">
+                        <div class="flex items-center gap-2">
+                            <label for="springStiffness" class="text-slate-400">Spring Stiffness (k):</label>
+                            <input type="range" id="springStiffness" min="0.1" max="20" step="0.1" value="2.0" class="w-24 h-1.5 bg-slate-800 rounded">
+                            <span id="stiffnessVal" class="text-emerald-400 font-mono font-bold">2.0</span>
+                        </div>
+
+                        <div class="flex items-center gap-2">
+                            <label for="mobilitySlider" class="text-slate-400">Mobility / Step Size (μ):</label>
+                            <input type="range" id="mobilitySlider" min="0.001" max="0.02" step="0.001" value="0.005" class="w-24 h-1.5 bg-slate-800 rounded">
+                            <span id="mobilityDisplay" class="text-emerald-400 font-mono font-bold">0.005</span>
+                        </div>
+
+                        <div class="flex items-center gap-2">
+                            <label for="springCutoffSelect" class="text-slate-400">Spring Cutoff:</label>
+                            <select id="springCutoffSelect" class="bg-slate-800 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs">
+                                <option value="12">12.0 Å (Local Contacts)</option>
+                                <option value="20" selected>20.0 Å (Medium Range - Recommended)</option>
+                                <option value="35">35.0 Å (Extended Network)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-4 font-mono text-[11px]">
+                        <div class="text-slate-400">TM-Score (P1): <span id="tmScoreDisplay" class="text-sky-400 font-bold">--</span></div>
+                        <div class="text-slate-400">RMSD (P1): <span id="tmRmsdDisplay" class="text-sky-400 font-bold">--</span></div>
+                        <div class="text-slate-400">RMSD Energy: <span id="physicsEnergyText" class="text-emerald-400 font-bold">0.00 Å</span></div>
+                        <div class="text-slate-400">Active Springs: <span id="physicsSpringDisplay" class="text-violet-400 font-bold">0</span></div>
+                        <div class="text-slate-400">Nodes: <span id="physicsNodeCount" class="text-white font-bold">0</span></div>
+                    </div>
+                </div>
+
             <!-- Per-model morph influence controls -->
             <div class="bg-slate-950 px-6 py-4 border-t border-slate-800 grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div id="referenceInfluenceControls"><label class="text-xs text-sky-400">Reference PDB influence on spring lengths and strengths <span id="model1InfluenceVal">100%</span><input id="model1InfluenceSlider" type="range" min="0" max="1" step="0.01" value="1" class="w-full"></label></div>
                 <label class="text-xs text-teal-400">AlphaFold influence on spring lengths and strengths <span id="model2InfluenceVal">100%</span><input id="model2InfluenceSlider" type="range" min="0" max="1" step="0.01" value="1" class="w-full"></label>
+            </div>
+
+            <div class="bg-slate-950 px-6 py-4 border-t border-slate-800/80 flex flex-col md:flex-row items-center justify-between gap-4">
+                <div class="flex items-center gap-3 w-full md:w-auto">
+                    <div class="w-10 h-10 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 shrink-0" aria-hidden="true"><i class="fa-solid fa-water"></i></div>
+                    <div><label for="membraneRepulsionSlider" class="text-xs font-semibold text-white">Membrane repulsion <output id="membraneRepulsionValue" class="text-cyan-300 font-mono">100%</output></label>
+                    <p class="text-[11px] text-slate-400 mt-0.5">Once repelled, an unaligned non-membrane residue keeps feeling a weaker force as it moves farther from the membrane.</p></div>
+                </div>
+                <input id="membraneRepulsionSlider" type="range" min="0" max="1" step="0.01" value="1" aria-label="Membrane repulsion force" class="w-full md:w-7/12 h-2.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50">
             </div>
 
             <!-- All-Residue Mutual Repulsion Force Controller Bar (Below Physics Simulation) -->
@@ -778,13 +821,13 @@
             </div>
             <div class="bg-slate-950 px-6 py-4 border-t border-slate-800/80 flex flex-col md:flex-row items-center justify-between gap-4">
                 <div class="flex items-center gap-3 w-full md:w-auto">
-                    <div class="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0 shadow-inner">
+                    <div class="w-10 h-10 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 shrink-0 shadow-inner">
                         <i class="fa-solid fa-atom text-base"></i>
                     </div>
                     <div>
                         <div class="flex items-center gap-2">
                             <span class="text-xs font-semibold text-white tracking-wide">All-Residue Repulsion Force</span>
-                            <span id="residueRepulsionBadge" class="bg-slate-900 border border-slate-700 text-slate-400 font-mono text-[11px] font-bold px-2.5 py-0.5 rounded-full shadow-sm">Off (0%)</span>
+                            <span id="residueRepulsionBadge" class="bg-slate-900 border border-slate-700 text-slate-400 font-mono text-[11px] font-bold px-2.5 py-0.5 rounded-full shadow-sm">Off</span>
                         </div>
                         <p class="text-[11px] text-slate-400 mt-0.5">
                             Applies an all-pairs repulsive force pushing all residues apart.
@@ -793,19 +836,10 @@
                 </div>
 
                 <div class="flex items-center gap-3 w-full md:w-7/12">
-                    <span class="text-[11px] text-slate-400 font-medium whitespace-nowrap flex items-center gap-1.5 shrink-0">
-                        <i class="fa-solid fa-ban text-slate-500"></i> Off (0%)
-                    </span>
                     <div class="relative w-full flex items-center">
                         <input type="range" id="residueRepulsionSlider" min="0" max="1" step="0.01" value="0"
                                class="w-full h-2.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50">
                     </div>
-                    <span class="text-[11px] text-amber-400 font-medium whitespace-nowrap flex items-center gap-1.5 shrink-0">
-                        Max (100%) 
-                    </span>
-                    <button type="button" data-action-click="49" class="bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 px-2.5 py-1 rounded text-[11px] border border-slate-700 transition whitespace-nowrap" title="Reset to 0% (Off)">
-                        Reset
-                    </button>
                 </div>
             </div>
 
@@ -827,24 +861,14 @@
                 </div>
 
                 <div class="flex items-center gap-3 w-full md:w-7/12">
-                    <span class="text-[11px] text-slate-400 font-medium whitespace-nowrap flex items-center gap-1.5 shrink-0">
-                        <i class="fa-solid fa-ban text-slate-500"></i> Off (0%)
-                    </span>
                     <div class="relative w-full flex items-center">
                         <input type="range" id="otherConstraintsSlider" min="0" max="1" step="0.01" value="1"
                                class="w-full h-2.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/50">
                     </div>
-                    <span class="text-[11px] text-sky-400 font-medium whitespace-nowrap flex items-center gap-1.5 shrink-0">
-                        Full (100%)
-                    </span>
-                    <button type="button" data-action-click="50" class="bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 px-2.5 py-1 rounded text-[11px] border border-slate-700 transition whitespace-nowrap" title="Reset to 100% (Full Constraints)">
-                        Reset
-                    </button>
                 </div>
             </div>
+            </div><!-- End Physics Controls -->
         </div>
-
-    </div>
 
         <!-- Section 7: View Simulation in Mol* Viewer -->
         <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl flex flex-col gap-4">
@@ -861,11 +885,11 @@
                     </div>
                 </div>
 
-                <div id="homologyViewerToggle" class="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-700" role="group" aria-label="Homology model viewer mode">
+                <div id="homologyViewerToggle" class="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-700" role="group" aria-label="Homology model viewer mode">
                     <button id="referenceViewerBtn" type="button" data-action-click="51" class="px-3 py-1.5 rounded text-xs font-semibold bg-violet-600 text-white">Reference PDB</button>
                     <button id="homologyViewerBtn" type="button" data-action-click="52" disabled class="px-3 py-1.5 rounded text-xs font-semibold text-slate-500 cursor-not-allowed">Homology model Building…</button>
                 </div>
-                <button id="loadSimulationMolstarBtn" data-action-click="53" class="hidden ml-auto bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-medium px-4 py-2 rounded-lg text-xs shadow-lg">Update Homology Model</button>
+                <button id="loadSimulationMolstarBtn" data-action-click="53" class="hidden ml-auto bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-medium px-4 py-2 rounded-xl text-xs shadow-lg">Update Homology Model</button>
             </div>
 
             <!-- Mol* Viewer Container -->
@@ -901,7 +925,7 @@
                 </div>
             </div>
 
-            <button id="downloadMmCifBtn" data-action-click="54" class="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-95 text-white font-medium px-4 py-2.5 rounded-lg text-xs transition flex items-center gap-2 shadow-lg shadow-emerald-950/40">
+            <button id="downloadMmCifBtn" data-action-click="54" class="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-95 text-white font-medium px-4 py-2.5 rounded-xl text-xs transition flex items-center gap-2 shadow-lg shadow-emerald-950/40">
                 <i class="fa-solid fa-download"></i> Download Model (mmCIF)
             </button>
         </div>
