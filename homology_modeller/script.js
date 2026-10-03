@@ -92,10 +92,10 @@
 
                 if (physicsStatusBadge) {
                     if (this.metrics.fps < 25) {
-                        physicsStatusBadge.className = 'text-[10px] bg-red-500/20 text-red-300 px-2 py-0.5 rounded font-mono';
+                        physicsStatusBadge.className = 'ml-auto text-[10px] bg-red-500/20 text-red-300 px-2 py-0.5 rounded font-mono';
                         physicsStatusBadge.textContent = `High Load (${this.metrics.fps} FPS)`;
                     } else {
-                        physicsStatusBadge.className = 'text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded font-mono';
+                        physicsStatusBadge.className = 'ml-auto text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded font-mono';
                         physicsStatusBadge.textContent = `Running (${this.metrics.fps} FPS)`;
                     }
                 }
@@ -130,6 +130,169 @@
         let referenceFiles = [], referenceAssembly = null, referenceInfluences = [];
 
         let alignmentResults = [];
+        const editedChainMatches = new Map();
+        const automaticChainMatches = new Map();
+        let selectionMode = 'residue';
+        let linkedSelection = null;
+        let selectionGlowMesh = null;
+        let selectedGlowIndices = [];
+        let selectedResiduesVisible = true, unselectedResiduesVisible = true;
+        let selectionGlowVisible = true;
+        function updateSelectionGlow() {
+            if (!selectionGlowMesh) return;
+            if(!selectionGlowVisible||!selectedGlowIndices.length||physicsRepresentation==='ball-stick'||linkedSelection?.kind==='lipid'){selectionGlowMesh.count=0;selectionGlowMesh.visible=false;return;}
+            const dummy=new THREE.Object3D();let shown=0;
+            for (const index of selectedGlowIndices) {
+                const node=physicsNodes[index];
+                if (!node||!isNodeVisibleInPhysics(node)) continue;
+                dummy.position.set(node.x,node.y,node.z);
+                dummy.scale.setScalar(linkedSelection?.mode==='chain'?2.1:2.7);
+                dummy.updateMatrix();selectionGlowMesh.setMatrixAt(shown++,dummy.matrix);
+            }
+            selectionGlowMesh.count=shown;
+            selectionGlowMesh.visible=shown>0;
+            if(shown)selectionGlowMesh.instanceMatrix.needsUpdate=true;
+        }
+        function refreshSelectedGlowIndices() {
+            selectedGlowIndices=[];
+            if(linkedSelection)physicsNodes.forEach((node,index)=>{if(selectionMatches(node))selectedGlowIndices.push(index);});
+            updateSelectionGlow();
+        }
+        let crossLinkEvidence = [];
+        let distanceEvidence = [];
+        let resolvedCrossLinks = [];
+        async function readCrossLinkEvidence(file, kind='crosslink') {
+            const status=document.getElementById('extraEvidenceStatus');
+            if(kind==='distance')distanceEvidence=[];else crossLinkEvidence=[];
+            completedModelInputKey=null;
+            updateBuildButtonState();
+            if (!file) { status.textContent=''; return; }
+            if (file.size>2_000_000) { status.textContent='Cross-link file is too large (2 MB maximum).'; return; }
+            const lines=(await file.text()).replace(/\r/g,'').split('\n').filter(line=>line.trim()&&!line.trim().startsWith('#'));
+            if (!lines.length) { status.textContent='Cross-link file is empty.'; return; }
+            const delimiter=lines[0].includes('\t')?'\t':',';
+            const headers=lines.shift().split(delimiter).map(item=>item.trim().toLowerCase());
+            const distanceColumn=kind==='distance'?'distance_angstrom':'max_distance_angstrom';
+            const required=['chain1','residue1','chain2','residue2',distanceColumn];
+            if (required.some(key=>!headers.includes(key))) { status.textContent=`Required columns: ${required.join(', ')}.`; return; }
+            const parsed=[];
+            for (const line of lines) {
+                const fields=line.split(delimiter);
+                const row=Object.fromEntries(required.map(key=>[key,fields[headers.indexOf(key)]?.trim()]));
+                const a=Number(row.residue1),b=Number(row.residue2),max=Number(row[distanceColumn]);
+                if (!row.chain1||!row.chain2||!Number.isInteger(a)||!Number.isInteger(b)||!Number.isFinite(max)||max<=0||max>500) { status.textContent='Invalid cross-link row; check chain IDs, residue numbers, and distances.'; return; }
+                parsed.push({chain1:row.chain1,residue1:a,chain2:row.chain2,residue2:b,max,kind});
+            }
+            if(kind==='distance')distanceEvidence=parsed;else crossLinkEvidence=parsed;
+            status.textContent=`${crossLinkEvidence.length} cross-links and ${distanceEvidence.length} measured distances loaded. Build the model to apply them.`;
+        }
+        function resolveCrossLinks() {
+            const lookup=new Map();
+            physicsNodes.forEach((node,index)=>{
+                const atom=node.idx1===null?node.res.atoms2[node.idx2]:node.res.atoms1[node.idx1];
+                if (atom) lookup.set(`${node.res.c1}\u0000${atom.resSeq}`,index);
+            });
+            resolvedCrossLinks=[...crossLinkEvidence,...distanceEvidence].map(link=>({i:lookup.get(`${link.chain1}\u0000${link.residue1}`),j:lookup.get(`${link.chain2}\u0000${link.residue2}`),max:link.max,kind:link.kind}))
+                .filter(link=>link.i!==undefined&&link.j!==undefined&&link.i!==link.j);
+            if (crossLinkEvidence.length||distanceEvidence.length) document.getElementById('extraEvidenceStatus').textContent=`${resolvedCrossLinks.length}/${crossLinkEvidence.length+distanceEvidence.length} evidence restraints mapped to model residues.`;
+        }
+        function selectionMatches(node) {
+            if (!linkedSelection || !node) return false;
+            if(linkedSelection.kind==='lipid')return false;
+            if (linkedSelection.mode==='chain') return node.res.c1===linkedSelection.chain;
+            if (node.res.c1!==linkedSelection.chain) return false;
+            const reference=node.idx1===null?null:node.res.atoms1[node.idx1];
+            const alpha=node.idx2===null?null:node.res.atoms2[node.idx2];
+            return !!((reference&&reference===linkedSelection.referenceAtom)||(alpha&&alpha===linkedSelection.alphaAtom));
+        }
+        function selectLinkedEntity(chain, resSeq=null, mode=selectionMode, atom=null) {
+            const res=alignmentResults.find(result=>result.c1===chain&&(!atom||result.atoms1.includes(atom)||result.atoms2.includes(atom)))||alignmentResults.find(result=>result.c1===chain);
+            const column=atom&&res?.alignedPairs.findIndex(pair=>(pair.idx1!==null&&res.atoms1[pair.idx1]===atom)||(pair.idx2!==null&&res.atoms2[pair.idx2]===atom));
+            const pair=column>=0?res.alignedPairs[column]:null;
+            linkedSelection={kind:'model',mode,chain,resSeq,atom,res,column,
+                referenceAtom:pair?.idx1!=null?res.atoms1[pair.idx1]:null,
+                alphaAtom:pair?.idx2!=null?res.atoms2[pair.idx2]:null};
+            document.querySelectorAll('#alignmentTableBody tr').forEach(row=>{
+                const result=alignmentResults[Number(row.dataset.alignmentIndex)];
+                row.classList.toggle('linked-selected',result?.c1===chain);
+            });
+            document.querySelectorAll('#alignmentCodeBox [data-linked-residue]').forEach(letter=>{
+                letter.classList.toggle('linked-selected',letter.dataset.linkedChain===chain && (mode==='chain'||Number(letter.dataset.linkedColumn)===column));
+            });
+            updateSelectionToggleVisibility();
+            updatePhysicsSelectionInfo();
+            refreshSelectedGlowIndices();
+            updatePhysicsNodeColors();
+            applyPhysicsVisibility();updateAtomRepresentation();updateCartoonRepresentation();
+            alignmentTmViewer?.updateColors();
+            drawIndividualMatrices(); drawDifferenceMatrix(); drawMorphMatrix();
+        }
+        function clearLinkedSelection() {
+            if (!linkedSelection) return;
+            linkedSelection=null;
+            selectedResiduesVisible=true;unselectedResiduesVisible=true;
+            document.querySelectorAll('.linked-selected').forEach(element=>element.classList.remove('linked-selected'));
+            updateSelectionToggleVisibility();
+            updatePhysicsSelectionInfo();
+            refreshSelectedGlowIndices();
+            updatePhysicsNodeColors();
+            applyPhysicsVisibility();updateAtomRepresentation();updateCartoonRepresentation();
+            alignmentTmViewer?.updateColors();
+            drawIndividualMatrices();drawDifferenceMatrix();drawMorphMatrix();
+        }
+        function updatePhysicsSelectionInfo() {
+            const box=document.getElementById('physicsSelectionInfo');
+            if (!box) return;
+            if (!linkedSelection) {box.classList.add('hidden');box.replaceChildren();return;}
+            const glowButton=document.createElement('button');glowButton.type='button';
+            glowButton.append(document.createTextNode('Glow '));
+            const glowIcon=document.createElement('i');glowIcon.className=selectionGlowVisible?'fa-solid fa-eye':'fa-solid fa-eye-slash';
+            glowIcon.setAttribute('aria-hidden','true');glowButton.append(glowIcon);
+            glowButton.setAttribute('aria-label',selectionGlowVisible?'Hide glow':'Show glow');
+            glowButton.setAttribute('aria-pressed',String(selectionGlowVisible));
+            glowButton.className='selection-glow-button';
+            glowButton.addEventListener('click',()=>{
+                selectionGlowVisible=!selectionGlowVisible;updatePhysicsSelectionInfo();updateSelectionGlow();
+                updatePhysicsNodeColors();updateAtomRepresentation();
+            });
+            if(linkedSelection.kind==='lipid'){
+                const heading=document.createElement('strong');heading.textContent='Generic Lipid';
+                const detail=document.createElement('div');detail.textContent='Procedurally added';
+                const headingRow=document.createElement('div');headingRow.className='selection-info-heading';headingRow.append(heading,glowButton);
+                box.replaceChildren(headingRow,detail);box.classList.remove('hidden');return;
+            }
+            const {chain,mode,referenceAtom,alphaAtom,atom}=linkedSelection;
+            const selected=atom||referenceAtom||alphaAtom;
+            const heading=document.createElement('strong');heading.textContent=mode==='chain'?`Chain ${chain}`:`${selected?.resName||'Atom'} ${selected?.resSeq??''} · Chain ${chain}`;
+            const detail=document.createElement('div');
+            detail.textContent=mode==='chain'
+                ? `${linkedSelection.res?.entityType==='nucleotide'?'Polynucleotide':linkedSelection.res?.entityType==='other'?'Non-protein molecule':'Protein'} · ${linkedSelection.res?.atoms1.length||linkedSelection.res?.atoms2.length||0} residues/atoms`
+                : `${selected?.entityType==='nucleotide'?'Nucleotide':selected?.entityType==='other'?'Non-protein atom':'Residue'} · ${referenceAtom&&alphaAtom?'Reference PDB & AlphaFold':referenceAtom?'Reference PDB':alphaAtom?'AlphaFold':''}`;
+            const headingRow=document.createElement('div');headingRow.className='selection-info-heading';headingRow.append(heading,glowButton);
+            box.replaceChildren(headingRow,detail);box.classList.remove('hidden');
+        }
+        function updateSelectionToggleVisibility() {
+            document.getElementById('selectedResidueToggles')?.classList.toggle('hidden',!linkedSelection);
+            updatePhysicsToggleButton('toggleSelectedResidues',selectedResiduesVisible);
+            updatePhysicsToggleButton('toggleUnselectedResidues',unselectedResiduesVisible);
+        }
+        function selectLipid(particle) {
+            if(!particle)return;
+            linkedSelection={kind:'lipid',particle,mode:'lipid'};
+            document.querySelectorAll('.linked-selected').forEach(element=>element.classList.remove('linked-selected'));
+            updateSelectionToggleVisibility();updatePhysicsSelectionInfo();refreshSelectedGlowIndices();
+            updatePhysicsNodeColors();applyPhysicsVisibility();updateAtomRepresentation();updateCartoonRepresentation();
+            alignmentTmViewer?.updateColors();drawIndividualMatrices();drawDifferenceMatrix();drawMorphMatrix();
+        }
+        function setSelectionMode(mode) {
+            selectionMode=mode==='chain'?'chain':'residue';
+            document.querySelectorAll('[data-select-mode]').forEach(button=>{
+                const active=button.dataset.selectMode===selectionMode;
+                button.classList.toggle('bg-violet-600',active);
+                button.classList.toggle('text-white',active);
+            });
+            if(linkedSelection?.kind==='model')selectLinkedEntity(linkedSelection.chain,linkedSelection.resSeq,selectionMode,linkedSelection.atom);
+        }
         let selectedPairKey = null;
         let diffMatrixMode = 'diff';
 
@@ -174,6 +337,7 @@
         let rigidBodySimulation = false; // true = protein chains act as rigid bodies
         let physicsOriginColorMode = false;
         let physicsColorMode = 'chain';
+        let rotationalSymmetryScores=[],rotationalSymmetryAxes=null,rotationalSymmetryGroups=[],rotationalAxesVisible=true,rotationalSymmetryLastUpdate=0;
         let simulationPhase = 1; // 1 = Phase 1 (TM-Align AlphaFold Structure), 2 = Phase 2 (Dynamic Elastic Simulation)
         let phase1AlignmentMetrics = { avgTmScore: 0, avgRmsd: 0, chainStats: {} };
         let morphColorMode = 'distance'; // 'distance' (default) or 'origin' (Reference PDB, AlphaFold, Both, Neither)
@@ -191,6 +355,8 @@
         let isDraggingChain = false; // true when Ctrl + left drag moves a chain
         let draggedChainId = null;
         let draggedBlockIdx = -1;
+        let draggedResidue = null;
+        let altDraggedSymmetryKey = null;
         let dragPlane = null;
         let prevDragWorldPos = new THREE.Vector3();
         let prevMouse3dX = 0, prevMouse3dY = 0;
@@ -919,13 +1085,16 @@
             referenceSpeciesController?.abort();
             const revision = ++referenceSpeciesRevision;
             const note = document.getElementById('referenceSpeciesNote'), links = document.getElementById('referenceSpeciesLinks'), status = document.getElementById('referenceSpeciesStatus');
+            const title=document.getElementById('stringFinderTitle');
+            title.textContent='Find the UniProt IDs for a species other than the reference PDB species';
             note.textContent = ''; links.replaceChildren(); status.textContent = '';
-            const id = String(raw).trim().toUpperCase();
-            if (!/^[0-9][A-Z0-9]{3}$/.test(id)) return;
+            const ids=[...new Set(String(raw).toUpperCase().split(/[\s,;]+/).filter(id=>/^[0-9][A-Z0-9]{3}$/.test(id)))];
+            if (!ids.length) return;
             referenceSpeciesTimer = setTimeout(async () => {
                 const controller = new AbortController(); referenceSpeciesController = controller;
                 status.textContent = 'Looking up reference source species…';
                 try {
+                    const results=await Promise.all(ids.map(async id=>{
                     let organisms = referenceSpeciesCache.get(id);
                     if (!organisms) {
                         const query = `{entry(entry_id:"${id}"){polymer_entities{entity_poly{rcsb_entity_polymer_type}rcsb_entity_source_organism{ncbi_taxonomy_id ncbi_scientific_name}}}}`;
@@ -942,20 +1111,27 @@
                         }
                         organisms = [...unique.values()]; referenceSpeciesCache.set(id, organisms);
                     }
+                    return {id,organisms};
+                    }));
                     if (revision !== referenceSpeciesRevision) return;
-                    if (!organisms.length) {status.textContent = `No source species is recorded for ${id}.`; return;}
+                    const names=[...new Set(results.flatMap(result=>result.organisms.map(organism=>organism.ncbi_scientific_name)))];
+                    if(names.length)title.textContent=`Find the UniProt IDs for a species other than ${names.join(' and ')}`;
+                    if (!names.length) {status.textContent = 'No source species is recorded for these references.'; return;}
                     note.replaceChildren(document.createTextNode(' (note that '));
-                    const pdbLabel = document.createElement('span'); pdbLabel.className = 'text-teal-400'; pdbLabel.textContent = id;
-                    note.appendChild(pdbLabel); note.appendChild(document.createTextNode(' is from '));
-                    organisms.forEach((organism,index) => {
-                        if (index) note.appendChild(document.createTextNode('; '));
-                        const speciesLabel = document.createElement('em'); speciesLabel.textContent = organism.ncbi_scientific_name;
-                        note.appendChild(speciesLabel);
+                    results.forEach((result,index)=>{
+                        if(index)note.appendChild(document.createTextNode('; '));
+                        const pdbLabel = document.createElement('span'); pdbLabel.className = 'text-teal-400'; pdbLabel.textContent = result.id;
+                        note.appendChild(pdbLabel,document.createTextNode(' is from '));
+                        result.organisms.forEach((organism,j)=>{
+                            if(j)note.appendChild(document.createTextNode(', '));
+                            const speciesLabel = document.createElement('em'); speciesLabel.textContent = organism.ncbi_scientific_name;
+                            note.appendChild(speciesLabel);
+                        });
                     });
                     note.appendChild(document.createTextNode(')'));
                     const shown = new Set();
                     let unmatched = false;
-                    for (const organism of organisms) {
+                    for (const organism of results.flatMap(result=>result.organisms)) {
                         const species = matchStringSpecies(organism);
                         if (!species) {unmatched = true; continue;}
                         if (shown.has(species.taxon)) continue;
@@ -963,7 +1139,7 @@
                         const link = document.createElement('a');
                         link.href = 'https://string-db.org/cgi/download?species_text=' + encodeURIComponent(species.name);
                         link.target = '_blank'; link.rel = 'noopener noreferrer';
-                        link.className = 'inline-flex items-center gap-2 rounded-lg border border-teal-500/40 bg-teal-700 hover:bg-teal-600 px-3 py-2 text-xs text-white';
+                        link.className = 'inline-flex items-center gap-2 rounded-xl border border-teal-500/40 bg-teal-700 hover:bg-teal-600 px-3 py-2 text-xs text-white';
                         link.textContent = `${species.name} STRING download page`;
                         link.title = `STRING taxon ${species.taxon}${species.speciesFallback ? ' — same genus and species; strain may differ' : ''} — opens in a new tab`;
                         const icon = document.createElement('i'); icon.className = 'fa-solid fa-arrow-up-right-from-square'; icon.setAttribute('aria-hidden','true');
@@ -971,7 +1147,7 @@
                     }
                     status.textContent = unmatched ? 'Some source species have no genus-and-species match in the STRING 12.5 catalog. You can search STRING manually above.' : '';
                 } catch (error) {
-                    if (revision === referenceSpeciesRevision && error.name !== 'AbortError') status.textContent = `Could not look up the source species for ${id}. You can still search STRING manually.`;
+                    if (revision === referenceSpeciesRevision && error.name !== 'AbortError') status.textContent = 'Could not look up the source species for the reference PDBs. You can still search STRING manually.';
                 }
             }, delay);
         }
@@ -1543,8 +1719,40 @@
         function drawMatrixViewport(ctx, cache, scale, offX, offY) {
             if (cache.overview) ctx.drawImage(cache.overview, offX, offY, cache.overviewSize * scale, cache.overviewSize * scale);
             const view = cache.renderedViewport;
-            if (!view) return;
-            ctx.drawImage(cache.canvas, offX + view.x * scale, offY + view.y * scale, view.extent * scale, view.extent * scale);
+            if (view) ctx.drawImage(cache.canvas, offX + view.x * scale, offY + view.y * scale, view.extent * scale, view.extent * scale);
+        }
+        function drawLinkedMatrixSelection(ctx,scale,offX,offY,kind,model=null) {
+            if (!linkedSelection||linkedSelection.kind==='lipid') return;
+            let index=-1;
+            let start=-1,end=-1;
+            const matches=(res,atom)=>res?.c1===linkedSelection.chain&&atom&&(linkedSelection.mode==='chain'||atom===linkedSelection.referenceAtom||atom===linkedSelection.alphaAtom);
+            if (kind==='single') {
+                const atoms=model.currentChain==='ALL'?model.caAtoms:model.chains[model.currentChain]||[];
+                const relevant=alignmentResults.filter(res=>res.c1===linkedSelection.chain);
+                const selectedAtoms=new Set(relevant.flatMap(res=>model===modelData1?res.atoms1:res.atoms2));
+                index=atoms.findIndex(atom=>selectedAtoms.has(atom)&&(linkedSelection.mode==='chain'||atom===linkedSelection.referenceAtom||atom===linkedSelection.alphaAtom));
+                if (linkedSelection.mode==='chain'&&index>=0) { start=index;end=atoms.findLastIndex(atom=>selectedAtoms.has(atom))+1; }
+            } else if (kind==='diff') {
+                const res=alignmentResults[selectedPairKey];
+                index=res?.alignedPairs.findIndex(pair=>matches(res,pair.idx1!==null?res.atoms1[pair.idx1]:pair.idx2!==null?res.atoms2[pair.idx2]:null))??-1;
+                if (linkedSelection.mode==='chain'&&res?.c1===linkedSelection.chain) { start=0;end=res.alignedPairs.length; }
+            } else if (kind==='morph') {
+                index=morphMatrixPositions.findIndex(pos=>matches(pos.res,pos.pair.idx1!==null?pos.res.atoms1[pos.pair.idx1]:pos.pair.idx2!==null?pos.res.atoms2[pos.pair.idx2]:null));
+                if (linkedSelection.mode==='chain') { const block=morphMatrixBlocks.find(item=>item.c1===linkedSelection.chain);if(block){start=block.offset;end=start+block.length;} }
+            }
+            ctx.save();ctx.strokeStyle='#facc15';ctx.lineWidth=2.5;
+            if (linkedSelection.mode==='chain'&&start>=0&&end>start) {
+                const pos=offX+start*scale, y=offY+start*scale,extent=(end-start)*scale;
+                if(kind==='diff'){
+                    ctx.fillStyle=getChainColor(linkedSelection.chain,morphMatrixBlocks.map(block=>block.c1));
+                    ctx.fillRect(pos,offY-7,extent,5);ctx.fillRect(offX-7,y,5,extent);
+                }
+                ctx.strokeRect(pos,offY-8,extent,7);ctx.strokeRect(offX-8,y,7,extent);
+            } else if(index>=0) {
+                const x=offX+(index+.5)*scale,y=offY+(index+.5)*scale;
+                ctx.beginPath();ctx.arc(x,y,Math.max(5,Math.min(12,scale*.7)),0,Math.PI*2);ctx.stroke();
+            }
+            ctx.restore();
         }
         function saveMatrixOverview(cache, key, N) {
             cache.overview ||= document.createElement('canvas');
@@ -1862,6 +2070,7 @@
                 ctx.lineWidth = 1.5;
                 ctx.strokeRect(offX + hoverCell.j * scale, offY + hoverCell.i * scale, Math.max(1, scale), Math.max(1, scale));
             }
+            drawLinkedMatrixSelection(ctx,scale,offX,offY,'single',modelData);
 
             PerfTracker.metrics.matrixDrawTime = performance.now() - t0;
         }
@@ -1979,6 +2188,7 @@
                 diffCtx.lineWidth = 1.5;
                 diffCtx.strokeRect(diffOffX + diffHoverCell.j * diffScale, diffOffY + diffHoverCell.i * diffScale, Math.max(1, diffScale), Math.max(1, diffScale));
             }
+            drawLinkedMatrixSelection(diffCtx,diffScale,diffOffX,diffOffY,'diff');
         }
 
         // Fast Morph Matrix with 32-bit Typed Array Blitting
@@ -2139,6 +2349,7 @@
                 morphCtx.lineWidth = 1.5;
                 morphCtx.strokeRect(morphOffX + morphHoverCell.j * morphScale, morphOffY + morphHoverCell.i * morphScale, Math.max(1, morphScale), Math.max(1, morphScale));
             }
+            drawLinkedMatrixSelection(morphCtx,morphScale,morphOffX,morphOffY,'morph');
         }
 
         // ==========================================
@@ -2483,6 +2694,26 @@
                 prevMouse3dX = e.clientX;
                 prevMouse3dY = e.clientY;
 
+                if(e.button===0&&e.shiftKey&&physicsNodes.length){
+                    const picked=pickPhysicsObject(e);
+                    if(picked?.kind==='node'&&picked.node.res.entityType!=='other'){
+                        e.preventDefault();
+                        const index=physicsNodes.indexOf(picked.node),visible=visualPointForNode(picked.node);
+                        const normal=new THREE.Vector3();physicsCamera.getWorldDirection(normal).negate();
+                        dragPlane=new THREE.Plane().setFromNormalAndCoplanarPoint(normal,visible);
+                        draggedResidue={index,target:new THREE.Vector3(picked.node.x,picked.node.y,picked.node.z)};
+                        el.style.cursor='move';return;
+                    }
+                }
+                if(e.button===0&&e.altKey&&physicsNodes.length){
+                    const picked=pickPhysicsObject(e);
+                    if(picked?.kind==='node'){
+                        updateRotationalSymmetry(true);
+                        const group=rotationalSymmetryGroups.find(item=>item.blockIds.has(picked.node.blockIdx));
+                        if(group){e.preventDefault();altDraggedSymmetryKey=group.key;el.style.cursor='ew-resize';return;}
+                    }
+                }
+
                 // Ctrl + Left Click: Click and drag on chains to move them
                 if ((e.ctrlKey || e.metaKey) && e.button === 0 && physicsNodes.length > 0) {
                     const rect = el.getBoundingClientRect();
@@ -2499,7 +2730,7 @@
                     for (let i = 0; i < physicsNodes.length; i++) {
                         const node = physicsNodes[i];
                         if (chainVisibility[node.res.c1] === false) continue;
-                        tempV.set(node.x, node.y, node.z);
+                        tempV.copy(visualPointForNode(node));
                         const d = ray.distanceToPoint(tempV);
                         if (d < 5.0 && d < minRayDist) {
                             minRayDist = d;
@@ -2514,11 +2745,7 @@
 
                         const planeNormal = new THREE.Vector3();
                         physicsCamera.getWorldDirection(planeNormal).negate();
-                        const planePoint = new THREE.Vector3(
-                            physicsNodes[closestNodeIdx].x,
-                            physicsNodes[closestNodeIdx].y,
-                            physicsNodes[closestNodeIdx].z
-                        );
+                        const planePoint = visualPointForNode(physicsNodes[closestNodeIdx]);
                         dragPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, planePoint);
 
                         const intersectPoint = new THREE.Vector3();
@@ -2535,11 +2762,62 @@
                 }
 
                 isDraggingChain = false;
-                el.style.cursor = (e.button === 2 || e.shiftKey) ? 'move' : 'grabbing';
+                el.style.cursor = e.button === 2 ? 'move' : 'grabbing';
+            });
+            let selectionPointer=null;
+            function pickPhysicsObject(event) {
+                if(!physicsCamera)return null;
+                const rect=el.getBoundingClientRect();
+                const mouse=new THREE.Vector2((event.clientX-rect.left)/rect.width*2-1,-(event.clientY-rect.top)/rect.height*2+1);
+                const raycaster=new THREE.Raycaster();raycaster.setFromCamera(mouse,physicsCamera);
+                let picked=null,best=Infinity;
+                if(physicsRepresentation==='ball-stick'&&atomRepresentation?.balls?.visible){
+                    const hit=raycaster.intersectObject(atomRepresentation.balls,false).find(item=>item.instanceId!==undefined&&isNodeVisibleInPhysics(physicsNodes[atomRepresentation.entries[item.instanceId]?.nodeIndex]));
+                    if(hit){picked={kind:'node',node:physicsNodes[atomRepresentation.entries[hit.instanceId].nodeIndex]};best=hit.distance;}
+                }
+                if(membraneLipids&&lipidsVisible){
+                    const molecular=physicsRepresentation==='ball-stick';
+                    for(const [mesh,count] of molecular?[[membraneLipids.atomMesh,LIPID_ATOMS.length],[membraneLipids.stickMesh,LIPID_BONDS.length]]:[[membraneLipids.mesh,1]]){
+                        if(!mesh.visible)continue;
+                        const hit=raycaster.intersectObject(mesh,false).find(item=>item.instanceId!==undefined);
+                        if(hit&&hit.distance<best){
+                            const particle=membraneLipids.particles[Math.floor(hit.instanceId/count)];
+                            if(particle){picked={kind:'lipid',particle};best=hit.distance;}
+                        }
+                    }
+                }
+                if(picked)return picked;
+                for (const node of physicsNodes) {
+                    if (!isNodeVisibleInPhysics(node)) continue;
+                    const point=visualPointForNode(node);
+                    const distance=raycaster.ray.distanceToPoint(point);
+                    const depth=physicsCamera.position.distanceTo(point);
+                    if(distance<Math.max(1.8,depth*.012)&&depth<best){picked={kind:'node',node};best=depth;}
+                }
+                return picked;
+            }
+            let lastSelectionHover=0;
+            el.addEventListener('pointermove',event=>{
+                if(event.pointerType==='touch'||event.buttons||isDraggingChain)return;
+                const now=performance.now();if(now-lastSelectionHover<45)return;lastSelectionHover=now;
+                el.style.cursor=pickPhysicsObject(event)?'pointer':'grab';
+            });
+            el.addEventListener('pointerdown',event=>{ if(event.button===0&&!event.ctrlKey&&!event.metaKey&&!event.shiftKey&&!event.altKey) selectionPointer={x:event.clientX,y:event.clientY}; });
+            el.addEventListener('pointerup',event=>{
+                if (!selectionPointer||Math.hypot(event.clientX-selectionPointer.x,event.clientY-selectionPointer.y)>5||!physicsCamera) { selectionPointer=null; return; }
+                selectionPointer=null;
+                const selected=pickPhysicsObject(event);
+                if(selected?.kind==='lipid')selectLipid(selected.particle);
+                else if (selected?.kind==='node') {
+                    const node=selected.node;
+                    const atom=node.idx1===null?node.res.atoms2[node.idx2]:node.res.atoms1[node.idx1];
+                    selectLinkedEntity(node.res.c1,atom?.resSeq,selectionMode,atom);
+                } else clearLinkedSelection();
             });
 
             window.addEventListener('mouseup', () => {
                 if (is3dMouseDown) {
+                    if(isDraggingChain||draggedResidue||altDraggedSymmetryKey)scheduleAnimationCapture();
                     is3dMouseDown = false;
                     if (isDraggingChain) {
                         isDraggingChain = false;
@@ -2547,12 +2825,33 @@
                         draggedBlockIdx = -1;
                         setDragChainBadge(false);
                     }
+                    draggedResidue=null;
+                    altDraggedSymmetryKey=null;
                     if (el) el.style.cursor = 'grab';
                 }
             });
 
             window.addEventListener('mousemove', (e) => {
                 if (is3dMouseDown) {
+                    if(draggedResidue){
+                        const rect=el.getBoundingClientRect();
+                        const mouse=new THREE.Vector2((e.clientX-rect.left)/rect.width*2-1,-(e.clientY-rect.top)/rect.height*2+1);
+                        const raycaster=new THREE.Raycaster();raycaster.setFromCamera(mouse,physicsCamera);
+                        const visibleTarget=new THREE.Vector3();
+                        if(raycaster.ray.intersectPlane(dragPlane,visibleTarget)){
+                            const node=physicsNodes[draggedResidue.index];
+                            const group=rotationalSymmetryGroups.find(item=>item.blockIds.has(node.blockIdx)&&Math.abs(item.angle)>1e-8);
+                            draggedResidue.target.copy(group?rotateVisualPoint(visibleTarget,group,-group.angle):visibleTarget);
+                            pinDraggedResidue();
+                        }
+                        return;
+                    }
+                    if(altDraggedSymmetryKey){
+                        const group=rotationalSymmetryGroups.find(item=>item.key===altDraggedSymmetryKey);
+                        if(group){group.angle+=(e.clientX-prevMouse3dX)*.012;updateResetRotationButton();updateSymmetryRotationControls();}
+                        prevMouse3dX=e.clientX;prevMouse3dY=e.clientY;
+                        return;
+                    }
                     if (isDraggingChain) {
                         const rect = el.getBoundingClientRect();
                         const mouseX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -2562,9 +2861,10 @@
 
                         const currentIntersect = new THREE.Vector3();
                         if (raycaster.ray.intersectPlane(dragPlane, currentIntersect)) {
-                            const dx = currentIntersect.x - prevDragWorldPos.x;
-                            const dy = currentIntersect.y - prevDragWorldPos.y;
-                            const dz = currentIntersect.z - prevDragWorldPos.z;
+                            const group=rotationalSymmetryGroups.find(item=>item.blockIds.has(draggedBlockIdx)&&Math.abs(item.angle)>1e-8);
+                            const previous=group?rotateVisualPoint(prevDragWorldPos,group,-group.angle):prevDragWorldPos;
+                            const current=group?rotateVisualPoint(currentIntersect,group,-group.angle):currentIntersect;
+                            const dx=current.x-previous.x,dy=current.y-previous.y,dz=current.z-previous.z;
                             prevDragWorldPos.copy(currentIntersect);
 
                             for (let i = 0; i < physicsNodes.length; i++) {
@@ -2584,7 +2884,7 @@
                     prevMouse3dX = e.clientX;
                     prevMouse3dY = e.clientY;
 
-                    if (mouse3dButton === 2 || e.shiftKey) {
+                    if (mouse3dButton === 2) {
                         // Pan camera: move camTarget in camera's view plane (right-click drag)
                         physicsCamera.updateMatrixWorld();
                         const right = new THREE.Vector3();
@@ -2675,6 +2975,133 @@
             }
         }
         window.setDragChainBadge = setDragChainBadge;
+
+        function rotateVisualPoint(point,group,angle=group.angle){
+            const offset=point.clone().sub(group.origin),axis=group.normal;
+            return group.origin.clone().add(offset.clone().multiplyScalar(Math.cos(angle)))
+                .add(new THREE.Vector3().crossVectors(axis,offset).multiplyScalar(Math.sin(angle)))
+                .add(axis.clone().multiplyScalar(axis.dot(offset)*(1-Math.cos(angle))));
+        }
+        function visualPointForNode(node){
+            const point=new THREE.Vector3(node.x,node.y,node.z);
+            const group=rotationalSymmetryGroups.find(item=>item.blockIds.has(node.blockIdx)&&Math.abs(item.angle)>1e-8);
+            return group?rotateVisualPoint(point,group):point;
+        }
+        function updateResetRotationButton(){
+            document.querySelectorAll('[data-reset-symmetry-rotation]').forEach(button=>{
+                const group=rotationalSymmetryGroups.find(item=>item.key===button.dataset.resetSymmetryRotation);
+                button.classList.toggle('hidden',!group||Math.abs(group.angle)<=1e-6);
+            });
+        }
+        function updateSymmetryRotationControls(){
+            const host=document.getElementById('symmetryRotationControls');if(!host?.dataset)return;
+            const keys=rotationalSymmetryGroups.map(group=>group.key).join('|');
+            if(host.dataset.groupKeys!==keys){
+                host.replaceChildren();host.dataset.groupKeys=keys;
+                rotationalSymmetryGroups.forEach((group,index)=>{
+                    const names=[...group.blockIds].map(block=>physicsNodes.find(node=>node.blockIdx===block)?.res?.c1||block);
+                    const label=document.createElement('label');label.className='inline-flex items-center gap-2 whitespace-nowrap text-xs text-slate-300';
+                    const caption=document.createElement('span');caption.textContent=`Rotation ${index+1} (${names.join(', ')})`;
+                    const input=document.createElement('input');input.type='text';input.inputMode='decimal';input.dataset.symmetryRotation=group.key;
+                    input.setAttribute('aria-label',`Rotational symmetry group ${index+1} angle in degrees`);
+                    input.title='Type any angle, or drag up/right to increase it';
+                    const unit=document.createElement('span');unit.className='text-violet-300';unit.textContent='°';
+                    const setAngle=value=>{if(!Number.isFinite(value))return;const current=rotationalSymmetryGroups.find(item=>item.key===input.dataset.symmetryRotation);if(!current)return;
+                        current.angle=value*Math.PI/180;updateResetRotationButton();scheduleAnimationCapture();};
+                    input.addEventListener('input',()=>{const value=Number(input.value);if(input.value.trim()&&Number.isFinite(value))setAngle(value);});
+                    input.addEventListener('change',()=>{const value=Number(input.value);if(input.value.trim()&&Number.isFinite(value))setAngle(value);else input.value=String(Math.round((rotationalSymmetryGroups.find(item=>item.key===input.dataset.symmetryRotation)?.angle||0)*180/Math.PI*100)/100);});
+                    input.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();input.dispatchEvent(new Event('change'));input.blur();}});
+                    let drag=null;
+                    input.addEventListener('pointerdown',event=>{if(event.button!==0)return;drag={x:event.clientX,y:event.clientY,start:Number(input.value)||0,moved:false};input.setPointerCapture(event.pointerId);});
+                    input.addEventListener('pointermove',event=>{if(!drag)return;const dx=event.clientX-drag.x,dy=event.clientY-drag.y;
+                        if(!drag.moved&&Math.hypot(dx,dy)<4)return;drag.moved=true;
+                        const value=Math.round((drag.start+(dx-dy)*.5)*100)/100;input.value=String(value);setAngle(value);event.preventDefault();});
+                    input.addEventListener('pointerup',()=>{drag=null;});input.addEventListener('pointercancel',()=>{drag=null;});
+                    const reset=document.createElement('button');reset.type='button';reset.dataset.resetSymmetryRotation=group.key;
+                    reset.className='rounded-lg bg-violet-600 px-2 py-1 text-white hover:bg-violet-500';reset.title='Reset rotation';reset.setAttribute('aria-label',`Reset rotation for symmetry group ${index+1}`);
+                    reset.innerHTML='<i class="fa-solid fa-rotate-left" aria-hidden="true"></i>';
+                    reset.addEventListener('click',()=>{const current=rotationalSymmetryGroups.find(item=>item.key===reset.dataset.resetSymmetryRotation);if(!current)return;current.angle=0;updateResetRotationButton();updateSymmetryRotationControls();scheduleAnimationCapture();});
+                    label.append(caption,input,unit,reset);host.append(label);
+                });
+            }
+            host.classList.toggle('hidden',!rotationalSymmetryGroups.length);
+            host.querySelectorAll('[data-symmetry-rotation]').forEach(input=>{
+                const group=rotationalSymmetryGroups.find(item=>item.key===input.dataset.symmetryRotation);if(!group)return;
+                if(document.activeElement!==input||animationPlaying)input.value=String(Math.round(group.angle*180/Math.PI*100)/100);
+            });
+            updateResetRotationButton();
+        }
+        function backboneRestLength(i){
+            const a=physicsPositions[i],b=physicsPositions[i+1];
+            if(!a||!b||a.blockIdx!==b.blockIdx)return BACKBONE_BOND_LEN;
+            if(a.res.entityType!=='nucleotide')return BACKBONE_BOND_LEN;
+            const d1=a.pair.idx1!==null&&b.pair.idx1!==null?dist3d(a.res.atoms1[a.pair.idx1],b.res.atoms1[b.pair.idx1]):null;
+            const d2=!a.res.referenceOnly&&a.pair.idx2!==null&&b.pair.idx2!==null?dist3d(a.res.atoms2[a.pair.idx2],b.res.atoms2[b.pair.idx2]):null;
+            return d1!==null&&d2!==null?(1-morphAlpha)*d1+morphAlpha*d2:d1??d2??BACKBONE_BOND_LEN;
+        }
+        function enforceDraggedBackboneContinuity(index){
+            const center=physicsNodes[index];if(!center||center.res.entityType==='other')return;
+            const pull=(anchor,follower,bondIndex)=>{
+                const dx=follower.x-anchor.x,dy=follower.y-anchor.y,dz=follower.z-anchor.z;
+                const distance=Math.hypot(dx,dy,dz);
+                const limit=Math.max(4.5,Math.min(9,backboneRestLength(bondIndex)*1.25));
+                if(distance<=limit||distance<1e-8)return;
+                const scale=limit/distance;
+                follower.x=anchor.x+dx*scale;follower.y=anchor.y+dy*scale;follower.z=anchor.z+dz*scale;
+            };
+            for(let i=index-1;i>=0&&physicsNodes[i].blockIdx===center.blockIdx;i--)pull(physicsNodes[i+1],physicsNodes[i],i);
+            for(let i=index+1;i<physicsNodes.length&&physicsNodes[i].blockIdx===center.blockIdx;i++)pull(physicsNodes[i-1],physicsNodes[i],i-1);
+        }
+        function pinDraggedResidue(){
+            if(!draggedResidue)return;
+            const node=physicsNodes[draggedResidue.index];
+            if(!node){draggedResidue=null;return;}
+            const target=draggedResidue.target,dx=target.x-node.x,dy=target.y-node.y,dz=target.z-node.z;
+            if(rigidBodySimulation){
+                for(const other of physicsNodes)if(other.blockIdx===node.blockIdx){other.x+=dx;other.y+=dy;other.z+=dz;}
+            }else{node.x=target.x;node.y=target.y;node.z=target.z;enforceDraggedBackboneContinuity(draggedResidue.index);}
+        }
+        function applyVisualSymmetryRotation(){
+            if(!rotationalSymmetryGroups.some(group=>Math.abs(group.angle)>1e-8))return null;
+            const original=[];
+            for(const node of physicsNodes){
+                const group=rotationalSymmetryGroups.find(item=>item.blockIds.has(node.blockIdx)&&Math.abs(item.angle)>1e-8);
+                if(!group)continue;
+                original.push([node,node.x,node.y,node.z]);
+                const point=rotateVisualPoint(new THREE.Vector3(node.x,node.y,node.z),group);
+                node.x=point.x;node.y=point.y;node.z=point.z;
+            }
+            return original;
+        }
+        function syncVisualPhysicsMeshes(){
+            if(instancedNodeMesh){
+                for(let i=0;i<physicsNodes.length;i++){
+                    const node=physicsNodes[i],visible=isNodeVisibleInPhysics(node);
+                    nodeDummy.position.set(node.x,node.y,node.z);
+                    nodeDummy.scale.setScalar(visible?viewerSizes.physics.residue:0);
+                    nodeDummy.updateMatrix();instancedNodeMesh.setMatrixAt(i,nodeDummy.matrix);
+                }
+                instancedNodeMesh.instanceMatrix.needsUpdate=true;
+            }
+            for(const chain of backboneChains){
+                const attr=chain.geo.attributes.position;
+                for(let k=0;k<chain.count;k++){
+                    const node=physicsNodes[chain.start+k];
+                    attr.setXYZ(k,node.x,node.y,node.z);
+                }
+                attr.needsUpdate=true;
+            }
+            if(springDisplay?.visible){
+                const attr=springDisplay.geometry.getAttribute('position');let count=0;
+                for(const spring of physicsSprings){
+                    if(!getActiveSpring(spring)||springStiffnessVal<=0)continue;
+                    const a=physicsNodes[spring.i],b=physicsNodes[spring.j];
+                    if(!a||!b||!isNodeVisibleInPhysics(a)||!isNodeVisibleInPhysics(b))continue;
+                    attr.setXYZ(count++,a.x,a.y,a.z);attr.setXYZ(count++,b.x,b.y,b.z);
+                }
+                attr.needsUpdate=true;
+            }
+        }
 
         // ==========================================
         // 11. TM-ALIGN & KABSCH RIGID BODY SUPERPOSITION (PHASE 1)
@@ -2906,16 +3333,75 @@
             physicsPulseUniform.value = physicsPulseOpacity(performance.now(), physicsOriginColorMode);
         }
         let physicsSnapshotUrl = '';
+        let physicsRecording=null,physicsRecordingUrl='',physicsRecordingMime='video/webm',physicsRecordingPixelRatio=null,physicsRecordingStarted=null;
+        function capturePixelRatio() {
+            const size=physicsRenderer.getSize(new THREE.Vector2());
+            const pixelCap=Math.sqrt(8_000_000/Math.max(1,size.x*size.y));
+            return Math.max(physicsRenderer.getPixelRatio(),Math.min(3,pixelCap));
+        }
         function togglePhysicsSnapshot() {
             const panel=document.getElementById('physicsSnapshotPanel');
-            if(!panel.classList.contains('hidden')){panel.classList.add('hidden');return;}
+            panel.classList.toggle('hidden');
+        }
+        function capturePhysicsSnapshot() {
             if(!physicsRenderer||!physicsScene||!physicsCamera)return;
-            for(const chain of backboneChains)chain.line.userData.syncBackbone?.();
-            physicsRenderer.render(physicsScene,physicsCamera);
-            try { physicsSnapshotUrl=physicsRenderer.domElement.toDataURL('image/png'); }
-            catch(error){console.error(error);alert('Could not capture the 3D viewport.');return;}
-            document.getElementById('physicsSnapshotImage').src=physicsSnapshotUrl;
-            panel.classList.remove('hidden');
+            const originalRatio=physicsRenderer.getPixelRatio();
+            try {
+                physicsRenderer.setPixelRatio(capturePixelRatio());
+                for(const chain of backboneChains)chain.line.userData.syncBackbone?.();
+                physicsRenderer.render(physicsScene,physicsCamera);
+                physicsSnapshotUrl=physicsRenderer.domElement.toDataURL('image/png');
+            } catch(error){console.error(error);alert('Could not capture the 3D viewport.');return;}
+            finally {physicsRenderer.setPixelRatio(originalRatio);}
+            const image=document.getElementById('physicsSnapshotImage');image.src=physicsSnapshotUrl;image.classList.remove('hidden');
+            document.getElementById('physicsPhotoActions').classList.remove('hidden');
+            document.getElementById('physicsVideoPreview').classList.add('hidden');
+            document.getElementById('physicsVideoDownload').classList.add('hidden');
+            document.getElementById('physicsCaptureStatus').classList.add('hidden');
+        }
+        function togglePhysicsRecording() {
+            const button=document.getElementById('physicsRecordBtn'),status=document.getElementById('physicsCaptureStatus');
+            if(physicsRecording){physicsRecording.stop();physicsRecording=null;physicsRecordingStarted=null;button.textContent='Record';button.classList.remove('recording-pulse');document.getElementById('physicsSnapBtn').disabled=false;status.textContent='Preparing video preview…';return;}
+            if(!physicsRenderer?.domElement.captureStream||typeof MediaRecorder==='undefined'){
+                status.textContent='Video recording is not supported by this browser.';status.classList.remove('hidden');return;
+            }
+            physicsRecordingPixelRatio=physicsRenderer.getPixelRatio();
+            let stream;
+            try {physicsRenderer.setPixelRatio(capturePixelRatio());stream=physicsRenderer.domElement.captureStream(30);}
+            catch(error){physicsRenderer.setPixelRatio(physicsRecordingPixelRatio);physicsRecordingPixelRatio=null;console.error(error);status.textContent='Could not capture the physics viewport.';status.classList.remove('hidden');return;}
+            const mime=['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm','video/mp4'].find(type=>MediaRecorder.isTypeSupported(type));
+            if(!mime){stream.getTracks().forEach(track=>track.stop());physicsRenderer.setPixelRatio(physicsRecordingPixelRatio);physicsRecordingPixelRatio=null;status.textContent='This browser cannot record video from the viewport.';status.classList.remove('hidden');return;}
+            const chunks=[];
+            let recorder;
+            try {recorder=new MediaRecorder(stream,{mimeType:mime});}
+            catch(error){stream.getTracks().forEach(track=>track.stop());physicsRenderer.setPixelRatio(physicsRecordingPixelRatio);physicsRecordingPixelRatio=null;console.error(error);status.textContent='Could not start video recording.';status.classList.remove('hidden');return;}
+            recorder.ondataavailable=event=>{if(event.data.size)chunks.push(event.data);};
+            recorder.onstop=()=>{
+                physicsRecording=null;physicsRecordingStarted=null;button.textContent='Record';button.classList.remove('recording-pulse');
+                document.getElementById('physicsSnapBtn').disabled=false;
+                stream.getTracks().forEach(track=>track.stop());
+                if(physicsRecordingPixelRatio!==null){physicsRenderer.setPixelRatio(physicsRecordingPixelRatio);physicsRecordingPixelRatio=null;}
+                if(!chunks.length){status.textContent='No video frames were captured.';status.classList.remove('hidden');return;}
+                if(physicsRecordingUrl)URL.revokeObjectURL(physicsRecordingUrl);
+                physicsRecordingUrl=URL.createObjectURL(new Blob(chunks,{type:mime}));
+                const video=document.getElementById('physicsVideoPreview');video.src=physicsRecordingUrl;video.classList.remove('hidden');
+                document.getElementById('physicsVideoDownload').classList.remove('hidden');
+                document.getElementById('physicsSnapshotImage').classList.add('hidden');
+                document.getElementById('physicsPhotoActions').classList.add('hidden');
+                status.classList.add('hidden');
+            };
+            physicsRecordingStarted=new Promise(resolve=>{
+                recorder.addEventListener('start',()=>resolve(true),{once:true});
+                recorder.addEventListener('error',()=>resolve(false),{once:true});
+            });
+            try {recorder.start();}
+            catch(error){physicsRecordingStarted=null;stream.getTracks().forEach(track=>track.stop());physicsRenderer.setPixelRatio(physicsRecordingPixelRatio);physicsRecordingPixelRatio=null;console.error(error);status.textContent='Could not start video recording.';status.classList.remove('hidden');return;}
+            physicsRecording=recorder;physicsRecordingMime=mime;button.textContent='Stop';button.classList.add('recording-pulse');document.getElementById('physicsSnapBtn').disabled=true;
+            document.getElementById('physicsSnapshotImage').classList.add('hidden');
+            document.getElementById('physicsPhotoActions').classList.add('hidden');
+            document.getElementById('physicsVideoPreview').classList.add('hidden');
+            document.getElementById('physicsVideoDownload').classList.add('hidden');
+            status.textContent='Recording the physics viewport…';status.classList.remove('hidden');
         }
         async function copyPhysicsSnapshot() {
             if(!physicsSnapshotUrl)return;
@@ -3068,7 +3554,13 @@
                 });
             }
 
+            updateRotationalSymmetry(true);
+
             // Create 1 single THREE.InstancedMesh for ALL nodes
+            resolveCrossLinks();
+            if(selectionGlowMesh){physicsScene.remove(selectionGlowMesh);selectionGlowMesh.geometry.dispose();selectionGlowMesh.material.dispose();selectionGlowMesh=null;}
+            selectionGlowMesh=new THREE.InstancedMesh(new THREE.SphereGeometry(1,12,10),new THREE.MeshBasicMaterial({color:0xffef59,transparent:true,opacity:.38,depthWrite:false,blending:THREE.AdditiveBlending}),N);
+            selectionGlowMesh.count=0;selectionGlowMesh.frustumCulled=false;selectionGlowMesh.renderOrder=15;physicsScene.add(selectionGlowMesh);
             const sphereGeo = new THREE.SphereGeometry(0.85, 10, 8);
             const sphereMat = new THREE.MeshPhongMaterial({
                 // specular: 0xaaaaaa,
@@ -3108,6 +3600,7 @@
             renderPhysicsChainToggles();
             computePhysicsOcclusion();
             updatePhysicsNodeColors();
+            refreshSelectedGlowIndices();
             setSimulationPhase(2); // Start Phase 2 automatically when initialization is complete
 
             const elapsed = PerfTracker.end('initPhysics');
@@ -3325,6 +3818,9 @@
                 if (!nonProteinAtomsVisible) return false;
             } else if (node.usedInAlignment ? !alignedResiduesVisible : !unalignedResiduesVisible) return false;
             if (chainVisibility[node.res.c1] === false) return false;
+            if(linkedSelection){
+                if(selectionMatches(node)?!selectedResiduesVisible:!unselectedResiduesVisible)return false;
+            }
             if (physicsOriginColorMode) {
                 const hasAF = node.idx2 !== null&&!node.res.referenceOnly;
                 if (!visibleOriginReferences(node).length && !(hasAF && originAFVisible)) return false;
@@ -3728,6 +4224,10 @@
 
         function resetPhysicsPositions() {
             if (!physicsNodes.length) return;
+            draggedResidue=null;altDraggedSymmetryKey=null;
+            rotationalSymmetryGroups.forEach(group=>{group.angle=0;});
+            updateResetRotationButton();
+            updateSymmetryRotationControls();
             for (let i = 0; i < physicsNodes.length; i++) {
                 const node = physicsNodes[i];
                 node.x = node.phase1X !== undefined ? node.phase1X : node.initX;
@@ -3967,6 +4467,7 @@
             if (modelLoading || readyModelGeneration !== modelBuildGeneration) return;
             if (simulationPhase === 1) return; // In Phase 1, hold the TM-aligned starting positions
             if (!physicsRunning || !physicsNodes.length) return;
+            pinDraggedResidue();
             const t0 = performance.now();
 
             const N = physicsNodes.length;
@@ -4011,6 +4512,14 @@
 
                 totalPotentialEnergy += 0.5 * kSpring * delta * delta;
                 activeSpringCount++;
+            }
+            for (const link of resolvedCrossLinks) {
+                const a=physicsNodes[link.i],b=physicsNodes[link.j];
+                const dx=b.x-a.x,dy=b.y-a.y,dz=b.z-a.z,dist=Math.hypot(dx,dy,dz)||.001;
+                if (link.kind==='crosslink'&&dist<=link.max) continue;
+                const magnitude=Math.min(100,kBase*.5*(dist-link.max))/dist;
+                fx[link.i]+=magnitude*dx;fy[link.i]+=magnitude*dy;fz[link.i]+=magnitude*dz;
+                fx[link.j]-=magnitude*dx;fy[link.j]-=magnitude*dy;fz[link.j]-=magnitude*dz;
             }
 
             // 2. Steric exclusion radius, independent of the backbone constraint strength.
@@ -4173,6 +4682,7 @@
                     if (isDraggingChain && (node.res.c1 === draggedChainId || node.blockIdx === draggedBlockIdx)) {
                         continue;
                     }
+                    if(draggedResidue?.index===i)continue;
                     if(node.res.entityType==='other'){
                         if(!atomicEntities.has(node.blockIdx))atomicEntities.set(node.blockIdx,[]);
                         atomicEntities.get(node.blockIdx).push(i);
@@ -4209,8 +4719,9 @@
                             const shiftY = dy * 0.5 * diff * otherConstraintsInfluence;
                             const shiftZ = dz * 0.5 * diff * otherConstraintsInfluence;
 
-                            n1.x += shiftX; n1.y += shiftY; n1.z += shiftZ;
-                            n2.x -= shiftX; n2.y -= shiftY; n2.z -= shiftZ;
+                            const pinned1=draggedResidue?.index===i,pinned2=draggedResidue?.index===i+1;
+                            if(!pinned1){n1.x+=shiftX*(pinned2?2:1);n1.y+=shiftY*(pinned2?2:1);n1.z+=shiftZ*(pinned2?2:1);}
+                            if(!pinned2){n2.x-=shiftX*(pinned1?2:1);n2.y-=shiftY*(pinned1?2:1);n2.z-=shiftZ*(pinned1?2:1);}
                         }
                     }
                 }
@@ -4220,6 +4731,7 @@
 
             // One rigid transform for the entire assembly after every Phase 2 step.
             alignWholeHomologyToReference();
+            pinDraggedResidue();
             if (++physicsOcclusionFrame % 30 === 0) { computePhysicsOcclusion(); if (!physicsDifferenceMode) updatePhysicsNodeColors(); }
             if (physicsDifferenceMode) updatePhysicsNodeColors();
             if (showModel1Overlay && (referenceColorMode === 'difference' || (referenceColorMode === 'same' && physicsDifferenceMode))) updateModel1AlignmentColors();
@@ -4777,9 +5289,12 @@
         }
         function membraneLipidFootprints(geometry,side,nodes=physicsNodes){
             const cell=8,grid=new Map();
-            for(const node of nodes){
+            for(let nodeIndex=0;nodeIndex<nodes.length;nodeIndex++){
+                const node=nodes[nodeIndex];
                 if(node.res?.entityType!=='protein')continue;
-                const p=membraneCoordinates(node,geometry);
+                const displayPoint=nodes===physicsNodes&&animationPlaying&&animationDisplayOverride?.[nodeIndex]
+                    ? animationDisplayOverride[nodeIndex] : visualPointForNode(node);
+                const p=membraneCoordinates({...node,x:displayPoint[0],y:displayPoint[1],z:displayPoint[2]},geometry);
                 if(Math.abs(p.signed-side*geometry.halfThickness)>7||
                     Math.abs(p.x)>geometry.extent+8||Math.abs(p.y)>geometry.extent+8)continue;
                 const key=`${Math.floor(p.x/cell)}:${Math.floor(p.y/cell)}`;
@@ -4830,7 +5345,7 @@
         }
         function disposeMembraneLipids(){
             if(!membraneLipids)return;
-            for(const mesh of [membraneLipids.mesh,membraneLipids.atomMesh,membraneLipids.stickMesh]){
+            for(const mesh of [membraneLipids.mesh,membraneLipids.atomMesh,membraneLipids.stickMesh,membraneLipids.glowMesh,membraneLipids.atomGlowMesh]){
                 physicsScene?.remove(mesh);mesh.geometry.dispose();mesh.material.dispose();
             }
             membraneLipids=null;
@@ -4911,9 +5426,13 @@
                 new THREE.MeshPhongMaterial({color:0xffffff,shininess:6,specular:0x080a0d}),particles.length*LIPID_ATOMS.length);
             const stickMesh=new THREE.InstancedMesh(new THREE.CylinderGeometry(1,1,1,6),
                 new THREE.MeshPhongMaterial({color:0xffffff,shininess:6,specular:0x080a0d}),particles.length*LIPID_BONDS.length);
+            const glowMaterial=()=>new THREE.MeshBasicMaterial({color:0xffe85a,transparent:true,opacity:.58,depthWrite:false,blending:THREE.AdditiveBlending});
+            const glowMesh=new THREE.InstancedMesh(new THREE.SphereGeometry(1.75,12,10),glowMaterial(),1);
+            const atomGlowMesh=new THREE.InstancedMesh(new THREE.SphereGeometry(.40,12,10),glowMaterial(),LIPID_ATOMS.length);
+            for(const glow of [glowMesh,atomGlowMesh]){glow.count=0;glow.frustumCulled=false;glow.renderOrder=15;physicsScene.add(glow);}
             for(const instanced of [atomMesh,stickMesh]){instanced.instanceMatrix.setUsage(THREE.DynamicDrawUsage);instanced.renderOrder=2;physicsScene.add(instanced);}
             mesh.renderOrder=2;physicsScene.add(mesh);
-            membraneLipids={mesh,atomMesh,stickMesh,particles,leaves,dummy:new THREE.Object3D(),bondDummy:new THREE.Object3D(),lastFrame:now,lastFootprints:now,lastRecount:now,extent:previousExtent??geometry.extent};
+            membraneLipids={mesh,atomMesh,stickMesh,glowMesh,atomGlowMesh,particles,leaves,dummy:new THREE.Object3D(),bondDummy:new THREE.Object3D(),lastFrame:now,lastFootprints:now,lastRecount:now,extent:previousExtent??geometry.extent};
             updateLipidColors();
         }
         function reconcileMembraneLipids(geometry,now,force=false){
@@ -4949,9 +5468,12 @@
             if(!membraneLipids)createMembraneLipids(geometry,now);
             reconcileMembraneLipids(geometry,now);
             const system=membraneLipids;if(!system)return;
+            const selectedLipidIndex=linkedSelection?.kind==='lipid'?system.particles.indexOf(linkedSelection.particle):-1;
+            if(linkedSelection?.kind==='lipid'&&selectedLipidIndex<0)clearLinkedSelection();
             const molecular=lipidsVisible&&physicsRepresentation==='ball-stick';
             system.mesh.visible=lipidsVisible&&!molecular;
             system.atomMesh.visible=molecular;system.stickMesh.visible=molecular;
+            system.glowMesh.count=0;system.atomGlowMesh.count=0;
             const dt=Math.max(.001,Math.min(.05,(now-system.lastFrame)/1000||.016));system.lastFrame=now;
             const motionDt=dt*lipidMotionScale();
             if(now-system.lastFootprints>400){
@@ -5012,7 +5534,12 @@
                 const bob=.85*Math.sin(now*.0015*lipidMotionScale()+p.lipidPhase);
                 const displayX=p.world.x+axes.inward[0]*bob,displayY=p.world.y+axes.inward[1]*bob,displayZ=p.world.z+axes.inward[2]*bob;
                 const sliceVisible=!membraneSliced||p.x*Math.cos(membraneSliceAngle)+p.y*Math.sin(membraneSliceAngle)>=0;
-                system.dummy.position.set(displayX,displayY,displayZ);system.dummy.scale.setScalar(sliceVisible?1:0);system.dummy.updateMatrix();system.mesh.setMatrixAt(i,system.dummy.matrix);
+                const selectionVisible=!linkedSelection||(i===selectedLipidIndex?selectedResiduesVisible:unselectedResiduesVisible);
+                const displayVisible=sliceVisible&&selectionVisible;
+                system.dummy.position.set(displayX,displayY,displayZ);system.dummy.scale.setScalar(displayVisible?1:0);system.dummy.updateMatrix();system.mesh.setMatrixAt(i,system.dummy.matrix);
+                if(selectionGlowVisible&&i===selectedLipidIndex&&lipidsVisible&&displayVisible&&!molecular){
+                    system.glowMesh.setMatrixAt(0,system.dummy.matrix);system.glowMesh.count=1;system.glowMesh.instanceMatrix.needsUpdate=true;
+                }
                 if(molecular){
                     if(p.lipidAngle===undefined){p.lipidAngle=Math.random()*Math.PI*2;p.lipidSpin=(Math.random()-.5)*.5;}
                     p.lipidAngle+=p.lipidSpin*dt*lipidMotionScale();
@@ -5030,15 +5557,20 @@
                             displayZ+tx[2]*x+ty[2]*y+axes.inward[2]*z);
                     });
                     for(let j=0;j<LIPID_ATOMS.length;j++){
-                        system.dummy.position.copy(positions[j]);system.dummy.scale.setScalar(sliceVisible?viewerSizes.physics.atom:0);system.dummy.updateMatrix();
+                        system.dummy.position.copy(positions[j]);system.dummy.scale.setScalar(displayVisible?viewerSizes.physics.atom:0);system.dummy.updateMatrix();
                         system.atomMesh.setMatrixAt(i*LIPID_ATOMS.length+j,system.dummy.matrix);
+                        if(selectionGlowVisible&&i===selectedLipidIndex&&displayVisible){
+                            system.dummy.scale.setScalar(viewerSizes.physics.atom*1.24);system.dummy.updateMatrix();
+                            system.atomGlowMesh.setMatrixAt(j,system.dummy.matrix);
+                        }
                     }
+                    if(selectionGlowVisible&&i===selectedLipidIndex&&displayVisible){system.atomGlowMesh.count=LIPID_ATOMS.length;system.atomGlowMesh.instanceMatrix.needsUpdate=true;}
                     for(let j=0;j<LIPID_BONDS.length;j++){
                         const [from,to]=LIPID_BONDS[j],start=positions[from],end=positions[to];
                         const direction=end.clone().sub(start),length=direction.length();
                         system.bondDummy.position.copy(start).add(end).multiplyScalar(.5);
                         system.bondDummy.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),direction.normalize());
-                        const radius=sliceVisible ? .07*viewerSizes.physics.stick : 0;
+                        const radius=displayVisible ? .07*viewerSizes.physics.stick : 0;
                         system.bondDummy.scale.set(radius,length,radius);system.bondDummy.updateMatrix();
                         system.stickMesh.setMatrixAt(i*LIPID_BONDS.length+j,system.bondDummy.matrix);
                     }
@@ -5049,7 +5581,7 @@
         }
         function renderMembraneGeometry(geometry){
             if(!physicsScene)return;
-            if(!geometry){if(membraneMeshes){physicsScene.remove(membraneMeshes);membraneMeshes.traverse(child=>{child.geometry?.dispose();child.material?.dispose();});membraneMeshes=null;}disposeMembraneLipids();return;}
+            if(!geometry){if(membraneMeshes){physicsScene.remove(membraneMeshes);membraneMeshes.traverse(child=>{child.geometry?.dispose();child.material?.dispose();});membraneMeshes=null;}disposeMembraneLipids();if(linkedSelection?.kind==='lipid')clearLinkedSelection();return;}
             const grid=64;
             if(!membraneMeshes){membraneMeshes=new THREE.Group();physicsScene.add(membraneMeshes);
                 for(const side of [-1,1]){
@@ -5105,16 +5637,25 @@
             PerfTracker.recordFrame();
             physicsPulseUniform.value = physicsPulseOpacity(performance.now(), physicsOriginColorMode);
 
+            advanceAnimation(performance.now());
             stepPhysicsSimulation();
+            if(physicsColorMode==='rotational-symmetry')updateRotationalSymmetry();
             updateInferredMembrane(performance.now());
             if (!physicsRunning) homologyEnergyStableSince = null;
             updateSpringDisplay();
-            updateAtomRepresentation();
-            updateCartoonRepresentation();
-            updateBasePairLines();
-
-            if (physicsRenderer && physicsScene && physicsCamera) {
-                { for (const chain of backboneChains) chain.line.userData.syncBackbone?.(); physicsRenderer.render(physicsScene, physicsCamera); }
+            const visualOriginal=animationPlaying?applyAnimationDisplayCoordinates():applyVisualSymmetryRotation();
+            try {
+                if(visualOriginal||draggedResidue)syncVisualPhysicsMeshes();
+                updateAtomRepresentation();
+                updateCartoonRepresentation();
+                updateBasePairLines();
+                updateSelectionGlow();
+                if (physicsRenderer && physicsScene && physicsCamera) {
+                    for (const chain of backboneChains) chain.line.userData.syncBackbone?.();
+                    physicsRenderer.render(physicsScene, physicsCamera);
+                }
+            }finally{
+                if(visualOriginal)for(const [node,x,y,z] of visualOriginal){node.x=x;node.y=y;node.z=z;}
             }
             if(physicsNodes.length&&readyModelGeneration===modelBuildGeneration)hidePhysicsViewerLoading();
             renderMolstarMembraneOverlay();
@@ -5252,6 +5793,18 @@
                     }
                 });
 
+                automaticChainMatches.set(c1,bestMatch?.c2||null);
+                const chosen = editedChainMatches.get(c1);
+                if (chosen && modelData2.chains[chosen]?.[0]?.entityType === entityType) {
+                    const atoms2 = modelData2.chains[chosen];
+                    const seq2 = atoms2.map(a => a.singleChar).join('');
+                    bestMatch = entityType === 'nucleotide'
+                        ? alignProteinSequences(seq1, seq2, alignmentMode, (a,b)=>a===b?4:-3)
+                        : alignProteinSequences(seq1, seq2);
+                    Object.assign(bestMatch, { c1, c2: chosen, atoms1, atoms2, entityType, editedMatch: true });
+                    if (entityType === 'nucleotide') bestMatch.similarity = bestMatch.identity;
+                }
+
                 if (bestMatch && (entityType==='protein'||bestMatch.identity>=threshold)) {
                     bestMatch.isEquivalent = bestMatch.identity >= threshold;
                     alignmentResults.push(bestMatch);
@@ -5272,6 +5825,25 @@
             const elapsed = PerfTracker.end('alignments');
             PerfTracker.metrics.alignTime = elapsed;
             //console.log(`[StringScape Homology Modeller Perf] All chain alignments computed in ${elapsed.toFixed(1)}ms`);
+        }
+        function applyEditedChainMatch(chainId, newChain) {
+            const previous = alignmentResults.find(result=>result.c1===chainId);
+            if (!previous || !modelData2.chains[newChain] || modelData2.chains[newChain][0]?.entityType!==previous.entityType) return;
+            if(newChain===automaticChainMatches.get(chainId))editedChainMatches.delete(chainId);
+            else editedChainMatches.set(chainId,newChain);
+            const generation = modelBuildGeneration;
+            computeAllChainAlignments();
+            renderChainLegends();
+            resetCanvasViews();
+            drawIndividualMatrices(); drawDifferenceMatrix();
+            initPhysicsSimulation(); drawMorphMatrix();
+            const index = alignmentResults.findIndex(result=>result.c1===chainId);
+            if (index>=0) inspectAlignment(index);
+            calculateAllPairTmMetricsInBackground(generation);
+            modelBuildCompleted = false;
+            completedModelInputKey = null;
+            updateBuildButtonState();
+            void loadSimulationIntoMolstar();
         }
 
         function alignmentMetricColor(value, low, middle, high, lowerIsBetter = false) {
@@ -5302,7 +5874,9 @@
 
                 const statusBadge = res.referenceOnly
                     ? `<span class="text-sky-300 text-[10px] font-semibold">REFERENCE ONLY</span>`
-                    : isMatch 
+                    : res.editedMatch
+                    ? `<span class="text-violet-400 text-[10px] font-semibold">EDITED MATCH</span>`
+                    : isMatch
                     ? `<span class="text-emerald-400 text-[10px] font-semibold">MATCHED</span>`
                     : `<span class="text-slate-400 text-[10px]">UNMATCHED</span>`;
 
@@ -5324,6 +5898,8 @@
                         </button>
                     </td>
                 `;
+                tr.dataset.alignmentIndex = String(idx);
+                tr.classList.toggle('linked-selected',linkedSelection?.chain===res.c1);
                 tbody.appendChild(tr);
 
                 const option = document.createElement('option');
@@ -5472,14 +6048,30 @@
 
             if (!colorsOnly || !alignmentDistanceData) alignmentDistanceData = calculateAlignmentDistances(res);
             inspectedAlignmentIndex = index;
+            const matchSelect = document.getElementById('editChainMatch');
+            matchSelect.replaceChildren();
+            if (res.entityType !== 'other') {
+                for (const [chain, atoms] of Object.entries(modelData2.chains)) {
+                    if (atoms[0]?.entityType !== res.entityType) continue;
+                    const option = new Option(`AlphaFold chain ${chain}`, chain);
+                    matchSelect.add(option);
+                }
+                matchSelect.value = res.c2 || '';
+            }
+            matchSelect.parentElement.classList.toggle('hidden', res.entityType === 'other' || matchSelect.options.length === 0);
             const button = document.getElementById('alignmentDistanceBtn');
             button.setAttribute('aria-pressed', String(alignmentDistanceMode));
             button.className = 'px-3 py-1.5 rounded text-xs ' + (alignmentDistanceMode ? 'bg-violet-600 text-white' : 'bg-slate-800 text-slate-200');
             document.getElementById('alignmentDistanceLegend').classList.toggle('hidden', !alignmentDistanceMode);
-            const paintLetters = (chunk, offset) => alignmentDistanceMode ? Array.from(chunk, (letter, k) => {
-                const d = alignmentDistanceData.columns[offset + k];
-                return `<span style="color:${alignmentDistanceColor(d)}" title="${d === null ? 'No paired residue' : 'PDB–AF: ' + d.toFixed(2) + ' Å'}">${escapeHtml(letter)}</span>`;
-            }).join('') : escapeHtml(chunk);
+            const paintLetters = (chunk, offset, side) => Array.from(chunk, (letter, k) => {
+                const pair=res.alignedPairs[offset+k];
+                const index=side===1?pair?.idx1:pair?.idx2;
+                const atom=index===null||index===undefined?null:(side===1?res.atoms1:res.atoms2)[index];
+                const d=alignmentDistanceData.columns[offset+k];
+                const selected=atom&&linkedSelection?.chain===res.c1&&(linkedSelection.mode==='chain'||linkedSelection.column===offset+k);
+                const tint=alignmentDistanceMode?alignmentDistanceColor(d):side===1?'#3498db':'#2eccbf';
+                return `<span ${atom?`data-linked-chain="${escapeHtml(res.c1)}" data-linked-residue="${atom.resSeq}" data-linked-column="${offset+k}" data-linked-side="${side}"`:''} class="${selected?'linked-selected':''}" style="color:${tint}" title="${d===null?'No paired residue':'PDB–AF: '+d.toFixed(2)+' Å'}">${escapeHtml(letter)}</span>`;
+            }).join('');
             const drawer = document.getElementById('alignmentInspector');
             const title = document.getElementById('alignmentInspectorTitle');
             const codeBox = document.getElementById('alignmentCodeBox');
@@ -5508,9 +6100,9 @@
                 }
 
                 outputHTML += `<div class="mb-4 font-mono text-xs whitespace-pre leading-5">`;
-                outputHTML += `<div><span style="color: #3498db;" class="font-bold select-none">${escapeHtml(pad1)}</span><span style="color: #3498db;">${paintLetters(chunk1, i)}</span></div>`;
+                outputHTML += `<div><span style="color: #3498db;" class="font-bold select-none">${escapeHtml(pad1)}</span><span style="color: #3498db;">${paintLetters(chunk1, i, 1)}</span></div>`;
                 outputHTML += `<div><span class="select-none text-slate-700">${escapeHtml(padMatch)}</span><span class="text-slate-400 font-bold">${escapeHtml(matchLine)}</span></div>`;
-                outputHTML += `<div><span style="color: #2eccbf;" class="font-bold select-none">${escapeHtml(pad2)}</span><span style="color: #2eccbf;">${paintLetters(chunk2, i)}</span></div>`;
+                outputHTML += `<div><span style="color: #2eccbf;" class="font-bold select-none">${escapeHtml(pad2)}</span><span style="color: #2eccbf;">${paintLetters(chunk2, i, 2)}</span></div>`;
                 outputHTML += `</div>`;
             }
 
@@ -5584,7 +6176,9 @@
                 chainMeshes.forEach(({ nodes, source, color, index }) => {
                     const attribute = source.getAttribute('color');
                     for (let i = 0; i < nodes.count; i++) {
-                        const tint = new THREE.Color(alignmentDistanceMode ? alignmentDistanceColor(alignmentDistanceData.byModel[index][i]) : color);
+                        const atom=index===0?res.atoms1[i]:res.atoms2[i];
+                        const highlighted=atom&&linkedSelection?.chain===res.c1&&(linkedSelection.mode==='chain'||atom===linkedSelection.referenceAtom||atom===linkedSelection.alphaAtom);
+                        const tint = new THREE.Color(highlighted?'#facc15':alignmentDistanceMode ? alignmentDistanceColor(alignmentDistanceData.byModel[index][i]) : color);
                         nodes.setColorAt(i, tint);
                         attribute.setXYZ(i, tint.r, tint.g, tint.b);
                     }
@@ -5621,21 +6215,37 @@
             });
             observer.observe(container);
             canvas.addEventListener('contextmenu', e => e.preventDefault());
+            function pickAlignmentAtom(event) {
+                const rect=canvas.getBoundingClientRect();
+                const pointer=new THREE.Vector2((event.clientX-rect.left)/rect.width*2-1,-(event.clientY-rect.top)/rect.height*2+1);
+                const raycaster=new THREE.Raycaster();raycaster.setFromCamera(pointer,camera);
+                const hit=raycaster.intersectObjects(chainMeshes.map(item=>item.nodes),false)[0];
+                if(!hit||hit.instanceId===undefined)return null;
+                const side=chainMeshes.findIndex(item=>item.nodes===hit.object);
+                return (side===0?res.atoms1:res.atoms2)[hit.instanceId]||null;
+            }
             canvas.addEventListener('pointerdown', e => {
                 if (e.button !== 0 && e.button !== 2) return;
                 e.preventDefault();
-                dragging = { button: e.button, id: e.pointerId, x: e.clientX, y: e.clientY };
+                dragging = { button: e.button, id: e.pointerId, x: e.clientX, y: e.clientY, moved:false };
                 canvas.setPointerCapture(e.pointerId); canvas.style.cursor = 'grabbing';
             });
             canvas.addEventListener('pointermove', e => {
-                if (!dragging || dragging.id !== e.pointerId) return;
+                if (!dragging || dragging.id !== e.pointerId) {if(e.pointerType!=='touch')canvas.style.cursor=pickAlignmentAtom(e)?'pointer':'grab';return;}
                 const dx = e.clientX - dragging.x, dy = e.clientY - dragging.y;
+                if(Math.hypot(dx,dy)>3)dragging.moved=true;
                 dragging.x = e.clientX; dragging.y = e.clientY;
                 if (dragging.button === 2 || e.shiftKey) {
                     const scale = 2 * distance * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / Math.max(1, container.clientHeight);
                     pan.x -= dx * scale; pan.y += dy * scale;
                 } else { group.rotation.y += dx * 0.008; group.rotation.x += dy * 0.008; }
                 draw();
+            });
+            canvas.addEventListener('pointerup',e=>{
+                if(!dragging||dragging.button!==0||dragging.moved)return;
+                const atom=pickAlignmentAtom(e);
+                if(atom)selectLinkedEntity(res.c1,atom.resSeq,selectionMode,atom);
+                else clearLinkedSelection();
             });
             function release() { dragging = null; canvas.style.cursor = 'grab'; }
             canvas.addEventListener('pointerup', release);
@@ -5764,26 +6374,171 @@
         let modelBuildInputKey = null;
         let completedModelInputKey = null;
         const uploadedStructureFiles = { reference: null, alphaFold: null };
+        const RECENT_MODELS_KEY = 'stringscape-recent-models-v1';
+        let siftsReferenceKey=null;
+        let siftsRequestToken=0;
+        function referencePdbIdsForSifts() {
+            const tokens=document.getElementById('pdbInput1').value.toUpperCase().split(/[\s,;]+/).filter(Boolean);
+            return tokens.length&&tokens.every(id=>/^[0-9][A-Z0-9]{3}$/.test(id))?[...new Set(tokens)]:[];
+        }
+        function updateSiftsButton(glow=false) {
+            const button=document.getElementById('fetchSiftsBtn');if(!button)return;
+            const ids=referencePdbIdsForSifts(),key=ids.join(',');
+            button.disabled=!ids.length;
+            button.textContent=ids.length?`Fetch UniProt IDs for ${ids.join(', ')}`:'Fetch UniProt IDs for reference PDBs';
+            if(glow&&key&&key!==siftsReferenceKey){
+                button.classList.remove('ready-glow');void button.offsetWidth;button.classList.add('ready-glow');
+                setTimeout(()=>button.classList.remove('ready-glow'),3000);
+            }
+            siftsReferenceKey=key;
+        }
+        async function fetchSiftsUniProtIds() {
+            const ids=referencePdbIdsForSifts();if(!ids.length)return;
+            const token=++siftsRequestToken,button=document.getElementById('fetchSiftsBtn'),status=document.getElementById('fetchSiftsStatus');
+            button.disabled=true;status.textContent=`Looking up ${ids.join(', ')} in PDBe SIFTS…`;
+            try {
+                const responses=await Promise.all(ids.map(async id=>{
+                    try {
+                        const response=await fetch(`https://www.ebi.ac.uk/pdbe/api/mappings/uniprot/${id.toLowerCase()}`);
+                        if(!response.ok)throw new Error(`HTTP ${response.status}`);
+                        const data=await response.json();return {id,item:data[id.toLowerCase()]||data[id]||{}};
+                    } catch(error) {return {id,item:{},error:error.message};}
+                }));
+                if(token!==siftsRequestToken||ids.join(',')!==referencePdbIdsForSifts().join(','))return;
+                const accessions=[...new Set(responses.flatMap(({item})=>Object.keys(item.UniProt||item.uniprot||{})))];
+                const failed=responses.filter(result=>result.error).map(result=>`${result.id} (${result.error})`);
+                if(!accessions.length){status.textContent=failed.length?`Could not fetch SIFTS mappings: ${failed.join(', ')}.`:'No UniProt mappings were found for these reference PDBs.';return;}
+                clearUploadedStructure('alphaFold');
+                document.getElementById('pdbInput2').value=accessions.join(', ');
+                status.textContent=`Found ${accessions.length} unique UniProt ${accessions.length===1?'ID':'IDs'}: ${accessions.join(', ')}.${failed.length?` Unavailable: ${failed.join(', ')}.`:''}`;
+                updateBuildButtonState();updateExampleSelection();saveRecentModel();
+            } catch(error) {if(token===siftsRequestToken)status.textContent=`Could not fetch SIFTS mappings: ${error.message}`;}
+            finally {if(token===siftsRequestToken)button.disabled=!referencePdbIdsForSifts().length;}
+        }
+        function recentFileKey(slot,info) { return `${slot}:${info.name}:${info.size??''}:${info.lastModified??''}`; }
+        function recentFileDatabase() {
+            if(!('indexedDB' in window))return Promise.resolve(null);
+            return new Promise(resolve=>{
+                try {
+                    const request=indexedDB.open('stringscape-recent-files',1);
+                    request.onupgradeneeded=()=>request.result.createObjectStore('files');
+                    request.onsuccess=()=>resolve(request.result);
+                    request.onerror=()=>resolve(null);
+                } catch (_) { resolve(null); }
+            });
+        }
+        async function cacheRecentFile(slot,file) {
+            const db=await recentFileDatabase();if(!db)return;
+            try {await new Promise(resolve=>{
+                    const transaction=db.transaction('files','readwrite');
+                    transaction.objectStore('files').put(file,recentFileKey(slot,file));
+                    transaction.oncomplete=resolve;transaction.onerror=resolve;transaction.onabort=resolve;
+                });} catch (_) { /* Browser storage is optional. */ }
+            db.close();
+        }
+        async function cachedRecentFile(slot,info) {
+            if(typeof info==='string')return null;
+            const db=await recentFileDatabase();if(!db)return null;
+            let file=null;
+            try {file=await new Promise(resolve=>{
+                    const request=db.transaction('files','readonly').objectStore('files').get(recentFileKey(slot,info));
+                    request.onsuccess=()=>resolve(request.result||null);request.onerror=()=>resolve(null);
+                });} catch (_) { /* The cached file may have been evicted. */ }
+            db.close();return file;
+        }
+        function recentModels() {
+            try { const value = JSON.parse(localStorage.getItem(RECENT_MODELS_KEY) || '[]'); return Array.isArray(value) ? value.filter(item=>typeof item?.reference==='string'&&typeof item?.alphaFold==='string').slice(0,30) : []; }
+            catch (_) { return []; }
+        }
+        function renderRecentModels() {
+            const select = document.getElementById('recentModels');
+            if (!select) return;
+            select.replaceChildren(new Option('Select a previous build',''));
+            const normalize=value=>String(value||'').toUpperCase().replace(/\s+/g,'');
+            const currentReference=normalize(document.getElementById('pdbInput1')?.value);
+            const currentAlpha=normalize(document.getElementById('pdbInput2')?.value);
+            recentModels().forEach((entry,index) => {
+                if(normalize(entry.reference)===currentReference&&normalize(entry.alphaFold)===currentAlpha)return;
+                select.add(new Option(`${entry.reference} || ${entry.alphaFold}`,String(index)));
+            });
+        }
+        function saveRecentModel() {
+            const reference = document.getElementById('pdbInput1').value.trim();
+            const alphaFold = document.getElementById('pdbInput2').value.trim();
+            if (!reference || !alphaFold) return;
+            const files = Object.fromEntries(['reference','alphaFold'].map(slot=>{
+                const selected=uploadedStructureFiles[slot]?.files||[];
+                const metadata=selected.map(file=>({name:file.name,size:file.size,lastModified:file.lastModified}));
+                return [slot,slot==='reference'?metadata:(metadata[0]||null)];
+            }));
+            const entry = { reference, alphaFold, files };
+            const rest = recentModels().filter(item=>!(item.reference===reference&&item.alphaFold===alphaFold));
+            try { localStorage.setItem(RECENT_MODELS_KEY,JSON.stringify([entry,...rest].slice(0,30))); } catch (_) { /* Private browsing or full storage. */ }
+            renderRecentModels();
+        }
+        async function restoreRecentModel(index) {
+            const entry = recentModels()[index]; if (!entry) return;
+            document.getElementById('recentModelStatus').textContent = '';
+            for (const slot of ['reference','alphaFold']) clearUploadedStructure(slot);
+            document.getElementById('pdbInput1').value = entry.reference;
+            document.getElementById('pdbInput2').value = entry.alphaFold;
+            if (entry.files?.reference && (!Array.isArray(entry.files.reference) || entry.files.reference.length) || entry.files?.alphaFold) {
+                document.getElementById('recentModelStatus').textContent = 'Please re-upload the saved structure file(s).';
+                for (const slot of ['reference','alphaFold']) {
+                    const infos=Array.isArray(entry.files[slot])?entry.files[slot]:entry.files[slot]?[entry.files[slot]]:[];
+                    if(!infos.length)continue;
+                    const restored=[];
+                    for(const info of infos){
+                    const name=typeof info==='string'?info:info.name;
+                    const cached=await cachedRecentFile(slot,info);
+                    if(cached){restored.push(cached);continue;}
+                    const input = document.getElementById(slot==='reference'?'referenceStructureUpload':'alphaFoldStructureUpload');
+                    const status=document.getElementById('recentModelStatus');
+                    const choose=document.createElement('button');choose.type='button';choose.className='bg-teal-700 hover:bg-teal-600 text-white rounded-lg px-2 py-1 ml-2';
+                    choose.textContent=`Re-upload ${name}`;
+                    status.replaceChildren(document.createTextNode(`Saved file ${name} is not cached.`),choose);
+                    const file = await new Promise(resolve=>{
+                        input.onchange = () => { const selected=[...(input.files||[])].find(file=>file.name===name); input.onchange=null;input.oncancel=null; resolve(selected||null); };
+                        input.oncancel = () => { input.onchange=null; input.oncancel=null; resolve(null); };
+                        choose.addEventListener('click',()=>input.click(),{once:true});
+                    });
+                    if (!file) { clearUploadedStructure(slot); document.getElementById('recentModelStatus').textContent = `Could not restore ${name}. Select it again to build.`; return; }
+                    restored.push(file);
+                    }
+                    assignStructureFiles(slot,restored);
+                }
+            }
+            document.getElementById('recentModelStatus').textContent='';
+            updateBuildButtonState(); updateExampleSelection();
+            loadModelPair(entry.reference,entry.alphaFold);
+        }
         let uploadedStructureRevision = 0;
         function clearUploadedStructure(slot) {
             uploadedStructureFiles[slot] = null;
             const input = document.getElementById(slot === 'reference' ? 'referenceStructureUpload' : 'alphaFoldStructureUpload');
             if (input) input.value = '';
         }
-        function selectStructureFile(slot, input) {
-            const file = input.files?.[0];
-            if (!file) return;
-            if (!/\.(?:pdb|ent|cif|mmcif)$/i.test(file.name)) { alert('Choose a PDB or mmCIF structure file.'); input.value = ''; return; }
+        function assignStructureFiles(slot,files) {
             const target = document.getElementById(slot === 'reference' ? 'pdbInput1' : 'pdbInput2');
-            uploadedStructureFiles[slot] = { file, inputValue: file.name.toUpperCase(), revision: ++uploadedStructureRevision };
-            target.value = file.name;
+            const selected=slot==='reference'?files:[files[0]];
+            const inputValue=selected.map(file=>file.name).join(', ');
+            uploadedStructureFiles[slot] = { file:selected[0], files:selected, inputValue:inputValue.toUpperCase(), revision: ++uploadedStructureRevision };
+            target.value = inputValue;
             if (slot === 'reference') { cancelStringMatching(); hideStringMatchResults(); updateFindMatchesReady(); }
             updateExampleSelection(); updateBuildButtonState();
+            saveRecentModel();
+        }
+        function selectStructureFile(slot, input) {
+            const files=[...(input.files||[])];
+            if (!files.length) return;
+            if (files.some(file=>!/\.(?:pdb|ent|cif|mmcif)$/i.test(file.name))) { alert('Choose PDB or mmCIF structure files.'); input.value = ''; return; }
+            assignStructureFiles(slot,files);
+            files.forEach(file=>{void cacheRecentFile(slot,file);});
         }
         function modelInputEntries(raw, slot) {
             const upload = uploadedStructureFiles[slot];
             return upload && raw.trim().toUpperCase() === upload.inputValue
-                ? [{ id: upload.file.name, uploadFile: upload.file, sequence: null }]
+                ? upload.files.map(file=>({ id: file.name, uploadFile: file, sequence: null }))
                 : parseModelInputs(raw);
         }
         function currentModelInputKey() {
@@ -5844,18 +6599,26 @@
             document.getElementById('morphMatrixLoading')?.classList.add('hidden');
             cancelPendingSimulationRender();
             resetHomologyRecommendation();
+            if(animationFrames.length){saveSelectedAnimationFrame();clearTimeout(animationSaveTimer);saveAnimation();}
             disposeAtomRepresentation();
             disposeCartoonRepresentation();
+            stopAnimation();
             physicsRunning = false;
             readyModelGeneration = -1;
             currentReferenceFile = null;
             homologyViewerMode = 'reference';
             homologyStructureVisible = true; alignedResiduesVisible = true; unalignedResiduesVisible = true; nonProteinAtomsVisible = true; physicsPulsePaused = false;
+            linkedSelection=null;selectedResiduesVisible=true;unselectedResiduesVisible=true;updateSelectionToggleVisibility();updatePhysicsSelectionInfo();
             updatePhysicsToggleButton('toggleHomologyStructure', true);
             updatePhysicsToggleButton('toggleAlignedResidues', true);
             updatePhysicsToggleButton('toggleUnalignedResidues', true);
             updatePhysicsToggleButton('toggleNonProteinAtoms', true);
             document.getElementById('pausePhysicsPulseBtn').textContent = 'Pause Pulsing';
+            if(rotationalSymmetryAxes){physicsScene?.remove(rotationalSymmetryAxes);rotationalSymmetryAxes.traverse(item=>{item.geometry?.dispose();item.material?.dispose();});rotationalSymmetryAxes=null;}
+            rotationalSymmetryScores=[];rotationalSymmetryGroups=[];rotationalSymmetryLastUpdate=0;
+            updateResetRotationButton();
+            updateSymmetryRotationControls();
+            document.getElementById('toggleSymmetryAxes')?.classList.add('hidden');
             physicsNodes = []; physicsSprings = []; physicsPositions = [];
             physicsBasePairs = []; disposeBasePairLines();
             alignmentResults = []; selectedPairKey = null;
@@ -5891,7 +6654,7 @@
             showModel1Overlay = false;
             referenceOverlayVisibility = [];
             updateShowPDBBtnUI();
-            isDraggingChain = false; chainVisibility = {};
+            isDraggingChain = false; draggedResidue=null;altDraggedSymmetryKey=null;chainVisibility = {};
             document.getElementById('simulationMolstarPlaceholder')?.classList.remove('hidden');
             document.getElementById('molstar-simulation-container').style.visibility = '';
             updateHomologyViewerToggle();
@@ -5901,9 +6664,13 @@
             if (uploadedStructureFiles.reference && pdbId1.toUpperCase() !== uploadedStructureFiles.reference.inputValue) clearUploadedStructure('reference');
             if (uploadedStructureFiles.alphaFold && pdbId2Raw.toUpperCase() !== uploadedStructureFiles.alphaFold.inputValue) clearUploadedStructure('alphaFold');
             document.getElementById('pdbInput1').value = pdbId1;
+            updateSiftsButton(true);
             syncStringMatchStatusVisibility();
             updateFindMatchesReady();
             document.getElementById('pdbInput2').value = pdbId2Raw;
+            editedChainMatches.clear();
+            linkedSelection=null;
+            saveRecentModel();
             updateExampleSelection();
             scheduleReferenceSpeciesLookup(pdbId1, 0);
             const generation = ++modelBuildGeneration;
@@ -6048,6 +6815,7 @@
                 if (backboneLinesGroup) backboneLinesGroup.visible = true;
                 readyModelGeneration = generation;
                 modelLoading = false;
+                animationOnModelReady();
                 updateBuildButtonState();
                 updateHomologyViewerToggle();
                 drawMorphMatrix();
@@ -6085,6 +6853,48 @@
             canvas2 = document.getElementById('matrixCanvas2'); ctx2 = canvas2.getContext('2d');
             diffCanvas = document.getElementById('diffMatrixCanvas'); diffCtx = diffCanvas.getContext('2d');
             morphCanvas = document.getElementById('morphMatrixCanvas'); morphCtx = morphCanvas.getContext('2d');
+            const installMatrixSelection=(canvas,entryAt,viewAt)=>{
+                let down=null;
+                canvas.addEventListener('pointerdown',event=>{if(event.button===0)down={x:event.clientX,y:event.clientY};});
+                canvas.addEventListener('pointermove',event=>{
+                    if(event.pointerType==='touch'||event.buttons) return;
+                    const rect=canvas.getBoundingClientRect(),view=viewAt();
+                    const x=(event.clientX-rect.left)*canvas.width/rect.width;
+                    const y=(event.clientY-rect.top)*canvas.height/rect.height;
+                    const i=Math.floor((x-view.offset)/view.scale),j=Math.floor((y-view.offsetY)/view.scale);
+                    canvas.style.cursor=i>=0&&j>=0&&i<view.length&&j<view.length?'pointer':'grab';
+                });
+                canvas.addEventListener('pointerup',event=>{
+                    if(!down||Math.hypot(event.clientX-down.x,event.clientY-down.y)>5){down=null;return;}
+                    down=null;
+                    const rect=canvas.getBoundingClientRect(),view=viewAt();
+                    const x=(event.clientX-rect.left)*canvas.width/rect.width;
+                    const y=(event.clientY-rect.top)*canvas.height/rect.height;
+                    const index=Math.floor((x-view.offset)/view.scale),row=Math.floor((y-view.offsetY)/view.scale);
+                    if(index<0||row<0||index>=view.length||row>=view.length){clearLinkedSelection();return;}
+                    const entry=entryAt(index);
+                    if(entry)selectLinkedEntity(entry.chain,entry.resSeq,selectionMode,entry.atom);else clearLinkedSelection();
+                });
+            };
+            const atomSelection=(model,index)=>{
+                const atoms=model.currentChain==='ALL'?model.caAtoms:model.chains[model.currentChain]||[];
+                const atom=atoms[index];if(!atom)return null;
+                const chain=Object.keys(model.chains).find(key=>model.chains[key].includes(atom));
+                const result=alignmentResults.find(res=>model===modelData1?res.c1===chain:res.c2===chain);
+                return {chain:result?.c1||chain,resSeq:atom.resSeq,atom};
+            };
+            installMatrixSelection(canvas1,index=>atomSelection(modelData1,index),()=>({offset:offX1,offsetY:offY1,scale:scale1,length:modelData1.currentChain==='ALL'?modelData1.caAtoms.length:(modelData1.chains[modelData1.currentChain]||[]).length}));
+            installMatrixSelection(canvas2,index=>atomSelection(modelData2,index),()=>({offset:offX2,offsetY:offY2,scale:scale2,length:modelData2.currentChain==='ALL'?modelData2.caAtoms.length:(modelData2.chains[modelData2.currentChain]||[]).length}));
+            installMatrixSelection(diffCanvas,index=>{
+                const res=alignmentResults[selectedPairKey],pair=res?.alignedPairs[index];
+                const atom=pair?.idx1!=null?res.atoms1[pair.idx1]:pair?.idx2!=null?res.atoms2[pair.idx2]:null;
+                return atom?{chain:res.c1,resSeq:atom.resSeq,atom}:null;
+            },()=>({offset:diffOffX,offsetY:diffOffY,scale:diffScale,length:alignmentResults[selectedPairKey]?.alignedPairs.length||0}));
+            installMatrixSelection(morphCanvas,index=>{
+                const pos=morphMatrixPositions[index];if(!pos)return null;
+                const atom=pos.pair.idx1!==null?pos.res.atoms1[pos.pair.idx1]:pos.pair.idx2!==null?pos.res.atoms2[pos.pair.idx2]:null;
+                return atom?{chain:pos.res.c1,resSeq:atom.resSeq,atom}:null;
+            },()=>({offset:morphOffX,offsetY:morphOffY,scale:morphScale,length:morphMatrixSize}));
 
             const installMatrixTouch = (canvas,getView,setView,redraw) => {
                 canvas.style.touchAction='none';
@@ -6291,6 +7101,7 @@
         }
 
         function togglePhysicsRun() {
+            if(animationPlaying){animationResumePhysics=false;animationEl('physicsPauseText').textContent='Resume Simulation';return;}
             if (simulationPhase === 1) {
                 // If in Phase 1, start Phase 2 dynamic simulation from TM-aligned starting positions
                 setSimulationPhase(2);
@@ -6770,6 +7581,119 @@
         function computePhysicsOcclusion() {
             physicsOcclusionFactors=burialFactorsForNodes(physicsNodes);
         }
+        function updateRotationalSymmetry(force=false) {
+            if(!physicsScene||!physicsNodes.length)return;
+            const now=performance.now();
+            if(!force&&now-rotationalSymmetryLastUpdate<1000)return;
+            rotationalSymmetryLastUpdate=now;
+            const previousAngles=new Map(rotationalSymmetryGroups.map(group=>[group.key,group.angle]));
+            rotationalSymmetryGroups=[];
+            if(rotationalSymmetryAxes){physicsScene.remove(rotationalSymmetryAxes);rotationalSymmetryAxes.traverse(item=>{item.geometry?.dispose();item.material?.dispose();});}
+            rotationalSymmetryAxes=new THREE.Group();physicsScene.add(rotationalSymmetryAxes);
+            rotationalSymmetryScores=Array(physicsNodes.length).fill(null);
+            const blocks=new Map();
+            physicsNodes.forEach((node,index)=>{
+                if(node.res.entityType!=='protein'||node.idx2===null)return;
+                if(!blocks.has(node.blockIdx))blocks.set(node.blockIdx,{res:node.res,nodes:[]});
+                blocks.get(node.blockIdx).nodes.push(index);
+            });
+            const byProtein=new Map();
+            for(const block of blocks.values()){
+                if(block.nodes.length<12)continue;
+                const atoms=block.res.atoms2;
+                const sequence=atoms.map(atom=>atom.singleChar||'X').join('');
+                const key=/[^X]/.test(sequence)?sequence:atoms[0]?.sourcePdbId||sequence;
+                if(!byProtein.has(key))byProtein.set(key,[]);
+                byProtein.get(key).push(block);
+            }
+            for(const members of byProtein.values()){
+                if(members.length<2)continue;
+                const maps=members.map(block=>new Map(block.nodes.map(index=>[physicsNodes[index].idx2,index])));
+                const common=[...maps[0].keys()].filter(index=>maps.every(map=>map.has(index))).sort((a,b)=>a-b);
+                if(common.length<12)continue;
+                const centers=members.map(block=>{
+                    const center=new THREE.Vector3();
+                    for(const index of block.nodes){const node=physicsNodes[index];center.add(new THREE.Vector3(node.x,node.y,node.z));}
+                    return center.multiplyScalar(1/block.nodes.length);
+                });
+                const origin=new THREE.Vector3();centers.forEach(center=>origin.add(center));origin.multiplyScalar(1/centers.length);
+                const offsets=centers.map(center=>center.clone().sub(origin));
+                let normal=new THREE.Vector3(),meanRadius;
+                if(members.length===2){
+                    const sampled=common.filter((_,index)=>index%Math.max(1,Math.floor(common.length/80))===0);
+                    const target=sampled.map(index=>physicsNodes[maps[0].get(index)]);
+                    const moving=sampled.map(index=>physicsNodes[maps[1].get(index)]);
+                    const fit=hornQuaternionSuperposition(target,moving);
+                    const R=fit.R,trace=R[0][0]+R[1][1]+R[2][2];
+                    if(trace>-.65)continue;
+                    const rmsd=Math.sqrt(target.reduce((sum,p,index)=>{
+                        const q=moving[index],dx=R[0][0]*q.x+R[0][1]*q.y+R[0][2]*q.z+fit.t[0]-p.x;
+                        const dy=R[1][0]*q.x+R[1][1]*q.y+R[1][2]*q.z+fit.t[1]-p.y;
+                        const dz=R[2][0]*q.x+R[2][1]*q.y+R[2][2]*q.z+fit.t[2]-p.z;
+                        return sum+dx*dx+dy*dy+dz*dz;
+                    },0)/sampled.length);
+                    if(rmsd>4)continue;
+                    const axisComponent=[0,1,2].sort((a,b)=>R[b][b]-R[a][a])[0];
+                    const components=[0,0,0];components[axisComponent]=Math.sqrt(Math.max(0,(R[axisComponent][axisComponent]+1)/2));
+                    if(components[axisComponent]<.2)continue;
+                    for(let k=0;k<3;k++)if(k!==axisComponent)components[k]=(R[k][axisComponent]+R[axisComponent][k])/(4*components[axisComponent]);
+                    normal.set(...components).normalize();
+                    const separation=centers[0].distanceTo(centers[1]);
+                    if(separation<6||Math.abs(offsets[0].dot(normal))>separation*.15)continue;
+                    meanRadius=separation/2;
+                }else{
+                    let bestCross=0;
+                    for(let i=0;i<offsets.length;i++)for(let j=i+1;j<offsets.length;j++){
+                        const cross=new THREE.Vector3().crossVectors(offsets[i],offsets[j]);
+                        if(cross.lengthSq()>bestCross){normal.copy(cross);bestCross=cross.lengthSq();}
+                    }
+                    if(bestCross<16)continue;
+                    normal.normalize();
+                    const radial=offsets.map(offset=>offset.clone().addScaledVector(normal,-offset.dot(normal)));
+                    meanRadius=radial.reduce((sum,point)=>sum+point.length(),0)/radial.length;
+                    if(meanRadius<3||radial.some(point=>Math.abs(point.length()-meanRadius)>meanRadius*.35)||offsets.some(offset=>Math.abs(offset.dot(normal))>meanRadius*.3))continue;
+                    const xAxis=radial[0].clone().normalize(),yAxis=new THREE.Vector3().crossVectors(normal,xAxis).normalize();
+                    const angles=radial.map(point=>Math.atan2(point.dot(yAxis),point.dot(xAxis))).sort((a,b)=>a-b);
+                    const ideal=2*Math.PI/angles.length;
+                    if(angles.some((angle,index)=>Math.abs(((angles[(index+1)%angles.length]+(index===angles.length-1?2*Math.PI:0))-angle)-ideal)>Math.max(.42,ideal*.3)))continue;
+                }
+                const anchors=common.filter((_,index)=>index%Math.max(1,Math.floor(common.length/32))===0);
+                for(const residueIndex of common){
+                    const differences=[];
+                    for(const anchor of anchors){
+                        if(anchor===residueIndex)continue;
+                        const distances=maps.map(map=>{
+                            const a=physicsNodes[map.get(residueIndex)],b=physicsNodes[map.get(anchor)];
+                            return Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z);
+                        });
+                        const mean=distances.reduce((sum,value)=>sum+value,0)/distances.length;
+                        differences.push(distances.map(value=>Math.abs(value-mean)));
+                    }
+                    if(!differences.length)continue;
+                    maps.forEach((map,memberIndex)=>{
+                        rotationalSymmetryScores[map.get(residueIndex)]=differences.reduce((sum,row)=>sum+row[memberIndex],0)/differences.length;
+                    });
+                }
+                const halfLength=Math.max(meanRadius,20);
+                const geometry=new THREE.BufferGeometry().setFromPoints([origin.clone().addScaledVector(normal,-halfLength),origin.clone().addScaledVector(normal,halfLength)]);
+                const axis=new THREE.Line(geometry,new THREE.LineDashedMaterial({color:0xfacc15,dashSize:2,gapSize:1,depthTest:true}));
+                axis.computeLineDistances();rotationalSymmetryAxes.add(axis);
+                const blockIds=members.map(member=>physicsNodes[member.nodes[0]].blockIdx);
+                const key=blockIds.slice().sort((a,b)=>a-b).join(',');
+                rotationalSymmetryGroups.push({key,blockIds:new Set(blockIds),origin:origin.clone(),normal:normal.clone(),angle:previousAngles.get(key)||0});
+            }
+            rotationalSymmetryAxes.visible=rotationalAxesVisible&&physicsColorMode==='rotational-symmetry';
+            const toggle=document.getElementById('toggleSymmetryAxes');
+            toggle?.classList.toggle('hidden',rotationalSymmetryAxes.children.length===0||physicsColorMode!=='rotational-symmetry');
+            updateResetRotationButton();
+            updateSymmetryRotationControls();
+            if(physicsColorMode==='rotational-symmetry')updatePhysicsNodeColors();
+        }
+        function rotationalSymmetryColor(index){
+            const deviation=rotationalSymmetryScores[index];
+            if(deviation===null||deviation===undefined)return '#475569';
+            return new THREE.Color('#38bdf8').lerp(new THREE.Color('#facc15'),Math.min(1,deviation/2.5)).lerp(new THREE.Color('#ef4444'),Math.max(0,Math.min(1,(deviation-2.5)/5)));
+        }
         function updatePhysicsNodeColors() {
             if (!instancedNodeMesh || !physicsNodes.length) return;
             const N = physicsNodes.length;
@@ -6810,6 +7734,8 @@
                 } else if (physicsColorMode === 'protein-id') {
                     const atom = node.idx2 !== null ? node.res.atoms2[node.idx2] : null;
                     color = new THREE.Color(getProteinIdColor(atom?.sourcePdbId));
+                } else if (physicsColorMode === 'rotational-symmetry') {
+                    color = new THREE.Color(rotationalSymmetryColor(i));
                 } else {
                     const atom = node.idx2 !== null ? node.res.atoms2[node.idx2] : null;
                     color = new THREE.Color(physicsResidueColor(atom, physicsColorMode, node.usedInAlignment));
@@ -6817,6 +7743,7 @@
                 // Origin colours above are shared constants; copy before shading
                 // so one buried residue cannot darken every subsequent instance.
                 color=color.clone().multiplyScalar(physicsOcclusionFactors[i]??1);
+                if (selectionGlowVisible&&selectionMatches(node)) color.set('#facc15');
                 instancedNodeMesh.setColorAt(i, color);
             }
             if (instancedNodeMesh.instanceColor) instancedNodeMesh.instanceColor.needsUpdate = true;
@@ -6870,8 +7797,10 @@
             return '#94a3b8';
         }
         function setPhysicsColorMode(mode) {
-            if (!['chain','uniform','protein-id','element','side-chains','origin','aligned','membrane','membrane-placement','membrane-repelled','charge','hydrophobicity','secondary','plddt','difference'].includes(mode)) return;
+            if (!['chain','uniform','protein-id','rotational-symmetry','element','side-chains','origin','aligned','membrane','membrane-placement','membrane-repelled','charge','hydrophobicity','secondary','plddt','difference'].includes(mode)) return;
             physicsColorMode = mode;
+            if(mode==='rotational-symmetry')updateRotationalSymmetry(true);
+            else {if(rotationalSymmetryAxes)rotationalSymmetryAxes.visible=false;document.getElementById('toggleSymmetryAxes')?.classList.add('hidden');}
             updateLipidColors();
             membraneRepelledColorMask=null;
             physicsOriginColorMode = mode === 'origin';
@@ -6884,6 +7813,7 @@
                 chain:'Chain: each protein chain has a distinct colour.',
                 uniform:'Uniform: all homology-model chains share one colour.',
                 'protein-id':'Protein ID: chains from the same AlphaFold structure share one colour.',
+                'rotational-symmetry':'Rotational symmetry: <span style="color:#38bdf8">low displacement</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">high</span>; dark grey: no detected rotational symmetry. Dashed yellow lines mark symmetry axes.',
                 element:'Element: <span style="color:#aeb7c4">C</span> · <span style="color:#4060ff">N</span> · <span style="color:#ff4040">O</span> · <span style="color:#ffdc38">S</span> · <span style="color:#ff9933">P</span> · <span style="color:#f8fafc">H</span>. Atom colours appear in Ball &amp; Stick and Surface.',
                 'side-chains':'Backbone: chain colour · Side chains: <span style="color:#f59e0b">nonpolar</span> · <span style="color:#c084fc">aromatic</span> · <span style="color:#38bdf8">polar</span> · <span style="color:#fb7185">basic</span> · <span style="color:#4ade80">acidic</span>.',
                 origin:'Origin: <span style="color:#3498db">Reference PDB</span> · <span style="color:#2eccbf">AlphaFold</span> · <span style="color:#31b2cd">Both</span>',
@@ -6965,7 +7895,7 @@
             if (!atomRepresentation) return;
             clearTimeout(atomRepresentation.loadingTimer);
             if (atomRepresentation.mode === 'surface') atomRepresentation.cancelled = true;
-            for (const mesh of [atomRepresentation.balls, atomRepresentation.sticks].filter(Boolean)) {
+            for (const mesh of [atomRepresentation.balls, atomRepresentation.sticks,atomRepresentation.atomGlow].filter(Boolean)) {
                 physicsScene?.remove(mesh); mesh.geometry.dispose(); mesh.material.dispose();
             }
             atomRepresentation = null;
@@ -7494,7 +8424,7 @@
             if (backboneLinesGroup) backboneLinesGroup.visible = homologyStructureVisible && physicsRepresentation === 'backbone' && physicsNodes.length > 0;
             if (physicsRepresentation === 'cartoon' && instancedNodeMesh) instancedNodeMesh.visible = false;
             if (!active || !physicsNodes.length || !physicsScene) {
-                if (atomRepresentation) { atomRepresentation.balls.visible = false; if(atomRepresentation.sticks) atomRepresentation.sticks.visible = false; }
+                if (atomRepresentation) { atomRepresentation.balls.visible = false; if(atomRepresentation.sticks) atomRepresentation.sticks.visible = false; if(atomRepresentation.atomGlow)atomRepresentation.atomGlow.visible=false; }
                 return;
             }
             const now = performance.now();
@@ -7506,16 +8436,19 @@
                 const surfaceSegments = entries.length > 12000 ? 6 : entries.length > 5000 ? 8 : 12;
                 const balls = new THREE.InstancedMesh(surface ? new THREE.SphereGeometry(1,surfaceSegments,Math.max(5,surfaceSegments-2)) : new THREE.SphereGeometry(0.34,10,8),surface ? new THREE.MeshPhongMaterial({shininess:45,specular:0x525f69}) : new THREE.MeshPhongMaterial({shininess:6,specular:0x080a0d}),entries.length);
                 const sticks = surface ? null : new THREE.InstancedMesh(new THREE.CylinderGeometry(1,1,1,6),new THREE.MeshPhongMaterial({shininess:6,specular:0x080a0d}),bonds.length);
+                const atomGlow=surface?null:new THREE.InstancedMesh(new THREE.SphereGeometry(.40,12,10),new THREE.MeshBasicMaterial({color:0xffe85a,transparent:true,opacity:.56,depthWrite:false,blending:THREE.AdditiveBlending}),entries.length);
+                if(atomGlow){atomGlow.count=0;atomGlow.frustumCulled=false;atomGlow.renderOrder=15;physicsScene.add(atomGlow);}
                 if (!surface) addPhysicsPulse(balls,entries.flatMap(e=>isModel2Only(physicsNodes[e.nodeIndex])?[1,1]:[0,0]));
                 if (sticks) addPhysicsPulse(sticks,bonds.flatMap(([a,b])=>[isModel2Only(physicsNodes[entries[a].nodeIndex])?1:0,isModel2Only(physicsNodes[entries[b].nodeIndex])?1:0]),true);
                 balls.frustumCulled = false;if(sticks)sticks.frustumCulled=false;
                 physicsScene.add(balls);if(sticks)physicsScene.add(sticks);
-                atomRepresentation = {entries,bonds,balls,sticks,mode:physicsRepresentation};
+                atomRepresentation = {entries,bonds,balls,sticks,atomGlow,mode:physicsRepresentation};
             }
-            const {entries,bonds,balls,sticks} = atomRepresentation;
+            const {entries,bonds,balls,sticks,atomGlow} = atomRepresentation;
             balls.visible = entries.length > 0;if(sticks)sticks.visible=true;
             if (physicsRepresentation === 'surface' && instancedNodeMesh) instancedNodeMesh.visible = entries.length === 0;
             const coords = simulationAtomCoordinates(entries,true), dummy = new THREE.Object3D(), color = new THREE.Color();
+            let glowing=0;
             entries.forEach((entry,i)=>{
                 const node=physicsNodes[entry.nodeIndex], p=coords[i];
                 dummy.position.set(p.x,p.y,p.z); dummy.quaternion.identity();
@@ -7523,8 +8456,12 @@
                 dummy.scale.setScalar(isNodeVisibleInPhysics(node)?radius:0);
                 dummy.updateMatrix(); balls.setMatrixAt(i,dummy.matrix);
                 instancedNodeMesh.getColorAt(entry.nodeIndex,color);
-                balls.setColorAt(i,physicsAtomColor(physicsColorMode,entry.source,node.res.atoms2[node.idx2],color,physicsOcclusionFactors[entry.nodeIndex]??1));
+                balls.setColorAt(i,selectionGlowVisible&&selectionMatches(node)?new THREE.Color('#fff176'):physicsAtomColor(physicsColorMode,entry.source,node.res.atoms2[node.idx2],color,physicsOcclusionFactors[entry.nodeIndex]??1));
+                if(atomGlow&&selectionGlowVisible&&selectionMatches(node)&&isNodeVisibleInPhysics(node)){
+                    dummy.scale.setScalar(radius*1.24);dummy.updateMatrix();atomGlow.setMatrixAt(glowing++,dummy.matrix);
+                }
             });
+            if(atomGlow){atomGlow.count=glowing;atomGlow.visible=glowing>0;if(glowing)atomGlow.instanceMatrix.needsUpdate=true;}
             const a=new THREE.Vector3(),b=new THREE.Vector3(),direction=new THREE.Vector3(),up=new THREE.Vector3(0,1,0),otherColor=new THREE.Color();
             bonds.forEach(([ia,ib],i)=>{
                 a.set(coords[ia].x,coords[ia].y,coords[ia].z); b.set(coords[ib].x,coords[ib].y,coords[ib].z);
@@ -8083,6 +9020,76 @@
             const index = Number(button.dataset.inspectAlignment);
             if (Number.isInteger(index) && index >= 0 && index < alignmentResults.length) inspectAlignment(index);
         });
+        document.getElementById('editChainMatch')?.addEventListener('change',event=>{
+            if (inspectedAlignmentIndex===null) return;
+            applyEditedChainMatch(alignmentResults[inspectedAlignmentIndex]?.c1,event.target.value);
+        });
+        document.getElementById('recentModels')?.addEventListener('change',event=>{
+            if (event.target.value!=='') void restoreRecentModel(Number(event.target.value));
+            event.target.value='';
+        });
+        document.getElementById('fetchSiftsBtn')?.addEventListener('click',fetchSiftsUniProtIds);
+        document.getElementById('physicsSnapBtn')?.addEventListener('click',capturePhysicsSnapshot);
+        document.getElementById('physicsRecordBtn')?.addEventListener('click',togglePhysicsRecording);
+        document.getElementById('physicsVideoDownload')?.addEventListener('click',()=>{
+            if(!physicsRecordingUrl)return;
+            const link=document.createElement('a');link.href=physicsRecordingUrl;link.download=`physics-viewport.${physicsRecordingMime.startsWith('video/mp4')?'mp4':'webm'}`;document.body.appendChild(link);link.click();link.remove();
+        });
+        document.getElementById('toggleSymmetryAxes')?.addEventListener('click',event=>{
+            rotationalAxesVisible=!rotationalAxesVisible;
+            if(rotationalSymmetryAxes)rotationalSymmetryAxes.visible=rotationalAxesVisible&&physicsColorMode==='rotational-symmetry';
+            const button=event.currentTarget;button.setAttribute('aria-pressed',String(rotationalAxesVisible));
+            button.querySelector('i').className=rotationalAxesVisible?'fa-solid fa-eye':'fa-solid fa-eye-slash';
+            button.classList.toggle('text-white',rotationalAxesVisible);button.classList.toggle('text-slate-500',!rotationalAxesVisible);
+        });
+        document.getElementById('resetSymmetryRotationBtn')?.addEventListener('click',()=>{
+            rotationalSymmetryGroups.forEach(group=>{group.angle=0;});
+            updateResetRotationButton();
+            updateSymmetryRotationControls();
+        });
+        document.getElementById('pdbInput1')?.addEventListener('input',()=>{siftsRequestToken++;updateSiftsButton(true);});
+        for(const id of ['pdbInput1','pdbInput2'])document.getElementById(id)?.addEventListener('input',renderRecentModels);
+        updateSiftsButton();
+        for (const id of ['pdbInput1','pdbInput2']) document.getElementById(id)?.addEventListener('change',saveRecentModel);
+        document.getElementById('extraEvidenceToggle')?.addEventListener('click',event=>{
+            const content=document.getElementById('extraEvidenceContent');
+            const expanded=event.currentTarget.getAttribute('aria-expanded')==='true';
+            event.currentTarget.setAttribute('aria-expanded',String(!expanded));
+            content.classList.toggle('hidden',expanded);
+        });
+        for(const [id,kind] of [['crossLinkEvidenceFile','crosslink'],['distanceEvidenceFile','distance']]){
+            document.getElementById(id)?.addEventListener('change',event=>{
+                const file=event.target.files?.[0],label=event.target.closest('.evidence-file-picker');
+                label?.classList.toggle('has-file',!!file);
+                if(label)label.querySelector('.string-file-name').textContent=file?.name||'No file selected';
+                void readCrossLinkEvidence(file,kind);
+            });
+        }
+        document.querySelectorAll('[data-select-mode]').forEach(button=>button.addEventListener('click',()=>setSelectionMode(button.dataset.selectMode)));
+        document.getElementById('toggleSelectedResidues')?.addEventListener('click',()=>{
+            selectedResiduesVisible=!selectedResiduesVisible;updateSelectionToggleVisibility();
+            applyPhysicsVisibility();updateAtomRepresentation();updateCartoonRepresentation();updateSelectionGlow();
+        });
+        document.getElementById('toggleUnselectedResidues')?.addEventListener('click',()=>{
+            unselectedResiduesVisible=!unselectedResiduesVisible;updateSelectionToggleVisibility();
+            applyPhysicsVisibility();updateAtomRepresentation();updateCartoonRepresentation();updateSelectionGlow();
+        });
+        document.getElementById('alignmentTableBody')?.addEventListener('click',event=>{
+            if (event.target.closest('button')) return;
+            const row=event.target.closest('tr[data-alignment-index]');
+            const res=alignmentResults[Number(row?.dataset.alignmentIndex)];
+            if (res) selectLinkedEntity(res.c1,null,'chain');
+        });
+        document.getElementById('alignmentCodeBox')?.addEventListener('click',event=>{
+            const letter=event.target.closest('[data-linked-residue]');
+            if(!letter){clearLinkedSelection();return;}
+            if (letter?.dataset.linkedResidue) {
+                const res=alignmentResults[inspectedAlignmentIndex],pair=res?.alignedPairs[Number(letter.dataset.linkedColumn)];
+                const atom=letter.dataset.linkedSide==='1'?res?.atoms1[pair?.idx1]:res?.atoms2[pair?.idx2];
+                if(atom)selectLinkedEntity(res.c1,atom.resSeq,'residue',atom);
+            }
+        });
+        renderRecentModels();
         function setLightMode(enabled) {
             document.body.classList.toggle('light-mode',enabled);
             if (physicsScene) physicsScene.background = new THREE.Color(enabled ? 0xffffff : 0x020617);
@@ -8768,3 +9775,422 @@
                 renderReferenceVisibilityControls();applyReferenceComparisonVisibility();
             });
         }
+
+        // Animation frames keep simulation coordinates separate from the optional
+        // display-only rotations of rotationally symmetric chains.
+        const ANIMATION_STORAGE_PREFIX='proteomatrix-animation-v1:';
+        let animationFrames=[],animationSelected=0,animationLoop=true,animationPlaying=false,animationPreparing=false;
+        let animationStartTime=0,animationResumePhysics=false,animationRecording=false;
+        let animationPreparationToken=0,animationRecordedFrame=0,animationLastRecordStep=0,animationFinalHoldUntil=0;
+        let animationDisplayOverride=null;
+        let animationApplying=false,animationSaveTimer=null,animationCaptureTimer=null,animationTableRows=null,animationModelStorageKey=null;
+        const animationEl=id=>document.getElementById(id);
+        const animationSessionKey=()=>ANIMATION_STORAGE_PREFIX+JSON.stringify([
+            animationEl('pdbInput1')?.value.trim()||'',animationEl('pdbInput2')?.value.trim()||''
+        ]);
+        const animationNodeSignature=()=>physicsNodes.map(node=>`${node.blockIdx}:${node.idx2??'x'}`).join(',');
+        const animationControls=()=>Array.from(document.querySelectorAll('.physics-simulation-panel input[type="range"], .physics-simulation-panel select'))
+            .filter(input=>!animationEl('animationEditor')?.contains(input));
+        function animationSettings(){
+            return {
+                controls:animationControls().map(input=>input.value),
+                representation:physicsRepresentation,color:physicsColorMode,
+                referenceColor:animationEl('referenceColorSelect')?.value,
+                springColor:animationEl('springColorSelect')?.value,
+                flags:{homologyStructureVisible,alignedResiduesVisible,unalignedResiduesVisible,
+                    nonProteinAtomsVisible,selectedResiduesVisible,unselectedResiduesVisible,
+                    lipidsVisible,membraneVisible,showSprings,rigidBodySimulation,sideChainJiggleEnabled,
+                    rotationalAxesVisible,physicsPulsePaused},
+                buttonStates:Object.fromEntries(Array.from(document.querySelectorAll('.physics-simulation-panel button[id][aria-pressed]'))
+                    .filter(button=>!animationEl('animationEditor')?.contains(button)).map(button=>[button.id,button.getAttribute('aria-pressed')])),
+                chainVisibility:{...chainVisibility},referenceOverlayVisibility:[...referenceOverlayVisibility],
+                symmetry:rotationalSymmetryGroups.map(group=>({key:group.key,angle:group.angle}))
+            };
+        }
+        function captureAnimationFrame(existing){
+            return {id:existing?.id||`${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                framesToNext:existing?.framesToNext??30,
+                coords:physicsNodes.map(node=>[node.x,node.y,node.z].map(value=>+value.toFixed(4))),
+                displayCoords:physicsNodes.map(node=>{const point=visualPointForNode(node);return [point.x,point.y,point.z].map(value=>+value.toFixed(4));}),
+                settings:animationSettings()};
+        }
+        function saveAnimation(){
+            if(!animationFrames.length)return;
+            try{localStorage.setItem(animationModelStorageKey||animationSessionKey(),JSON.stringify({signature:animationNodeSignature(),frames:animationFrames,loop:animationLoop}));
+                animationEl('animationStatus').textContent='Animation saved in this browser.';
+            }catch(error){animationEl('animationStatus').textContent='Could not save the animation in browser storage (storage may be full).';console.warn('Animation storage:',error);}
+        }
+        function scheduleAnimationSave(){clearTimeout(animationSaveTimer);animationSaveTimer=setTimeout(saveAnimation,300);}
+        function saveSelectedAnimationFrame(){
+            if(!animationFrames.length||animationPlaying||animationApplying||!physicsNodes.length)return;
+            clearTimeout(animationCaptureTimer);
+            animationFrames[animationSelected]=captureAnimationFrame(animationFrames[animationSelected]);
+            scheduleAnimationSave();
+        }
+        function scheduleAnimationCapture(){clearTimeout(animationCaptureTimer);animationCaptureTimer=setTimeout(saveSelectedAnimationFrame,120);}
+        function applyAnimationSettings(settings){
+            if(!settings)return;
+            animationApplying=true;
+            try{
+                const controls=animationControls();
+                settings.controls?.forEach((value,index)=>{const input=controls[index];if(!input||input.value===String(value))return;
+                    input.value=value;input.dispatchEvent(new Event(input.tagName==='SELECT'?'change':'input',{bubbles:true}));});
+                if(settings.representation&&settings.representation!==physicsRepresentation)setPhysicsRepresentation(settings.representation);
+                if(settings.color&&settings.color!==physicsColorMode){animationEl('physicsColorSelect').value=settings.color;setPhysicsColorMode(settings.color);}
+                const flags=settings.flags||{};
+                if(typeof flags.homologyStructureVisible==='boolean'&&flags.homologyStructureVisible!==homologyStructureVisible)togglePhysicsStructure('homology');
+                if(typeof flags.alignedResiduesVisible==='boolean'&&flags.alignedResiduesVisible!==alignedResiduesVisible)togglePhysicsAlignmentVisibility('aligned');
+                if(typeof flags.unalignedResiduesVisible==='boolean'&&flags.unalignedResiduesVisible!==unalignedResiduesVisible)togglePhysicsAlignmentVisibility('unaligned');
+                if(typeof flags.nonProteinAtomsVisible==='boolean'&&flags.nonProteinAtomsVisible!==nonProteinAtomsVisible)animationEl('toggleNonProteinAtoms')?.click();
+                if(typeof flags.rigidBodySimulation==='boolean'&&flags.rigidBodySimulation!==rigidBodySimulation)toggleRigidBodySimulation();
+                if(typeof flags.sideChainJiggleEnabled==='boolean'&&flags.sideChainJiggleEnabled!==sideChainJiggleEnabled)toggleSideChainJiggle();
+                if(typeof flags.lipidsVisible==='boolean'&&flags.lipidsVisible!==lipidsVisible)animationEl('toggleLipidStructure')?.click();
+                if(typeof flags.membraneVisible==='boolean'&&flags.membraneVisible!==membraneVisible)animationEl('toggleMembraneStructure')?.click();
+                if(typeof flags.showSprings==='boolean'&&flags.showSprings!==showSprings)toggleShowSprings();
+                if(typeof flags.rotationalAxesVisible==='boolean'&&flags.rotationalAxesVisible!==rotationalAxesVisible)animationEl('toggleSymmetryAxes')?.click();
+                if(typeof flags.physicsPulsePaused==='boolean'&&flags.physicsPulsePaused!==physicsPulsePaused)togglePhysicsPulse();
+                for(const [id,pressed] of Object.entries(settings.buttonStates||{})){
+                    const button=animationEl(id);
+                    if(button&&button.getAttribute('aria-pressed')!==null&&button.getAttribute('aria-pressed')!==pressed)button.click();
+                }
+                if(settings.chainVisibility)for(const [chain,visible] of Object.entries(settings.chainVisibility))if(chainVisibility[chain]!==visible)chainVisibility[chain]=visible;
+                settings.referenceOverlayVisibility?.forEach((visible,index)=>{if(referenceOverlayVisibility[index]!==visible)setReferenceOverlayVisibility(index,visible);});
+                if(settings.chainVisibility){renderPhysicsChainToggles();applyPhysicsVisibility();}
+                for(const group of rotationalSymmetryGroups){group.angle=settings.symmetry?.find(item=>item.key===group.key)?.angle||0;}
+                updateResetRotationButton();
+                updateSymmetryRotationControls();
+            }finally{animationApplying=false;}
+        }
+        function showAnimationFrame(index){
+            const frame=animationFrames[index];if(!frame||frame.coords.length!==physicsNodes.length)return;
+            animationSelected=index;
+            frame.coords.forEach((point,i)=>{const node=physicsNodes[i];[node.x,node.y,node.z]=point;});
+            applyAnimationSettings(frame.settings);
+            syncVisualPhysicsMeshes();renderAnimationTimeline();
+        }
+        function animationSegmentFrames(frame){return Math.max(0,Math.min(10000,Number(frame?.framesToNext)||0));}
+        function animationDurationFrames(){return animationFrames.reduce((total,frame)=>total+animationSegmentFrames(frame),0);}
+        function updateAnimationButtons(){
+            const exists=animationFrames.length>0;
+            animationEl('createAnimationBtn')?.querySelector('span')?.replaceChildren(document.createTextNode(exists?'Edit animation':'Create animation'));
+            animationEl('quickPlayAnimationBtn')?.classList.toggle('hidden',!exists);
+            for(const id of ['quickPlayAnimationBtn','animationPlay']){
+                const button=animationEl(id);if(!button)continue;
+                const icon=document.createElement('i');icon.className=`fa-solid ${animationPlaying?'fa-pause':'fa-play'} mr-1`;icon.setAttribute('aria-hidden','true');
+                const label=animationPreparing?'Preparing…':animationPlaying?'Pause animation':id==='animationPlay'?'Play':'Play animation';
+                button.replaceChildren(icon,document.createTextNode(label));button.disabled=animationPreparing;
+            }
+            animationEl('loopAnimation')?.setAttribute('aria-pressed',String(animationLoop));
+            if(animationEl('loopAnimation'))animationEl('loopAnimation').textContent=`Loop: ${animationLoop?'On':'Off'}`;
+        }
+        function renderAnimationTimeline(){
+            const host=animationEl('animationTimeline');if(!host)return;host.replaceChildren();
+            animationFrames.forEach((frame,index)=>{
+                const key=document.createElement('button');key.type='button';key.draggable=true;key.dataset.keyframe=String(index);
+                key.className=`relative z-10 rounded-xl px-3 py-2 font-semibold text-xs transition ${index===animationSelected?'bg-amber-400 text-slate-950 scale-110 shadow-lg shadow-amber-500/30':'bg-amber-700 text-white hover:bg-amber-600'}`;
+                key.classList.toggle('selected',index===animationSelected);
+                key.textContent=`Keyframe ${index+1}`;key.addEventListener('click',()=>{if(animationPlaying)stopAnimation();else saveSelectedAnimationFrame();showAnimationFrame(index);});
+                key.addEventListener('dragstart',event=>{event.dataTransfer.setData('text/plain',String(index));event.dataTransfer.effectAllowed='move';});
+                key.addEventListener('dragover',event=>event.preventDefault());
+                key.addEventListener('drop',event=>{event.preventDefault();const from=Number(event.dataTransfer.getData('text/plain'));if(!Number.isInteger(from)||!animationFrames[from]||from===index)return;
+                    saveSelectedAnimationFrame();const selectedId=animationFrames[animationSelected]?.id;
+                    animationFrames.splice(index,0,animationFrames.splice(from,1)[0]);animationSelected=animationFrames.findIndex(item=>item.id===selectedId);
+                    renderAnimationTimeline();scheduleAnimationSave();});
+                host.append(key);
+                if(index<animationFrames.length){
+                    const gap=document.createElement('label');gap.className='relative z-0 flex items-center gap-1 rounded-xl bg-slate-700 px-2 py-1 text-xs text-slate-200';
+                    const input=document.createElement('input');input.type='number';input.min='0';input.max='10000';input.value=frame.framesToNext;input.className='w-8 rounded-md bg-slate-600 px-1 py-0.5 text-center text-white';input.setAttribute('aria-label',`Frames after keyframe ${index+1}`);
+                    input.addEventListener('change',()=>{frame.framesToNext=Math.max(0,Math.min(10000,Math.round(Number(input.value)||0)));input.value=frame.framesToNext;scheduleAnimationSave();});
+                    input.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();input.dispatchEvent(new Event('change'));input.blur();}});
+                    gap.append(input,document.createTextNode('frames'));host.append(gap);
+                }
+            });updateAnimationButtons();
+        }
+        function stopAnimation(){
+            if(!animationPlaying&&!animationPreparing)return;
+            const wasPlaying=animationPlaying;
+            const wasRecording=animationRecording,wasPreparing=animationPreparing;
+            animationPreparationToken++;
+            animationPreparing=false;
+            animationPlaying=false;
+            animationDisplayOverride=null;
+            if(physicsRecording&&(wasRecording||wasPreparing))togglePhysicsRecording();
+            animationRecording=false;
+            animationFinalHoldUntil=0;
+            if(animationResumePhysics)physicsRunning=true;
+            animationEl('physicsPauseText').textContent=physicsRunning?'Pause Simulation':'Resume Simulation';
+            animationEl('physicsPauseIcon').className=physicsRunning?'fa-solid fa-pause':'fa-solid fa-play text-emerald-400';
+            animationResumePhysics=false;
+            animationEl('animationStatus').textContent=wasRecording?'Animation recording finished.':'Animation stopped.';
+            // Pausing between keyframes commits the display to the next stored
+            // keyframe. The interpolated in-between values are never saved back
+            // into the keyframe data.
+            if(wasPlaying&&!wasRecording&&!wasPreparing&&animationFrames.length){
+                const nextIndex=Math.min(animationSelected+1,animationFrames.length-1);
+                showAnimationFrame(nextIndex);
+            }
+            updateAnimationButtons();
+        }
+        async function playAnimation(record=false){
+            if(animationPreparing)return;
+            if(animationPlaying){stopAnimation();if(!record)return;}
+            if(animationFrames.length<2||!physicsNodes.length){animationEl('animationStatus').textContent='Add at least two keyframes to play an animation.';return;}
+            saveSelectedAnimationFrame();
+            animationResumePhysics=physicsRunning;physicsRunning=false;
+            showAnimationFrame(0);
+            if(record){
+                animationPreparing=true;
+                const token=++animationPreparationToken;
+                animationEl('animationStatus').textContent='Preparing viewport recording…';
+                updateAnimationButtons();
+                animationEl('physicsSnapshotPanel')?.classList.remove('hidden');
+                // Let the first keyframe and any representation changes paint before capture starts.
+                await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+                if(token!==animationPreparationToken)return;
+                if(!physicsRecording)togglePhysicsRecording();
+                const ready=physicsRecording&&await Promise.race([
+                    physicsRecordingStarted||Promise.resolve(false),
+                    new Promise(resolve=>setTimeout(()=>resolve(false),2000))
+                ]);
+                if(token!==animationPreparationToken)return;
+                if(!ready){
+                    if(physicsRecording)togglePhysicsRecording();
+                    animationPreparing=false;if(animationResumePhysics)physicsRunning=true;animationResumePhysics=false;
+                    animationEl('animationStatus').textContent='Viewport recording could not start.';updateAnimationButtons();return;
+                }
+                // Hold the first frame long enough for the stream to encode it.
+                await new Promise(resolve=>setTimeout(resolve,250));
+                if(token!==animationPreparationToken)return;
+                animationPreparing=false;
+                animationRecording=true;
+                animationRecordedFrame=0;animationLastRecordStep=performance.now();animationFinalHoldUntil=0;
+            }
+            animationPlaying=true;
+            animationEl('physicsPauseText').textContent='Animation playing (physics paused)';
+            animationEl('physicsPauseIcon').className='fa-solid fa-film';
+            animationEl('animationStatus').textContent=record?'Recording animation…':'Playing animation…';
+            showAnimationFrame(0);animationStartTime=performance.now();updateAnimationButtons();
+        }
+        function advanceAnimation(now){
+            if(!animationPlaying||animationFrames.length<2)return;
+            const total=animationDurationFrames();
+            if(animationRecording&&animationFinalHoldUntil){if(now>=animationFinalHoldUntil)stopAnimation();return;}
+            if(animationRecording&&now-animationLastRecordStep>=1000/30){animationRecordedFrame++;animationLastRecordStep=now;}
+            const elapsed=animationRecording?animationRecordedFrame:(now-animationStartTime)*30/1000;
+            const nonLoopTotal=animationFrames.reduce((sum,frame)=>sum+animationSegmentFrames(frame),0);
+            if(elapsed>=(animationLoop?total:nonLoopTotal)){
+                showAnimationFrame(animationFrames.length-1);
+                if(animationRecording){
+                    animationDisplayOverride=physicsNodes.map(node=>{const point=visualPointForNode(node);return [point.x,point.y,point.z];});
+                    animationFinalHoldUntil=now+350;
+                }
+                else if(animationLoop){animationStartTime=now;showAnimationFrame(0);}else stopAnimation();
+                return;
+            }
+            let remaining=elapsed,index=0;
+            while(index<animationFrames.length&&remaining>=animationSegmentFrames(animationFrames[index])){remaining-=animationSegmentFrames(animationFrames[index]);index++;}
+            if(index>=animationFrames.length)index=animationFrames.length-1;
+            const a=animationFrames[index],targetIndex=index<animationFrames.length-1?index+1:(animationLoop?0:index),b=animationFrames[targetIndex];
+            const t=targetIndex===index?0:Math.max(0,Math.min(1,remaining/Math.max(1,animationSegmentFrames(a))));
+            if(animationSelected!==index){animationSelected=index;applyAnimationSettings(a.settings);renderAnimationTimeline();}
+            animationDisplayOverride=new Array(physicsNodes.length);
+            for(let i=0;i<physicsNodes.length;i++){
+                const from=a.coords[i],to=b.coords[i],node=physicsNodes[i];
+                if(!from||!to)continue;
+                node.x=from[0]+(to[0]-from[0])*t;node.y=from[1]+(to[1]-from[1])*t;node.z=from[2]+(to[2]-from[2])*t;
+            }
+            for(const group of rotationalSymmetryGroups){
+                const start=a.settings.symmetry?.find(item=>item.key===group.key)?.angle||0;
+                const end=b.settings.symmetry?.find(item=>item.key===group.key)?.angle||0;
+                group.angle=start+(end-start)*t;
+            }
+            // Apply the interpolated rotation angles as a display-only layer over
+            // the interpolated true coordinates. This keeps rotational animation
+            // independent from the coordinates saved for each keyframe.
+            for(let i=0;i<physicsNodes.length;i++){
+                const point=visualPointForNode(physicsNodes[i]);
+                animationDisplayOverride[i]=[point.x,point.y,point.z];
+            }
+            updateSymmetryRotationControls();
+            syncVisualPhysicsMeshes();
+        }
+        function applyAnimationDisplayCoordinates(){
+            if(!animationDisplayOverride)return applyVisualSymmetryRotation();
+            const original=[];
+            animationDisplayOverride.forEach((point,index)=>{if(!point)return;const node=physicsNodes[index];
+                original.push([node,node.x,node.y,node.z]);[node.x,node.y,node.z]=point;});
+            return original;
+        }
+        function animationOnModelReady(){
+            stopAnimation();animationFrames=[];animationSelected=0;
+            animationModelStorageKey=animationSessionKey();
+            try{const saved=JSON.parse(localStorage.getItem(animationModelStorageKey)||'null');
+                if(saved?.signature===animationNodeSignature()&&Array.isArray(saved.frames)&&saved.frames.every(frame=>frame.coords?.length===physicsNodes.length)){
+                    animationFrames=saved.frames;animationLoop=saved.loop!==false;
+                }
+            }catch(error){console.warn('Could not restore animation:',error);}
+            renderAnimationTimeline();
+        }
+        function animationRowDefinitions(){
+            const rows=[];
+            const first=animationFrames[0];if(!first)return rows;
+            const controls=animationControls();
+            const controlNames=controls.map((input,index)=>input.id||input.getAttribute('aria-label')||input.closest('label')?.textContent.trim().slice(0,40)||`Control ${index+1}`);
+            for(let i=0;i<controlNames.length;i++){
+                if(controls[i]?.dataset.symmetryRotation)continue;
+                rows.push({label:controlNames[i],graphable:controls[i]?.type==='range',step:Number(controls[i]?.step)||0,
+                    get:frame=>frame.settings.controls?.[i],set:(frame,value)=>{frame.settings.controls[i]=value;}});
+            }
+            for(const flag of Object.keys(first.settings.flags||{}))rows.push({label:flag.replace(/([A-Z])/g,' $1'),get:frame=>String(frame.settings.flags?.[flag]),set:(frame,value)=>{frame.settings.flags[flag]=value==='true';}});
+            for(const chain of Object.keys(first.settings.chainVisibility||{}))rows.push({label:`Chain ${chain} visible`,get:frame=>String(frame.settings.chainVisibility?.[chain]!==false),set:(frame,value)=>{frame.settings.chainVisibility[chain]=value==='true';}});
+            first.settings.referenceOverlayVisibility?.forEach((_,index)=>rows.push({label:`Reference PDB ${index+1} visible`,get:frame=>String(frame.settings.referenceOverlayVisibility?.[index]===true),set:(frame,value)=>{frame.settings.referenceOverlayVisibility[index]=value==='true';}}));
+            for(const id of Object.keys(first.settings.buttonStates||{}))rows.push({label:id.replace(/([A-Z])/g,' $1'),get:frame=>frame.settings.buttonStates?.[id],set:(frame,value)=>{frame.settings.buttonStates[id]=value==='true'?'true':'false';}});
+            for(const property of ['representation','color','referenceColor','springColor'])rows.push({label:property,get:frame=>frame.settings[property],set:(frame,value)=>{frame.settings[property]=value;}});
+            for(const group of rotationalSymmetryGroups)rows.push({label:`Rotation of symmetry group ${group.key} (°)`,graphable:true,step:1,
+                get:frame=>String(Math.round((frame.settings.symmetry?.find(item=>item.key===group.key)?.angle||0)*180/Math.PI)),
+                set:(frame,value)=>{const degrees=Number(value);if(!Number.isFinite(degrees))throw Error('Rotation must be a number of degrees.');
+                    const angle=degrees*Math.PI/180;
+                    const item=frame.settings.symmetry.find(entry=>entry.key===group.key);
+                    if(item)item.angle=angle;else frame.settings.symmetry.push({key:group.key,angle});
+                    group.blockIds.forEach(block=>physicsNodes.forEach((node,index)=>{if(node.blockIdx!==block)return;
+                        const p=rotateVisualPoint(new THREE.Vector3(...frame.coords[index]),group,angle);
+                        frame.displayCoords[index]=[p.x,p.y,p.z];}));
+                }});
+            return rows;
+        }
+        function animationComparisonColor(value,base,extent){
+            const current=Number(value),initial=Number(base);
+            if(!Number.isFinite(current)||!Number.isFinite(initial)||current===initial)return '#f8fafc';
+            const ratio=Math.max(.2,Math.min(1,Math.abs(current-initial)/Math.max(extent,1e-9)));
+            const target=current>initial?[134,239,172]:[252,165,165],white=[248,250,252];
+            return `rgb(${white.map((channel,i)=>Math.round(channel+(target[i]-channel)*ratio)).join(',')})`;
+        }
+        function renderAnimationTable(){
+            saveSelectedAnimationFrame();const host=animationEl('animationTableContent');host.replaceChildren();
+            const table=document.createElement('table');table.className='min-w-full border-collapse text-left text-xs text-slate-200';
+            const head=table.createTHead().insertRow();for(const title of ['Changed setting',...animationFrames.map((_,i)=>`Keyframe ${i+1}`)]){const cell=document.createElement('th');cell.className='sticky top-0 bg-slate-800 p-2 text-amber-300';cell.textContent=title;head.append(cell);}
+            const body=table.createTBody();
+            const rows=animationTableRows||animationRowDefinitions().filter(row=>new Set(animationFrames.map(frame=>row.get(frame))).size>1);
+            animationTableRows=rows;
+            for(const row of rows){const tr=body.insertRow();const label=tr.insertCell();label.className='border-b border-slate-700 p-2 font-medium';label.textContent=row.label;
+                const base=row.get(animationFrames[0]);
+                const extent=Math.max(0,...animationFrames.map(frame=>Math.abs(Number(row.get(frame))-Number(base))).filter(Number.isFinite));
+                animationFrames.forEach((frame,index)=>{const td=tr.insertCell();td.className='border-b border-slate-700 p-2';
+                    const input=document.createElement(row.large?'textarea':'input');input.value=row.get(frame)??'';input.className='min-w-32 rounded-lg bg-slate-800 p-2 text-white '+(row.large?'h-20 w-72 font-mono':'');
+                    input.style.color=animationComparisonColor(input.value,base,extent);
+                    input.setAttribute('aria-label',`${row.label}, keyframe ${index+1}`);
+                    input.addEventListener('change',()=>{try{row.set(frame,input.value);input.setCustomValidity('');
+                        const updatedBase=row.get(animationFrames[0]);
+                        const updatedExtent=Math.max(0,...animationFrames.map(item=>Math.abs(Number(row.get(item))-Number(updatedBase))).filter(Number.isFinite));
+                        tr.querySelectorAll('input,textarea').forEach((cell,column)=>{cell.style.color=animationComparisonColor(row.get(animationFrames[column]),updatedBase,updatedExtent);});
+                        if(index===animationSelected)showAnimationFrame(index);scheduleAnimationSave();
+                    }catch(error){input.setCustomValidity(error.message);input.reportValidity();}});
+                    td.append(input);});}
+            host.append(table);
+        }
+        function renderAnimationGraph(){
+            const host=animationEl('animationGraphContent');host.replaceChildren();
+            const note=document.createElement('p');note.className='mb-3 text-xs text-slate-400';
+            note.textContent='Numeric settings are normalised to their value range. Switches between options and on/off states are not shown.';
+            host.append(note);
+            const rows=(animationTableRows||animationRowDefinitions()).filter(row=>row.graphable&&
+                animationFrames.every(frame=>Number.isFinite(Number(row.get(frame))))&&
+                new Set(animationFrames.map(frame=>Number(row.get(frame)))).size>1);
+            if(!rows.length){const empty=document.createElement('p');empty.className='text-sm text-slate-300';empty.textContent='No changing numeric settings to graph.';host.append(empty);return;}
+            const svgNS='http://www.w3.org/2000/svg';
+            const svgElement=(name,attrs={})=>{const element=document.createElementNS(svgNS,name);for(const [key,value] of Object.entries(attrs))element.setAttribute(key,String(value));return element;};
+            const totals=[0];for(let i=0;i<animationFrames.length-1;i++)totals.push(totals.at(-1)+animationSegmentFrames(animationFrames[i]));
+            const duration=Math.max(1,totals.at(-1));
+            rows.forEach(row=>{
+                const values=animationFrames.map(frame=>Number(row.get(frame))),min=Math.min(...values),max=Math.max(...values),span=Math.max(1e-9,max-min);
+                const block=document.createElement('div');block.className='animation-graph-row';
+                const title=document.createElement('div');title.className='flex justify-between gap-3 text-xs text-slate-200';
+                const label=document.createElement('strong');label.textContent=row.label;
+                const range=document.createElement('span');range.className='text-slate-400';range.textContent=`${min.toFixed(2)} → ${max.toFixed(2)}`;
+                title.append(label,range);block.append(title);
+                const svg=svgElement('svg',{viewBox:'0 0 600 145',role:'img','aria-label':`${row.label} across keyframes`});
+                const x=index=>40+totals[index]/duration*520;
+                const y=value=>99-(value-min)/span*76;
+                for(const level of [20,58,99])svg.append(svgElement('line',{x1:40,x2:560,y1:level,y2:level,stroke:'#475569','stroke-width':1}));
+                const path=svgElement('polyline',{fill:'none',stroke:'#facc15','stroke-width':2.5});svg.append(path);
+                const dots=[];
+                const redraw=()=>{
+                    path.setAttribute('points',values.map((value,index)=>`${x(index)},${y(value)}`).join(' '));
+                    dots.forEach((dot,index)=>{dot.setAttribute('cy',y(values[index]));dot.setAttribute('aria-label',`Keyframe ${index+1}: ${values[index].toFixed(2)}`);});
+                };
+                values.forEach((value,index)=>{
+                    const dot=svgElement('circle',{cx:x(index),cy:y(value),r:7,fill:'#facc15',stroke:'#1e293b','stroke-width':2,tabindex:0});
+                    dot.style.cursor='ns-resize';let dragging=false;
+                    dot.addEventListener('pointerdown',event=>{dragging=true;dot.setPointerCapture(event.pointerId);event.preventDefault();});
+                    dot.addEventListener('pointermove',event=>{if(!dragging)return;
+                        const rect=svg.getBoundingClientRect(),svgY=(event.clientY-rect.top)/rect.height*125;
+                        let next=min+(1-Math.max(0,Math.min(1,(svgY-23)/76)))*span;
+                        if(row.step>=1)next=Math.round(next/row.step)*row.step;
+                        const valueText=row.step>=1?String(Math.round(next)):String(+next.toFixed(4));
+                        try{row.set(animationFrames[index],valueText);values[index]=Number(row.get(animationFrames[index]));redraw();scheduleAnimationSave();}
+                        catch(error){animationEl('animationStatus').textContent=error.message;}
+                    });
+                    const finish=()=>{if(!dragging)return;dragging=false;if(index===animationSelected)showAnimationFrame(index);};
+                    dot.addEventListener('pointerup',finish);dot.addEventListener('pointercancel',finish);
+                    svg.append(dot);dots.push(dot);
+                    const tick=svgElement('text',{x:x(index),y:119,'text-anchor':'middle',fill:'#94a3b8','font-size':10});tick.textContent=`K${index+1}`;svg.append(tick);
+                    const frameCount=svgElement('text',{x:x(index),y:137,'text-anchor':'middle',fill:'#cbd5e1','font-size':9});frameCount.textContent=`Frame ${totals[index]}`;svg.append(frameCount);
+                });
+                redraw();block.append(svg);host.append(block);
+            });
+        }
+        animationEl('createAnimationBtn')?.addEventListener('click',()=>{
+            if(!physicsNodes.length){animationEl('animationStatus').textContent='Build a homology model before creating an animation.';animationEl('animationEditor').classList.remove('hidden');animationEl('animationEditor').scrollIntoView({behavior:'smooth',block:'start'});return;}
+            if(!animationFrames.length){animationFrames=[captureAnimationFrame(),captureAnimationFrame()];animationSelected=0;scheduleAnimationSave();renderAnimationTimeline();}
+            animationEl('animationEditor').classList.toggle('hidden');
+            if(!animationEl('animationEditor').classList.contains('hidden'))animationEl('animationEditor').scrollIntoView({behavior:'smooth',block:'start'});
+        });
+        animationEl('closeAnimationEditor')?.addEventListener('click',()=>animationEl('animationEditor').classList.add('hidden'));
+        animationEl('quickPlayAnimationBtn')?.addEventListener('click',()=>playAnimation());
+        animationEl('animationPlay')?.addEventListener('click',()=>playAnimation());
+        animationEl('recordAnimation')?.addEventListener('click',()=>playAnimation(true));
+        animationEl('loopAnimation')?.addEventListener('click',()=>{animationLoop=!animationLoop;updateAnimationButtons();scheduleAnimationSave();});
+        const animationButtonIcons={duplicateAnimationKeyframe:'fa-copy',deleteAnimationKeyframe:'fa-trash',showAnimationTable:'fa-table',toggleAnimationGraph:'fa-chart-line',recordAnimation:'fa-video',loopAnimation:'fa-repeat',deleteAnimation:'fa-trash'};
+        Object.entries(animationButtonIcons).forEach(([id,iconName])=>{const button=animationEl(id);if(!button||button.querySelector('i'))return;const icon=document.createElement('i');icon.className=`fa-solid ${iconName} mr-1`;icon.setAttribute('aria-hidden','true');button.prepend(icon);});
+        animationEl('duplicateAnimationKeyframe')?.addEventListener('click',()=>{if(!animationFrames.length)return;saveSelectedAnimationFrame();const copy=structuredClone(animationFrames[animationSelected]);copy.id=`${Date.now()}-${Math.random()}`;animationFrames.splice(++animationSelected,0,copy);showAnimationFrame(animationSelected);scheduleAnimationSave();});
+        function deleteSelectedAnimationKeyframe(){
+            if(animationFrames.length<2)return false;
+            const deletingIndex=animationSelected;
+            stopAnimation();clearTimeout(animationCaptureTimer);
+            const survivors=animationFrames.filter((_,index)=>index!==deletingIndex);
+            const nextIndex=Math.min(deletingIndex,survivors.length-1),next=survivors[nextIndex];
+            if(!next||next.coords?.length!==physicsNodes.length){animationEl('animationStatus').textContent='Could not restore the remaining keyframe; the animation was left unchanged.';return false;}
+            animationFrames=survivors;animationDisplayOverride=null;
+            showAnimationFrame(nextIndex);saveAnimation();return true;
+        }
+        animationEl('deleteAnimationKeyframe')?.addEventListener('click',deleteSelectedAnimationKeyframe);
+        animationEl('deleteAnimation')?.addEventListener('click',()=>{
+            stopAnimation();clearTimeout(animationCaptureTimer);clearTimeout(animationSaveTimer);
+            animationFrames=[];animationSelected=0;animationTableRows=null;animationDisplayOverride=null;
+            try{localStorage.removeItem(animationModelStorageKey||animationSessionKey());}catch(error){console.warn('Could not delete saved animation:',error);}
+            closeAnimationTable();animationEl('animationEditor').classList.add('hidden');renderAnimationTimeline();
+        });
+        // Place the dialog outside the simulation panel's overflow clipping.
+        document.body.append(animationEl('animationTableDialog'));
+        animationEl('showAnimationTable')?.addEventListener('click',()=>{
+            animationTableRows=null;renderAnimationTable();animationEl('animationGraphContent').classList.add('hidden');animationEl('animationTableContent').classList.remove('hidden');
+            animationEl('toggleAnimationGraph').textContent='Graph editor';
+            animationEl('animationTableDialog').classList.remove('hidden');animationEl('animationTableDialog').classList.add('flex');
+            document.body.classList.add('animation-dialog-open');
+        });
+        animationEl('toggleAnimationGraph')?.addEventListener('click',()=>{
+            const graph=animationEl('animationGraphContent'),table=animationEl('animationTableContent');
+            const showGraph=graph.classList.contains('hidden');
+            if(showGraph)renderAnimationGraph();else renderAnimationTable();
+            graph.classList.toggle('hidden',!showGraph);table.classList.toggle('hidden',showGraph);
+            animationEl('toggleAnimationGraph').textContent=showGraph?'Table editor':'Graph editor';
+        });
+        function closeAnimationTable(){animationEl('animationTableDialog').classList.add('hidden');animationEl('animationTableDialog').classList.remove('flex');document.body.classList.remove('animation-dialog-open');animationTableRows=null;}
+        animationEl('closeAnimationTable')?.addEventListener('click',closeAnimationTable);
+        animationEl('animationTableDialog')?.addEventListener('click',event=>{if(event.target===event.currentTarget)closeAnimationTable();});
+        document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!animationEl('animationTableDialog').classList.contains('hidden'))closeAnimationTable();});
+        document.querySelector('.physics-simulation-panel')?.addEventListener('input',event=>{if(!animationEl('animationEditor')?.contains(event.target))scheduleAnimationCapture();});
+        document.querySelector('.physics-simulation-panel')?.addEventListener('change',event=>{if(!animationEl('animationEditor')?.contains(event.target))scheduleAnimationCapture();});
+        document.querySelector('.physics-simulation-panel')?.addEventListener('click',event=>{if(!event.target.closest('button')||animationEl('animationEditor')?.contains(event.target)||animationEl('animationTableDialog')?.contains(event.target))return;scheduleAnimationCapture();});
+        animationEl('physicsContainer')?.addEventListener('pointerup',scheduleAnimationCapture);
+        window.addEventListener('pagehide',()=>{if(animationFrames.length){saveSelectedAnimationFrame();clearTimeout(animationSaveTimer);saveAnimation();}});
