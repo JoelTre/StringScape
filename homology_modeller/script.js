@@ -127,6 +127,208 @@
         // Reference PDB and AlphaFold with flat matrix caching
         let modelData1 = { pdbId: '', chains: {}, caAtoms: [], currentChain: 'ALL', matrixCache: new Map() };
         let modelData2 = { pdbId: '', chains: {}, caAtoms: [], currentChain: 'ALL', matrixCache: new Map(), files: [] };
+        const uniProtEntryCache = new Map();
+        let uniProtAnnotations = new Map();
+        let uniProtUnavailable = [];
+        let uniProtLookupController = null;
+        let uniProtLookupPending = false;
+        const UNI_PROT_FEATURE_MODES = {
+            'uniprot-topological':'Topological domain','uniprot-domain':'Domain',
+            'uniprot-transmembrane':'Transmembrane','uniprot-intramembrane':'Intramembrane',
+            'uniprot-active-site':'Active site','uniprot-binding-site':'Binding site',
+            'uniprot-signal':'Signal peptide','uniprot-transit':'Transit peptide',
+            'uniprot-region':'Region','uniprot-motif':'Motif',
+            'uniprot-modified':'Modified residue','uniprot-glycosylation':'Glycosylation',
+            'uniprot-disulfide':'Disulfide bond'
+        };
+        const UNI_PROT_FEATURE_COLORS = ['#f97316','#eab308','#22c55e','#06b6d4','#a78bfa','#ec4899','#ef4444','#84cc16','#14b8a6','#6366f1'];
+        function updateUniProtFetchingBadge() {
+            document.getElementById('uniProtFetchingBadge')?.classList.toggle('hidden',!(uniProtLookupPending&&Boolean(UNI_PROT_FEATURE_MODES[physicsColorMode])));
+        }
+        function uniProtAccession(id) {
+            const value=String(id||'').trim().toUpperCase().replace(/^AF[-_]/,'').replace(/[-_]F\d+$/,'');
+            return /^(?:[OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9](?:[A-Z][A-Z0-9]{2}[0-9]){1,2})(?:-\d+)?$/.test(value)?value:null;
+        }
+        function uniProtName(entry) {
+            const description=entry?.proteinDescription;
+            return description?.recommendedName?.shortNames?.[0]?.value || description?.recommendedName?.fullName?.value ||
+                description?.submissionNames?.[0]?.fullName?.value ||
+                entry?.protein?.recommendedName?.shortName?.[0]?.value || entry?.protein?.recommendedName?.fullName?.value ||
+                entry?.protein?.submittedName?.[0]?.fullName?.value || entry?.genes?.[0]?.geneName?.value || null;
+        }
+        function uniProtAnnotationForAtom(atom) { return uniProtAnnotations.get(uniProtAccession(atom?.sourcePdbId)); }
+        function uniProtFeatureAt(atom,type) {
+            const position=Number(atom?.resSeq),annotation=uniProtAnnotationForAtom(atom);
+            if(!Number.isInteger(position)||!annotation)return null;
+            return annotation.features.find(feature=>feature.type===type&&
+                (type==='Disulfide bond'?(position===feature.start||position===feature.end):(position>=feature.start&&position<=feature.end)))||null;
+        }
+        function uniProtFeatureColor(atom,mode) {
+            const type=UNI_PROT_FEATURE_MODES[mode];
+            const feature=uniProtFeatureAt(atom,type);
+            if(!feature)return '#64748b';
+            return uniProtFeatureShade(uniProtAccession(atom?.sourcePdbId),feature);
+        }
+        function uniProtFeatureShade(accession,feature) {
+            const key=`${accession}:${feature.type}:${feature.description||feature.start}`;
+            let hash=0;for(const char of key)hash=(hash*31+char.charCodeAt(0))>>>0;
+            return UNI_PROT_FEATURE_COLORS[hash%UNI_PROT_FEATURE_COLORS.length];
+        }
+        function renderUniProtFeatureKey() {
+            if(!UNI_PROT_FEATURE_MODES[physicsColorMode])return;
+            const key=document.getElementById('physicsColourKey');
+            if(!key)return;
+            key.querySelector('.uniprot-feature-list')?.remove();
+            const type=UNI_PROT_FEATURE_MODES[physicsColorMode],matches=[];
+            for(const [accession,entry] of uniProtAnnotations)
+                for(const feature of entry.features)if(feature.type===type)matches.push({accession,feature});
+            if(!matches.length)return;
+            const list=document.createElement('div');list.className='uniprot-feature-list mt-1 flex flex-wrap gap-1.5';list.style.maxHeight='110px';list.style.overflowY='auto';
+            for(const {accession,feature} of matches.slice(0,30)){
+                const item=document.createElement('button');item.type='button';item.title='Select annotated residues in the 3D structure';
+                const dot=document.createElement('span');dot.className='inline-block w-2 h-2 rounded-full';dot.style.backgroundColor=uniProtFeatureShade(accession,feature);
+                item.append(dot,document.createTextNode(`${accession}: ${feature.description||type} ${feature.start}${feature.end!==feature.start?'–'+feature.end:''}`));
+                item.addEventListener('click',()=>selectUniProtFeature(accession,feature));list.append(item);
+            }
+            if(matches.length>30)list.append(document.createTextNode(`+${matches.length-30} more annotations`));
+            key.append(list);
+        }
+        function selectUniProtFeature(accession,feature){
+            const matches=[];
+            for(const node of physicsNodes){
+                const atom=node.idx2==null?null:node.res.atoms2[node.idx2];
+                if(uniProtAccession(atom?.sourcePdbId)!==accession)continue;
+                const position=Number(atom.resSeq);
+                if(feature.type==='Disulfide bond'?(position!==feature.start&&position!==feature.end):(position<feature.start||position>feature.end))continue;
+                matches.push({node,atom});
+            }
+            if(!matches.length)return;
+            const first=matches[0];selectLinkedEntity(first.node.res.c1,first.atom.resSeq,'residue',first.atom);
+            additionalSelections=matches.slice(1).map(({node,atom})=>({kind:'model',mode:'residue',chain:node.res.c1,resSeq:atom.resSeq,atom,res:node.res,referenceAtom:null,alphaAtom:atom}));
+            updatePhysicsSelectionInfo();refreshSelectedGlowIndices();updatePhysicsNodeColors();applyPhysicsVisibility();updateAtomRepresentation();updateCartoonRepresentation();
+            alignmentTmViewer?.updateColors();drawIndividualMatrices();drawDifferenceMatrix();drawMorphMatrix();
+        }
+        function displayChainName(chain,source='reference') {
+            const alphaChain=source==='alphaFold'?chain:alignmentResults.find(result=>result.c1===chain&&result.isEquivalent&&result.c2)?.c2;
+            const id=modelData2.chains[alphaChain]?.[0]?.sourcePdbId;
+            const name=uniProtAnnotations.get(uniProtAccession(id))?.name;
+            return name?`${name} (${chain})`:`Chain ${chain}`;
+        }
+        function uniProtCommentText(comment) {
+            const texts=comment.texts||comment.text||[];
+            const pieces=(Array.isArray(texts)?texts:[texts]).map(item=>typeof item==='string'?item:item?.value).filter(Boolean);
+            if(comment.reaction?.name)pieces.push(comment.reaction.name);
+            pieces.push(...(comment.note?.texts||[]).map(item=>item.value).filter(Boolean));
+            for(const location of comment.subcellularLocations||comment.locations||[]) {
+                const words=[location.location?.value,location.topology?.value,location.orientation?.value].filter(Boolean);
+                if(words.length)pieces.push(words.join(' · '));
+            }
+            return [...new Set(pieces)].join(' ');
+        }
+        function renderAboutProteinComplex(status='') {
+            const host=document.getElementById('aboutProteinComplexContent');
+            if(!host)return;
+            host.replaceChildren();
+            const addRetry=()=>{
+                const button=document.createElement('button');button.type='button';button.className='mt-2 rounded-lg bg-slate-700 px-3 py-1.5 text-xs text-white';
+                button.textContent='Retry UniProt lookup';
+                button.addEventListener('click',()=>void loadUniProtAnnotations(modelData2.files,modelBuildGeneration));
+                host.append(button);
+            };
+            if(status){host.textContent=status;return;}
+            if(!uniProtAnnotations.size){host.textContent=uniProtUnavailable.length?`UniProt information could not be loaded for: ${uniProtUnavailable.join(', ')}.`:'No UniProt annotations are available for the current AlphaFold inputs.';if(uniProtUnavailable.length)addRetry();return;}
+            for(const [accession,entry] of uniProtAnnotations){
+                const card=document.createElement('section');card.className='rounded-lg bg-slate-800/70 p-3 mb-3';
+                const title=document.createElement('h3');title.className='font-semibold text-sky-300';title.textContent=`${entry.name||accession} · ${accession}`;card.append(title);
+                if(entry.organism){const organism=document.createElement('p');organism.className='text-xs text-slate-400';organism.textContent=entry.organism;card.append(organism);}
+                for(const [type,label] of [['FUNCTION','Function'],['CATALYTIC ACTIVITY','Catalytic activity'],['SUBCELLULAR LOCATION','Subcellular location'],['TISSUE SPECIFICITY','Tissue specificity']]){
+                    const values=entry.comments.filter(comment=>(comment.commentType||comment.type)===type).map(uniProtCommentText).filter(Boolean);
+                    if(!values.length)continue;
+                    const row=document.createElement('p');row.className='mt-2 leading-relaxed';
+                    const strong=document.createElement('strong');strong.textContent=`${label}: `;row.append(strong,document.createTextNode(values.join(' ')));card.append(row);
+                }
+                const count=document.createElement('p');count.className='mt-2 text-xs text-slate-400';count.textContent=`${entry.features.length} UniProt positional annotations`;card.append(count);
+                host.append(card);
+            }
+            if(uniProtUnavailable.length){const notice=document.createElement('p');notice.className='text-amber-300 text-xs';notice.textContent=`UniProt information unavailable for: ${uniProtUnavailable.join(', ')}.`;host.append(notice);addRetry();}
+        }
+        function updateUniProtChainLabels() {
+            document.querySelectorAll('#alignmentTableBody tr[data-alignment-index]').forEach(row=>{
+                const result=alignmentResults[Number(row.dataset.alignmentIndex)];
+                if(!result)return;
+                row.children[0].textContent=displayChainName(result.c1);
+                row.children[2].textContent=result.c2?displayChainName(result.c2,'alphaFold'):'--';
+            });
+            for(const [id,model,source] of [['PDBChainSelect',modelData1,'reference'],['AFChainSelect',modelData2,'alphaFold']]){
+                const select=document.getElementById(id);
+                for(const option of select?.options||[]){if(option.value!=='ALL'&&model.chains[option.value])option.textContent=`${displayChainName(option.value,source)} (${model.chains[option.value].length} res)`;}
+            }
+            renderChainLegends();renderPhysicsChainToggles();updatePhysicsSelectionInfo();
+        }
+        const LEGACY_UNIPROT_FEATURE_TYPES={TOPO_DOM:'Topological domain',DOMAIN:'Domain',TRANSMEM:'Transmembrane',INTRAMEM:'Intramembrane',ACT_SITE:'Active site',BINDING:'Binding site',SIGNAL:'Signal peptide',TRANSIT:'Transit peptide',REGION:'Region',MOTIF:'Motif',MOD_RES:'Modified residue',CARBOHYD:'Glycosylation',DISULFID:'Disulfide bond'};
+        function normalizeUniProtEntry(data,featureData=data) {
+            const rawFeatures=(Array.isArray(featureData)&&featureData[0]?.type?featureData:null)||featureData?.features||data?.features||[];
+            const features=(Array.isArray(rawFeatures)?rawFeatures:[]).map(feature=>({
+                type:LEGACY_UNIPROT_FEATURE_TYPES[feature.type]||feature.type,
+                description:feature.description||'',
+                start:Number(feature.location?.start?.value??feature.begin??feature.start),
+                end:Number(feature.location?.end?.value??feature.end??feature.location?.start?.value??feature.begin??feature.start)
+            })).filter(feature=>Number.isInteger(feature.start)&&Number.isInteger(feature.end));
+            return {name:uniProtName(data),organism:data?.organism?.scientificName||data?.organism?.names?.find(name=>name.type==='scientific')?.value||'',
+                comments:Array.isArray(data?.comments)?data.comments:[],features};
+        }
+        async function fetchUniProtEntry(accession,signal) {
+            const headers={Accept:'application/json'};
+            let primaryError=null;
+            for(let attempt=0;attempt<2;attempt++){
+                try{
+                    const response=await fetch(`https://rest.uniprot.org/uniprotkb/${encodeURIComponent(accession)}.json`,{signal,headers});
+                    if(response.ok)return normalizeUniProtEntry(await response.json());
+                    primaryError=new Error(`UniProt ${accession}: HTTP ${response.status}`);
+                    if(![429,500,502,503,504].includes(response.status))break;
+                }catch(error){if(signal.aborted)throw error;primaryError=error;}
+                if(attempt===0)await new Promise((resolve,reject)=>{
+                    const timer=setTimeout(resolve,650);
+                    signal.addEventListener('abort',()=>{clearTimeout(timer);reject(new DOMException('Aborted','AbortError'));},{once:true});
+                });
+            }
+            // EMBL-EBI's Proteins API serves UniProt data through a separate service.
+            const base='https://www.ebi.ac.uk/proteins/api';
+            const fallback=await Promise.allSettled(['proteins','features'].map(async path=>{
+                const response=await fetch(`${base}/${path}/${encodeURIComponent(accession)}`,{signal,headers});
+                if(!response.ok)throw new Error(`EMBL-EBI ${path}: HTTP ${response.status}`);
+                return response.json();
+            }));
+            if(signal.aborted)throw new DOMException('Aborted','AbortError');
+            const protein=fallback[0].status==='fulfilled'?fallback[0].value:null;
+            const features=fallback[1].status==='fulfilled'?fallback[1].value:null;
+            if(protein||features)return normalizeUniProtEntry(Array.isArray(protein)?protein[0]:protein||{},Array.isArray(features)&&features[0]?.features?features[0]:features||protein||{});
+            throw new Error(`${primaryError?.message||'UniProt request failed'}; EMBL-EBI fallback unavailable (${fallback.map(result=>result.reason?.message||'unknown').join('; ')})`);
+        }
+        async function loadUniProtAnnotations(fileResults,generation) {
+            const accessions=[...new Set(fileResults.map(file=>uniProtAccession(file.pdbId)).filter(Boolean))];
+            if(!accessions.length){uniProtLookupPending=false;updateUniProtFetchingBadge();renderAboutProteinComplex();return;}
+            uniProtLookupController?.abort();
+            renderAboutProteinComplex('Loading UniProt information…');
+            const controller=new AbortController();uniProtLookupController=controller;
+            uniProtLookupPending=accessions.some(accession=>!uniProtEntryCache.has(accession));
+            updateUniProtFetchingBadge();
+            const results=await Promise.allSettled(accessions.map(async accession=>{
+                if(uniProtEntryCache.has(accession))return [accession,uniProtEntryCache.get(accession)];
+                const entry=await fetchUniProtEntry(accession,controller.signal);
+                uniProtEntryCache.set(accession,entry);return [accession,entry];
+            }));
+            if(generation!==modelBuildGeneration||controller.signal.aborted){
+                if(uniProtLookupController===controller){uniProtLookupPending=false;updateUniProtFetchingBadge();}
+                return;
+            }
+            uniProtLookupPending=false;updateUniProtFetchingBadge();
+            uniProtAnnotations=new Map(results.filter(result=>result.status==='fulfilled').map(result=>result.value));
+            uniProtUnavailable=accessions.filter((_,index)=>results[index].status==='rejected');
+            for(const result of results)if(result.status==='rejected')console.warn('UniProt annotation unavailable:',result.reason);
+            renderAboutProteinComplex();updateUniProtChainLabels();updateMembraneSideNames();
+            if(UNI_PROT_FEATURE_MODES[physicsColorMode]){renderUniProtFeatureKey();updatePhysicsNodeColors();updateAtomRepresentation();updateModel1AlignmentColors();}
+        }
         let referenceFiles = [], referenceAssembly = null, referenceInfluences = [];
 
         let alignmentResults = [];
@@ -285,7 +487,7 @@
                 const detail=document.createElement('div');detail.className='selection-pair-detail';
                 const labels=[linkedSelection.i,linkedSelection.j].map(index=>{
                     const node=physicsNodes[index],atom=validationAtom(node,'reference')||validationAtom(node,'af');
-                    return `${atom?.resName||'?'} ${atom?.resSeq||'?'} · Chain ${node.res.c1}`;
+                    return `${atom?.resName||'?'} ${atom?.resSeq||'?'} · ${displayChainName(node.res.c1)}`;
                 });
                 const first=document.createElement('span'),separator=document.createElement('span'),second=document.createElement('span');
                 first.textContent=labels[0];separator.className='selection-pair-separator';separator.textContent='↔';second.textContent=labels[1];
@@ -295,14 +497,14 @@
             }
             const {chain,mode,referenceAtom,alphaAtom,atom}=linkedSelection;
             const selected=atom||referenceAtom||alphaAtom;
-            const heading=document.createElement('strong');heading.textContent=mode==='chain'?`Chain ${chain}`:`${selected?.resName||'Atom'} ${selected?.resSeq??''} · Chain ${chain}`;
+            const heading=document.createElement('strong');heading.textContent=mode==='chain'?displayChainName(chain):`${selected?.resName||'Atom'} ${selected?.resSeq??''} · ${displayChainName(chain)}`;
             const detail=document.createElement('div');
             detail.textContent=mode==='chain'
                 ? `${linkedSelection.res?.entityType==='nucleotide'?'Polynucleotide':linkedSelection.res?.entityType==='other'?'Non-protein molecule':'Protein'} · ${linkedSelection.res?.atoms1.length||linkedSelection.res?.atoms2.length||0} residues/atoms`
                 : `${selected?.entityType==='nucleotide'?'Nucleotide':selected?.entityType==='other'?'Non-protein atom':'Residue'} · ${referenceAtom&&alphaAtom?'Reference PDB & AlphaFold':referenceAtom?'Reference PDB':alphaAtom?'AlphaFold':''}`;
             const headingRow=document.createElement('div');headingRow.className='selection-info-heading';headingRow.append(heading,glowButton);
             box.replaceChildren(headingRow,detail);box.classList.remove('hidden');
-            if(additionalSelections.length){const list=document.createElement('div');list.className='mt-1';list.textContent=`Also selected: ${additionalSelections.map(selection=>selection.mode==='chain'?`Chain ${selection.chain}`:`${selection.atom?.resName||'Residue'} ${selection.atom?.resSeq??''} · Chain ${selection.chain}`).join('; ')}`;box.append(list);}
+            if(additionalSelections.length){const list=document.createElement('div');list.className='mt-1';list.textContent=`Also selected: ${additionalSelections.map(selection=>selection.mode==='chain'?displayChainName(selection.chain):`${selection.atom?.resName||'Residue'} ${selection.atom?.resSeq??''} · ${displayChainName(selection.chain)}`).join('; ')}`;box.append(list);}
         }
         function updateSelectionToggleVisibility() {
             document.getElementById('selectedResidueToggles')?.classList.toggle('hidden',!linkedSelection);
@@ -612,6 +814,7 @@
         let is3dMouseDown = false;
         let mouse3dButton = 0; // 0 = left (rotate), 2 = right (pan)
         let isDraggingChain = false; // true when Ctrl + left drag moves a chain
+        let mobilePhysicsDragMode = null;
         let draggedChainId = null;
         let draggedBlockIdx = -1;
         let draggedResidue = null;
@@ -1988,9 +2191,9 @@
             finally {button.disabled=false;}
         }
 
-        async function resolveUniProtInput(entry) {
+        async function resolveUniProtInput(entry, signal) {
             const accession = entry.id;
-            const response = await fetch(`https://alphafold.ebi.ac.uk/api/prediction/${encodeURIComponent(accession)}`);
+            const response = await fetch(`https://alphafold.ebi.ac.uk/api/prediction/${encodeURIComponent(accession)}`, {signal});
             if (!response.ok && response.status !== 404) {
                 throw new Error(`AlphaFold lookup for ${accession} failed (HTTP ${response.status}). Please retry.`);
             }
@@ -1998,12 +2201,12 @@
             if (!Array.isArray(models)) throw new Error(`Unexpected AlphaFold response for ${accession}. Please retry.`);
             const model = models.find(m => m.pdbUrl || m.cifUrl);
             if (model) {
-                const file = await fetch(trustedAlphaFoldUrl(model.pdbUrl || model.cifUrl));
+                const file = await fetch(trustedAlphaFoldUrl(model.pdbUrl || model.cifUrl), {signal});
                 if (!file.ok) throw new Error(`Could not download AlphaFold model for ${accession} (HTTP ${file.status}). Please retry.`);
                 return { text: await file.text(), sequence: null };
             }
             if (models.length) throw new Error(`AlphaFold returned no downloadable coordinates for ${accession}.`);
-            const sequenceResponse = await fetch(`https://rest.uniprot.org/uniprotkb/${encodeURIComponent(accession)}.fasta`);
+            const sequenceResponse = await fetch(`https://rest.uniprot.org/uniprotkb/${encodeURIComponent(accession)}.fasta`, {signal});
             if (!sequenceResponse.ok) throw new Error(`No AlphaFold model found for ${accession}; UniProt sequence lookup failed (HTTP ${sequenceResponse.status}). Please check the accession.`);
             const fasta = await sequenceResponse.text();
             if (!fasta.trim().startsWith('>')) throw new Error(`UniProt returned an invalid sequence for ${accession}.`);
@@ -2012,7 +2215,7 @@
             return { text: sequenceToPdb(records[0].sequence), sequence: records[0].sequence };
         }
 
-        async function loadModelInput(entry,includeOther=false) {
+        async function loadModelInput(entry,includeOther=false,signal) {
             let sequence = entry.sequence;
             let text;
             let alphaFoldCoordinates = Boolean(entry.uploadFile);
@@ -2024,11 +2227,12 @@
             const isUniProt = /^(?:[OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9](?:[A-Z][A-Z0-9]{2}[0-9]){1,2})(?:-[0-9]+)?$/.test(entry.id);
             if (entry.uploadFile) { /* Use the selected local coordinates. */ }
             else if (!sequence && isUniProt) {
-                const resolved = await resolveUniProtInput(entry);
+                const resolved = await resolveUniProtInput(entry,signal);
                 text = resolved.text;
                 sequence = resolved.sequence;
                 alphaFoldCoordinates = !resolved.sequence;
-            } else text = sequence ? sequenceToPdb(sequence) : await fetchPdbData(entry.id);
+            } else text = sequence ? sequenceToPdb(sequence) : await fetchPdbData(entry.id,signal);
+            if (signal?.aborted) throw new DOMException('Model build cancelled', 'AbortError');
             if (/^AF[-_]/i.test(entry.id)) alphaFoldCoordinates = true;
             const format = /^(?:\uFEFF)?\s*data_/m.test(text) ? 'mmcif' : 'pdb';
             const parsed = format === 'mmcif' ? parseMmCifCalpha(text,includeOther) : parsePDBCalpha(text,includeOther);
@@ -2076,22 +2280,22 @@
         // ==========================================
         // 5. PDB FETCHING & DATA LOADING
         // ==========================================
-        async function fetchPdbData(cleanId) {
+        async function fetchPdbData(cleanId,signal) {
             let pdbText = null;
             const extractAcc = cleanId.replace(/^AF[-_]?/i, '').replace(/[-_]?F\d+$/i, '').trim();
             const isLikelyUniProt = cleanId.startsWith('AF') || cleanId.length > 4 || !/^[0-9][A-Z0-9]{3}$/i.test(cleanId);
 
             if (isLikelyUniProt) {
                 try {
-                    const afResponse = await fetch(`https://alphafold.ebi.ac.uk/api/prediction/${extractAcc}`);
+                    const afResponse = await fetch(`https://alphafold.ebi.ac.uk/api/prediction/${extractAcc}`, {signal});
                     if (afResponse.ok) {
                         const afData = await afResponse.json();
                         if (Array.isArray(afData) && afData.length > 0 && afData[0].pdbUrl) {
-                            const fileResp = await fetch(trustedAlphaFoldUrl(afData[0].pdbUrl));
+                            const fileResp = await fetch(trustedAlphaFoldUrl(afData[0].pdbUrl), {signal});
                             if (fileResp.ok) pdbText = await fileResp.text();
                         }
                     }
-                } catch (e) { console.warn('AF fetch notice:', e); }
+                } catch (e) { if (signal?.aborted) throw e; console.warn('AF fetch notice:', e); }
             }
 
             if (!pdbText) {
@@ -2108,12 +2312,12 @@
                 for (let i = 0; i < candidateUrls.length; i++) {
                     const url = candidateUrls[i];
                     try {
-                        const response = await fetch(url);
+                        const response = await fetch(url,{signal});
                         if (response.ok) {
                             const text = await response.text();
                             if (text && (text.includes('_atom_site.') || /^ATOM  /m.test(text))) { pdbText = text; break; }
                         }
-                    } catch (e) {}
+                    } catch (e) { if (signal?.aborted) throw e; }
                 }
             }
 
@@ -2820,8 +3024,8 @@
                 const a1 = atoms[i], a2 = atoms[j];
                 const differentSource = a1.fileIndex !== undefined && a2.fileIndex !== undefined && a1.fileIndex !== a2.fileIndex;
 
-                const res1Label = a1.sourcePdbId ? `${a1.sourcePdbId} Chain ${a1.chainId}` : `Chain ${a1.chainId}`;
-                const res2Label = a2.sourcePdbId ? `${a2.sourcePdbId} Chain ${a2.chainId}` : `Chain ${a2.chainId}`;
+                const res1Label = a1.sourcePdbId ? `${a1.sourcePdbId} ${displayChainName(a1.chainId)}` : displayChainName(a1.chainId);
+                const res2Label = a2.sourcePdbId ? `${a2.sourcePdbId} ${displayChainName(a2.chainId,'alphaFold')}` : displayChainName(a2.chainId,'alphaFold');
 
                 // Instant O(1) lookup from cached flat Float32Array - zero allocation!
                 const matrix = getOrComputeDistanceMatrix(modelData, modelData.currentChain, atoms);
@@ -2913,7 +3117,7 @@
                 document.getElementById('morphTooltipMMSI').textContent = `Influence on sim: ${Math.round((cell ? cell.mmsi : 0) * 100)}%`;
 
                 document.getElementById('morphTooltipPos').textContent =
-                    `Chain ${posI.res.c1} [${(i - morphMatrixBlocks[posI.blockIdx].offset) + 1}] × Chain ${posJ.res.c1} [${(j - morphMatrixBlocks[posJ.blockIdx].offset) + 1}]`;
+                    `${displayChainName(posI.res.c1)} [${(i - morphMatrixBlocks[posI.blockIdx].offset) + 1}] × ${displayChainName(posJ.res.c1)} [${(j - morphMatrixBlocks[posJ.blockIdx].offset) + 1}]`;
 
                 if (cell) {
                     if (sameChain) {
@@ -3085,7 +3289,7 @@
             dirLight1.position.set(50, 100, 50);
             physicsScene.add(dirLight1);
 
-            const dirLight2 = new THREE.DirectionalLight(0x6366f1, 0.4);
+            const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.8);
             dirLight2.position.set(-50, -50, -50);
             physicsScene.add(dirLight2);
 
@@ -3107,9 +3311,19 @@
                 if (touches.length === 1) return {count:1,...touchPoint(touches[0])};
                 return null;
             };
-            el.addEventListener('touchstart', e => { e.preventDefault(); touchView=touchGesture(e.touches); }, {passive:false});
+            let touchDraggingPhysics = false;
+            const touchAsMouse = (type,touch) => new MouseEvent(type,{bubbles:true,button:0,buttons:type==='mouseup'?0:1,clientX:touch.clientX,clientY:touch.clientY});
+            el.addEventListener('touchstart', e => {
+                e.preventDefault();
+                if(touchDraggingPhysics&&e.touches.length!==1){window.dispatchEvent(touchAsMouse('mouseup',e.changedTouches[0]));touchDraggingPhysics=false;}
+                if(mobilePhysicsDragMode&&e.touches.length===1&&physicsNodes.length){
+                    touchDraggingPhysics=true;touchView=null;el.dispatchEvent(touchAsMouse('mousedown',e.touches[0]));return;
+                }
+                touchView=touchGesture(e.touches);
+            }, {passive:false});
             el.addEventListener('touchmove', e => {
                 e.preventDefault();
+                if(touchDraggingPhysics){if(e.touches.length===1)window.dispatchEvent(touchAsMouse('mousemove',e.touches[0]));return;}
                 const next=touchGesture(e.touches);
                 if (!next || !touchView || next.count!==touchView.count) { touchView=next; return; }
                 const dx=next.x-touchView.x,dy=next.y-touchView.y;
@@ -3129,7 +3343,11 @@
                 }
                 touchView=next;
             }, {passive:false});
-            const finishTouch=e=>{e.preventDefault();touchView=touchGesture(e.touches);};
+            const finishTouch=e=>{
+                e.preventDefault();
+                if(touchDraggingPhysics){window.dispatchEvent(touchAsMouse('mouseup',e.changedTouches[0]));touchDraggingPhysics=false;}
+                touchView=touchGesture(e.touches);
+            };
             el.addEventListener('touchend',finishTouch,{passive:false});
             el.addEventListener('touchcancel',finishTouch,{passive:false});
 
@@ -3145,7 +3363,7 @@
                 prevMouse3dX = e.clientX;
                 prevMouse3dY = e.clientY;
 
-                if(e.button===0&&e.shiftKey&&physicsNodes.length){
+                if(!animationPlaying&&!animationPreparing&&e.button===0&&(e.shiftKey||mobilePhysicsDragMode==='residue')&&physicsNodes.length){
                     const picked=pickPhysicsObject(e);
                     if(picked?.kind==='node'&&picked.node.res.entityType!=='other'){
                         e.preventDefault();
@@ -3156,7 +3374,7 @@
                         el.style.cursor='move';return;
                     }
                 }
-                if(e.button===0&&e.altKey&&physicsNodes.length){
+                if(!animationPlaying&&!animationPreparing&&e.button===0&&e.altKey&&physicsNodes.length){
                     const picked=pickPhysicsObject(e);
                     if(picked?.kind==='node'){
                         updateRotationalSymmetry(true);
@@ -3166,7 +3384,7 @@
                 }
 
                 // Ctrl + Left Click: Click and drag on chains to move them
-                if ((e.ctrlKey || e.metaKey) && e.button === 0 && physicsNodes.length > 0) {
+                if (!animationPlaying&&!animationPreparing&&(e.ctrlKey || e.metaKey || mobilePhysicsDragMode==='chain') && e.button === 0 && physicsNodes.length > 0) {
                     const rect = el.getBoundingClientRect();
                     const mouseX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
                     const mouseY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -3253,7 +3471,7 @@
                 const now=performance.now();if(now-lastSelectionHover<45)return;lastSelectionHover=now;
                 el.style.cursor=pickPhysicsObject(event)?'pointer':'grab';
             });
-            el.addEventListener('pointerdown',event=>{ if(event.button===0&&!event.ctrlKey&&!event.metaKey&&!event.altKey) selectionPointer={x:event.clientX,y:event.clientY}; });
+            el.addEventListener('pointerdown',event=>{ if(event.button===0&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!mobilePhysicsDragMode) selectionPointer={x:event.clientX,y:event.clientY}; });
             el.addEventListener('pointerup',event=>{
                 if (!selectionPointer||Math.hypot(event.clientX-selectionPointer.x,event.clientY-selectionPointer.y)>5||!physicsCamera) { selectionPointer=null; return; }
                 selectionPointer=null;
@@ -3419,7 +3637,7 @@
             const label = document.getElementById('physicsDragChainId');
             if (!badge) return;
             if (show) {
-                if (label) label.textContent = chainId ? `Chain ${chainId}` : '';
+                if (label) label.textContent = chainId ? displayChainName(chainId) : '';
                 badge.classList.remove('hidden');
             } else {
                 badge.classList.add('hidden');
@@ -3784,7 +4002,7 @@
             physicsPulseUniform.value = physicsPulseOpacity(performance.now(), physicsOriginColorMode);
         }
         let physicsSnapshotUrl = '';
-        let physicsRecording=null,physicsRecordingUrl='',physicsRecordingMime='video/webm',physicsRecordingPixelRatio=null,physicsRecordingStarted=null;
+        let physicsRecording=null,physicsRecordingUrl='',physicsRecordingMime='video/webm',physicsRecordingPixelRatio=null,physicsRecordingStarted=null,physicsRecordingDownloadTitle='';
         function capturePixelRatio() {
             const size=physicsRenderer.getSize(new THREE.Vector2());
             const pixelCap=Math.sqrt(8_000_000/Math.max(1,size.x*size.y));
@@ -3813,6 +4031,7 @@
         function togglePhysicsRecording() {
             const button=document.getElementById('physicsRecordBtn'),status=document.getElementById('physicsCaptureStatus');
             if(physicsRecording){physicsRecording.stop();physicsRecording=null;physicsRecordingStarted=null;button.textContent='Record';button.classList.remove('recording-pulse');document.getElementById('physicsSnapBtn').disabled=false;status.textContent='Preparing video preview…';return;}
+            if(!animationPreparing&&!animationRecording)physicsRecordingDownloadTitle='';
             if(!physicsRenderer?.domElement.captureStream||typeof MediaRecorder==='undefined'){
                 status.textContent='Video recording is not supported by this browser.';status.classList.remove('hidden');return;
             }
@@ -4231,7 +4450,7 @@
                 const isWater = isWaterChain(keys[0]);
                 const isVis = keys.every(chainId => chainVisibility[chainId] !== false);
                 const color = physicsToggleColor(keys[0],chainKeys);
-                const name = isWater ? 'Water' : `Chain ${keys[0]}`;
+                const name = isWater ? 'Water' : displayChainName(keys[0]);
 
                 const btn = document.createElement('button');
                 btn.type = 'button';
@@ -4369,7 +4588,7 @@
                     dummy.position.set(x, y, z);
                     const vdw={H:1.2,D:1.2,C:1.7,N:1.55,O:1.52,S:1.8,P:1.8,SE:1.9};
                     dummy.scale.setScalar(physicsRepresentation==='surface'?(vdw[a.element]||1.7)*viewerSizes.physics.surface:
-                        physicsRepresentation==='ball-stick'?viewerSizes.physics.atom*(a.element==='H'?0.65:1):viewerSizes.physics.residue);
+                        physicsRepresentation==='ball-stick'?viewerSizes.physics.atom*elementAtomScale(a.element):viewerSizes.physics.residue);
                     dummy.updateMatrix();
                     mesh.setMatrixAt(idx, dummy.matrix);
                     mesh.setColorAt(idx, color);
@@ -4538,7 +4757,7 @@
                     : referenceSiteColors ? referenceSiteColors[referenceNodeIndex]??'#475569'
                     : referenceMutationColors ? referenceMutationColors[referenceNodeIndex]??'#475569'
                     : mode==='residue-speed' ? residueSpeedColor(referenceNodeIndex)
-                    : ['constraint-confidence','alpha-pae','model-confidence','qmeandisco'].includes(mode) ? validationNodeColor(referenceNodeIndex,mode)
+                    : ['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','qmeandisco'].includes(mode) ? validationNodeColor(referenceNodeIndex,mode)
                     : mode === 'chain' || mode === 'side-chains' ? getChainColor(chainId, chainKeys)
                     : mode === 'membrane' ? membraneResidueDisplayColor(referenceNodeIndex)
                     : mode === 'membrane-placement' ? membranePlacementResidueColor(referenceNodeIndex,atom)
@@ -4548,6 +4767,7 @@
                     : mode === 'uniform' ? '#94a3b8'
                     : mode === 'protein-id' ? getProteinIdColor(sourceByChain.get(chainId))
                     : mode === 'origin' ? '#3498db'
+                    : UNI_PROT_FEATURE_MODES[mode] ? uniProtFeatureColor(afAtom,mode)
                     : mode === 'plddt' ? physicsResidueColor(afAtom, 'plddt')
                     : mode === 'difference' ? alignmentDistanceColor(distanceByChain.get(chainId)?.get(atomIdx) ?? null)
                     : physicsResidueColor(atom, mode, matched.get(chainId)?.has(atomIdx), afAtom);
@@ -5377,6 +5597,13 @@
         let membraneDisplayedExtent = null;
         let membraneExtentLastFrame = 0;
         let membraneVisible = false;
+        let membraneLabelsVisible = true;
+        let membraneSideNames = {negative:'',positive:''};
+        const membraneLabelScreenPositions = {negative:null,positive:null};
+        const membraneLabelCorners = {negative:null,positive:null};
+        const membraneLabelCornerCandidates = {negative:null,positive:null};
+        const membraneLabelLeaderPositions = {negative:null,positive:null};
+        const membraneLabelLeaderTransitions = {negative:false,positive:false};
         let membraneSliced = false;
         let membraneSliceAngle = 0;
         let membraneSizeScale = 1;
@@ -5410,6 +5637,86 @@
             const x=dot(geometry.u),y=dot(geometry.v);
             const [a,b,c]=geometry.curvature;
             return {x,y,signed:dot(geometry.normal)-(a*x*x+b*x*y+c*y*y)};
+        }
+        function updateMembraneSideNames(){
+            membraneSideNames={negative:'',positive:''};
+            if(!inferredMembrane)return;
+            const votes={negative:new Map(),positive:new Map()};
+            for(const node of physicsNodes){
+                const atom=node.idx2==null?null:node.res.atoms2[node.idx2];
+                const feature=uniProtFeatureAt(atom,'Topological domain');
+                if(!feature?.description)continue;
+                const p=membraneCoordinates(node,inferredMembrane);
+                if(Math.abs(p.x)>inferredMembrane.extent*1.2||Math.abs(p.y)>inferredMembrane.extent*1.2)continue;
+                const side=p.signed>inferredMembrane.halfThickness*0.6?'positive':p.signed<-inferredMembrane.halfThickness*0.6?'negative':null;
+                if(!side)continue;
+                const label=feature.description.trim().replace(/\s+(side|domain)$/i,'');
+                votes[side].set(label,(votes[side].get(label)||0)+1);
+            }
+            for(const side of ['negative','positive']){
+                const ordered=[...votes[side]].sort((a,b)=>b[1]-a[1]);
+                if(ordered.length&&ordered[0][1]>=2&&(!ordered[1]||ordered[0][1]>=ordered[1][1]*1.5))membraneSideNames[side]=ordered[0][0];
+            }
+        }
+        function updateMembraneSideLabels(geometry){
+            const canvas=physicsRenderer?.domElement;
+            const leaders=document.getElementById('membraneSideLeaders');
+            // This runs before renderer.render(), which would otherwise update
+            // the camera matrices. Project against the current drag position.
+            if(geometry&&physicsCamera)physicsCamera.updateMatrixWorld();
+            let showing=0;
+            for(const [side,id,lineId,sign] of [['negative','membraneSideLabelNegative','membraneSideLeaderNegative',-1],['positive','membraneSideLabelPositive','membraneSideLeaderPositive',1]]){
+                const label=document.getElementById(id),line=document.getElementById(lineId);if(!label||!line)continue;
+                label.textContent=membraneSideNames[side];
+                if(!membraneLabelsVisible||!geometry||!membraneSideNames[side]||!canvas){label.classList.add('hidden');line.style.display='none';continue;}
+                const width=canvas.clientWidth,height=canvas.clientHeight;
+                const project=(x,y)=>{
+                    const point=membranePlatePoint(geometry,x,y,sign);
+                    const p=new THREE.Vector3(...point).project(physicsCamera);
+                    return p.z<1?{x:(p.x+1)*width/2,y:(1-p.y)*height/2,distance:physicsCamera.position.distanceTo(new THREE.Vector3(...point))}:null;
+                };
+                const center=project(0,0);
+                if(!center){label.classList.add('hidden');line.style.display='none';continue;}
+                // Prefer the front-right corner, but require a sustained,
+                // meaningful improvement before switching to another corner.
+                const corners=[[-1,-1],[-1,1],[1,-1],[1,1]];
+                const projected=corners.map(([x,y])=>project(x*geometry.extent,y*geometry.extent));
+                const distances=projected.filter(Boolean).map(point=>point.distance);
+                const near=Math.min(...distances),far=Math.max(...distances);
+                const scores=projected.map(point=>point?point.x/width*.7+(far-point.distance)/Math.max(1,far-near)*.3:-Infinity);
+                const best=scores.indexOf(Math.max(...scores));
+                if(!Number.isFinite(scores[best])){label.classList.add('hidden');line.style.display='none';continue;}
+                if(membraneLabelCorners[side]===null)membraneLabelCorners[side]=best;
+                else if(best!==membraneLabelCorners[side]&&scores[best]>scores[membraneLabelCorners[side]]+.08){
+                    const candidate=membraneLabelCornerCandidates[side],now=performance.now();
+                    if(candidate?.index!==best)membraneLabelCornerCandidates[side]={index:best,since:now};
+                    else if(now-candidate.since>180){membraneLabelCorners[side]=best;membraneLabelCornerCandidates[side]=null;membraneLabelLeaderTransitions[side]=true;}
+                }else membraneLabelCornerCandidates[side]=null;
+                const edge=projected[membraneLabelCorners[side]];
+                if(!edge){label.classList.add('hidden');line.style.display='none';continue;}
+                let leader={x:edge.x,y:edge.y};
+                if(membraneLabelLeaderTransitions[side]&&membraneLabelLeaderPositions[side]){
+                    const previous=membraneLabelLeaderPositions[side];
+                    leader={x:previous.x+(edge.x-previous.x)*.24,y:previous.y+(edge.y-previous.y)*.24};
+                    if(Math.hypot(leader.x-edge.x,leader.y-edge.y)<2)membraneLabelLeaderTransitions[side]=false;
+                }
+                membraneLabelLeaderPositions[side]=leader;
+                label.classList.remove('hidden');
+                const targetX=width-(width<600?12:48);
+                let targetY=Math.max(22,Math.min(height-22,center.y));
+                if(side==='positive'&&membraneLabelScreenPositions.negative&&Math.abs(targetY-membraneLabelScreenPositions.negative.y)<34)
+                    targetY=Math.max(22,Math.min(height-22,membraneLabelScreenPositions.negative.y+(targetY>=membraneLabelScreenPositions.negative.y?34:-34)));
+                const previous=membraneLabelScreenPositions[side];
+                const position=previous?{x:previous.x+(targetX-previous.x)*.16,y:previous.y+(targetY-previous.y)*.16}:{x:targetX,y:targetY};
+                membraneLabelScreenPositions[side]=position;
+                label.style.left=`${position.x}px`;label.style.top=`${position.y}px`;
+                const endX=Math.max(0,position.x-label.offsetWidth-5);
+                line.setAttribute('x1',String(Math.max(0,Math.min(width,leader.x))));
+                line.setAttribute('y1',String(Math.max(0,Math.min(height,leader.y))));
+                line.setAttribute('x2',String(endX));line.setAttribute('y2',String(position.y));
+                line.style.display='';showing++;
+            }
+            leaders?.classList.toggle('hidden',showing===0);
         }
         function membraneResidueDisplayColor(index,nodes=physicsNodes,geometry=inferredMembrane){
             if(!geometry||!nodes[index])return '#7dd3fc';
@@ -5545,8 +5852,9 @@
             const detected=Boolean(inferredMembrane);
             button.classList.toggle('hidden',!detected);
             lipidButton?.classList.toggle('hidden',!detected);
+            document.getElementById('toggleMembraneLabels')?.classList.toggle('hidden',!detected);
             absent.classList.toggle('hidden',detected);
-            if(detected){updatePhysicsToggleButton('toggleMembraneStructure',membraneVisible);if(lipidButton)updatePhysicsToggleButton('toggleLipidStructure',lipidsVisible);}
+            if(detected){updatePhysicsToggleButton('toggleMembraneStructure',membraneVisible);updatePhysicsToggleButton('toggleMembraneLabels',membraneLabelsVisible);if(lipidButton)updatePhysicsToggleButton('toggleLipidStructure',lipidsVisible);}
             const sliceButton=document.getElementById('sliceMembraneBtn');
             if(sliceButton){sliceButton.disabled=!detected;sliceButton.textContent=membraneSliced?'Show full membrane':'Slice membrane';sliceButton.setAttribute('aria-pressed',String(membraneSliced));}
             document.getElementById('membraneSliceAngleControl')?.classList.toggle('hidden',!detected||!membraneSliced);
@@ -5844,6 +6152,12 @@
             if(membraneMeshes){physicsScene?.remove(membraneMeshes);membraneMeshes.traverse(child=>{child.geometry?.dispose();child.material?.dispose();});membraneMeshes=null;}
             disposeMembraneLipids();
             inferredMembrane=null;membraneLastInference=0;
+            membraneSideNames={negative:'',positive:''};updateMembraneSideLabels(null);
+            membraneLabelScreenPositions.negative=null;membraneLabelScreenPositions.positive=null;
+            membraneLabelCorners.negative=null;membraneLabelCorners.positive=null;
+            membraneLabelCornerCandidates.negative=null;membraneLabelCornerCandidates.positive=null;
+            membraneLabelLeaderPositions.negative=null;membraneLabelLeaderPositions.positive=null;
+            membraneLabelLeaderTransitions.negative=false;membraneLabelLeaderTransitions.positive=false;
             membraneDisplayedExtent=null;membraneExtentLastFrame=0;
             membraneRepulsionActive.clear();membraneRepelledColorMask=null;
             membraneDetectionStats=null;renderMembraneDetectionStats();
@@ -6166,10 +6480,10 @@
                             displayZ+tx[2]*x+ty[2]*y+axes.inward[2]*z);
                     });
                     for(let j=0;j<LIPID_ATOMS.length;j++){
-                        system.dummy.position.copy(positions[j]);system.dummy.scale.setScalar(displayVisible?viewerSizes.physics.atom:0);system.dummy.updateMatrix();
+                        system.dummy.position.copy(positions[j]);system.dummy.scale.setScalar(displayVisible?viewerSizes.physics.atom*elementAtomScale(LIPID_ATOMS[j].element):0);system.dummy.updateMatrix();
                         system.atomMesh.setMatrixAt(i*LIPID_ATOMS.length+j,system.dummy.matrix);
                         if(selectionGlowVisible&&i===selectedLipidIndex&&displayVisible){
-                            system.dummy.scale.setScalar(viewerSizes.physics.atom*1.24);system.dummy.updateMatrix();
+                            system.dummy.scale.setScalar(viewerSizes.physics.atom*elementAtomScale(LIPID_ATOMS[j].element)*1.24);system.dummy.updateMatrix();
                             system.atomGlowMesh.setMatrixAt(j,system.dummy.matrix);
                         }
                     }
@@ -6190,7 +6504,7 @@
         }
         function renderMembraneGeometry(geometry){
             if(!physicsScene)return;
-            if(!geometry){if(membraneMeshes){physicsScene.remove(membraneMeshes);membraneMeshes.traverse(child=>{child.geometry?.dispose();child.material?.dispose();});membraneMeshes=null;}disposeMembraneLipids();if(linkedSelection?.kind==='lipid')clearLinkedSelection();return;}
+            if(!geometry){updateMembraneSideLabels(null);if(membraneMeshes){physicsScene.remove(membraneMeshes);membraneMeshes.traverse(child=>{child.geometry?.dispose();child.material?.dispose();});membraneMeshes=null;}disposeMembraneLipids();if(linkedSelection?.kind==='lipid')clearLinkedSelection();return;}
             const grid=64;
             if(!membraneMeshes){membraneMeshes=new THREE.Group();physicsScene.add(membraneMeshes);
                 for(const side of [-1,1]){
@@ -6202,6 +6516,7 @@
                 }
             }
             membraneMeshes.visible=membraneVisible;
+            updateMembraneSideLabels(geometry);
             for(const mesh of membraneMeshes.children){const arr=mesh.geometry.attributes.position.array,side=mesh.userData.side;
                 arr.set(membranePlateMeshData(geometry,side,grid,undefined,false).positions);
                 if(!mesh.userData.lastCutout||performance.now()-mesh.userData.lastCutout>=350){
@@ -6221,6 +6536,7 @@
                 const diagnostics={samples:samples.length};
                 inferredMembrane=inferMembraneGeometry(samples,diagnostics);
                 if(inferredMembrane)completeMembraneMembers(inferredMembrane,physicsNodes);
+                updateMembraneSideNames();
                 if(physicsColorMode==='membrane'){updatePhysicsNodeColors();if(showModel1Overlay)updateModel1AlignmentColors();}
                 diagnostics.detected=Boolean(inferredMembrane);
                 diagnostics.durationMs=performance.now()-started;
@@ -6254,9 +6570,9 @@
             // Refresh against the current conformation at display cadence, including
             // animation playback when the physics step itself is paused.
             if(physicsColorMode==='residue-speed')updateResidueSpeeds(performance.now());
-            if((physicsColorMode==='af-difference'||physicsColorMode==='residue-speed'||['constraint-confidence','alpha-pae','model-confidence'].includes(physicsColorMode))&&
-                (++physicsAfDifferenceFrame%2===0)&&(!['constraint-confidence','alpha-pae','model-confidence'].includes(physicsColorMode)||performance.now()-validationState.lastDraw>1000)){
-                if(['constraint-confidence','alpha-pae','model-confidence'].includes(physicsColorMode)){
+            if((physicsColorMode==='af-difference'||physicsColorMode==='residue-speed'||['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence'].includes(physicsColorMode))&&
+                (++physicsAfDifferenceFrame%2===0)&&(!['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence'].includes(physicsColorMode)||performance.now()-validationState.lastDraw>1000)){
+                if(['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence'].includes(physicsColorMode)){
                     calculateValidationPairs();validationState.lastDraw=performance.now();
                 }
                 updatePhysicsNodeColors();
@@ -6504,9 +6820,9 @@
                     : `<span class="text-slate-400 text-[10px]">UNMATCHED</span>`;
 
                 tr.innerHTML = `
-                    <td class="py-2.5 px-4 font-bold" style="color: #3498db;">Chain ${escapeHtml(res.c1)}</td>
+                    <td class="py-2.5 px-4 font-bold" style="color: #3498db;">${escapeHtml(displayChainName(res.c1))}</td>
                     <td class="py-2.5 px-4 text-slate-400">${res.seq1.length}</td>
-                    <td class="py-2.5 px-4 font-bold" style="color: #2eccbf;">${res.c2 ? 'Chain ' + escapeHtml(res.c2) : '--'}</td>
+                    <td class="py-2.5 px-4 font-bold" style="color: #2eccbf;">${res.c2 ? escapeHtml(displayChainName(res.c2,'alphaFold')) : '--'}</td>
                     <td data-preferred-name-row="${idx}" class="hidden py-2.5 px-4 text-teal-300"></td>
                     <td class="py-2.5 px-4 text-slate-400">${res.seq2.length}</td>
                     <td class="py-2.5 px-4 font-semibold" style="color:${alignmentMetricColor(res.identity,0,50,100)}">${res.identity.toFixed(1)}%</td>
@@ -6573,6 +6889,15 @@
         }
 
         const viewerSizes = { alignment: { residue: 1, backbone: 2 }, physics: { residue: 1, backbone: 2, atom: 3, stick: 1, surface: 0.8 } };
+        let atomSizeByElement = 1;
+        // Covalent radii in Å (Cordero et al., Dalton Trans. 2008, 2832–2838).
+        // Ball-and-stick atoms use covalent rather than van der Waals radii.
+        const atomCovalentRadii = {H:.31,D:.31,B:.84,C:.76,N:.71,O:.66,F:.57,SI:1.11,P:1.07,S:1.05,CL:1.02,SE:1.20,BR:1.20,I:1.39,NA:1.66,MG:1.41,K:2.03,CA:1.76,MN:1.39,FE:1.24,CO:1.26,NI:1.24,CU:1.32,ZN:1.22};
+        function elementAtomScale(element) {
+            const radius = atomCovalentRadii[String(element || 'C').trim().toUpperCase()] ?? atomCovalentRadii.C;
+            return 1 + atomSizeByElement * (radius / atomCovalentRadii.C - 1);
+        }
+
         function setViewerSize(viewer, kind, value) {
             if(!(kind in viewerSizes[viewer]))return;
             viewerSizes[viewer][kind] = Math.max(0, Math.min(kind === 'atom' ? 5 : ['residue','surface'].includes(kind) ? 3 : 8, Number(value)));
@@ -6699,7 +7024,7 @@
             const title = document.getElementById('alignmentInspectorTitle');
             const codeBox = document.getElementById('alignmentCodeBox');
 
-            title.textContent = res.referenceOnly?`Reference-only ${res.entityType}: ${res.c1}`:`${alignmentModeNames[res.alignmentMode] || "Sequence"} Alignment: Chain ${res.c1} (PDB) vs Chain ${res.c2} (AF)`;
+            title.textContent = res.referenceOnly?`Reference-only ${res.entityType}: ${displayChainName(res.c1)}`:`${alignmentModeNames[res.alignmentMode] || 'Sequence'} Alignment: ${displayChainName(res.c1)} (PDB) vs ${displayChainName(res.c2,'alphaFold')} (AF)`;
 
             const label1 = `PDB (${res.c1}):`;
             const label2 = `AF (${res.c2}):`;
@@ -6957,7 +7282,7 @@
                     dot.style.backgroundColor = getChainColor(c, allChains);
                     badge.appendChild(dot);
                     const unit = atoms[0].entityType === 'nucleotide' ? 'nucleotides' : atoms[0].entityType === 'other' ? 'atoms' : 'res';
-                    badge.appendChild(document.createTextNode(` Chain ${c} (${atoms.length} ${unit})`));
+                    badge.appendChild(document.createTextNode(` ${displayChainName(c,modelData===modelData2?'alphaFold':'reference')} (${atoms.length} ${unit})`));
                     row.appendChild(badge);
                 }
                 container.appendChild(row);
@@ -6973,7 +7298,7 @@
             select1.appendChild(optAll1);
             Object.keys(modelData1.chains).forEach(c => {
                 const opt = document.createElement('option'); opt.value = c;
-                opt.textContent = `Chain ${c} (${modelData1.chains[c].length} res)`;
+                opt.textContent = `${displayChainName(c)} (${modelData1.chains[c].length} res)`;
                 select1.appendChild(opt);
             });
 
@@ -6981,7 +7306,7 @@
             select2.appendChild(optAll2);
             Object.keys(modelData2.chains).forEach(c => {
                 const opt = document.createElement('option'); opt.value = c;
-                opt.textContent = `Chain ${c} (${modelData2.chains[c].length} res)`;
+                opt.textContent = `${displayChainName(c,'alphaFold')} (${modelData2.chains[c].length} res)`;
                 select2.appendChild(opt);
             });
 
@@ -7270,11 +7595,12 @@
                 const spinner = document.createElement('i');
                 spinner.className = 'fa-solid fa-circle-notch fa-spin';
                 spinner.setAttribute('aria-hidden', 'true');
-                button.append(spinner, document.createTextNode(' Building Homology Model…'));
+                button.append(spinner, document.createTextNode(' Building homology model (click to cancel)'));
             } else button.textContent = completedModelInputKey !== null && completedModelInputKey === currentModelInputKey()
                 ? 'Homology Model Built (see below)' : 'Build Homology Model';
         }
         let modelBuildGeneration = 0;
+        let modelBuildAbortController = null;
         let currentReferenceFile = null;
         let homologyViewerMode = 'reference';
         let simulationViewerInteracted = false;
@@ -7284,6 +7610,21 @@
         let readyModelGeneration = -1;
         function showPhysicsViewerLoading(){document.getElementById('physicsInitialLoading')?.classList.remove('hidden');}
         function hidePhysicsViewerLoading(){document.getElementById('physicsInitialLoading')?.classList.add('hidden');}
+        function cancelModelBuild() {
+            if (!modelLoading) return;
+            ++modelBuildGeneration;
+            modelBuildAbortController?.abort();
+            modelBuildAbortController = null;
+            modelLoading = false;
+            modelBuildCompleted = false;
+            modelBuildStartedAt = null;
+            completedModelInputKey = null;
+            clearModelUI();
+            hidePhysicsViewerLoading();
+            updateProgressBar(0);
+            document.getElementById('modelBuildTime').textContent = 'Model build cancelled';
+            updateBuildButtonState();
+        }
         function toggleStringFinder() {
             const content = document.getElementById('stringFinderContent');
             const expanded = content.classList.toggle('hidden') === false;
@@ -7310,6 +7651,8 @@
         }
 
         function clearModelUI() {
+            uniProtLookupController?.abort();uniProtLookupController=null;uniProtLookupPending=false;updateUniProtFetchingBadge();uniProtAnnotations=new Map();uniProtUnavailable=[];
+            renderAboutProteinComplex();
             validationState.version++;validationState.pairs=[];validationState.byPair.clear();validationState.pae.clear();validationState.selected=null;
             validationState.matrixView={zoom:1,x:0,y:0};
             validationState.matrixOverviews.clear();clearTimeout(validationState.matrixRedrawTimer);validationState.matrixRedrawTimer=null;
@@ -7418,6 +7761,9 @@
             saveRecentModel({updateExistingOnly:Boolean(referenceParts?.searched)});
             updateExampleSelection();
             scheduleReferenceSpeciesLookup(pdbId1, 0);
+            modelBuildAbortController?.abort();
+            modelBuildAbortController = new AbortController();
+            const buildSignal = modelBuildAbortController.signal;
             const generation = ++modelBuildGeneration;
             modelBuildStartedAt = performance.now();
             modelBuildCompleted = false; modelLoading = true; simulationAutoRendered = false;
@@ -7433,11 +7779,11 @@
                 if (generation !== modelBuildGeneration) return;
                 await Promise.all([molstarViewer1, molstarViewer2, simulationMolstarViewer].map(viewer => viewer?.plugin?.clear()));
                 if (generation !== modelBuildGeneration) return;
-                await loadModelPairCurrent(pdbId1, pdbId2Raw, generation);
+                await loadModelPairCurrent(pdbId1, pdbId2Raw, generation, buildSignal);
             });
             return modelLoadQueue;
         }
-        async function loadModelPairCurrent(pdbId1, pdbId2Raw, generation) {
+        async function loadModelPairCurrent(pdbId1, pdbId2Raw, generation, buildSignal) {
             document.getElementById('modelBuildTime').textContent = 'Building model…';
             simulationAutoRendered = false;
             updateProgressBar(15);
@@ -7464,8 +7810,8 @@
                 chainVisibility = {};
 
                 const [files1, fileResults2] = await Promise.all([
-                    Promise.all(entries1.map(entry=>loadModelInput(entry,true))),
-                    Promise.all(entries2.map(entry=>loadModelInput(entry,true)))
+                    Promise.all(entries1.map(entry=>loadModelInput(entry,true,buildSignal))),
+                    Promise.all(entries2.map(entry=>loadModelInput(entry,true,buildSignal)))
                 ]);
                 if (generation !== modelBuildGeneration) return;
                 const file1 = files1[0];
@@ -7562,6 +7908,8 @@
                 if (backboneLinesGroup) backboneLinesGroup.visible = true;
                 readyModelGeneration = generation;
                 modelLoading = false;
+                modelBuildAbortController = null;
+                void loadUniProtAnnotations(fileResults2,generation);
                 animationOnModelReady();
                 updateBuildButtonState();
                 updateHomologyViewerToggle();
@@ -7579,6 +7927,7 @@
             } catch (err) {
                 if (generation !== modelBuildGeneration) return;
                 modelLoading = false;
+                modelBuildAbortController = null;
                 hidePhysicsViewerLoading();
                 updateBuildButtonState();
                 document.getElementById("modelBuildTime").textContent = "Model build failed";
@@ -8008,6 +8357,7 @@
             });
             document.getElementById('dualPdbForm').addEventListener('submit', (e) => {
                 e.preventDefault();
+                if (modelLoading) { cancelModelBuild(); return; }
                 if(referenceSearchLoading || siftsLookupLoading)return;
                 const id1 = document.getElementById('pdbInput1').value.trim();
                 const id2 = document.getElementById('pdbInput2').value.trim().toUpperCase();
@@ -8766,6 +9116,9 @@
                 } else if (physicsColorMode === 'protein-id') {
                     const atom = node.idx2 !== null ? node.res.atoms2[node.idx2] : null;
                     color = new THREE.Color(getProteinIdColor(atom?.sourcePdbId));
+                } else if (UNI_PROT_FEATURE_MODES[physicsColorMode]) {
+                    const atom = node.idx2 !== null ? node.res.atoms2[node.idx2] : null;
+                    color = new THREE.Color(uniProtFeatureColor(atom,physicsColorMode));
                 } else if (physicsColorMode === 'rotational-symmetry') {
                     color = new THREE.Color(rotationalSymmetryColor(i));
                 } else if (afDistances) {
@@ -8778,7 +9131,7 @@
                     color = new THREE.Color(mutationColors[i]);
                 } else if (physicsColorMode === 'residue-speed') {
                     color = new THREE.Color(residueSpeedColor(i));
-                } else if (['constraint-confidence','alpha-pae','model-confidence','qmeandisco'].includes(physicsColorMode)) {
+                } else if (['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','qmeandisco'].includes(physicsColorMode)) {
                     color = new THREE.Color(validationNodeColor(i,physicsColorMode));
                 } else {
                     const atom = node.idx2 !== null ? node.res.atoms2[node.idx2] : null;
@@ -8852,10 +9205,22 @@
             }
             return '#94a3b8';
         }
+        function syncPhysicsColorMenu() {
+            const select=document.getElementById('physicsColorSelect');
+            const trigger=document.getElementById('physicsColorMenuButton');
+            const menu=document.getElementById('physicsColorMenu');
+            if (!select || !trigger || !menu) return;
+            select.value=physicsColorMode;
+            trigger.replaceChildren(document.createTextNode(select.selectedOptions[0]?.textContent || physicsColorMode+' '));
+            const chevron=document.createElement('i');chevron.className='fa-solid fa-chevron-down ml-1';chevron.setAttribute('aria-hidden','true');trigger.append(chevron);
+            menu.querySelectorAll('button[data-color-mode]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.colorMode===physicsColorMode)));
+        }
         function setPhysicsColorMode(mode) {
-            if (!['chain','uniform','protein-id','rotational-symmetry','keyframe-difference','residue-speed','binding-sites','binding-site-type','mutation-effect-basic','constraint-confidence','alpha-pae','model-confidence','qmeandisco','element','side-chains','origin','aligned','membrane','membrane-placement','membrane-repelled','charge','hydrophobicity','secondary','plddt','difference','af-difference'].includes(mode)) return;
+            if (!['chain','uniform','protein-id','rotational-symmetry','keyframe-difference','residue-speed','binding-sites','binding-site-type','mutation-effect-basic','constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','qmeandisco','element','side-chains','origin','aligned','membrane','membrane-placement','membrane-repelled','charge','hydrophobicity','secondary','plddt','difference','af-difference',...Object.keys(UNI_PROT_FEATURE_MODES)].includes(mode)) return;
             if(mode==='residue-speed'&&physicsColorMode!=='residue-speed')resetResidueSpeedTracking();
             physicsColorMode = mode;
+            syncPhysicsColorMenu();
+            updateUniProtFetchingBadge();
             if(mode==='alpha-pae'||mode==='constraint-confidence'||mode==='model-confidence')void loadValidationPae();
             if(mode==='qmeandisco'&&!validationState.qmean){document.getElementById('validationReport').open=true;renderValidationReport();}
             updateBindingSiteToggleVisibility();
@@ -8880,6 +9245,8 @@
                 'binding-site-type':'Binding site type: contact patches between the same pair of protein types share a colour; grey residues are outside binding sites.',
                 'mutation-effect-basic':'Mutation effect (basic): <span style="color:#38bdf8">low</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">high</span> structural priority from burial, inter-protein binding sites, plausible salt bridges and hydrogen bonds, disulfides, ligand contacts, and membrane association. This is a heuristic, not a measured or predicted mutation effect; grey means structure coordinates are unavailable.',
                 'constraint-confidence':'Constraint confidence: <span style="color:#ef4444">weak</span> → <span style="color:#38bdf8">strong</span> evidence support, averaged over active restraints at each residue. PAE is weighted more than pLDDT; grey means unavailable.',
+                'spring-strain':'Spring compression / stretch: <span style="color:#38bdf8">compressed</span> → <span style="color:#a855f7">at target</span> → <span style="color:#ef4444">stretched</span>. Each residue shows the mean signed strain of its active distance restraints; grey means no scored restraints.',
+                'membrane-score':'Membrane placement score: <span style="color:#ef4444">low</span> → <span style="color:#38bdf8">high</span> local score for moving non-membrane residues out of the membrane. Grey means unavailable or no membrane detected.',
                 'alpha-pae':'AlphaFold PAE: <span style="color:#38bdf8">low error</span> → <span style="color:#ef4444">high error</span>, averaged over active pairs with available PAE. Grey means unavailable. PAE describes predicted relative-position error, not model accuracy.',
                 'model-confidence':'Model confidence: <span style="color:#ef4444">low</span> → <span style="color:#38bdf8">high</span> local heuristic combining evidence support and restraint satisfaction. Grey means unavailable.',
                 qmeandisco:validationState.qmean
@@ -8899,8 +9266,10 @@
                 difference:'',
                 'af-difference':'AF-Homology model difference: <span style="color:#38bdf8">small</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">large</span> displacement after aligning each AlphaFold chain to its current homology chain; grey: no AlphaFold coordinates.'
             };
+            if(UNI_PROT_FEATURE_MODES[mode])keys[mode]=`UniProt ${UNI_PROT_FEATURE_MODES[mode]}: annotated residues use distinct colours for each feature; grey means no annotation or no UniProt record. UniProt positions refer to the canonical sequence.`;
             const colourKey = document.getElementById('physicsColourKey');
             colourKey.innerHTML = keys[mode];
+            renderUniProtFeatureKey();
             document.getElementById('keyframeDifferenceNormalize')?.addEventListener('click',()=>{
                 keyframeDifferenceNormalized=!keyframeDifferenceNormalized;
                 keyframeDifferenceCache=null;
@@ -8956,7 +9325,7 @@
             const jiggleControls = document.getElementById('sideChainJiggleControls');
             jiggleControls.classList.toggle('hidden', mode !== 'ball-stick');
             jiggleControls.classList.toggle('flex', mode === 'ball-stick');
-            for(const [id,visible] of [['physicsResidueSizeControl',mode==='backbone'],['physicsBackboneSizeControl',mode==='backbone'||mode==='cartoon'],['physicsAtomSizeControl',mode==='ball-stick'],['physicsStickSizeControl',mode==='ball-stick'],['physicsSurfaceSizeControl',mode==='surface']])document.getElementById(id).classList.toggle('hidden',!visible);
+            for(const [id,visible] of [['physicsResidueSizeControl',mode==='backbone'],['physicsBackboneSizeControl',mode==='backbone'||mode==='cartoon'],['physicsAtomSizeControl',mode==='ball-stick'],['physicsElementSizeControl',mode==='ball-stick'],['physicsStickSizeControl',mode==='ball-stick'],['physicsSurfaceSizeControl',mode==='surface']])document.getElementById(id).classList.toggle('hidden',!visible);
             if (atomRepresentation && atomRepresentation.mode !== mode) disposeAtomRepresentation();
             lastSurfaceUpdate = 0;
             updateAtomRepresentation();
@@ -9530,7 +9899,7 @@
             entries.forEach((entry,i)=>{
                 const node=physicsNodes[entry.nodeIndex], p=coords[i];
                 dummy.position.set(p.x,p.y,p.z); dummy.quaternion.identity();
-                const radius=viewerSizes.physics.atom*(entry.source.element==='H'?0.65:1);
+                const radius=viewerSizes.physics.atom*elementAtomScale(entry.source.element);
                 dummy.scale.setScalar(isNodeVisibleInPhysics(node)?radius:0);
                 dummy.updateMatrix(); balls.setMatrixAt(i,dummy.matrix);
                 instancedNodeMesh.getColorAt(entry.nodeIndex,color);
@@ -10118,9 +10487,72 @@
         });
         document.getElementById('physicsSnapBtn')?.addEventListener('click',capturePhysicsSnapshot);
         document.getElementById('physicsRecordBtn')?.addEventListener('click',togglePhysicsRecording);
+        document.getElementById('mobileScrollUp')?.addEventListener('click',()=>window.scrollBy({top:-Math.max(150,window.innerHeight*.3),behavior:'smooth'}));
+        function setMobilePhysicsDragMode(mode) {
+            mobilePhysicsDragMode=mobilePhysicsDragMode===mode?null:mode;
+            for(const [id,value] of [['mobileDragChainBtn','chain'],['mobileDragResidueBtn','residue']])
+                document.getElementById(id)?.setAttribute('aria-pressed',String(mobilePhysicsDragMode===value));
+        }
+        document.getElementById('mobileDragChainBtn')?.addEventListener('click',()=>setMobilePhysicsDragMode('chain'));
+        document.getElementById('mobileDragResidueBtn')?.addEventListener('click',()=>setMobilePhysicsDragMode('residue'));
+        const physicsColorSelect=document.getElementById('physicsColorSelect');
+        const physicsColorMenu=document.getElementById('physicsColorMenu');
+        const physicsColorMenuButton=document.getElementById('physicsColorMenuButton');
+        if (physicsColorSelect && physicsColorMenu && physicsColorMenuButton) {
+            for (const option of physicsColorSelect.options) {
+                const button=document.createElement('button');
+                button.type='button';button.dataset.colorMode=option.value;
+                button.textContent=option.textContent;
+                button.setAttribute('aria-pressed',String(option.value===physicsColorMode));
+                button.addEventListener('click',()=>{
+                    setPhysicsColorMode(option.value);
+                    physicsColorMenu.classList.add('hidden');
+                    physicsColorMenuButton.setAttribute('aria-expanded','false');
+                    physicsColorMenuButton.focus();
+                });
+                physicsColorMenu.append(button);
+            }
+            const placePhysicsColorMenu=()=>{
+                const rect=physicsColorMenuButton.getBoundingClientRect();
+                const width=Math.min(800,window.innerWidth-16);
+                physicsColorMenu.style.left=`${Math.max(8,Math.min(rect.left,window.innerWidth-width-8))}px`;
+                physicsColorMenu.style.top=`${rect.bottom+6}px`;
+                physicsColorMenu.style.maxHeight=`${Math.max(96,Math.min(450,window.innerHeight-rect.bottom-14))}px`;
+            };
+            physicsColorMenuButton.addEventListener('click',()=>{
+                const opening=physicsColorMenu.classList.toggle('hidden')===false;
+                physicsColorMenuButton.setAttribute('aria-expanded',String(opening));
+                if(opening)placePhysicsColorMenu();
+            });
+            document.addEventListener('click',event=>{
+                if(!physicsColorMenu.contains(event.target)&&!physicsColorMenuButton.contains(event.target)){
+                    physicsColorMenu.classList.add('hidden');
+                    physicsColorMenuButton.setAttribute('aria-expanded','false');
+                }
+            });
+            document.addEventListener('keydown',event=>{
+                if(event.key==='Escape'&&!physicsColorMenu.classList.contains('hidden')){
+                    physicsColorMenu.classList.add('hidden');physicsColorMenuButton.setAttribute('aria-expanded','false');physicsColorMenuButton.focus();
+                }
+            });
+            window.addEventListener('resize',()=>{if(!physicsColorMenu.classList.contains('hidden'))placePhysicsColorMenu();});
+            syncPhysicsColorMenu();
+        }
+        const appHeader = document.querySelector('body > header');
+        if (appHeader) {
+            const positionMobileScrollButton = () => document.documentElement.style.setProperty('--app-header-height', `${appHeader.getBoundingClientRect().height}px`);
+            positionMobileScrollButton();
+            new ResizeObserver(positionMobileScrollButton).observe(appHeader);
+        }
+        document.getElementById('physicsElementSizeSlider')?.addEventListener('input',event=>{
+            atomSizeByElement=Number(event.target.value);
+            document.getElementById('physicsElementSizeValue').textContent=Math.round(atomSizeByElement*100)+'%';
+            setViewerSize('physics','atom',viewerSizes.physics.atom);
+        });
         document.getElementById('physicsVideoDownload')?.addEventListener('click',()=>{
             if(!physicsRecordingUrl)return;
-            const link=document.createElement('a');link.href=physicsRecordingUrl;link.download=`physics-viewport.${physicsRecordingMime.startsWith('video/mp4')?'mp4':'webm'}`;document.body.appendChild(link);link.click();link.remove();
+            const safeTitle=(physicsRecordingDownloadTitle||'physics-viewport').trim().replace(/[^a-z0-9._ -]+/gi,'').replace(/\s+/g,'-').slice(0,80)||'physics-viewport';
+            const link=document.createElement('a');link.href=physicsRecordingUrl;link.download=`${safeTitle}.${physicsRecordingMime.startsWith('video/mp4')?'mp4':'webm'}`;document.body.appendChild(link);link.click();link.remove();
         });
         document.getElementById('toggleSymmetryAxes')?.addEventListener('click',event=>{
             rotationalAxesVisible=!rotationalAxesVisible;
@@ -10858,6 +11290,11 @@
             if(membraneMeshes)membraneMeshes.visible=membraneVisible;
             updateMembraneToggleUI();
         });
+        document.getElementById('toggleMembraneLabels')?.addEventListener('click',()=>{
+            membraneLabelsVisible=!membraneLabelsVisible;
+            updateMembraneToggleUI();
+            updateMembraneSideLabels(membraneVisualGeometry(inferredMembrane,performance.now()));
+        });
         document.getElementById('physicsControlsToggle')?.addEventListener('click',event=>{
             const panel=document.getElementById('physicsControlsPanel');
             const expanded=event.currentTarget.getAttribute('aria-expanded')!=='true';
@@ -10900,12 +11337,44 @@
         // display-only rotations of rotationally symmetric chains.
         const ANIMATION_STORAGE_PREFIX='proteomatrix-animation-v1:';
         let animationFrames=[],animationSelected=0,animationLoop=true,animationPlaying=false,animationPreparing=false;
+        let animationLibrary=[],animationActiveId=null,animationTitle='Animation 1',animationSameConformation=false,animationAutoSpinDismissed=false;
         let animationPlaybackOrigin=0;
         let animationStartTime=0,animationResumePhysics=false,animationRecording=false;
         let animationPreparationToken=0,animationRecordedFrame=0,animationLastRecordStep=0,animationFinalHoldUntil=0;
         let animationDisplayOverride=null;
         let animationApplying=false,animationSaveTimer=null,animationCaptureTimer=null,animationTableRows=null,animationModelStorageKey=null;
         const animationEl=id=>document.getElementById(id);
+        const animationPanel=document.querySelector('.physics-simulation-panel');
+        if(animationPanel){
+            const children=[...animationPanel.children],viewerIndex=children.findIndex(child=>child.id==='physicsContainer');
+            children.forEach((child,index)=>{
+                if(index>1&&index<viewerIndex){child.classList.add('animation-lockable');child.dataset.animationLockZone='top';}
+                if(['physicsControlsToggle','physicsControlsPanel'].includes(child.id)){child.classList.add('animation-lockable');child.dataset.animationLockZone='bottom';}
+            });
+            [animationEl('animationEditor')?.firstElementChild?.firstElementChild,animationEl('animationTimeline'),
+                ...['sameAnimationConformation','duplicateAnimationKeyframe','deleteAnimationKeyframe','showAnimationTable','recordAnimation','loopAnimation','deleteAnimation'].map(animationEl)]
+                .filter(Boolean).forEach(element=>element.classList.add('animation-editor-lockable'));
+            animationPanel.addEventListener('click',event=>{
+                if((animationPlaying||animationPreparing)&&event.isTrusted&&event.target.closest('.animation-lockable,.animation-editor-lockable,#physicsViewerKey button,#physicsSelectionInfo button')&&!event.target.closest('#quickPlayAnimationBtn')){
+                    event.preventDefault();event.stopPropagation();
+                }
+            },true);
+            animationPanel.addEventListener('keydown',event=>{
+                if((animationPlaying||animationPreparing)&&event.isTrusted&&event.target.closest('.animation-lockable,.animation-editor-lockable')&&!event.target.closest('#quickPlayAnimationBtn')){
+                    event.preventDefault();event.stopPropagation();
+                }
+            },true);
+        }
+        function updateAnimationControlLock(){
+            const locked=animationPlaying||animationPreparing;
+            animationPanel?.classList.toggle('animation-controls-locked',locked);
+            for(const element of animationPanel?.querySelectorAll('.animation-editor-lockable')||[])element.inert=locked;
+            if(locked){
+                document.getElementById('physicsColorMenu')?.classList.add('hidden');
+                document.getElementById('physicsColorMenuButton')?.setAttribute('aria-expanded','false');
+                if(document.activeElement?.closest('.animation-lockable,.animation-editor-lockable'))document.activeElement.blur();
+            }
+        }
         const animationSessionKey=()=>ANIMATION_STORAGE_PREFIX+JSON.stringify([
             animationEl('pdbInput1')?.value.trim()||'',animationEl('pdbInput2')?.value.trim()||''
         ]);
@@ -10930,14 +11399,44 @@
         }
         function captureAnimationFrame(existing){
             return {id:existing?.id||`${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                name:existing?.name,
                 framesToNext:existing?.framesToNext??30,
                 coords:physicsNodes.map(node=>[node.x,node.y,node.z].map(value=>+value.toFixed(4))),
                 displayCoords:physicsNodes.map(node=>{const point=visualPointForNode(node);return [point.x,point.y,point.z].map(value=>+value.toFixed(4));}),
                 settings:animationSettings()};
         }
+        function animationId(){return `${Date.now()}-${Math.random().toString(36).slice(2)}`;}
+        function syncActiveAnimation(){
+            if(!animationActiveId||!animationFrames.length)return;
+            const entry=animationLibrary.find(item=>item.id===animationActiveId);
+            if(entry)Object.assign(entry,{title:animationTitle,frames:animationFrames,loop:animationLoop,sameConformation:animationSameConformation});
+        }
+        function renderAnimationSelector(){
+            const select=animationEl('animationSelector'),title=animationEl('animationTitle');if(!select||!title)return;
+            select.replaceChildren();
+            for(const entry of animationLibrary)select.add(new Option(entry.title,entry.id));
+            select.add(new Option('+ New','new'));
+            select.value=animationActiveId||'new';
+            title.value=animationActiveId?animationTitle:'';
+            title.disabled=!animationActiveId;
+            const same=animationEl('sameAnimationConformation');
+            if(same){same.textContent=`Use same conformation for all keyframes: ${animationSameConformation?'True':'False'}`;same.setAttribute('aria-pressed',String(animationSameConformation));}
+        }
+        function activateAnimation(entry){
+            if(!entry)return;
+            animationActiveId=entry.id;animationTitle=entry.title;animationFrames=entry.frames;
+            animationLoop=entry.loop!==false;animationSameConformation=entry.sameConformation===true;
+            animationSelected=0;animationTableRows=null;keyframeDifferenceCache=null;
+            renderAnimationTimeline();renderAnimationSelector();
+            if(physicsNodes.length&&animationFrames[0]?.coords?.length===physicsNodes.length)showAnimationFrame(0);
+        }
+        function addAnimation(title='New animation'){
+            const entry={id:animationId(),title,frames:[captureAnimationFrame(),captureAnimationFrame()],loop:true,sameConformation:false};
+            animationLibrary.push(entry);activateAnimation(entry);saveAnimation();return entry;
+        }
         function saveAnimation(){
-            if(!animationFrames.length)return;
-            try{localStorage.setItem(animationModelStorageKey||animationSessionKey(),JSON.stringify({signature:animationNodeSignature(),frames:animationFrames,loop:animationLoop}));
+            syncActiveAnimation();
+            try{localStorage.setItem(animationModelStorageKey||animationSessionKey(),JSON.stringify({signature:animationNodeSignature(),animations:animationLibrary,activeId:animationActiveId,autoSpinDismissed:animationAutoSpinDismissed}));
                 animationEl('animationStatus').textContent='Animation saved in this browser.';
             }catch(error){animationEl('animationStatus').textContent='Could not save the animation in browser storage (storage may be full).';console.warn('Animation storage:',error);}
         }
@@ -10946,6 +11445,10 @@
             if(!animationFrames.length||animationPlaying||animationApplying||!physicsNodes.length)return;
             clearTimeout(animationCaptureTimer);
             animationFrames[animationSelected]=captureAnimationFrame(animationFrames[animationSelected]);
+            if(animationSameConformation){
+                const shared=animationFrames[animationSelected];
+                for(const frame of animationFrames){frame.coords=shared.coords;frame.displayCoords=shared.displayCoords;}
+            }
             scheduleAnimationSave();
         }
         function scheduleAnimationCapture(){clearTimeout(animationCaptureTimer);animationCaptureTimer=setTimeout(saveSelectedAnimationFrame,120);}
@@ -10987,7 +11490,7 @@
         function showAnimationFrame(index){
             const frame=animationFrames[index];if(!frame||frame.coords.length!==physicsNodes.length)return;
             animationSelected=index;
-            frame.coords.forEach((point,i)=>{const node=physicsNodes[i];[node.x,node.y,node.z]=point;});
+            (animationSameConformation?animationFrames[0].coords:frame.coords).forEach((point,i)=>{const node=physicsNodes[i];[node.x,node.y,node.z]=point;});
             applyAnimationSettings(frame.settings);
             syncVisualPhysicsMeshes();renderAnimationTimeline();
         }
@@ -11005,20 +11508,79 @@
             }
             animationEl('loopAnimation')?.setAttribute('aria-pressed',String(animationLoop));
             if(animationEl('loopAnimation'))animationEl('loopAnimation').textContent=`Loop: ${animationLoop?'On':'Off'}`;
+            renderAnimationSelector();
+            updateAnimationControlLock();
+        }
+        let lastAnimationKeyframeClick=null,animationKeyframeDrag=null,suppressAnimationKeyframeClick=false;
+        function editAnimationKeyframeName(frame,index,button){
+            if(animationPlaying||animationPreparing)return;
+            const input=document.createElement('input');input.type='text';input.dataset.keyframeName='';
+            input.maxLength=80;input.value=frame.name||`Keyframe ${index+1}`;input.setAttribute('aria-label',`Name for keyframe ${index+1}`);
+            button.replaceWith(input);input.focus();input.select();
+            let finished=false;
+            const finish=commit=>{
+                if(finished)return;finished=true;
+                if(commit){frame.name=input.value.trim()||`Keyframe ${index+1}`;scheduleAnimationSave();}
+                renderAnimationTimeline();
+            };
+            input.addEventListener('blur',()=>finish(true));
+            input.addEventListener('keydown',event=>{
+                if(event.key==='Enter'){event.preventDefault();input.blur();}
+                if(event.key==='Escape'){event.preventDefault();finish(false);}
+            });
+        }
+        function reorderAnimationKeyframe(from,to){
+            if(animationPlaying||animationPreparing||from===to||!animationFrames[from]||!animationFrames[to])return;
+            saveSelectedAnimationFrame();
+            const selectedId=animationFrames[animationSelected]?.id;
+            animationFrames.splice(to,0,animationFrames.splice(from,1)[0]);
+            animationSelected=animationFrames.findIndex(frame=>frame.id===selectedId);
+            renderAnimationTimeline();scheduleAnimationSave();
         }
         function renderAnimationTimeline(){
             const host=animationEl('animationTimeline');if(!host)return;host.replaceChildren();
             animationFrames.forEach((frame,index)=>{
-                const key=document.createElement('button');key.type='button';key.draggable=true;key.dataset.keyframe=String(index);
+                const key=document.createElement('button');key.type='button';key.dataset.keyframe=String(index);
                 key.className=`relative z-10 rounded-xl px-3 py-2 font-semibold text-xs transition ${index===animationSelected?'bg-amber-400 text-slate-950 scale-110 shadow-lg shadow-amber-500/30':'bg-amber-700 text-white hover:bg-amber-600'}`;
                 key.classList.toggle('selected',index===animationSelected);
-                key.textContent=`Keyframe ${index+1}`;key.addEventListener('click',()=>{if(animationPlaying)stopAnimation();else saveSelectedAnimationFrame();showAnimationFrame(index);});
-                key.addEventListener('dragstart',event=>{event.dataTransfer.setData('text/plain',String(index));event.dataTransfer.effectAllowed='move';});
-                key.addEventListener('dragover',event=>event.preventDefault());
-                key.addEventListener('drop',event=>{event.preventDefault();const from=Number(event.dataTransfer.getData('text/plain'));if(!Number.isInteger(from)||!animationFrames[from]||from===index)return;
-                    saveSelectedAnimationFrame();const selectedId=animationFrames[animationSelected]?.id;
-                    animationFrames.splice(index,0,animationFrames.splice(from,1)[0]);animationSelected=animationFrames.findIndex(item=>item.id===selectedId);
-                    renderAnimationTimeline();scheduleAnimationSave();});
+                key.textContent=frame.name||`Keyframe ${index+1}`;
+                key.addEventListener('click',()=>{
+                    if(suppressAnimationKeyframeClick){suppressAnimationKeyframeClick=false;return;}
+                    if(animationPlaying||animationPreparing)return;
+                    const now=performance.now();
+                    if(lastAnimationKeyframeClick?.id===frame.id&&now-lastAnimationKeyframeClick.at<550){lastAnimationKeyframeClick=null;editAnimationKeyframeName(frame,index,key);return;}
+                    lastAnimationKeyframeClick={id:frame.id,at:now};
+                    if(index!==animationSelected){saveSelectedAnimationFrame();showAnimationFrame(index);}
+                });
+                key.addEventListener('pointerdown',event=>{
+                    if(event.button!==0||animationPlaying||animationPreparing)return;
+                    animationKeyframeDrag={from:index,startX:event.clientX,startY:event.clientY,moved:false,key};
+                    key.setPointerCapture(event.pointerId);
+                });
+                key.addEventListener('pointermove',event=>{
+                    const drag=animationKeyframeDrag;if(!drag||drag.key!==key)return;
+                    if(!drag.moved&&Math.hypot(event.clientX-drag.startX,event.clientY-drag.startY)>7){drag.moved=true;key.classList.add('dragging');}
+                    if(!drag.moved)return;
+                    event.preventDefault();
+                    let nearest=null,distance=Infinity;
+                    for(const candidate of host.querySelectorAll('button[data-keyframe]')){
+                        const rect=candidate.getBoundingClientRect(),d=Math.hypot(event.clientX-(rect.left+rect.right)/2,event.clientY-(rect.top+rect.bottom)/2);
+                        if(d<distance){distance=d;nearest=candidate;}
+                        candidate.classList.remove('drop-target');
+                    }
+                    nearest?.classList.add('drop-target');drag.to=Number(nearest?.dataset.keyframe);
+                });
+                const finishDrag=()=>{
+                    const drag=animationKeyframeDrag;if(!drag||drag.key!==key)return;
+                    animationKeyframeDrag=null;
+                    key.classList.remove('dragging');
+                    host.querySelectorAll('.drop-target').forEach(item=>item.classList.remove('drop-target'));
+                    if(drag.moved){
+                        suppressAnimationKeyframeClick=true;setTimeout(()=>{suppressAnimationKeyframeClick=false;},0);
+                        lastAnimationKeyframeClick=null;reorderAnimationKeyframe(drag.from,Number.isInteger(drag.to)?drag.to:drag.from);
+                    }
+                };
+                key.addEventListener('pointerup',finishDrag);key.addEventListener('pointercancel',finishDrag);
                 host.append(key);
                 if(index<animationFrames.length){
                     const gap=document.createElement('label');gap.className='relative z-0 flex items-center gap-1 rounded-xl bg-slate-700 px-2 py-1 text-xs text-slate-200';
@@ -11071,6 +11633,7 @@
                 // Let the first keyframe and any representation changes paint before capture starts.
                 await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
                 if(token!==animationPreparationToken)return;
+                physicsRecordingDownloadTitle=animationTitle;
                 if(!physicsRecording)togglePhysicsRecording();
                 const ready=physicsRecording&&await Promise.race([
                     physicsRecordingStarted||Promise.resolve(false),
@@ -11119,7 +11682,7 @@
             if(animationSelected!==index){animationSelected=index;applyAnimationSettings(a.settings);renderAnimationTimeline();}
             animationDisplayOverride=new Array(physicsNodes.length);
             for(let i=0;i<physicsNodes.length;i++){
-                const from=a.coords[i],to=b.coords[i],node=physicsNodes[i];
+                const from=(animationSameConformation?animationFrames[0]:a).coords[i],to=(animationSameConformation?animationFrames[0]:b).coords[i],node=physicsNodes[i];
                 if(!from||!to)continue;
                 node.x=from[0]+(to[0]-from[0])*t;node.y=from[1]+(to[1]-from[1])*t;node.z=from[2]+(to[2]-from[2])*t;
             }
@@ -11146,13 +11709,36 @@
             return original;
         }
         function animationOnModelReady(){
-            stopAnimation();animationFrames=[];animationSelected=0;keyframeDifferenceCache=null;bindingSiteCache=null;
+            stopAnimation();animationFrames=[];animationLibrary=[];animationActiveId=null;animationAutoSpinDismissed=false;animationSelected=0;keyframeDifferenceCache=null;bindingSiteCache=null;
             animationModelStorageKey=animationSessionKey();
+            let repairedSpin=false;
             try{const saved=JSON.parse(localStorage.getItem(animationModelStorageKey)||'null');
-                if(saved?.signature===animationNodeSignature()&&Array.isArray(saved.frames)&&saved.frames.every(frame=>frame.coords?.length===physicsNodes.length)){
-                    animationFrames=saved.frames;animationLoop=saved.loop!==false;
+                if(saved?.signature===animationNodeSignature()){
+                    animationAutoSpinDismissed=saved.autoSpinDismissed===true;
+                    if(Array.isArray(saved.animations))animationLibrary=saved.animations.filter(item=>Array.isArray(item.frames)&&item.frames.length&&item.frames.every(frame=>frame.coords?.length===physicsNodes.length));
+                    else if(Array.isArray(saved.frames)&&saved.frames.every(frame=>frame.coords?.length===physicsNodes.length))
+                        animationLibrary=[{id:animationId(),title:'Animation 1',frames:saved.frames,loop:saved.loop!==false,sameConformation:false}];
+                    for(const entry of animationLibrary)if(entry.autoGenerated||entry.title==='Auto-generated spin animation'){
+                        entry.autoGenerated=true;
+                        if(entry.sameConformation!==true){entry.sameConformation=true;repairedSpin=true;}
+                        const shared=entry.frames[0]?.coords;
+                        if(shared)for(const frame of entry.frames)frame.coords=shared;
+                    }
+                    const active=animationLibrary.find(item=>item.id===saved.activeId)||animationLibrary[0];
+                    if(active)activateAnimation(active);
                 }
             }catch(error){console.warn('Could not restore animation:',error);}
+            if(repairedSpin)saveAnimation();
+            if(rotationalSymmetryGroups.length&&!animationAutoSpinDismissed&&!animationLibrary.some(item=>item.autoGenerated||item.title==='Auto-generated spin animation')){
+                const first=captureAnimationFrame(),second=captureAnimationFrame();
+                first.framesToNext=30;second.framesToNext=0;
+                first.settings.symmetry=rotationalSymmetryGroups.map(group=>({key:group.key,angle:0}));
+                second.settings.symmetry=rotationalSymmetryGroups.map(group=>({key:group.key,angle:359*Math.PI/180}));
+                const entry={id:animationId(),title:'Auto-generated spin animation',frames:[first,second],loop:true,sameConformation:true,autoGenerated:true};
+                animationLibrary.push(entry);
+                if(!animationActiveId)activateAnimation(entry);
+                saveAnimation();
+            }
             renderAnimationTimeline();
         }
         function animationRowDefinitions(){
@@ -11166,7 +11752,7 @@
                     get:frame=>frame.settings.controls?.[i],set:(frame,value)=>{frame.settings.controls[i]=value;}});
             }
             for(const flag of Object.keys(first.settings.flags||{}))rows.push({label:flag.replace(/([A-Z])/g,' $1'),get:frame=>String(frame.settings.flags?.[flag]),set:(frame,value)=>{frame.settings.flags[flag]=value==='true';}});
-            for(const chain of Object.keys(first.settings.chainVisibility||{}))rows.push({label:`Chain ${chain} visible`,get:frame=>String(frame.settings.chainVisibility?.[chain]!==false),set:(frame,value)=>{frame.settings.chainVisibility[chain]=value==='true';}});
+            for(const chain of Object.keys(first.settings.chainVisibility||{}))rows.push({label:`${displayChainName(chain)} visible`,get:frame=>String(frame.settings.chainVisibility?.[chain]!==false),set:(frame,value)=>{frame.settings.chainVisibility[chain]=value==='true';}});
             first.settings.referenceOverlayVisibility?.forEach((_,index)=>rows.push({label:`Reference PDB ${index+1} visible`,get:frame=>String(frame.settings.referenceOverlayVisibility?.[index]===true),set:(frame,value)=>{frame.settings.referenceOverlayVisibility[index]=value==='true';}}));
             for(const id of Object.keys(first.settings.buttonStates||{}))rows.push({label:id.replace(/([A-Z])/g,' $1'),get:frame=>frame.settings.buttonStates?.[id],set:(frame,value)=>{frame.settings.buttonStates[id]=value==='true'?'true':'false';}});
             for(const property of ['representation','color','referenceColor','springColor'])rows.push({label:property,get:frame=>frame.settings[property],set:(frame,value)=>{frame.settings[property]=value;}});
@@ -11192,7 +11778,7 @@
         function renderAnimationTable(){
             saveSelectedAnimationFrame();const host=animationEl('animationTableContent');host.replaceChildren();
             const table=document.createElement('table');table.className='min-w-full border-collapse text-left text-xs text-slate-200';
-            const head=table.createTHead().insertRow();for(const title of ['Changed setting',...animationFrames.map((_,i)=>`Keyframe ${i+1}`)]){const cell=document.createElement('th');cell.className='sticky top-0 bg-slate-800 p-2 text-amber-300';cell.textContent=title;head.append(cell);}
+            const head=table.createTHead().insertRow();for(const title of ['Changed setting',...animationFrames.map((frame,i)=>frame.name||`Keyframe ${i+1}`)]){const cell=document.createElement('th');cell.className='sticky top-0 bg-slate-800 p-2 text-amber-300';cell.textContent=title;head.append(cell);}
             const body=table.createTBody();
             const rows=animationTableRows||animationRowDefinitions().filter(row=>new Set(animationFrames.map(frame=>row.get(frame))).size>1);
             animationTableRows=rows;
@@ -11265,9 +11851,37 @@
         }
         animationEl('createAnimationBtn')?.addEventListener('click',()=>{
             if(!physicsNodes.length){animationEl('animationStatus').textContent='Build a homology model before creating an animation.';animationEl('animationEditor').classList.remove('hidden');animationEl('animationEditor').scrollIntoView({behavior:'smooth',block:'start'});return;}
-            if(!animationFrames.length){animationFrames=[captureAnimationFrame(),captureAnimationFrame()];animationSelected=0;scheduleAnimationSave();renderAnimationTimeline();}
+            if(!animationFrames.length)addAnimation();
             animationEl('animationEditor').classList.toggle('hidden');
             if(!animationEl('animationEditor').classList.contains('hidden'))animationEl('animationEditor').scrollIntoView({behavior:'smooth',block:'start'});
+        });
+        animationEl('animationSelector')?.addEventListener('change',event=>{
+            if(!physicsNodes.length)return;
+            if(animationPlaying||animationPreparing)stopAnimation(true);
+            saveSelectedAnimationFrame();saveAnimation();
+            if(event.target.value==='new')addAnimation(`Animation ${animationLibrary.length+1}`);
+            else activateAnimation(animationLibrary.find(item=>item.id===event.target.value));
+        });
+        animationEl('animationTitle')?.addEventListener('input',event=>{
+            if(!animationActiveId)return;
+            animationTitle=event.target.value.slice(0,100);
+            syncActiveAnimation();
+            const option=[...animationEl('animationSelector').options].find(item=>item.value===animationActiveId);
+            if(option)option.textContent=animationTitle||'Untitled animation';
+            scheduleAnimationSave();
+        });
+        animationEl('animationTitle')?.addEventListener('blur',event=>{
+            if(!animationActiveId)return;
+            animationTitle=event.target.value.trim()||'Untitled animation';event.target.value=animationTitle;
+            saveAnimation();renderAnimationSelector();
+        });
+        animationEl('sameAnimationConformation')?.addEventListener('click',()=>{
+            if(!animationFrames.length)return;
+            saveSelectedAnimationFrame();animationSameConformation=!animationSameConformation;
+            if(animationSameConformation){const shared=animationFrames[animationSelected].coords;
+                for(const frame of animationFrames)frame.coords=structuredClone(shared);
+            }
+            renderAnimationSelector();scheduleAnimationSave();
         });
         animationEl('closeAnimationEditor')?.addEventListener('click',()=>animationEl('animationEditor').classList.add('hidden'));
         animationEl('quickPlayAnimationBtn')?.addEventListener('click',()=>playAnimation());
@@ -11290,9 +11904,13 @@
         animationEl('deleteAnimationKeyframe')?.addEventListener('click',deleteSelectedAnimationKeyframe);
         animationEl('deleteAnimation')?.addEventListener('click',()=>{
             stopAnimation();clearTimeout(animationCaptureTimer);clearTimeout(animationSaveTimer);
+            if(animationLibrary.find(entry=>entry.id===animationActiveId)?.autoGenerated)animationAutoSpinDismissed=true;
+            animationLibrary=animationLibrary.filter(entry=>entry.id!==animationActiveId);
             animationFrames=[];animationSelected=0;animationTableRows=null;animationDisplayOverride=null;
-            try{localStorage.removeItem(animationModelStorageKey||animationSessionKey());}catch(error){console.warn('Could not delete saved animation:',error);}
-            closeAnimationTable();animationEl('animationEditor').classList.add('hidden');renderAnimationTimeline();
+            animationActiveId=null;
+            if(animationLibrary.length)activateAnimation(animationLibrary[0]);
+            saveAnimation();
+            closeAnimationTable();animationEl('animationEditor').classList.add('hidden');renderAnimationTimeline();renderAnimationSelector();
         });
         // Place the dialog outside the simulation panel's overflow clipping.
         document.body.append(animationEl('animationTableDialog'));
@@ -11591,9 +12209,9 @@
             const a=physicsNodes[pair.i],b=physicsNodes[pair.j],atomA=validationAtom(a,'reference')||validationAtom(a,'af'),atomB=validationAtom(b,'reference')||validationAtom(b,'af');
             const title=document.createElement('h3');title.className='font-semibold text-violet-300 text-sm';
             const left=document.createElement('span'),separator=document.createElement('span'),right=document.createElement('span');
-            left.textContent=`${atomA?.resName||'?'} ${atomA?.resSeq||'?'} Chain ${a.res.c1}`;
+            left.textContent=`${atomA?.resName||'?'} ${atomA?.resSeq||'?'} ${displayChainName(a.res.c1)}`;
             separator.className='validation-pair-separator';separator.textContent=' ↔ ';
-            right.textContent=`${atomB?.resName||'?'} ${atomB?.resSeq||'?'} Chain ${b.res.c1}`;
+            right.textContent=`${atomB?.resName||'?'} ${atomB?.resSeq||'?'} ${displayChainName(b.res.c1)}`;
             title.append(left,separator,right);
             box.replaceChildren(title);
             const referenceMean=pair.refs?.length?validationMean(pair.refs):null;
@@ -11667,9 +12285,10 @@
                 const previous=keyframeSelect.value;
                 if(keyframeSelect.options.length!==animationFrames.length+1){
                     keyframeSelect.replaceChildren(new Option('Currently viewed keyframe','current'));
-                    animationFrames.forEach((_,index)=>keyframeSelect.add(new Option(`Keyframe ${index+1}`,String(index))));
+                    animationFrames.forEach((frame,index)=>keyframeSelect.add(new Option(frame.name||`Keyframe ${index+1}`,String(index))));
                     keyframeSelect.value=previous==='current'||Number(previous)<animationFrames.length?previous:'current';
                 }
+                animationFrames.forEach((frame,index)=>{if(keyframeSelect.options[index+1])keyframeSelect.options[index+1].textContent=frame.name||`Keyframe ${index+1}`;});
             }
             const frame=animationFrames[Number(keyframeSelect?.value)];
             const useSavedFrame=keyframeSelect?.value!=='current'&&frame?.coords?.length===physicsNodes.length;
@@ -11724,6 +12343,10 @@
             validationState.matrixView={zoom:1,x:0,y:0};
             clearTimeout(validationState.matrixRedrawTimer);validationState.matrixRedrawTimer=null;
             redrawValidationMatrices();
+        }));
+        validationElement('validationReport')?.querySelectorAll('.validation-color-in-3d').forEach(button=>button.addEventListener('click',()=>{
+            setPhysicsColorMode(button.dataset.colorMode);
+            document.getElementById('physicsContainer')?.scrollIntoView({behavior:'smooth',block:'center'});
         }));
         for(const id of validationMatrixIds){
             const canvas=validationElement(id);
@@ -11993,7 +12616,7 @@
                     });
                 }else{
                     for(const pair of validationState.pairs){
-                        const value=mode==='constraint-confidence'?pair.confidence:mode==='model-confidence'?pair.combined:pair.pae;
+                        const value=mode==='constraint-confidence'?pair.confidence:mode==='spring-strain'?pair.strain:mode==='membrane-score'?pair.membraneScore:mode==='model-confidence'?pair.combined:pair.pae;
                         if(!Number.isFinite(value))continue;
                         for(const nodeIndex of [pair.i,pair.j]){sums[nodeIndex]+=value;counts[nodeIndex]++;}
                     }
@@ -12004,6 +12627,7 @@
             if(!counts[index])return '#64748b';
             const average=sums[index]/counts[index];
             if(mode==='alpha-pae')return new THREE.Color('#38bdf8').lerp(new THREE.Color('#ef4444'),validationClamp(average/30)).getStyle();
+            if(mode==='spring-strain')return validationColor('strain',average);
             return validationColor('confidence',average);
         }
         function selectMatrixResiduePair(first,second){
