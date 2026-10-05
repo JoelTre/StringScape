@@ -617,9 +617,9 @@
         let physicsGraphNormalized=true;
         let physicsGraphLogScale=false;
         const PHYSICS_GRAPH_SERIES=[
-            {key:'tm',label:'TM-score',color:'#38bdf8',unit:''},
-            {key:'rmsd',label:'RMSD (P1)',color:'#a78bfa',unit:' Å'},
-            {key:'energy',label:'RMSD energy',color:'#4ade80',unit:' Å'},
+            {key:'tm',label:'TM-score (Phase 2)',color:'#38bdf8',unit:''},
+            {key:'rmsd',label:'RMSD (Phase 2)',color:'#a78bfa',unit:' Å'},
+            {key:'energy',label:'Weighted spring-length error',color:'#4ade80',unit:' a.u.'},
             {key:'speed',label:'Average residue speed',color:'#fbbf24',unit:' Å/s'},
             {key:'satisfaction',label:'Restraint satisfaction',color:'#fb923c',unit:''},
             {key:'modelConfidence',label:'Overall model confidence',color:'#f472b6',unit:''},
@@ -828,7 +828,7 @@
                 : 'Raw values share one numeric y-axis even though their units differ; use each series’ legend maximum to interpret its scale. ')
                 +(physicsGraphLogScale?'The logarithmic y-axis spreads out small positive values; zero remains at the baseline. ':'')
                 +'Confidence and membrane scores hold their last measured value between intermittent updates. Vertical lines mark changes to physics controls; their labels are rotated to fit.';
-            canvas.setAttribute('aria-label',`Live ${physicsGraphNormalized?'normalised':'raw'} TM-score, RMSD, RMSD energy, average residue speed, restraint satisfaction, overall model confidence, and membrane placement over Phase 2 time on a ${physicsGraphLogScale?'logarithmic':'linear'} y-axis`);
+            canvas.setAttribute('aria-label',`Live ${physicsGraphNormalized?'normalised':'raw'} TM-score, RMSD, weighted spring-length error, average residue speed, restraint satisfaction, overall model confidence, and membrane placement over Phase 2 time on a ${physicsGraphLogScale?'logarithmic':'linear'} y-axis`);
             physicsGraphHistory.lastDrawAt=performance.now();
         }
         let morphColorMode = 'distance'; // 'distance' (default) or 'origin' (Reference PDB, AlphaFold, Both, Neither)
@@ -5675,7 +5675,7 @@
             }
 
             const rmsdEnergy = Math.sqrt(totalPotentialEnergy / Math.max(1, activeSpringCount));
-            document.getElementById('physicsEnergyText').textContent = `${rmsdEnergy.toFixed(2)} Å`;
+            document.getElementById('physicsEnergyText').textContent = `${rmsdEnergy.toFixed(2)} a.u.`;
             recordPhysicsGraphSample(rmsdEnergy,performance.now());
             observeHomologyEnergy(rmsdEnergy, performance.now());
             scheduleSimulationAutoRender(rmsdEnergy);
@@ -6679,6 +6679,7 @@
 
             advanceAnimation(performance.now());
             stepPhysicsSimulation();
+            advanceConformationOptimization(performance.now());
             if(validationState.reportVisible&&!validationState.physicsViewerVisible&&document.getElementById('validationReport')?.open&&physicsNodes.length&&
                 performance.now()-validationState.lastReportDraw>1000&&performance.now()-(validationState.matrixInteractionAt||0)>220)
                 scheduleValidationReportRefresh();
@@ -11549,11 +11550,13 @@
         // display-only rotations of rotationally symmetric chains.
         const ANIMATION_STORAGE_PREFIX='proteomatrix-animation-v1:';
         let animationFrames=[],animationSelected=0,animationLoop=true,animationPlaying=false,animationPreparing=false;
-        let animationLibrary=[],animationActiveId=null,animationTitle='Animation 1',animationSameConformation=false,animationAutoSpinDismissed=false;
+        let animationLibrary=[],animationActiveId=null,animationTitle='Animation 1',animationSyncKeys=new Set(),animationInterpolation={},animationAutoSpinDismissed=false;
         let animationPlaybackOrigin=0;
         let animationStartTime=0,animationResumePhysics=false,animationRecording=false;
         let animationPreparationToken=0,animationRecordedFrame=0,animationLastRecordStep=0,animationFinalHoldUntil=0;
         let animationDisplayOverride=null;
+        let conformationOptimization=null;
+        let animationReferenceInfluenceDeferred=false;
         let animationApplying=false,animationSaveTimer=null,animationCaptureTimer=null,animationTableRows=null,animationModelStorageKey=null;
         const animationEl=id=>document.getElementById(id);
         const animationPanel=document.querySelector('.physics-simulation-panel');
@@ -11563,8 +11566,8 @@
                 if(index>1&&index<viewerIndex){child.classList.add('animation-lockable');child.dataset.animationLockZone='top';}
                 if(['physicsControlsToggle','physicsControlsPanel'].includes(child.id)){child.classList.add('animation-lockable');child.dataset.animationLockZone='bottom';}
             });
-            [animationEl('animationEditor')?.firstElementChild?.firstElementChild,animationEl('animationTimeline'),
-                ...['sameAnimationConformation','duplicateAnimationKeyframe','deleteAnimationKeyframe','showAnimationTable','recordAnimation','loopAnimation','deleteAnimation'].map(animationEl)]
+            [animationEl('animationEditor')?.firstElementChild?.firstElementChild,animationEl('animationTimeline'),animationEl('animationSyncTable'),
+                ...['animationSyncToggle','duplicateAnimationKeyframe','deleteAnimationKeyframe','showAnimationTable','recordAnimation','loopAnimation','deleteAnimation'].map(animationEl)]
                 .filter(Boolean).forEach(element=>element.classList.add('animation-editor-lockable'));
             animationPanel.addEventListener('click',event=>{
                 if((animationPlaying||animationPreparing)&&event.isTrusted&&event.target.closest('.animation-lockable,.animation-editor-lockable,#physicsViewerKey button,#physicsSelectionInfo button')&&!event.target.closest('#quickPlayAnimationBtn')){
@@ -11599,9 +11602,22 @@
             if(slicePercent)controls.push(slicePercent);
             return controls;
         };
+        function stripAnimationGraphSettings(frame){
+            const settings=frame?.settings;if(!settings)return;
+            const graphIndex=animationControls().findIndex(input=>input.id==='physicsGraphRange');
+            if(graphIndex>=0&&Array.isArray(settings.controls))settings.controls[graphIndex]=null;
+            if(settings.buttonStates)for(const id of ['physicsGraphLogScale','physicsGraphNormalize'])delete settings.buttonStates[id];
+        }
+        function stripAnimationGraphMetadata(entry){
+            const graphIndex=animationControls().findIndex(input=>input.id==='physicsGraphRange');
+            const graphControlKey=`control:${graphIndex}`;
+            const excluded=key=>key===graphControlKey||key==='button:physicsGraphLogScale'||key==='button:physicsGraphNormalize';
+            entry.syncKeys=(entry.syncKeys||[]).filter(key=>!excluded(key));
+            if(entry.interpolation)for(const key of Object.keys(entry.interpolation))if(excluded(key))delete entry.interpolation[key];
+        }
         function animationSettings(){
             return {
-                controls:animationControls().map(input=>input.value),
+                controls:animationControls().map(input=>input.closest('#physicsGraphPanel')?null:input.value),
                 representation:physicsRepresentation,color:physicsColorMode,
                 referenceColor:animationEl('referenceColorSelect')?.value,
                 springColor:animationEl('springColorSelect')?.value,
@@ -11610,7 +11626,7 @@
                     lipidsVisible,membraneVisible,showSprings,rigidBodySimulation,sideChainJiggleEnabled,
                     rotationalAxesVisible,physicsPulsePaused},
                 buttonStates:Object.fromEntries(Array.from(document.querySelectorAll('.physics-simulation-panel button[id][aria-pressed]'))
-                    .filter(button=>!animationEl('animationEditor')?.contains(button)).map(button=>[button.id,button.getAttribute('aria-pressed')])),
+                    .filter(button=>!animationEl('animationEditor')?.contains(button)&&!button.closest('#physicsGraphPanel')).map(button=>[button.id,button.getAttribute('aria-pressed')])),
                 chainVisibility:{...chainVisibility},referenceOverlayVisibility:[...referenceOverlayVisibility],
                 symmetry:rotationalSymmetryGroups.map(group=>({key:group.key,angle:group.angle})),
                 chainRotations:[...singleChainRotations].map(([block,entry])=>({block,...entry}))
@@ -11628,7 +11644,7 @@
         function syncActiveAnimation(){
             if(!animationActiveId||!animationFrames.length)return;
             const entry=animationLibrary.find(item=>item.id===animationActiveId);
-            if(entry)Object.assign(entry,{title:animationTitle,frames:animationFrames,loop:animationLoop,sameConformation:animationSameConformation});
+            if(entry)Object.assign(entry,{title:animationTitle,frames:animationFrames,loop:animationLoop,syncKeys:[...animationSyncKeys],interpolation:{...animationInterpolation}});
         }
         function renderAnimationSelector(){
             const select=animationEl('animationSelector'),title=animationEl('animationTitle');if(!select||!title)return;
@@ -11638,19 +11654,23 @@
             select.value=animationActiveId||'new';
             title.value=animationActiveId?animationTitle:'';
             title.disabled=!animationActiveId;
-            const same=animationEl('sameAnimationConformation');
-            if(same){same.textContent=`Use same conformation for all keyframes: ${animationSameConformation?'True':'False'}`;same.setAttribute('aria-pressed',String(animationSameConformation));}
+            animationEl('conformationAnimationNote')?.classList.toggle('hidden',!animationLibrary.find(item=>item.id===animationActiveId)?.conformationalChange);
+            renderAnimationSyncTable();
         }
         function activateAnimation(entry){
             if(!entry)return;
             animationActiveId=entry.id;animationTitle=entry.title;animationFrames=entry.frames;
-            animationLoop=entry.loop!==false;animationSameConformation=entry.sameConformation===true;
+            animationLoop=entry.loop!==false;animationSyncKeys=new Set(entry.syncKeys||[]);animationInterpolation={...entry.interpolation};
+            if(animationSyncKeys.has('conformation')){
+                for(const row of animationSyncDefinitions())if(row.category==='Physics variables')animationSyncKeys.add(row.key);
+                syncAnimationVariables(animationFrames[0]);entry.syncKeys=[...animationSyncKeys];
+            }
             animationSelected=0;animationTableRows=null;keyframeDifferenceCache=null;
             renderAnimationTimeline();renderAnimationSelector();
             if(physicsNodes.length&&animationFrames[0]?.coords?.length===physicsNodes.length)showAnimationFrame(0);
         }
         function addAnimation(title='New animation'){
-            const entry={id:animationId(),title,frames:[captureAnimationFrame(),captureAnimationFrame()],loop:true,sameConformation:false};
+            const entry={id:animationId(),title,frames:[captureAnimationFrame(),captureAnimationFrame()],loop:true,syncKeys:[],interpolation:{}};
             animationLibrary.push(entry);activateAnimation(entry);saveAnimation();return entry;
         }
         function saveAnimation(){
@@ -11664,20 +11684,36 @@
             if(!animationFrames.length||animationPlaying||animationApplying||!physicsNodes.length)return;
             clearTimeout(animationCaptureTimer);
             animationFrames[animationSelected]=captureAnimationFrame(animationFrames[animationSelected]);
-            if(animationSameConformation){
-                const shared=animationFrames[animationSelected];
-                for(const frame of animationFrames){frame.coords=shared.coords;frame.displayCoords=shared.displayCoords;}
-            }
+            syncAnimationVariables(animationFrames[animationSelected]);
             scheduleAnimationSave();
         }
         function scheduleAnimationCapture(){clearTimeout(animationCaptureTimer);animationCaptureTimer=setTimeout(saveSelectedAnimationFrame,120);}
+        function applyAnimationControlValue(input,value){
+            const before=input.value;
+            input.value=String(value);
+            if(input.value===before)return;
+            const referenceLabel=input.closest('#referenceInfluenceControls .extra-reference-slider');
+            if(referenceLabel&&(animationPlaying||animationReferenceInfluenceDeferred)){
+                const sliders=[...document.querySelectorAll('#referenceInfluenceControls .extra-reference-slider input[type="range"]')];
+                const index=sliders.indexOf(input);
+                if(index>=0){
+                    referenceInfluences[index]=Number(input.value);
+                    referenceLabel.querySelector('span').textContent=` ${Math.round(referenceInfluences[index]*100)}%`;
+                    model1Influence=referenceInfluences.reduce((sum,weight)=>sum+weight,0)/referenceInfluences.length;
+                    const total=referenceInfluences.reduce((sum,weight)=>sum+weight,0)+model2Influence;
+                    morphAlpha=total?model2Influence/total:0.5;
+                    animationReferenceInfluenceDeferred=true;
+                    return;
+                }
+            }
+            input.dispatchEvent(new Event(input.tagName==='SELECT'?'change':'input',{bubbles:true}));
+        }
         function applyAnimationSettings(settings){
             if(!settings)return;
             animationApplying=true;
             try{
                 const controls=animationControls();
-                settings.controls?.forEach((value,index)=>{const input=controls[index];if(!input||input.value===String(value))return;
-                    input.value=value;input.dispatchEvent(new Event(input.tagName==='SELECT'?'change':'input',{bubbles:true}));});
+                settings.controls?.forEach((value,index)=>{const input=controls[index];if(input&&value!==null&&!input.closest('#physicsGraphPanel'))applyAnimationControlValue(input,value);});
                 if(settings.representation&&settings.representation!==physicsRepresentation)setPhysicsRepresentation(settings.representation);
                 if(settings.color&&settings.color!==physicsColorMode){animationEl('physicsColorSelect').value=settings.color;setPhysicsColorMode(settings.color);}
                 const flags=settings.flags||{};
@@ -11696,6 +11732,7 @@
                 if(typeof flags.physicsPulsePaused==='boolean'&&flags.physicsPulsePaused!==physicsPulsePaused)togglePhysicsPulse();
                 for(const [id,pressed] of Object.entries(settings.buttonStates||{})){
                     const button=animationEl(id);
+                    if(button?.closest('#physicsGraphPanel'))continue;
                     if(button&&button.getAttribute('aria-pressed')!==null&&button.getAttribute('aria-pressed')!==pressed)button.click();
                 }
                 if(settings.chainVisibility)for(const [chain,visible] of Object.entries(settings.chainVisibility))if(chainVisibility[chain]!==visible)chainVisibility[chain]=visible;
@@ -11710,21 +11747,39 @@
         function showAnimationFrame(index){
             const frame=animationFrames[index];if(!frame||frame.coords.length!==physicsNodes.length)return;
             animationSelected=index;
-            (animationSameConformation?animationFrames[0].coords:frame.coords).forEach((point,i)=>{const node=physicsNodes[i];[node.x,node.y,node.z]=point;});
+            frame.coords.forEach((point,i)=>{const node=physicsNodes[i];[node.x,node.y,node.z]=point;});
             applyAnimationSettings(frame.settings);
             syncVisualPhysicsMeshes();renderAnimationTimeline();
         }
         function animationSegmentFrames(frame){return Math.max(0,Math.min(10000,Number(frame?.framesToNext)||0));}
         function animationDurationFrames(){return animationFrames.reduce((total,frame)=>total+animationSegmentFrames(frame),0);}
+        function animationEasedProgress(key,t){return animationInterpolation[key]==='bezier'?t*t*(3-2*t):t;}
+        function ensureAnimationBezierLoopFrames(){
+            if(!animationLoop||!animationFrames.length||!Object.values(animationInterpolation).includes('bezier')||animationSegmentFrames(animationFrames.at(-1))>0)return false;
+            animationFrames.at(-1).framesToNext=Math.max(1,animationSegmentFrames(animationFrames.at(-2))||30);
+            animationEl('animationStatus').textContent='Added return frames after the final keyframe for a smooth Bézier loop.';
+            renderAnimationTimeline();scheduleAnimationSave();return true;
+        }
+        function applyInterpolatedAnimationControls(a,b,t){
+            const controls=animationControls();
+            controls.forEach((input,index)=>{
+                if(input.type!=='range'||input.closest('#physicsGraphPanel'))return;
+                const start=Number(a.settings.controls?.[index]),end=Number(b.settings.controls?.[index]);
+                if(!Number.isFinite(start)||!Number.isFinite(end)||start===end)return;
+                const value=start+(end-start)*animationEasedProgress(`control:${index}`,t);
+                applyAnimationControlValue(input,value);
+            });
+        }
         function updateAnimationButtons(){
             const exists=animationFrames.length>0;
+            animationEl('conformationAnimationBtn')?.classList.toggle('hidden',referenceFiles.length<2||!physicsNodes.length);
             animationEl('createAnimationBtn')?.querySelector('span')?.replaceChildren(document.createTextNode(exists?'Edit animation':'Create animation'));
             animationEl('quickPlayAnimationBtn')?.classList.toggle('hidden',!exists);
             for(const id of ['quickPlayAnimationBtn','animationPlay']){
                 const button=animationEl(id);if(!button)continue;
-                const icon=document.createElement('i');icon.className=`fa-solid ${animationPlaying?'fa-pause':'fa-play'} mr-1`;icon.setAttribute('aria-hidden','true');
-                const label=animationPreparing?'Preparing…':animationPlaying?'Pause':id==='animationPlay'?'Play':'Play animation';
-                button.replaceChildren(icon,document.createTextNode(label));button.disabled=animationPreparing;
+                const icon=document.createElement('i');icon.className=`fa-solid ${conformationOptimization?'fa-stop':animationPlaying?'fa-pause':'fa-play'} mr-1`;icon.setAttribute('aria-hidden','true');
+                const label=conformationOptimization?'Cancel optimisation':animationPreparing?'Preparing…':animationPlaying?'Pause':id==='animationPlay'?'Play':'Play animation';
+                button.replaceChildren(icon,document.createTextNode(label));button.disabled=animationPreparing&&!conformationOptimization;
             }
             animationEl('loopAnimation')?.setAttribute('aria-pressed',String(animationLoop));
             if(animationEl('loopAnimation'))animationEl('loopAnimation').textContent=`Loop: ${animationLoop?'On':'Off'}`;
@@ -11732,12 +11787,28 @@
             updateAnimationControlLock();
         }
         let lastAnimationKeyframeClick=null,animationKeyframeDrag=null,suppressAnimationKeyframeClick=false;
+        function renderAnimationTimelineLines(){
+            const host=animationEl('animationTimeline');if(!host)return;
+            const centers=[];
+            for(const item of host.querySelectorAll(':scope > button[data-keyframe], :scope > label, :scope > input[data-keyframe-name]')){
+                const center=item.offsetTop+item.offsetHeight/2;
+                if(!centers.some(existing=>Math.abs(existing-center)<12))centers.push(center);
+            }
+            const lines=[...host.querySelectorAll('.animation-timeline-line')];
+            centers.forEach((center,index)=>{
+                const line=lines[index]||document.createElement('span');
+                if(!lines[index]){line.className='animation-timeline-line';host.append(line);}
+                line.style.top=`${center-1}px`;
+            });
+            lines.slice(centers.length).forEach(line=>line.remove());
+        }
+        new ResizeObserver(()=>renderAnimationTimelineLines()).observe(animationEl('animationTimeline'));
         function editAnimationKeyframeName(frame,index,button){
             if(animationPlaying||animationPreparing)return;
             const frameId=frame.id;
             const input=document.createElement('input');input.type='text';input.dataset.keyframeName='';
             input.maxLength=80;input.value=frame.name||`Keyframe ${index+1}`;input.setAttribute('aria-label',`Name for keyframe ${index+1}`);
-            button.replaceWith(input);input.focus();input.select();
+            button.replaceWith(input);input.focus();input.select();requestAnimationFrame(renderAnimationTimelineLines);
             let finished=false;
             const finish=commit=>{
                 if(finished)return;finished=true;
@@ -11809,26 +11880,109 @@
                 key.addEventListener('pointerup',finishDrag);key.addEventListener('pointercancel',finishDrag);
                 host.append(key);
                 if(index<animationFrames.length){
-                    const gap=document.createElement('label');gap.className='relative z-0 flex items-center gap-1 rounded-xl bg-slate-700 px-2 py-1 text-xs text-slate-200';
+                    const gap=document.createElement('label');gap.className='relative z-10 flex items-center gap-1 rounded-xl bg-slate-700 px-2 py-1 text-xs text-slate-200';
                     const input=document.createElement('input');input.type='number';input.min='0';input.max='10000';input.value=frame.framesToNext;input.className='w-8 rounded-md bg-slate-600 px-1 py-0.5 text-center text-white';input.setAttribute('aria-label',`Frames after keyframe ${index+1}`);
-                    input.addEventListener('change',()=>{frame.framesToNext=Math.max(0,Math.min(10000,Math.round(Number(input.value)||0)));input.value=frame.framesToNext;scheduleAnimationSave();});
+                    input.addEventListener('change',()=>{frame.framesToNext=Math.max(0,Math.min(10000,Math.round(Number(input.value)||0)));ensureAnimationBezierLoopFrames();input.value=frame.framesToNext;scheduleAnimationSave();});
                     input.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();input.dispatchEvent(new Event('change'));input.blur();}});
                     gap.append(input,document.createTextNode('frames'));host.append(gap);
                 }
-            });updateAnimationButtons();
+            });updateAnimationButtons();renderAnimationTimelineLines();
+        }
+        function createConformationAnimations(){
+            if(referenceFiles.length<2||!physicsNodes.length)return;
+            if(animationPlaying||animationPreparing)stopAnimation(true);
+            if(animationFrames.length)saveSelectedAnimationFrame();
+            syncActiveAnimation();
+            const base=captureAnimationFrame();
+            const cloneFrame=()=>{const frame=structuredClone(base);frame.id=animationId();frame.framesToNext=30;return frame;};
+            const blank={id:animationId(),title:'Blank animation',frames:[cloneFrame(),cloneFrame()],loop:true,syncKeys:[],interpolation:{}};
+            blank.frames[1].framesToNext=0;
+            const controls=animationControls(),referenceSliders=[...document.querySelectorAll('#referenceInfluenceControls .extra-reference-slider input[type="range"]')];
+            const colorIndex=controls.indexOf(animationEl('physicsColorSelect'));
+            const frames=referenceFiles.map((file,index)=>{
+                const frame=cloneFrame();frame.name=file.pdbId;
+                frame.settings.color='keyframe-difference';
+                if(colorIndex>=0)frame.settings.controls[colorIndex]='keyframe-difference';
+                referenceSliders.forEach((slider,sliderIndex)=>{const controlIndex=controls.indexOf(slider);if(controlIndex>=0)frame.settings.controls[controlIndex]=sliderIndex===index?'1':'0';});
+                return frame;
+            });
+            frames.at(-1).framesToNext=0;
+            const change={id:animationId(),title:'Conformational change using PDBs',frames,loop:true,syncKeys:[],interpolation:{},conformationalChange:true,optimized:false};
+            animationLibrary.push(blank,change);
+            activateAnimation(change);
+            animationSyncKeys=new Set(animationSyncDefinitions().filter(row=>row.category==='Visual variables').map(row=>row.key));
+            change.syncKeys=[...animationSyncKeys];
+            syncAnimationVariables(frames[0]);
+            renderAnimationSyncTable();
+            animationEl('animationEditor').classList.remove('hidden');
+            animationEl('animationEditor').scrollIntoView({behavior:'smooth',block:'start'});
+            saveAnimation();
+        }
+        function startConformationOptimization(record){
+            const entry=animationLibrary.find(item=>item.id===animationActiveId);
+            if(!entry||entry.optimized)return;
+            animationResumePhysics=physicsRunning;
+            animationPreparing=true;
+            animationDisplayOverride=null;
+            showAnimationFrame(0);
+            if(simulationPhase!==2)setSimulationPhase(2);
+            physicsRunning=true;
+            physicsGraphHistory.lastPositions=null;
+            conformationOptimization={entry,record,index:0,started:performance.now(),sampled:0,positions:null};
+            animationEl('conformationOptimizingBadge')?.classList.remove('hidden');
+            animationEl('animationStatus').textContent=`Optimising ${entry.frames[0].name} (1 of ${entry.frames.length})…`;
+            updateAnimationButtons();
+        }
+        function advanceConformationOptimization(now){
+            const state=conformationOptimization;
+            if(!state||now-state.sampled<250)return;
+            const positions=physicsNodes.map(node=>[node.x,node.y,node.z]);
+            let speed=Infinity;
+            if(state.positions){
+                let distance=0,count=0;
+                for(let i=0;i<positions.length;i++)if(['protein','nucleotide'].includes(physicsNodes[i].res.entityType)){
+                    distance+=Math.hypot(...positions[i].map((value,axis)=>value-state.positions[i][axis]));count++;
+                }
+                speed=distance/Math.max(1,count)/Math.max(.001,(now-state.sampled)/1000);
+            }
+            state.positions=positions;state.sampled=now;
+            if(!((now-state.started>=600&&speed<.02)||now-state.started>=20000))return;
+            const frame=state.entry.frames[state.index];
+            state.entry.frames[state.index]=captureAnimationFrame(frame);
+            state.index++;
+            if(state.index<state.entry.frames.length){
+                animationSelected=state.index;
+                applyAnimationSettings(state.entry.frames[state.index].settings);
+                state.started=now;state.sampled=0;state.positions=null;
+                renderAnimationTimeline();
+                animationEl('animationStatus').textContent=`Optimising ${state.entry.frames[state.index].name} (${state.index+1} of ${state.entry.frames.length})…`;
+                return;
+            }
+            state.entry.optimized=true;
+            keyframeDifferenceCache=null;
+            if(physicsColorMode==='keyframe-difference')updatePhysicsNodeColors();
+            const record=state.record,resume=animationResumePhysics;
+            conformationOptimization=null;animationPreparing=false;
+            animationEl('conformationOptimizingBadge')?.classList.add('hidden');
+            physicsRunning=resume;
+            showAnimationFrame(0);
+            saveAnimation();
+            playAnimation(record);
         }
         function stopAnimation(restorePlaybackOrigin=false){
             if(!animationPlaying&&!animationPreparing)return;
             const wasPlaying=animationPlaying;
             const wasRecording=animationRecording,wasPreparing=animationPreparing;
             animationPreparationToken++;
+            conformationOptimization=null;
+            animationEl('conformationOptimizingBadge')?.classList.add('hidden');
             animationPreparing=false;
             animationPlaying=false;
             animationDisplayOverride=null;
             if(physicsRecording&&(wasRecording||wasPreparing))togglePhysicsRecording();
             animationRecording=false;
             animationFinalHoldUntil=0;
-            if(animationResumePhysics)physicsRunning=true;
+            physicsRunning=animationResumePhysics;
             physicsGraphHistory.lastPositions=null;
             animationEl('physicsPauseText').textContent=physicsRunning?'Pause Simulation':'Resume Simulation';
             animationEl('physicsPauseIcon').className=physicsRunning?'fa-solid fa-pause':'fa-solid fa-play text-emerald-400';
@@ -11839,13 +11993,25 @@
             if(wasPlaying&&!wasRecording&&!wasPreparing&&animationFrames.length){
                 showAnimationFrame(restorePlaybackOrigin?Math.min(animationPlaybackOrigin,animationFrames.length-1):animationFrames.length-1);
             }
+            if(animationReferenceInfluenceDeferred){
+                animationReferenceInfluenceDeferred=false;
+                offscreenCaches.morph.dirty=true;
+                drawMorphMatrix();
+                rebuildCutoffSprings();
+            }
             updateAnimationButtons();
         }
         async function playAnimation(record=false){
-            if(animationPreparing)return;
+            if(animationPreparing){if(conformationOptimization)stopAnimation();return;}
             if(animationPlaying){stopAnimation(true);if(!record)return;}
             if(animationFrames.length<2||!physicsNodes.length){animationEl('animationStatus').textContent='Add at least two keyframes to play an animation.';return;}
             saveSelectedAnimationFrame();
+            const currentEntry=animationLibrary.find(item=>item.id===animationActiveId);
+            if(currentEntry?.conformationalChange&&!currentEntry.optimized){
+                startConformationOptimization(record);
+                return;
+            }
+            ensureAnimationBezierLoopFrames();
             animationPlaybackOrigin=animationSelected;
             animationResumePhysics=physicsRunning;physicsRunning=false;
             physicsGraphHistory.lastPositions=null;
@@ -11906,16 +12072,17 @@
             const a=animationFrames[index],targetIndex=index<animationFrames.length-1?index+1:(animationLoop?0:index),b=animationFrames[targetIndex];
             const t=targetIndex===index?0:Math.max(0,Math.min(1,remaining/Math.max(1,animationSegmentFrames(a))));
             if(animationSelected!==index){animationSelected=index;applyAnimationSettings(a.settings);renderAnimationTimeline();}
+            applyInterpolatedAnimationControls(a,b,t);
             animationDisplayOverride=new Array(physicsNodes.length);
             for(let i=0;i<physicsNodes.length;i++){
-                const from=(animationSameConformation?animationFrames[0]:a).coords[i],to=(animationSameConformation?animationFrames[0]:b).coords[i],node=physicsNodes[i];
+                const from=a.coords[i],to=b.coords[i],node=physicsNodes[i];
                 if(!from||!to)continue;
                 node.x=from[0]+(to[0]-from[0])*t;node.y=from[1]+(to[1]-from[1])*t;node.z=from[2]+(to[2]-from[2])*t;
             }
             for(const group of rotationalSymmetryGroups){
                 const start=a.settings.symmetry?.find(item=>item.key===group.key)?.angle||0;
                 const end=b.settings.symmetry?.find(item=>item.key===group.key)?.angle||0;
-                group.angle=start+(end-start)*t;
+                group.angle=start+(end-start)*animationEasedProgress(`symmetry:${group.key}`,t);
             }
             singleChainRotations.clear();
             const chainEntries=new Map([...(a.settings.chainRotations||[]),...(b.settings.chainRotations||[])].map(entry=>[Number(entry.block),entry]));
@@ -11962,12 +12129,18 @@
                     animationAutoSpinDismissed=saved.autoSpinDismissed===true;
                     if(Array.isArray(saved.animations))animationLibrary=saved.animations.filter(item=>Array.isArray(item.frames)&&item.frames.length&&item.frames.every(frame=>frame.coords?.length===physicsNodes.length));
                     else if(Array.isArray(saved.frames)&&saved.frames.every(frame=>frame.coords?.length===physicsNodes.length))
-                        animationLibrary=[{id:animationId(),title:'Animation 1',frames:saved.frames,loop:saved.loop!==false,sameConformation:false}];
-                    for(const entry of animationLibrary)if(entry.autoGenerated||entry.title==='Auto-generated spin animation'){
-                        entry.autoGenerated=true;
-                        if(entry.sameConformation!==true){entry.sameConformation=true;repairedSpin=true;}
-                        const shared=entry.frames[0]?.coords;
-                        if(shared)for(const frame of entry.frames)frame.coords=shared;
+                        animationLibrary=[{id:animationId(),title:'Animation 1',frames:saved.frames,loop:saved.loop!==false,syncKeys:[]}];
+                    for(const entry of animationLibrary){
+                        entry.frames.forEach(stripAnimationGraphSettings);
+                        stripAnimationGraphMetadata(entry);
+                        if(entry.autoGenerated||entry.title==='Auto-generated spin animation')entry.autoGenerated=true;
+                        if(entry.sameConformation===true||entry.autoGenerated){
+                            entry.syncKeys=Array.isArray(entry.syncKeys)?entry.syncKeys:[];
+                            if(!entry.syncKeys.includes('conformation')){entry.syncKeys.push('conformation');repairedSpin=true;}
+                            const shared=entry.frames[0]?.coords;
+                            if(shared)for(const frame of entry.frames)frame.coords=structuredClone(shared);
+                        }
+                        delete entry.sameConformation;
                     }
                     const active=animationLibrary.find(item=>item.id===saved.activeId)||animationLibrary[0];
                     if(active)activateAnimation(active);
@@ -11979,9 +12152,14 @@
                 first.framesToNext=30;second.framesToNext=0;
                 first.settings.symmetry=rotationalSymmetryGroups.map(group=>({key:group.key,angle:0}));
                 second.settings.symmetry=rotationalSymmetryGroups.map(group=>({key:group.key,angle:359*Math.PI/180}));
-                const entry={id:animationId(),title:'Auto-generated spin animation',frames:[first,second],loop:true,sameConformation:true,autoGenerated:true};
+                const entry={id:animationId(),title:'Auto-generated spin animation',frames:[first,second],loop:true,syncKeys:['conformation'],autoGenerated:true};
                 animationLibrary.push(entry);
                 if(!animationActiveId)activateAnimation(entry);
+                const previous=animationActiveId;
+                animationActiveId=entry.id;animationFrames=entry.frames;animationSyncKeys=new Set(entry.syncKeys);
+                for(const row of animationSyncDefinitions())if(row.category==='Physics variables')animationSyncKeys.add(row.key);
+                entry.syncKeys=[...animationSyncKeys];
+                if(previous!==entry.id){const selected=animationLibrary.find(item=>item.id===previous);if(selected)activateAnimation(selected);}
                 saveAnimation();
             }
             configureAutoSpinAnimation();
@@ -11991,18 +12169,26 @@
             const rows=[];
             const first=animationFrames[0];if(!first)return rows;
             const controls=animationControls();
-            const controlNames=controls.map((input,index)=>input.id||input.getAttribute('aria-label')||input.closest('label')?.textContent.trim().slice(0,40)||`Control ${index+1}`);
+            const controlNames=controls.map((input,index)=>{
+                const label=input.closest('label')||[...document.querySelectorAll('label[for]')].find(item=>item.htmlFor===input.id&&input.id);
+                const labelText=label?.textContent.trim().replace(/\s+/g,' ').replace(/\s*[\d.]+(?:%|×|Å|°)?\s*$/,'').slice(0,60);
+                const idText=input.id.replace(/([a-z])([A-Z])/g,'$1 $2').replace(/\b(?:Slider|Select|Input)\b/g,'').trim();
+                return input.getAttribute('aria-label')||labelText||idText||input.title||`${input.type==='range'?'Slider':'Selection'} ${index+1}`;
+            });
             for(let i=0;i<controlNames.length;i++){
-                if(controls[i]?.dataset.symmetryRotation)continue;
-                rows.push({label:controlNames[i],graphable:controls[i]?.type==='range',step:Number(controls[i]?.step)||0,
+                if(controls[i]?.dataset.symmetryRotation||controls[i]?.closest('#physicsGraphPanel'))continue;
+                rows.push({key:`control:${i}`,category:controls[i]?.closest('#physicsControlsPanel')?'Physics variables':'Visual variables',label:controlNames[i],graphable:controls[i]?.type==='range',step:Number(controls[i]?.step)||0,
                     get:frame=>frame.settings.controls?.[i],set:(frame,value)=>{frame.settings.controls[i]=value;}});
             }
-            for(const flag of Object.keys(first.settings.flags||{}))rows.push({label:flag.replace(/([A-Z])/g,' $1'),get:frame=>String(frame.settings.flags?.[flag]),set:(frame,value)=>{frame.settings.flags[flag]=value==='true';}});
-            for(const chain of Object.keys(first.settings.chainVisibility||{}))rows.push({label:`${displayChainName(chain)} visible`,get:frame=>String(frame.settings.chainVisibility?.[chain]!==false),set:(frame,value)=>{frame.settings.chainVisibility[chain]=value==='true';}});
-            first.settings.referenceOverlayVisibility?.forEach((_,index)=>rows.push({label:`Reference PDB ${index+1} visible`,get:frame=>String(frame.settings.referenceOverlayVisibility?.[index]===true),set:(frame,value)=>{frame.settings.referenceOverlayVisibility[index]=value==='true';}}));
-            for(const id of Object.keys(first.settings.buttonStates||{}))rows.push({label:id.replace(/([A-Z])/g,' $1'),get:frame=>frame.settings.buttonStates?.[id],set:(frame,value)=>{frame.settings.buttonStates[id]=value==='true'?'true':'false';}});
-            for(const property of ['representation','color','referenceColor','springColor'])rows.push({label:property,get:frame=>frame.settings[property],set:(frame,value)=>{frame.settings[property]=value;}});
-            for(const group of rotationalSymmetryGroups)rows.push({label:`Rotation of symmetry group ${group.key} (°)`,graphable:true,step:1,
+            for(const flag of Object.keys(first.settings.flags||{}))rows.push({key:`flag:${flag}`,category:flag==='rigidBodySimulation'?'Physics variables':'Visual variables',label:flag.replace(/([A-Z])/g,' $1'),get:frame=>String(frame.settings.flags?.[flag]),set:(frame,value)=>{frame.settings.flags[flag]=value==='true';}});
+            for(const chain of Object.keys(first.settings.chainVisibility||{}))rows.push({key:`chain:${chain}`,category:'Visual variables',label:`${displayChainName(chain)} visible`,get:frame=>String(frame.settings.chainVisibility?.[chain]!==false),set:(frame,value)=>{frame.settings.chainVisibility[chain]=value==='true';}});
+            first.settings.referenceOverlayVisibility?.forEach((_,index)=>rows.push({key:`reference:${index}`,category:'Visual variables',label:`Reference PDB ${index+1} visible`,get:frame=>String(frame.settings.referenceOverlayVisibility?.[index]===true),set:(frame,value)=>{frame.settings.referenceOverlayVisibility[index]=value==='true';}}));
+            for(const id of Object.keys(first.settings.buttonStates||{})){
+                if(animationEl(id)?.closest('#physicsGraphPanel'))continue;
+                rows.push({key:`button:${id}`,category:animationEl(id)?.closest('#physicsControlsPanel')?'Physics variables':'Visual variables',label:id.replace(/([A-Z])/g,' $1'),get:frame=>frame.settings.buttonStates?.[id],set:(frame,value)=>{frame.settings.buttonStates[id]=value==='true'?'true':'false';}});
+            }
+            for(const property of ['representation','color','referenceColor','springColor'])rows.push({key:`property:${property}`,category:'Visual variables',label:property.replace(/([A-Z])/g,' $1'),get:frame=>frame.settings[property],set:(frame,value)=>{frame.settings[property]=value;}});
+            for(const group of rotationalSymmetryGroups)rows.push({key:`symmetry:${group.key}`,category:'Visual variables',label:`Rotation of ${symmetryGroupName(group)} (°)`,graphable:true,step:1,
                 get:frame=>String(Math.round((frame.settings.symmetry?.find(item=>item.key===group.key)?.angle||0)*180/Math.PI)),
                 set:(frame,value)=>{const degrees=Number(value);if(!Number.isFinite(degrees))throw Error('Rotation must be a number of degrees.');
                     const angle=degrees*Math.PI/180;
@@ -12014,6 +12200,81 @@
                 }});
             return rows;
         }
+        function animationSyncDefinitions(){
+            if(!animationFrames.length)return [];
+            const controls=animationControls();
+            const rows=animationRowDefinitions().filter(row=>row.key&&(!row.key.startsWith('control:')||!controls[Number(row.key.slice(8))]?.id?.startsWith('physicsGraph')));
+            const conformation={key:'conformation',category:'Conformation',label:'Conformation',get:frame=>frame.coords,
+                set:(frame,value)=>{frame.coords=structuredClone(value);}};
+            const rotations=[...new Set(physicsNodes.map(node=>node.blockIdx))].map(block=>({key:`chainRotation:${block}`,category:'Visual variables',label:`${chainProteinName(block)} single-chain rotation`,
+                get:frame=>(frame.settings.chainRotations||[]).find(item=>Number(item.block)===block)||null,
+                set:(frame,value)=>{frame.settings.chainRotations=(frame.settings.chainRotations||[]).filter(item=>Number(item.block)!==block);if(value)frame.settings.chainRotations.push(structuredClone(value));}}));
+            return [conformation,...rows.filter(row=>row.category==='Physics variables'),...rows.filter(row=>row.category==='Visual variables'),...rotations];
+        }
+        function syncAnimationVariables(source,onlyKey=null){
+            if(!source||!animationSyncKeys.size)return;
+            for(const row of animationSyncDefinitions()){
+                if(!animationSyncKeys.has(row.key)||(onlyKey&&row.key!==onlyKey))continue;
+                const value=structuredClone(row.get(source));
+                for(const frame of animationFrames)if(frame!==source)row.set(frame,value);
+            }
+            keyframeDifferenceCache=null;
+        }
+        function toggleAnimationVariableSync(row){
+            saveSelectedAnimationFrame();
+            if(animationSyncKeys.has(row.key)){
+                animationSyncKeys.delete(row.key);
+                if(row.category==='Physics variables')animationSyncKeys.delete('conformation');
+            }else{
+                animationSyncKeys.add(row.key);
+                if(row.key==='conformation')for(const variable of animationSyncDefinitions())if(variable.category==='Physics variables')animationSyncKeys.add(variable.key);
+                syncAnimationVariables(animationFrames[animationSelected]);
+            }
+            renderAnimationSyncTable();
+            if(!animationEl('animationTableDialog').classList.contains('hidden')){
+                if(!animationEl('animationTableContent').classList.contains('hidden'))renderAnimationTable();
+                else renderAnimationGraph();
+            }
+            scheduleAnimationSave();
+        }
+        function animationVariableSyncButton(row){
+            const button=document.createElement('button'),synced=animationSyncKeys.has(row.key);
+            button.type='button';button.className='animation-variable-sync';
+            button.textContent=synced?'Synced':'Independent';button.setAttribute('aria-pressed',String(synced));
+            button.setAttribute('aria-label',`${row.label}: ${synced?'Synced':'Independent'} across keyframes`);
+            button.addEventListener('click',()=>toggleAnimationVariableSync(row));
+            return button;
+        }
+        function renderAnimationSyncTable(){
+            const host=animationEl('animationSyncTable');if(!host||host.classList.contains('hidden'))return;
+            host.replaceChildren();
+            const rows=animationSyncDefinitions();
+            const allSynced=rows.length>0&&rows.every(row=>animationSyncKeys.has(row.key));
+            const bulk=document.createElement('button');bulk.type='button';bulk.className='animation-sync-all';
+            bulk.textContent=allSynced?'Make all independent':'Sync all';bulk.setAttribute('aria-pressed',String(allSynced));
+            bulk.addEventListener('click',()=>{
+                saveSelectedAnimationFrame();
+                if(allSynced)animationSyncKeys.clear();
+                else{animationSyncKeys=new Set(rows.map(row=>row.key));syncAnimationVariables(animationFrames[animationSelected]);}
+                renderAnimationSyncTable();scheduleAnimationSave();
+            });
+            const note=document.createElement('p');note.className='mb-2 text-xs text-slate-300';
+            note.textContent='Sync copies the selected keyframe’s value to every keyframe and keeps future edits shared. Syncing conformation also syncs all physics variables.';
+            host.append(note);
+            const table=document.createElement('table');
+            const header=table.createTHead().insertRow();
+            const variableHeading=document.createElement('th');variableHeading.textContent='Variable';
+            const syncHeading=document.createElement('th');syncHeading.append(bulk);
+            header.append(variableHeading,syncHeading);
+            const body=table.createTBody();
+            let category='';
+            for(const row of rows){
+                if(row.category!==category){category=row.category;const section=body.insertRow(),heading=section.insertCell();section.insertCell();const title=document.createElement('strong');title.textContent=category;heading.append(title);}
+                const tr=body.insertRow(),label=tr.insertCell(),action=tr.insertCell();label.textContent=row.label;
+                action.append(animationVariableSyncButton(row));
+            }
+            host.append(table);
+        }
         function animationComparisonColor(value,base,extent){
             const current=Number(value),initial=Number(base);
             if(!Number.isFinite(current)||!Number.isFinite(initial)||current===initial)return '#f8fafc';
@@ -12024,7 +12285,7 @@
         function renderAnimationTable(){
             saveSelectedAnimationFrame();const host=animationEl('animationTableContent');host.replaceChildren();
             const table=document.createElement('table');table.className='min-w-full border-collapse text-left text-xs text-slate-200';
-            const head=table.createTHead().insertRow();for(const title of ['Changed setting',...animationFrames.map((frame,i)=>frame.name||`Keyframe ${i+1}`)]){const cell=document.createElement('th');cell.className='sticky top-0 bg-slate-800 p-2 text-amber-300';cell.textContent=title;head.append(cell);}
+            const head=table.createTHead().insertRow();for(const title of ['Changed setting',...animationFrames.map((frame,i)=>frame.name||`Keyframe ${i+1}`),'Sync']){const cell=document.createElement('th');cell.className='sticky top-0 bg-slate-800 p-2 text-amber-300';cell.textContent=title;head.append(cell);}
             const body=table.createTBody();
             const rows=animationTableRows||animationRowDefinitions().filter(row=>new Set(animationFrames.map(frame=>row.get(frame))).size>1);
             animationTableRows=rows;
@@ -12035,19 +12296,126 @@
                     const input=document.createElement(row.large?'textarea':'input');input.value=row.get(frame)??'';input.className='min-w-32 rounded-lg bg-slate-800 p-2 text-white '+(row.large?'h-20 w-72 font-mono':'');
                     input.style.color=animationComparisonColor(input.value,base,extent);
                     input.setAttribute('aria-label',`${row.label}, keyframe ${index+1}`);
-                    input.addEventListener('change',()=>{try{row.set(frame,input.value);input.setCustomValidity('');
+                    input.addEventListener('change',()=>{try{row.set(frame,input.value);syncAnimationVariables(frame,row.key);input.setCustomValidity('');
                         const updatedBase=row.get(animationFrames[0]);
                         const updatedExtent=Math.max(0,...animationFrames.map(item=>Math.abs(Number(row.get(item))-Number(updatedBase))).filter(Number.isFinite));
-                        tr.querySelectorAll('input,textarea').forEach((cell,column)=>{cell.style.color=animationComparisonColor(row.get(animationFrames[column]),updatedBase,updatedExtent);});
+                        tr.querySelectorAll('input,textarea').forEach((cell,column)=>{cell.value=row.get(animationFrames[column])??'';cell.style.color=animationComparisonColor(cell.value,updatedBase,updatedExtent);});
                         if(index===animationSelected)showAnimationFrame(index);scheduleAnimationSave();
                     }catch(error){input.setCustomValidity(error.message);input.reportValidity();}});
-                    td.append(input);});}
+                    td.append(input);});
+                const syncCell=tr.insertCell();syncCell.className='border-b border-slate-700 p-2';
+                if(row.key)syncCell.append(animationVariableSyncButton(row));
+            }
             host.append(table);
+        }
+        function animationCsvCell(value){
+            const text=String(value??'');
+            const safe=/^\s*[=+@]/.test(text)||/^\s*-(?!\d)/.test(text)?`'${text}`:text;
+            return `"${safe.replace(/"/g,'""')}"`;
+        }
+        function animationCsvModelSignature(){
+            const signature=animationNodeSignature();let hash=2166136261;
+            for(let i=0;i<signature.length;i++)hash=Math.imul(hash^signature.charCodeAt(i),16777619);
+            return `${physicsNodes.length}:${(hash>>>0).toString(16)}`;
+        }
+        function buildAnimationTableCsv(){
+            if(!animationFrames.length)throw Error('There is no animation to save.');
+            const count=animationFrames.length;
+            const metadata={version:1,signature:animationCsvModelSignature(),references:referenceFiles.map(file=>file.pdbId),title:animationTitle,loop:animationLoop,
+                syncKeys:[...animationSyncKeys],interpolation:{...animationInterpolation},
+                conformationalChange:animationLibrary.find(item=>item.id===animationActiveId)?.conformationalChange===true,
+                optimized:animationLibrary.find(item=>item.id===animationActiveId)?.optimized===true};
+            const values=(key,label,cells,sync='',interpolate='')=>[key,label,...cells,sync,interpolate];
+            const lines=[['Key','Setting',...animationFrames.map((_,index)=>`Keyframe ${index+1}`),'Sync','Interpolate'],
+                values('@name','Keyframe name',animationFrames.map((frame,index)=>frame.name||`Keyframe ${index+1}`)),
+                values('@framesToNext','Frames after keyframe',animationFrames.map(frame=>animationSegmentFrames(frame)))];
+            const frameData=animationFrames.map(frame=>JSON.stringify(frame)),chunkSize=12000;
+            const metadataData=JSON.stringify(metadata);
+            for(let part=0;part<Math.ceil(metadataData.length/chunkSize);part++)
+                lines.push(values(`@metadata:${part}`,`Animation metadata (part ${part+1})`,[metadataData.slice(part*chunkSize,(part+1)*chunkSize),...Array(count-1).fill('')]));
+            for(let part=0;part<Math.ceil(Math.max(...frameData.map(data=>data.length))/chunkSize);part++)
+                lines.push(values(`@frame:${part}`,`Complete keyframe data (part ${part+1})`,frameData.map(data=>data.slice(part*chunkSize,(part+1)*chunkSize))));
+            for(const row of animationSyncDefinitions()){
+                const cells=row.key==='conformation'?Array(count).fill(''):animationFrames.map(frame=>{
+                    const value=row.get(frame);return value===null||typeof value==='object'?JSON.stringify(value):String(value??'');
+                });
+                lines.push(values(row.key,row.label,cells,animationSyncKeys.has(row.key)?'Synced':'Independent',animationInterpolation[row.key]||'linear'));
+            }
+            return lines.map(line=>line.map(animationCsvCell).join(',')).join('\r\n')+'\r\n';
+        }
+        function parseAnimationTableCsv(text){
+            const rows=[];let row=[],cell='',quoted=false;
+            const restored=value=>value.startsWith("'")&&(/^\s*[=+@]/.test(value.slice(1))||/^\s*-(?!\d)/.test(value.slice(1)))?value.slice(1):value;
+            for(let i=0;i<text.length;i++){
+                const char=text[i];
+                if(quoted){if(char==='"'){if(text[i+1]==='"'){cell+='"';i++;}else quoted=false;}else cell+=char;}
+                else if(char==='"'){if(cell)throw Error('Invalid CSV quoting.');quoted=true;}
+                else if(char===','){row.push(restored(cell));cell='';}
+                else if(char==='\n'){row.push(restored(cell.replace(/\r$/,'')));if(row.some(value=>value!==''))rows.push(row);row=[];cell='';}
+                else cell+=char;
+            }
+            if(quoted)throw Error('The CSV has an unclosed quoted field.');
+            if(cell||row.length){row.push(restored(cell));rows.push(row);}
+            const header=rows.shift();
+            if(header?.[0]?.replace(/^\uFEFF/,'')!=='Key'||header[1]!=='Setting'||header.at(-2)!=='Sync'||header.at(-1)!=='Interpolate')
+                throw Error('Upload a CSV saved with “Save animation table”.');
+            const count=header.length-4;
+            if(count<2||count>100)throw Error('The CSV must contain 2–100 keyframes.');
+            const byKey=new Map();
+            for(const record of rows){if(record.length!==header.length)throw Error(`CSV row “${record[0]}” has the wrong number of columns.`);
+                if(byKey.has(record[0]))throw Error(`Duplicate CSV row “${record[0]}”.`);byKey.set(record[0],record);}
+            const metadataChunks=[];
+            for(let part=0;byKey.has(`@metadata:${part}`);part++)metadataChunks.push(byKey.get(`@metadata:${part}`)[2]);
+            if(!metadataChunks.length)throw Error('The CSV is missing its animation metadata.');
+            const metadata=JSON.parse(metadataChunks.join(''));
+            if(metadata?.version!==1||metadata.signature!==animationCsvModelSignature()||
+                JSON.stringify(metadata.references)!==JSON.stringify(referenceFiles.map(file=>file.pdbId)))
+                throw Error('This animation table belongs to a different model or an unsupported format.');
+            const frameChunks=[];
+            for(let part=0;byKey.has(`@frame:${part}`);part++)frameChunks.push(byKey.get(`@frame:${part}`));
+            if(!frameChunks.length)throw Error('The CSV is missing its keyframe data.');
+            const controlsCount=animationControls().length;
+            const frames=Array.from({length:count},(_,index)=>{
+                const frame=JSON.parse(frameChunks.map(chunk=>chunk[index+2]).join(''));
+                if(!frame||!Array.isArray(frame.coords)||frame.coords.length!==physicsNodes.length||
+                    !frame.coords.every(point=>Array.isArray(point)&&point.length===3&&point.every(Number.isFinite))||
+                    !frame.settings||!Array.isArray(frame.settings.controls)||frame.settings.controls.length!==controlsCount)
+                    throw Error(`Keyframe ${index+1} is incomplete or has coordinates for another model.`);
+                frame.id=animationId();frame.name=String(frame.name||`Keyframe ${index+1}`).slice(0,80);
+                frame.framesToNext=animationSegmentFrames(frame);
+                if(!Array.isArray(frame.displayCoords)||frame.displayCoords.length!==physicsNodes.length)frame.displayCoords=structuredClone(frame.coords);
+                stripAnimationGraphSettings(frame);
+                return frame;
+            });
+            const names=byKey.get('@name'),durations=byKey.get('@framesToNext');
+            frames.forEach((frame,index)=>{
+                if(names)frame.name=String(names[index+2]||`Keyframe ${index+1}`).slice(0,80);
+                if(durations){const value=Number(durations[index+2]);if(!Number.isInteger(value)||value<0||value>10000)throw Error(`Invalid frame count for keyframe ${index+1}.`);frame.framesToNext=value;}
+            });
+            const definitions=animationSyncDefinitions(),syncKeys=new Set(Array.isArray(metadata.syncKeys)?metadata.syncKeys:[]),interpolation={...metadata.interpolation};
+            for(const definition of definitions){
+                const record=byKey.get(definition.key);if(!record)continue;
+                if(definition.key!=='conformation')frames.forEach((frame,index)=>{
+                    const value=record[index+2];if(value==='')return;
+                    definition.set(frame,definition.key.startsWith('chainRotation:')?JSON.parse(value):value);
+                });
+                const sync=record[count+2];
+                if(sync==='Synced')syncKeys.add(definition.key);
+                else if(sync==='Independent')syncKeys.delete(definition.key);
+                else throw Error(`Invalid sync setting for “${definition.label}”.`);
+                const mode=record[count+3];if(mode==='bezier'||mode==='linear')interpolation[definition.key]=mode;
+                else throw Error(`Invalid interpolation for “${definition.label}”.`);
+            }
+            if(syncKeys.has('conformation'))for(const definition of definitions)if(definition.category==='Physics variables')syncKeys.add(definition.key);
+            const imported={frames,title:String(metadata.title||animationTitle).slice(0,100),loop:metadata.loop!==false,
+                syncKeys:[...syncKeys],interpolation,conformationalChange:metadata.conformationalChange===true,optimized:metadata.optimized===true};
+            stripAnimationGraphMetadata(imported);
+            return imported;
         }
         function renderAnimationGraph(){
             const host=animationEl('animationGraphContent');host.replaceChildren();
             const note=document.createElement('p');note.className='mb-3 text-xs text-slate-400';
-            note.textContent='Numeric settings are normalised to their value range. Switches between options and on/off states are not shown.';
+            note.textContent='Numeric settings are normalised to their value range. Switches between options and on/off states are not shown. Bézier interpolation eases smoothly into and out of each keyframe.';
             host.append(note);
             const rows=(animationTableRows||animationRowDefinitions()).filter(row=>row.graphable&&
                 animationFrames.every(frame=>Number.isFinite(Number(row.get(frame))))&&
@@ -12056,22 +12424,45 @@
             const svgNS='http://www.w3.org/2000/svg';
             const svgElement=(name,attrs={})=>{const element=document.createElementNS(svgNS,name);for(const [key,value] of Object.entries(attrs))element.setAttribute(key,String(value));return element;};
             const totals=[0];for(let i=0;i<animationFrames.length-1;i++)totals.push(totals.at(-1)+animationSegmentFrames(animationFrames[i]));
-            const duration=Math.max(1,totals.at(-1));
+            const duration=Math.max(1,animationDurationFrames());
             rows.forEach(row=>{
                 const values=animationFrames.map(frame=>Number(row.get(frame))),min=Math.min(...values),max=Math.max(...values),span=Math.max(1e-9,max-min);
                 const block=document.createElement('div');block.className='animation-graph-row';
                 const title=document.createElement('div');title.className='flex justify-between gap-3 text-xs text-slate-200';
                 const label=document.createElement('strong');label.textContent=row.label;
                 const range=document.createElement('span');range.className='text-slate-400';range.textContent=`${min.toFixed(2)} → ${max.toFixed(2)}`;
-                title.append(label,range);block.append(title);
+                title.append(label,range);
+                if(row.key){
+                    const actions=document.createElement('div');actions.className='flex flex-col items-end gap-1';
+                    actions.append(animationVariableSyncButton(row));
+                    const interpolationLabel=document.createElement('span');interpolationLabel.className='text-slate-400';interpolationLabel.textContent='Interpolate';
+                    const interpolationButton=document.createElement('button');interpolationButton.type='button';interpolationButton.className='animation-interpolation-button';
+                    interpolationButton.textContent=animationInterpolation[row.key]==='bezier'?'Bezier':'Linear';
+                    interpolationButton.setAttribute('aria-label',`Interpolation for ${row.label}: ${interpolationButton.textContent}`);
+                    interpolationButton.addEventListener('click',()=>{
+                        animationInterpolation[row.key]=animationInterpolation[row.key]==='bezier'?'linear':'bezier';
+                        ensureAnimationBezierLoopFrames();renderAnimationGraph();scheduleAnimationSave();
+                    });
+                    actions.append(interpolationLabel,interpolationButton);title.append(actions);
+                }
+                block.append(title);
                 const svg=svgElement('svg',{viewBox:'0 0 600 145',role:'img','aria-label':`${row.label} across keyframes`});
                 const x=index=>40+totals[index]/duration*520;
                 const y=value=>99-(value-min)/span*76;
                 for(const level of [20,58,99])svg.append(svgElement('line',{x1:40,x2:560,y1:level,y2:level,stroke:'#475569','stroke-width':1}));
-                const path=svgElement('polyline',{fill:'none',stroke:'#facc15','stroke-width':2.5});svg.append(path);
+                const path=svgElement('path',{fill:'none',stroke:'#facc15','stroke-width':2.5});svg.append(path);
                 const dots=[];
                 const redraw=()=>{
-                    path.setAttribute('points',values.map((value,index)=>`${x(index)},${y(value)}`).join(' '));
+                    let shape=`M ${x(0)} ${y(values[0])}`;
+                    const segment=(x0,y0,x1,y1)=>animationInterpolation[row.key]==='bezier'
+                        ?` C ${x0+(x1-x0)/3} ${y0}, ${x1-(x1-x0)/3} ${y1}, ${x1} ${y1}`
+                        :` L ${x1} ${y1}`;
+                    for(let index=1;index<values.length;index++)shape+=segment(x(index-1),y(values[index-1]),x(index),y(values[index]));
+                    if(animationSegmentFrames(animationFrames.at(-1))>0){
+                        const endValue=animationLoop?values[0]:values.at(-1);
+                        shape+=segment(x(values.length-1),y(values.at(-1)),560,y(endValue));
+                    }
+                    path.setAttribute('d',shape);
                     dots.forEach((dot,index)=>{dot.setAttribute('cy',y(values[index]));dot.setAttribute('aria-label',`Keyframe ${index+1}: ${values[index].toFixed(2)}`);});
                 };
                 values.forEach((value,index)=>{
@@ -12083,7 +12474,7 @@
                         let next=min+(1-Math.max(0,Math.min(1,(svgY-23)/76)))*span;
                         if(row.step>=1)next=Math.round(next/row.step)*row.step;
                         const valueText=row.step>=1?String(Math.round(next)):String(+next.toFixed(4));
-                        try{row.set(animationFrames[index],valueText);values[index]=Number(row.get(animationFrames[index]));redraw();scheduleAnimationSave();}
+                        try{row.set(animationFrames[index],valueText);syncAnimationVariables(animationFrames[index],row.key);animationFrames.forEach((frame,column)=>{values[column]=Number(row.get(frame));});redraw();scheduleAnimationSave();}
                         catch(error){animationEl('animationStatus').textContent=error.message;}
                     });
                     const finish=()=>{if(!dragging)return;dragging=false;if(index===animationSelected)showAnimationFrame(index);};
@@ -12092,6 +12483,12 @@
                     const tick=svgElement('text',{x:x(index),y:119,'text-anchor':'middle',fill:'#94a3b8','font-size':10});tick.textContent=`K${index+1}`;svg.append(tick);
                     const frameCount=svgElement('text',{x:x(index),y:137,'text-anchor':'middle',fill:'#cbd5e1','font-size':9});frameCount.textContent=`Frame ${totals[index]}`;svg.append(frameCount);
                 });
+                if(animationSegmentFrames(animationFrames.at(-1))>0){
+                    const endTick=svgElement('text',{x:560,y:119,'text-anchor':'end',fill:'#94a3b8','font-size':10});
+                    endTick.textContent=animationLoop?'Loop to K1':'End';svg.append(endTick);
+                    const endCount=svgElement('text',{x:560,y:137,'text-anchor':'end',fill:'#cbd5e1','font-size':9});
+                    endCount.textContent=`Frame ${duration}`;svg.append(endCount);
+                }
                 redraw();block.append(svg);host.append(block);
             });
         }
@@ -12101,6 +12498,7 @@
             animationEl('animationEditor').classList.toggle('hidden');
             if(!animationEl('animationEditor').classList.contains('hidden'))animationEl('animationEditor').scrollIntoView({behavior:'smooth',block:'start'});
         });
+        animationEl('conformationAnimationBtn')?.addEventListener('click',createConformationAnimations);
         animationEl('animationSelector')?.addEventListener('change',event=>{
             if(!physicsNodes.length)return;
             if(animationPlaying||animationPreparing)stopAnimation(true);
@@ -12121,19 +12519,21 @@
             animationTitle=event.target.value.trim()||'Untitled animation';event.target.value=animationTitle;
             saveAnimation();renderAnimationSelector();
         });
-        animationEl('sameAnimationConformation')?.addEventListener('click',()=>{
-            if(!animationFrames.length)return;
-            saveSelectedAnimationFrame();animationSameConformation=!animationSameConformation;
-            if(animationSameConformation){const shared=animationFrames[animationSelected].coords;
-                for(const frame of animationFrames)frame.coords=structuredClone(shared);
-            }
-            renderAnimationSelector();scheduleAnimationSave();
+        animationEl('animationSyncToggle')?.addEventListener('click',()=>{
+            const table=animationEl('animationSyncTable'),expanded=table.classList.toggle('hidden')===false;
+            animationEl('animationSyncToggle').setAttribute('aria-expanded',String(expanded));
+            animationEl('animationSyncToggle').querySelector('i').className=`fa-solid fa-chevron-${expanded?'up':'down'} ml-1`;
+            if(expanded)renderAnimationSyncTable();
         });
         animationEl('closeAnimationEditor')?.addEventListener('click',()=>animationEl('animationEditor').classList.add('hidden'));
         animationEl('quickPlayAnimationBtn')?.addEventListener('click',()=>playAnimation());
-        animationEl('animationPlay')?.addEventListener('click',()=>playAnimation());
+        animationEl('animationPlay')?.addEventListener('click',()=>{
+            if(!animationPlaying&&!animationPreparing&&animationFrames.length>=2&&physicsNodes.length)
+                animationEl('physicsContainer')?.scrollIntoView({behavior:'smooth',block:'start'});
+            playAnimation();
+        });
         animationEl('recordAnimation')?.addEventListener('click',()=>playAnimation(true));
-        animationEl('loopAnimation')?.addEventListener('click',()=>{animationLoop=!animationLoop;updateAnimationButtons();scheduleAnimationSave();});
+        animationEl('loopAnimation')?.addEventListener('click',()=>{animationLoop=!animationLoop;ensureAnimationBezierLoopFrames();updateAnimationButtons();scheduleAnimationSave();});
         const animationButtonIcons={duplicateAnimationKeyframe:'fa-copy',deleteAnimationKeyframe:'fa-trash',showAnimationTable:'fa-table',toggleAnimationGraph:'fa-chart-line',recordAnimation:'fa-video',loopAnimation:'fa-repeat',deleteAnimation:'fa-trash'};
         Object.entries(animationButtonIcons).forEach(([id,iconName])=>{const button=animationEl(id);if(!button||button.querySelector('i'))return;const icon=document.createElement('i');icon.className=`fa-solid ${iconName} mr-1`;icon.setAttribute('aria-hidden','true');button.prepend(icon);});
         animationEl('duplicateAnimationKeyframe')?.addEventListener('click',()=>{if(!animationFrames.length)return;saveSelectedAnimationFrame();const copy=structuredClone(animationFrames[animationSelected]);copy.id=`${Date.now()}-${Math.random()}`;animationFrames.splice(++animationSelected,0,copy);showAnimationFrame(animationSelected);scheduleAnimationSave();});
@@ -12160,8 +12560,42 @@
         });
         // Place the dialog outside the simulation panel's overflow clipping.
         document.body.append(animationEl('animationTableDialog'));
+        function animationTableTransferStatus(message,error=false){
+            const status=animationEl('animationTableTransferStatus');
+            status.textContent=message;status.classList.toggle('hidden',!message);
+            status.style.color=error?'#f87171':'';
+        }
+        animationEl('saveAnimationTable')?.addEventListener('click',()=>{
+            try{
+                const csv=buildAnimationTableCsv(),blob=new Blob(['\uFEFF',csv],{type:'text/csv;charset=utf-8'});
+                const url=URL.createObjectURL(blob),link=document.createElement('a');
+                link.href=url;link.download=`${(animationTitle||'animation').replace(/[^a-z0-9_-]+/gi,'-').replace(/^-|-$/g,'')||'animation'}-table.csv`;
+                document.body.append(link);link.click();link.remove();
+                setTimeout(()=>URL.revokeObjectURL(url),60000);
+                animationTableTransferStatus('Animation table saved as CSV.');
+            }catch(error){animationTableTransferStatus(error.message,true);}
+        });
+        animationEl('uploadAnimationTable')?.addEventListener('click',()=>animationEl('animationTableFile')?.click());
+        animationEl('animationTableFile')?.addEventListener('change',async event=>{
+            const file=event.target.files?.[0];if(!file)return;
+            try{
+                if(animationPlaying||animationPreparing)throw Error('Stop playback before uploading an animation table.');
+                if(file.size>100*1024*1024)throw Error('The CSV is too large to load (100 MB limit).');
+                const imported=parseAnimationTableCsv(await file.text());
+                const entry=animationLibrary.find(item=>item.id===animationActiveId);
+                if(!entry)throw Error('Select an animation before uploading a table.');
+                Object.assign(entry,imported,{autoGenerated:false});
+                animationTableRows=null;activateAnimation(entry);
+                saveAnimation();
+                if(animationEl('animationGraphContent').classList.contains('hidden'))renderAnimationTable();else renderAnimationGraph();
+                animationTableTransferStatus(`Uploaded “${file.name}” and replaced the current animation.`);
+            }catch(error){animationTableTransferStatus(error.message,true);}
+            finally{event.target.value='';}
+        });
         animationEl('showAnimationTable')?.addEventListener('click',()=>{
+            animationTableTransferStatus('');
             animationTableRows=null;renderAnimationTable();animationEl('animationGraphContent').classList.add('hidden');animationEl('animationTableContent').classList.remove('hidden');
+            animationEl('animationTableDialog').querySelector('h2').textContent='Keyframe table';
             animationEl('toggleAnimationGraph').textContent='Graph editor';
             animationEl('animationTableDialog').classList.remove('hidden');animationEl('animationTableDialog').classList.add('flex');
             document.body.classList.add('animation-dialog-open');
@@ -12171,6 +12605,7 @@
             const showGraph=graph.classList.contains('hidden');
             if(showGraph)renderAnimationGraph();else renderAnimationTable();
             graph.classList.toggle('hidden',!showGraph);table.classList.toggle('hidden',showGraph);
+            animationEl('animationTableDialog').querySelector('h2').textContent=showGraph?'Graph editor':'Keyframe table';
             animationEl('toggleAnimationGraph').textContent=showGraph?'Table editor':'Graph editor';
         });
         function closeAnimationTable(){animationEl('animationTableDialog').classList.add('hidden');animationEl('animationTableDialog').classList.remove('flex');document.body.classList.remove('animation-dialog-open');animationTableRows=null;}
