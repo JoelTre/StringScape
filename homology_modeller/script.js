@@ -142,6 +142,34 @@
             'uniprot-disulfide':'Disulfide bond'
         };
         const UNI_PROT_FEATURE_COLORS = ['#f97316','#eab308','#22c55e','#06b6d4','#a78bfa','#ec4899','#ef4444','#84cc16','#14b8a6','#6366f1'];
+        const topologicalDomainColors=new Map();
+        const topologicalDomainLabel=feature=>(feature.description||'Unlabelled domain').trim().toLocaleLowerCase();
+        const topologicalDomainKey=(accession,feature)=>`${accession}:${feature.start}:${feature.end}:${topologicalDomainLabel(feature)}`;
+        function topologicalDomainHex(hue,lightness){
+            const saturation=.7,lum=lightness/100,chroma=(1-Math.abs(2*lum-1))*saturation;
+            const sector=(hue%360)/60,secondary=chroma*(1-Math.abs(sector%2-1));
+            const rgb=sector<1?[chroma,secondary,0]:sector<2?[secondary,chroma,0]:sector<3?[0,chroma,secondary]:
+                sector<4?[0,secondary,chroma]:sector<5?[secondary,0,chroma]:[chroma,0,secondary];
+            const offset=lum-chroma/2;
+            return '#'+rgb.map(value=>Math.round((value+offset)*255).toString(16).padStart(2,'0')).join('');
+        }
+        function rebuildTopologicalDomainColors(){
+            topologicalDomainColors.clear();
+            const regions=[];
+            for(const [accession,entry] of uniProtAnnotations)for(const feature of entry.features)
+                if(feature.type==='Topological domain')regions.push({accession,feature,label:topologicalDomainLabel(feature)});
+            const labels=[...new Set(regions.map(region=>region.label))].sort();
+            for(const [labelIndex,label] of labels.entries()){
+                const matching=regions.filter(region=>region.label===label)
+                    .sort((a,b)=>a.accession.localeCompare(b.accession)||a.feature.start-b.feature.start||a.feature.end-b.feature.end);
+                const hue=(210+labelIndex*137.508)%360;
+                matching.forEach(({accession,feature},index)=>{
+                    // One hue per annotation label; lightness distinguishes its regions.
+                    const lightness=matching.length===1?55:32+44*index/(matching.length-1);
+                    topologicalDomainColors.set(topologicalDomainKey(accession,feature),topologicalDomainHex(hue,lightness));
+                });
+            }
+        }
         function updateUniProtFetchingBadge() {
             document.getElementById('uniProtFetchingBadge')?.classList.toggle('hidden',!(uniProtLookupPending&&Boolean(UNI_PROT_FEATURE_MODES[physicsColorMode])));
         }
@@ -170,6 +198,7 @@
             return uniProtFeatureShade(uniProtAccession(atom?.sourcePdbId),feature);
         }
         function uniProtFeatureShade(accession,feature) {
+            if(feature.type==='Topological domain')return topologicalDomainColors.get(topologicalDomainKey(accession,feature))||'#64748b';
             const key=`${accession}:${feature.type}:${feature.description||feature.start}`;
             let hash=0;for(const char of key)hash=(hash*31+char.charCodeAt(0))>>>0;
             return UNI_PROT_FEATURE_COLORS[hash%UNI_PROT_FEATURE_COLORS.length];
@@ -324,9 +353,10 @@
             }
             uniProtLookupPending=false;updateUniProtFetchingBadge();
             uniProtAnnotations=new Map(results.filter(result=>result.status==='fulfilled').map(result=>result.value));
+            rebuildTopologicalDomainColors();
             uniProtUnavailable=accessions.filter((_,index)=>results[index].status==='rejected');
             for(const result of results)if(result.status==='rejected')console.warn('UniProt annotation unavailable:',result.reason);
-            renderAboutProteinComplex();updateUniProtChainLabels();updateMembraneSideNames();
+            renderAboutProteinComplex();updateUniProtChainLabels();updateMembraneSideNames();updateSymmetryRotationControls();configureAutoSpinAnimation();
             if(UNI_PROT_FEATURE_MODES[physicsColorMode]){renderUniProtFeatureKey();updatePhysicsNodeColors();updateAtomRepresentation();updateModel1AlignmentColors();}
         }
         let referenceFiles = [], referenceAssembly = null, referenceInfluences = [];
@@ -1510,7 +1540,6 @@
             setTimeout(() => input.classList.remove('string-id-glow'), 3100);
             clearUploadedStructure('reference');
             cancelStringMatching(); hideStringMatchResults();
-            scheduleReferenceSpeciesLookup(input.value);
             updateSiftsButton(true); updateFindMatchesReady(); updateBuildButtonState(); updateExampleSelection();
             saveRecentModel({updateExistingOnly:true});
             renderRecentModels();
@@ -1603,7 +1632,7 @@
                 }
                 const best = Number(referenceSearchResults[0].score) || 0;
                 // Relative threshold retains results close to the top hit despite query-specific score normalization.
-                const ids = referenceSearchResults.filter(hit => Number(hit.score) >= best * 0.7).slice(0,5).map(hit => hit.identifier);
+                const ids = referenceSearchResults.filter(hit => Number(hit.score) >= best * 0.7).slice(0,mode === 'query' ? 2 : 5).map(hit => hit.identifier);
                 setReferenceSearchSelection(ids);
                 const view = document.getElementById('viewReferenceSearchResultsBtn'); view.classList.remove('hidden');
                 status.textContent = `Found ${data.total_count ?? referenceSearchResults.length} matching PDB entries; selected ${ids.length} within 70% of the top score.`;
@@ -1717,8 +1746,6 @@
             referenceSpeciesController?.abort();
             const revision = ++referenceSpeciesRevision;
             const note = document.getElementById('referenceSpeciesNote'), links = document.getElementById('referenceSpeciesLinks'), status = document.getElementById('referenceSpeciesStatus');
-            const title=document.getElementById('stringFinderTitle');
-            title.textContent='Find the UniProt IDs for a species other than the reference PDB species';
             note.textContent = ''; links.replaceChildren(); status.textContent = '';
             let ids=[]; try { ids=referenceInputParts(raw).ids.filter(id=>/^[0-9][A-Z0-9]{3}$/.test(id)); } catch (_) {}
             if (!ids.length) return;
@@ -1747,7 +1774,6 @@
                     }));
                     if (revision !== referenceSpeciesRevision) return;
                     const names=[...new Set(results.flatMap(result=>result.organisms.map(organism=>organism.ncbi_scientific_name)))];
-                    if(names.length)title.textContent=`Find the UniProt IDs for a species other than ${names.join(' and ')}`;
                     if (!names.length) {status.textContent = 'No source species is recorded for these references.'; return;}
                     note.replaceChildren(document.createTextNode(' (note that '));
                     results.forEach((result,index)=>{
@@ -1786,7 +1812,7 @@
 
         async function updateReferenceStructureName(entry, generation) {
             const label = document.getElementById('referenceStructureName');
-            label.textContent = entry.sequence ? 'Reference sequence' : 'Reference: ' + entry.id;
+            label.textContent = entry.sequence ? 'Reference: sequence' : 'Reference: ' + entry.id;
             if (entry.sequence || !/^[0-9][A-Z0-9]{3}$/i.test(entry.id)) return;
             try {
                 const response = await fetch(`https://data.rcsb.org/rest/v1/core/entry/${encodeURIComponent(entry.id)}`);
@@ -2013,13 +2039,32 @@
         }
         let preferredNames = new Map(), preferredNamesJob = null, preferredNamesState = '';
         let stringAliasStatusReference = null, stringMatchStatusReference = null;
+        const selectedStringFiles={sequence:null,aliases:null};
+        const stringSequenceFile=()=>selectedStringFiles.sequence;
+        const stringAliasesFile=()=>selectedStringFiles.aliases;
+        function selectStringFiles(input){
+            let invalid=false,aliasesChanged=false;
+            for(const file of input.files){
+                if(/^\d+\.protein\.sequences\.v[\d.]+\.fa$/i.test(file.name))selectedStringFiles.sequence=file;
+                else if(/^\d+\.protein\.aliases\.v[\d.]+\.txt$/i.test(file.name)){
+                    aliasesChanged=selectedStringFiles.aliases!==file;selectedStringFiles.aliases=file;
+                }else invalid=true;
+            }
+            const picker=input.closest('.string-file-picker'),names=[stringSequenceFile()?.name,stringAliasesFile()?.name].filter(Boolean);
+            picker.classList.toggle('has-file',names.length>0);
+            picker.querySelector('.string-file-name').textContent=names.length?names.join(' · '):'No files selected';
+            document.getElementById('stringFilesStatus').textContent=invalid?'Choose STRING .fa sequences and .txt aliases files with the expected names.':
+                names.length===1?'Choose the other STRING file as well.':'';
+            cancelStringMatching();updateFindMatchesReady();
+            if(aliasesChanged)loadPreferredNames();
+        }
         function currentStringReferenceKey() {
             return document.getElementById('pdbInput1').value.trim().toUpperCase().replace(/\s*,\s*/g, ',');
         }
         function loadPreferredNames() {
             cancelStringMatching();
             preferredNamesJob?.terminate();preferredNamesJob=null;preferredNames.clear();
-            const file=document.getElementById('stringAliasesFile').files[0];
+            const file=stringAliasesFile();
             const status=document.getElementById('stringAliasStatus');
             stringAliasStatusReference = currentStringReferenceKey();
             preferredNamesState=file?'loading':'';
@@ -2051,7 +2096,7 @@
             return preferredNames.get(raw) || preferredNames.get(id) || null;
         }
         function updatePreferredNameCells() {
-            const show=Boolean(document.getElementById('stringAliasesFile').files[0]);
+            const show=Boolean(stringAliasesFile());
             document.getElementById('preferredNameHeader').classList.toggle('hidden',!show);
             document.querySelectorAll('[data-preferred-name-row]').forEach(cell=>{
                 cell.classList.toggle('hidden',!show);
@@ -2117,8 +2162,8 @@
         function updateFindMatchesReady() {
             const id = document.getElementById('pdbInput1').value.trim().toUpperCase();
             const ready = (selectedReferencePdbIds().length > 0 || Boolean(uploadedStructureFiles.reference && id === uploadedStructureFiles.reference.inputValue))
-                && Boolean(document.getElementById('stringSequencesFile').files?.length)
-                && Boolean(document.getElementById('stringAliasesFile').files?.length);
+                && Boolean(stringSequenceFile())
+                && Boolean(stringAliasesFile());
             const button = document.getElementById('findStringMatchesBtn');
             if (ready && !findMatchesWasReady) {
                 button.classList.remove('ready-glow');
@@ -2139,7 +2184,7 @@
         async function findStringReferenceMatches() {
             const button=document.getElementById('findStringMatchesBtn'), status=document.getElementById('stringMatchStatus');
             const result=document.getElementById('stringMatchResults');
-            const fasta=document.getElementById('stringSequencesFile').files[0], aliases=document.getElementById('stringAliasesFile').files[0];
+            const fasta=stringSequenceFile(), aliases=stringAliasesFile();
             const referenceInput=document.getElementById('pdbInput1').value;
             stringMatchStatusReference = currentStringReferenceKey();
             status.textContent = 'Loading reference chains…';
@@ -2157,7 +2202,7 @@
                 const entries=modelInputEntries(referenceInput,'reference');
                 if(!entries.length)throw new Error('Enter a reference PDB ID first.');
                 const files=await Promise.all(entries.map(entry=>loadModelInput(entry,false)));
-                const inputsUnchanged=()=>document.getElementById('pdbInput1').value===referenceInput && document.getElementById('stringSequencesFile').files[0]===fasta && document.getElementById('stringAliasesFile').files[0]===aliases;
+                const inputsUnchanged=()=>document.getElementById('pdbInput1').value===referenceInput && stringSequenceFile()===fasta && stringAliasesFile()===aliases;
                 if(!inputsUnchanged())throw new Error('Inputs changed; press Find matches again.');
                 const queries=files.flatMap(file=>Object.entries(file.parsed.chains).filter(([,atoms])=>atoms[0]?.entityType==='protein').map(([chain,atoms])=>({chain:`${file.pdbId}: ${chain}`,sequence:atoms.map(a=>a.singleChar).join('')}))).filter(q=>q.sequence.length);
                 if(!queries.length)throw new Error('No protein chains found in the reference.');
@@ -3509,7 +3554,7 @@
                         const visibleTarget=new THREE.Vector3();
                         if(raycaster.ray.intersectPlane(dragPlane,visibleTarget)){
                             const node=physicsNodes[draggedResidue.index];
-                            const group=rotationalSymmetryGroups.find(item=>item.blockIds.has(node.blockIdx)&&Math.abs(item.angle)>1e-8);
+                            const group=visualRotationForNode(node);
                             draggedResidue.target.copy(group?rotateVisualPoint(visibleTarget,group,-group.angle):visibleTarget);
                             pinDraggedResidue();
                         }
@@ -3530,7 +3575,7 @@
 
                         const currentIntersect = new THREE.Vector3();
                         if (raycaster.ray.intersectPlane(dragPlane, currentIntersect)) {
-                            const group=rotationalSymmetryGroups.find(item=>item.blockIds.has(draggedBlockIdx)&&Math.abs(item.angle)>1e-8);
+                            const group=visualRotationForNode(physicsNodes.find(node=>node.blockIdx===draggedBlockIdx));
                             const previous=group?rotateVisualPoint(prevDragWorldPos,group,-group.angle):prevDragWorldPos;
                             const current=group?rotateVisualPoint(currentIntersect,group,-group.angle):currentIntersect;
                             const dx=current.x-previous.x,dy=current.y-previous.y,dz=current.z-previous.z;
@@ -3651,11 +3696,61 @@
                 .add(new THREE.Vector3().crossVectors(axis,offset).multiplyScalar(Math.sin(angle)))
                 .add(axis.clone().multiplyScalar(axis.dot(offset)*(1-Math.cos(angle))));
         }
-        function visualPointForNode(node){
-            const point=new THREE.Vector3(node.x,node.y,node.z);
-            const group=rotationalSymmetryGroups.find(item=>item.blockIds.has(node.blockIdx)&&Math.abs(item.angle)>1e-8);
-            return group?rotateVisualPoint(point,group):point;
+        const singleChainRotations=new Map();
+        function chainRotationGroup(block){return rotationalSymmetryGroups.find(group=>group.blockIds.has(block));}
+        function chainProteinName(block){
+            const node=physicsNodes.find(item=>item.blockIdx===block),accession=uniProtAccession(node?.res?.atoms2?.[0]?.sourcePdbId||'');
+            return uniProtAnnotations.get(accession)?.name||'';
         }
+        function symmetryGroupName(group){
+            const blocks=[...group.blockIds],names=[...new Set(blocks.map(chainProteinName).filter(Boolean))];
+            const letters=blocks.map(block=>physicsNodes.find(node=>node.blockIdx===block)?.res?.c1||block).join(', ');
+            return `${names.join(' / ')||'Rotation'} (${letters})`;
+        }
+        function chainRotationAxis(block,key){
+            if(key?.startsWith('group:')){const group=rotationalSymmetryGroups.find(item=>item.key===key.slice(6));if(group)return group;}
+            const nodes=physicsNodes.filter(node=>node.blockIdx===block);
+            const origin=new THREE.Vector3();for(const node of nodes)origin.add(new THREE.Vector3(node.x,node.y,node.z));
+            if(nodes.length)origin.multiplyScalar(1/nodes.length);
+            const normal=new THREE.Vector3(key==='self-y'?0:key==='self-z'?0:1,key==='self-y'?1:0,key==='self-z'?1:0);
+            return {origin,normal};
+        }
+        function visualRotationForNode(node){
+            const entry=singleChainRotations.get(node.blockIdx);
+            if(entry?.overridden)return {...chainRotationAxis(node.blockIdx,entry.axisKey),angle:entry.angle};
+            return chainRotationGroup(node.blockIdx)||null;
+        }
+        function visualPointForNode(node){
+            const point=new THREE.Vector3(node.x,node.y,node.z),rotation=visualRotationForNode(node);
+            return rotation&&Math.abs(rotation.angle)>1e-8?rotateVisualPoint(point,rotation):point;
+        }
+        function updateSingleChainRotations(){
+            const body=document.getElementById('singleChainRotationsRows');if(!body)return;
+            const blocks=[...new Set(physicsNodes.map(node=>node.blockIdx))];
+            const signature=blocks.join('|')+';'+rotationalSymmetryGroups.map(group=>group.key+symmetryGroupName(group)).join('|');
+            if(body.dataset.signature!==signature){
+                body.dataset.signature=signature;body.replaceChildren();
+                for(const block of blocks){
+                    const row=document.createElement('tr'),group=chainRotationGroup(block),node=physicsNodes.find(item=>item.blockIdx===block);
+                    row.dataset.block=block;row.className='border-t border-slate-700';
+                    const name=document.createElement('td');name.className='p-2';name.textContent=chainProteinName(block)?`${chainProteinName(block)} (${node.res.c1})`:`Chain ${node.res.c1||block}`;
+                    const cell=document.createElement('td');cell.className='p-2';const input=document.createElement('input');input.type='number';input.step='any';input.className='w-24 rounded-lg bg-slate-900 px-2 py-1 text-white';input.setAttribute('aria-label',`Rotation for ${name.textContent}`);cell.append(input);
+                    const axisCell=document.createElement('td');axisCell.className='p-2';const select=document.createElement('select');select.className='rounded-lg bg-slate-900 px-2 py-1 text-white';
+                    for(const [value,label] of [['self-x','Self X'],['self-y','Self Y'],['self-z','Self Z'],...rotationalSymmetryGroups.map(item=>[`group:${item.key}`,`${symmetryGroupName(item)} axis`])]){const option=document.createElement('option');option.value=value;option.textContent=label;select.append(option);}axisCell.append(select);
+                    const syncCell=document.createElement('td');syncCell.className='p-2';const sync=document.createElement('button');sync.type='button';sync.textContent='Sync to group';sync.className='hidden rounded-lg bg-violet-600 px-2 py-1 text-white';syncCell.append(sync);
+                    const override=()=>{const value=Number(input.value);if(!Number.isFinite(value))return;singleChainRotations.set(block,{angle:value*Math.PI/180,axisKey:select.value,overridden:true});sync.classList.toggle('hidden',!group);scheduleAnimationCapture();};
+                    input.addEventListener('input',override);input.addEventListener('keydown',event=>{if(event.key==='Enter')input.blur();});select.addEventListener('change',override);
+                    sync.addEventListener('click',()=>{singleChainRotations.delete(block);updateSingleChainRotations();scheduleAnimationCapture();});
+                    row.append(name,cell,axisCell,syncCell);body.append(row);
+                }
+            }
+            for(const row of body.rows){const block=Number(row.dataset.block),entry=singleChainRotations.get(block),group=chainRotationGroup(block),input=row.cells[1].querySelector('input'),select=row.cells[2].querySelector('select'),sync=row.cells[3].querySelector('button');
+                if(document.activeElement!==input||animationPlaying)input.value=String(Math.round((entry?.overridden?entry.angle:group?.angle||0)*180/Math.PI*100)/100);
+                if(document.activeElement!==select)select.value=entry?.axisKey|| (group?`group:${group.key}`:'self-z');
+                sync.classList.toggle('hidden',!entry?.overridden||!group);
+            }
+        }
+        document.getElementById('singleChainRotationsToggle')?.addEventListener('click',event=>{const panel=document.getElementById('singleChainRotationsPanel');panel.classList.toggle('hidden');event.currentTarget.setAttribute('aria-expanded',String(!panel.classList.contains('hidden')));updateSingleChainRotations();});
         function updateResetRotationButton(){
             document.querySelectorAll('[data-reset-symmetry-rotation]').forEach(button=>{
                 const group=rotationalSymmetryGroups.find(item=>item.key===button.dataset.resetSymmetryRotation);
@@ -3664,13 +3759,13 @@
         }
         function updateSymmetryRotationControls(){
             const host=document.getElementById('symmetryRotationControls');if(!host?.dataset)return;
-            const keys=rotationalSymmetryGroups.map(group=>group.key).join('|');
+            const keys=rotationalSymmetryGroups.map(group=>group.key+symmetryGroupName(group)).join('|');
             if(host.dataset.groupKeys!==keys){
                 host.replaceChildren();host.dataset.groupKeys=keys;
                 rotationalSymmetryGroups.forEach((group,index)=>{
                     const names=[...group.blockIds].map(block=>physicsNodes.find(node=>node.blockIdx===block)?.res?.c1||block);
                     const label=document.createElement('label');label.className='inline-flex items-center gap-2 whitespace-nowrap text-xs text-slate-300';
-                    const caption=document.createElement('span');caption.textContent=`Rotation ${index+1} (${names.join(', ')})`;
+                    const caption=document.createElement('span');caption.textContent=symmetryGroupName(group);
                     const input=document.createElement('input');input.type='text';input.inputMode='decimal';input.dataset.symmetryRotation=group.key;
                     input.setAttribute('aria-label',`Rotational symmetry group ${index+1} angle in degrees`);
                     input.title='Type any angle, or drag up/right to increase it';
@@ -3698,7 +3793,7 @@
                 const group=rotationalSymmetryGroups.find(item=>item.key===input.dataset.symmetryRotation);if(!group)return;
                 if(document.activeElement!==input||animationPlaying)input.value=String(Math.round(group.angle*180/Math.PI*100)/100);
             });
-            updateResetRotationButton();
+            updateResetRotationButton();updateSingleChainRotations();
         }
         function backboneRestLength(i){
             const a=physicsPositions[i],b=physicsPositions[i+1];
@@ -3731,13 +3826,11 @@
             }else{node.x=target.x;node.y=target.y;node.z=target.z;enforceDraggedBackboneContinuity(draggedResidue.index);}
         }
         function applyVisualSymmetryRotation(){
-            if(!rotationalSymmetryGroups.some(group=>Math.abs(group.angle)>1e-8))return null;
+            if(!rotationalSymmetryGroups.some(group=>Math.abs(group.angle)>1e-8)&&![...singleChainRotations.values()].some(entry=>entry.overridden&&Math.abs(entry.angle)>1e-8))return null;
             const original=[];
             for(const node of physicsNodes){
-                const group=rotationalSymmetryGroups.find(item=>item.blockIds.has(node.blockIdx)&&Math.abs(item.angle)>1e-8);
-                if(!group)continue;
-                original.push([node,node.x,node.y,node.z]);
-                const point=rotateVisualPoint(new THREE.Vector3(node.x,node.y,node.z),group);
+                const rotation=visualRotationForNode(node);if(!rotation||Math.abs(rotation.angle)<=1e-8)continue;
+                original.push([node,node.x,node.y,node.z]);const point=rotateVisualPoint(new THREE.Vector3(node.x,node.y,node.z),rotation);
                 node.x=point.x;node.y=point.y;node.z=point.z;
             }
             return original;
@@ -4104,6 +4197,7 @@
 
         function initPhysicsSimulation() {
             cancelPendingSimulationRender();
+            singleChainRotations.clear();document.getElementById('singleChainRotationsRows')?.removeAttribute('data-signature');
             disposeMembrane();
             disposeAtomRepresentation();
             disposeCartoonRepresentation();
@@ -5606,6 +5700,7 @@
         const membraneLabelLeaderTransitions = {negative:false,positive:false};
         let membraneSliced = false;
         let membraneSliceAngle = 0;
+        let membraneSlicePercent = 50;
         let membraneSizeScale = 1;
         let lipidsVisible = true;
         let membraneDetectionStats = null;
@@ -5858,6 +5953,7 @@
             const sliceButton=document.getElementById('sliceMembraneBtn');
             if(sliceButton){sliceButton.disabled=!detected;sliceButton.textContent=membraneSliced?'Show full membrane':'Slice membrane';sliceButton.setAttribute('aria-pressed',String(membraneSliced));}
             document.getElementById('membraneSliceAngleControl')?.classList.toggle('hidden',!detected||!membraneSliced);
+            document.getElementById('membraneSlicePercentControl')?.classList.toggle('hidden',!detected||!membraneSliced);
             const sizeSlider=document.getElementById('membraneSizeSlider');if(sizeSlider)sizeSlider.disabled=!detected;
         }
         const MEMBRANE_DIRECTIONS = (() => {
@@ -6161,9 +6257,10 @@
             membraneDisplayedExtent=null;membraneExtentLastFrame=0;
             membraneRepulsionActive.clear();membraneRepelledColorMask=null;
             membraneDetectionStats=null;renderMembraneDetectionStats();
-            membraneVisible=false;lipidsVisible=true;membraneSliced=false;membraneSliceAngle=0;
+            membraneVisible=false;lipidsVisible=true;membraneSliced=false;membraneSliceAngle=0;membraneSlicePercent=50;
             const sliceSlider=document.getElementById('membraneSliceAngleSlider');if(sliceSlider)sliceSlider.value='0';
             const sliceValue=document.getElementById('membraneSliceAngleValue');if(sliceValue)sliceValue.textContent='0°';
+            const percentSlider=document.getElementById('membraneSlicePercentSlider');if(percentSlider)percentSlider.value='50';
             updateMembraneToggleUI();
         }
         function membranePlatePoint(geometry,x,y,side,offset={cx:0,cy:0,cz:0}){
@@ -6183,14 +6280,30 @@
                 excludeProteins?membraneLipidFootprints(geometry,side):null):[];
             return {positions,indices};
         }
+        let membraneSliceThresholdCache={key:null,value:0};
+        function membraneSliceThreshold(angle,grid,percent){
+            if(percent<=0)return -Infinity;
+            if(percent>=100)return Infinity;
+            if(percent===50)return 0;
+            const key=`${angle}:${grid}:${percent}`;
+            if(membraneSliceThresholdCache.key===key)return membraneSliceThresholdCache.value;
+            const cos=Math.cos(angle),sin=Math.sin(angle),projections=[];
+            for(let y=0;y<grid;y++)for(let x=0;x<grid;x++)
+                projections.push(((x+.5)/grid*2-1)*cos+((y+.5)/grid*2-1)*sin);
+            projections.sort((a,b)=>a-b);
+            const value=projections[Math.min(projections.length-1,Math.floor(projections.length*percent/100))];
+            membraneSliceThresholdCache={key,value};
+            return value;
+        }
         function membranePlateCutoutIndices(geometry,side,grid,footprints,sliceAngle=null){
             const indices=[],cellWidth=2*geometry.extent/grid;
             const cutoff=6.2+cellWidth*Math.SQRT2/2;
             const sliceCos=sliceAngle===null?0:Math.cos(sliceAngle),sliceSin=sliceAngle===null?0:Math.sin(sliceAngle);
+            const sliceCutoff=sliceAngle===null?0:membraneSliceThreshold(sliceAngle,grid,membraneSlicePercent)*geometry.extent;
             for(let y=0;y<grid;y++)for(let x=0;x<grid;x++){
                 const px=((x+.5)/grid*2-1)*geometry.extent;
                 const py=((y+.5)/grid*2-1)*geometry.extent;
-                if(sliceAngle!==null&&px*sliceCos+py*sliceSin<0)continue;
+                if(sliceAngle!==null&&px*sliceCos+py*sliceSin<sliceCutoff)continue;
                 if(footprints){
                     const nearest=nearestMembraneProtein(px,py,footprints);
                     if(nearest&&nearest.distance<cutoff)continue;
@@ -6436,6 +6549,8 @@
                 }
             }
             const follow=1-Math.exp(-dt/3),damping=Math.exp(-motionDt*1.5);
+            const sliceCos=Math.cos(membraneSliceAngle),sliceSin=Math.sin(membraneSliceAngle);
+            const sliceCutoff=membraneSliced?membraneSliceThreshold(membraneSliceAngle,64,membraneSlicePercent)*geometry.extent:0;
             for(let i=0;i<system.particles.length;i++){
                 const p=system.particles[i];
                 const oldX=p.previousX,oldY=p.previousY;
@@ -6456,7 +6571,7 @@
                 const axes=lipidMoleculeAxes(geometry,p.x,p.y,p.side);
                 const bob=.85*Math.sin(now*.0015*lipidMotionScale()+p.lipidPhase);
                 const displayX=p.world.x+axes.inward[0]*bob,displayY=p.world.y+axes.inward[1]*bob,displayZ=p.world.z+axes.inward[2]*bob;
-                const sliceVisible=!membraneSliced||p.x*Math.cos(membraneSliceAngle)+p.y*Math.sin(membraneSliceAngle)>=0;
+                const sliceVisible=!membraneSliced||p.x*sliceCos+p.y*sliceSin>=sliceCutoff;
                 const selectionVisible=!linkedSelection||(i===selectedLipidIndex?selectedResiduesVisible:unselectedResiduesVisible);
                 const displayVisible=sliceVisible&&selectionVisible;
                 system.dummy.position.set(displayX,displayY,displayZ);system.dummy.scale.setScalar(displayVisible?1:0);system.dummy.updateMatrix();system.mesh.setMatrixAt(i,system.dummy.matrix);
@@ -7626,7 +7741,7 @@
             updateBuildButtonState();
         }
         function toggleStringFinder() {
-            const content = document.getElementById('stringFinderContent');
+            const content = document.getElementById('stringUploadBox');
             const expanded = content.classList.toggle('hidden') === false;
             document.getElementById('stringFinderToggle').setAttribute('aria-expanded', String(expanded));
             document.getElementById('stringFinderChevron').className = 'fa-solid fa-chevron-' + (expanded ? 'up' : 'down');
@@ -7645,13 +7760,13 @@
                 const selected = button.dataset.reference === reference && button.dataset.alphafold.toUpperCase().replace(/\s*,\s*/g, ',') === alphaFold;
                 button.setAttribute('aria-pressed', String(selected));
                 button.className = selected
-                    ? 'bg-teal-700 hover:bg-teal-600 text-white text-xs px-2.5 py-1 rounded font-mono border border-teal-500/40 transition'
+                    ? 'bg-sky-300 hover:bg-sky-200 text-slate-950 text-xs px-2.5 py-1 rounded font-mono transition'
                     : 'bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded text-slate-300 font-mono border border-slate-700 transition';
             });
         }
 
         function clearModelUI() {
-            uniProtLookupController?.abort();uniProtLookupController=null;uniProtLookupPending=false;updateUniProtFetchingBadge();uniProtAnnotations=new Map();uniProtUnavailable=[];
+            uniProtLookupController?.abort();uniProtLookupController=null;uniProtLookupPending=false;updateUniProtFetchingBadge();uniProtAnnotations=new Map();topologicalDomainColors.clear();uniProtUnavailable=[];
             renderAboutProteinComplex();
             validationState.version++;validationState.pairs=[];validationState.byPair.clear();validationState.pae.clear();validationState.selected=null;
             validationState.matrixView={zoom:1,x:0,y:0};
@@ -7760,7 +7875,6 @@
             try {referenceParts=referenceInputParts(pdbId1);} catch (_) {}
             saveRecentModel({updateExistingOnly:Boolean(referenceParts?.searched)});
             updateExampleSelection();
-            scheduleReferenceSpeciesLookup(pdbId1, 0);
             modelBuildAbortController?.abort();
             modelBuildAbortController = new AbortController();
             const buildSignal = modelBuildAbortController.signal;
@@ -7793,7 +7907,7 @@
                 const entries2 = modelInputEntries(pdbId2Raw, 'alphaFold');
                 if (!entries1.length) throw new Error('Enter at least one Reference PDB ID.');
                 if (!entries2.length) throw new Error('Enter at least one AlphaFold ID or sequence.');
-                if (entries1.length > 1) document.getElementById('referenceStructureName').textContent = `References: ${entries1.map(entry=>entry.id).join(' + ')}`;
+                if (entries1.length > 1) document.getElementById('referenceStructureName').textContent = `Reference: ${entries1.map(entry=>entry.id).join(' + ')}`;
                 else if (entries1[0].uploadFile) document.getElementById('referenceStructureName').textContent = `Reference: ${entries1[0].id}`;
                 else void updateReferenceStructureName(entries1[0], modelBuildGeneration);
                 const id2List = entries2.map(entry => entry.id);
@@ -7831,8 +7945,8 @@
                 currentReferenceFile = file1;
                 pdbId1 = file1.pdbId;
                 const parsed1 = file1.parsed;
-                if (files1.length > 1) document.getElementById('referenceStructureName').textContent = `References: ${files1.map(file=>file.parsed.title||file.pdbId).join(' + ')}`;
-                else if (parsed1.title) document.getElementById('referenceStructureName').textContent = parsed1.title;
+                if (files1.length > 1) document.getElementById('referenceStructureName').textContent = `Reference: ${files1.map(file=>file.parsed.title||file.pdbId).join(' + ')}`;
+                else if (parsed1.title) document.getElementById('referenceStructureName').textContent = `Reference: ${parsed1.title}`;
                 updateProgressBar(45);
                 const sequenceCount = fileResults2.filter(file => file.sequenceOnly).length;
                 const fallbackIds = fileResults2.filter(file => file.sequenceFallback).map(file => file.pdbId);
@@ -8345,6 +8459,39 @@
                 document.getElementById('membraneSliceAngleValue').textContent=`${degrees}°`;
                 if(membraneMeshes)for(const mesh of membraneMeshes.children)mesh.userData.lastCutout=0;
             });
+            const slicePercentInput=document.getElementById('membraneSlicePercentSlider');
+            const setSlicePercent=value=>{
+                if(!Number.isFinite(value))return;
+                membraneSlicePercent=Math.round(Math.max(0,Math.min(100,value))*100)/100;
+                if(membraneMeshes)for(const mesh of membraneMeshes.children)mesh.userData.lastCutout=0;
+            };
+            slicePercentInput?.addEventListener('input',event=>{
+                if(event.target.value.trim())setSlicePercent(Number(event.target.value));
+            });
+            slicePercentInput?.addEventListener('change',()=>{
+                if(slicePercentInput.value.trim())setSlicePercent(Number(slicePercentInput.value));
+                slicePercentInput.value=String(membraneSlicePercent);
+            });
+            slicePercentInput?.addEventListener('keydown',event=>{
+                if(event.key==='Enter'){event.preventDefault();slicePercentInput.dispatchEvent(new Event('change'));slicePercentInput.blur();}
+            });
+            let slicePercentDrag=null;
+            slicePercentInput?.addEventListener('pointerdown',event=>{
+                if(event.button!==0)return;
+                slicePercentDrag={x:event.clientX,y:event.clientY,start:membraneSlicePercent,moved:false};
+                slicePercentInput.setPointerCapture(event.pointerId);
+            });
+            slicePercentInput?.addEventListener('pointermove',event=>{
+                if(!slicePercentDrag)return;
+                const dx=event.clientX-slicePercentDrag.x,dy=event.clientY-slicePercentDrag.y;
+                if(!slicePercentDrag.moved&&Math.hypot(dx,dy)<4)return;
+                slicePercentDrag.moved=true;
+                setSlicePercent(slicePercentDrag.start+(dx-dy)*.5);
+                slicePercentInput.value=String(membraneSlicePercent);
+                event.preventDefault();
+            });
+            slicePercentInput?.addEventListener('pointerup',()=>{slicePercentDrag=null;});
+            slicePercentInput?.addEventListener('pointercancel',()=>{slicePercentDrag=null;});
             document.getElementById('membraneSizeSlider')?.addEventListener('input',event=>{
                 membraneSizeScale=Math.max(.5,Math.min(2,Number(event.target.value)||1));
                 document.getElementById('membraneSizeValue').textContent=`${membraneSizeScale.toFixed(2)}×`;
@@ -8373,6 +8520,7 @@
                     }
                 }
                 if(id2)loadModelPair(id1,id2);
+                else if(selectedReferencePdbIds().length)void fetchSiftsUniProtIds({autoBuild:true});
             });
 
             document.getElementById('PDBChainSelect').addEventListener('change', (e) => {
@@ -9258,7 +9406,7 @@
                 aligned:'<span style="color:#ef4444">Red</span>: aligned residue · <span style="color:#f97316">Orange</span>: similar, non-identical aligned residue (positive BLOSUM62 score) · <span style="color:#94a3b8">Grey</span>: unaligned residue',
                 membrane:'<span style="color:#ef4444">Red</span>: helix or sheet residue inside the membrane plates · <span style="color:#f97316">Orange</span>: other membrane-associated residue · <span style="color:#7dd3fc">Light blue</span>: other residues, including helix and sheet portions outside the membrane',
                 'membrane-placement':'Membrane placement influence: <span style="color:#ef4444">red</span> hydrophobic · <span style="color:#2563eb">blue</span> charged · <span style="color:#94a3b8">grey</span> other. Stronger colour means greater exposed-surface influence.',
-                'membrane-repelled':'<span style="color:#f97316">Orange</span>: currently repelled from the detected membrane · <span style="color:#94a3b8">Grey</span>: not repelled.',
+                'membrane-repelled':'<span style="color:#f97316">Orange</span>: currently repelled from the detected membrane to improve model · <span style="color:#94a3b8">Grey</span>: not repelled.',
                 charge:'Charge: <span style="color:#2563eb">blue</span> positive (Lys/Arg) · <span style="color:#93c5fd">pale blue</span> His · <span style="color:#ef4444">red</span> negative (Asp/Glu) · <span style="color:#94a3b8">grey</span> neutral.',
                 hydrophobicity:'Hydrophobicity: <span style="color:#38bdf8">hydrophilic</span> → <span style="color:#f97316">hydrophobic</span>',
                 secondary:'Secondary structure: <span style="color:#d946ef">helix</span> · <span style="color:#facc15">sheet</span> · <span style="color:#94a3b8">coil</span>',
@@ -9266,7 +9414,9 @@
                 difference:'',
                 'af-difference':'AF-Homology model difference: <span style="color:#38bdf8">small</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">large</span> displacement after aligning each AlphaFold chain to its current homology chain; grey: no AlphaFold coordinates.'
             };
-            if(UNI_PROT_FEATURE_MODES[mode])keys[mode]=`UniProt ${UNI_PROT_FEATURE_MODES[mode]}: annotated residues use distinct colours for each feature; grey means no annotation or no UniProt record. UniProt positions refer to the canonical sequence.`;
+            if(UNI_PROT_FEATURE_MODES[mode])keys[mode]=mode==='uniprot-topological'
+                ? 'UniProt topological domains: regions with the same label share a colour family; different shades distinguish regions. Grey means no annotation or no UniProt record. UniProt positions refer to the canonical sequence.'
+                : `UniProt ${UNI_PROT_FEATURE_MODES[mode]}: annotated residues use distinct colours for each feature; grey means no annotation or no UniProt record. UniProt positions refer to the canonical sequence.`;
             const colourKey = document.getElementById('physicsColourKey');
             colourKey.innerHTML = keys[mode];
             renderUniProtFeatureKey();
@@ -10431,7 +10581,7 @@
                 function() { loadModelPair('6YKM, 8UCS', 'P09348, P0AF06, P0ABZ1') },
             ],
             input: [
-                function() { referenceSearchRequest++; referenceSearchLoading=false; siftsRequestToken++; if(siftsLookupLoading)clearSiftsLookupLoading(true); document.getElementById('fetchSiftsStatus').textContent=''; referenceSearchSessionId=null; clearUploadedStructure('reference'); cancelStringMatching(); hideStringMatchResults(); scheduleReferenceSpeciesLookup(this.value); updateBuildButtonState(); updateFindMatchesReady(); updateExampleSelection(); updateReferenceSequenceSearchButton(true); document.getElementById('viewReferenceSearchResultsBtn').classList.add('hidden'); document.getElementById('referenceSearchResults').classList.add('hidden'); document.getElementById('referenceSequenceSearchStatus').textContent='' },
+                function() { referenceSearchRequest++; referenceSearchLoading=false; siftsRequestToken++; if(siftsLookupLoading)clearSiftsLookupLoading(true); document.getElementById('fetchSiftsStatus').textContent=''; referenceSearchSessionId=null; clearUploadedStructure('reference'); cancelStringMatching(); hideStringMatchResults(); updateBuildButtonState(); updateFindMatchesReady(); updateExampleSelection(); updateReferenceSequenceSearchButton(true); document.getElementById('viewReferenceSearchResultsBtn').classList.add('hidden'); document.getElementById('referenceSearchResults').classList.add('hidden'); document.getElementById('referenceSequenceSearchStatus').textContent='' },
                 function() { if(siftsLookupLoading){siftsRequestToken++;clearSiftsLookupLoading();} clearUploadedStructure('alphaFold'); this.classList.remove('string-id-glow'); updateBuildButtonState(); updateExampleSelection() },
                 function() { setViewerSize('alignment', 'residue', this.value) },
                 function() { setViewerSize('alignment', 'backbone', this.value) },
@@ -10476,6 +10626,7 @@
             event.target.value='';
         });
         document.getElementById('fetchSiftsBtn')?.addEventListener('click',fetchSiftsUniProtIds);
+        document.getElementById('stringFiles')?.addEventListener('change',event=>selectStringFiles(event.currentTarget));
         document.getElementById('fetchReferenceSequencesBtn')?.addEventListener('click',()=>fetchReferencePdbsForSequences('sequence'));
         document.getElementById('fetchReferenceQueryBtn')?.addEventListener('click',()=>fetchReferencePdbsForSequences('query'));
         document.getElementById('viewReferenceSearchResultsBtn')?.addEventListener('click',event=>{
@@ -10487,7 +10638,6 @@
         });
         document.getElementById('physicsSnapBtn')?.addEventListener('click',capturePhysicsSnapshot);
         document.getElementById('physicsRecordBtn')?.addEventListener('click',togglePhysicsRecording);
-        document.getElementById('mobileScrollUp')?.addEventListener('click',()=>window.scrollBy({top:-Math.max(150,window.innerHeight*.3),behavior:'smooth'}));
         function setMobilePhysicsDragMode(mode) {
             mobilePhysicsDragMode=mobilePhysicsDragMode===mode?null:mode;
             for(const [id,value] of [['mobileDragChainBtn','chain'],['mobileDragResidueBtn','residue']])
@@ -10499,10 +10649,21 @@
         const physicsColorMenu=document.getElementById('physicsColorMenu');
         const physicsColorMenuButton=document.getElementById('physicsColorMenuButton');
         if (physicsColorSelect && physicsColorMenu && physicsColorMenuButton) {
-            for (const option of physicsColorSelect.options) {
+            const colorOptions=new Map([...physicsColorSelect.options].map(option=>[option.value,option]));
+            const colorColumns=[
+                [['Main',['chain','protein-id','secondary','side-chains','origin','uniform']],
+                 ['Properties',['element','charge','hydrophobicity','mutation-effect-basic','residue-speed']]],
+                [['Regions',['binding-sites','binding-site-type','aligned']],
+                 ['Comparison',['rotational-symmetry','keyframe-difference','difference','af-difference']],
+                 ['Scores',['constraint-confidence','alpha-pae','plddt','spring-strain','membrane-score','model-confidence','qmeandisco']]],
+                [['Membrane',['membrane','membrane-placement','membrane-repelled']],
+                 ['UniProt',['uniprot-topological','uniprot-domain','uniprot-transmembrane','uniprot-intramembrane','uniprot-active-site','uniprot-binding-site','uniprot-signal','uniprot-transit','uniprot-region','uniprot-motif','uniprot-modified','uniprot-glycosylation','uniprot-disulfide']]]
+            ];
+            const addColorButton=(value,group)=>{
+                const option=colorOptions.get(value);if(!option)return;
                 const button=document.createElement('button');
                 button.type='button';button.dataset.colorMode=option.value;
-                button.textContent=option.textContent;
+                button.textContent=value==='plddt'?'AlphaFold pLDDT':option.textContent;
                 button.setAttribute('aria-pressed',String(option.value===physicsColorMode));
                 button.addEventListener('click',()=>{
                     setPhysicsColorMode(option.value);
@@ -10510,14 +10671,32 @@
                     physicsColorMenuButton.setAttribute('aria-expanded','false');
                     physicsColorMenuButton.focus();
                 });
-                physicsColorMenu.append(button);
+                group.append(button);colorOptions.delete(value);
+            };
+            for(const categories of colorColumns){
+                const column=document.createElement('div');column.className='color-menu-column';
+                for(const [heading,values] of categories){
+                    const group=document.createElement('section');group.className='color-menu-group';
+                    const title=document.createElement('h3');title.textContent=heading;group.append(title);
+                    values.forEach(value=>addColorButton(value,group));column.append(group);
+                }
+                physicsColorMenu.append(column);
             }
+            if(colorOptions.size){
+                const group=document.createElement('section');group.className='color-menu-group';
+                const title=document.createElement('h3');title.textContent='Other';group.append(title);
+                for(const value of [...colorOptions.keys()])addColorButton(value,group);
+                physicsColorMenu.lastElementChild.append(group);
+            }
+            // Keep the open menu at a document position so it scrolls with its trigger.
+            document.body.append(physicsColorMenu);
             const placePhysicsColorMenu=()=>{
                 const rect=physicsColorMenuButton.getBoundingClientRect();
                 const width=Math.min(800,window.innerWidth-16);
-                physicsColorMenu.style.left=`${Math.max(8,Math.min(rect.left,window.innerWidth-width-8))}px`;
-                physicsColorMenu.style.top=`${rect.bottom+6}px`;
-                physicsColorMenu.style.maxHeight=`${Math.max(96,Math.min(450,window.innerHeight-rect.bottom-14))}px`;
+                physicsColorMenu.style.left=`${window.scrollX+Math.max(8,Math.min(rect.left,window.innerWidth-width-8))}px`;
+                physicsColorMenu.style.maxHeight=`${Math.max(96,window.innerHeight-16)}px`;
+                const height=Math.min(physicsColorMenu.scrollHeight,window.innerHeight-16);
+                physicsColorMenu.style.top=`${window.scrollY+Math.max(8,Math.min(rect.bottom+6,window.innerHeight-height-8))}px`;
             };
             physicsColorMenuButton.addEventListener('click',()=>{
                 const opening=physicsColorMenu.classList.toggle('hidden')===false;
@@ -10537,12 +10716,6 @@
             });
             window.addEventListener('resize',()=>{if(!physicsColorMenu.classList.contains('hidden'))placePhysicsColorMenu();});
             syncPhysicsColorMenu();
-        }
-        const appHeader = document.querySelector('body > header');
-        if (appHeader) {
-            const positionMobileScrollButton = () => document.documentElement.style.setProperty('--app-header-height', `${appHeader.getBoundingClientRect().height}px`);
-            positionMobileScrollButton();
-            new ResizeObserver(positionMobileScrollButton).observe(appHeader);
         }
         document.getElementById('physicsElementSizeSlider')?.addEventListener('input',event=>{
             atomSizeByElement=Number(event.target.value);
@@ -10639,6 +10812,45 @@
             let savedLightMode=false;
             try { savedLightMode=localStorage.getItem('stringscape-light-mode')==='1'; } catch (_) { /* Use dark mode. */ }
             setLightMode(savedLightMode);
+            const referenceInput=document.getElementById('pdbInput1');
+            const alphaFoldInput=document.getElementById('pdbInput2');
+            const referenceSuggestions=[
+                'Human aquaporin-7','4F5S, 45FT, 45FU, 45FV','SEQUENCELETTERS, GEAHKSEIAHRFKD','E. coli RecA','5IUO',
+                '>Sequences in FASTA format','Rubisco from Arabidopsis thaliana','11BB','Bovine Serum Albumin',
+                '10IE, 10IF','Human UroD','10YL','Bovine Rhodopsin','23SH','Human Potassium channel 7.1',
+                'Duck RIG-I','Duck MHC Class I','Duck Ovotransferrin','Ducks are so funny...',
+                'Waddle, waddle!','Quack, quack!','Oh dear, I got distracted','We better start over'
+            ];
+            let suggestionIndex=0,suggestionFrame=0,suggestionStart=0,suggestionCycle=0;
+            const reducedSuggestionMotion=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            const animateReferenceSuggestions=now=>{
+                if(referenceInput.value){suggestionFrame=0;return;}
+                if(!suggestionStart)suggestionStart=now;
+                const elapsed=now-suggestionStart,cycle=Math.floor(elapsed/3600),phase=(elapsed%3600)/3600;
+                if(cycle!==suggestionCycle){
+                    // Change only at the exact zero-opacity boundary of the pulse.
+                    suggestionIndex=(suggestionIndex+cycle-suggestionCycle)%referenceSuggestions.length;
+                    suggestionCycle=cycle;referenceInput.placeholder=referenceSuggestions[suggestionIndex];
+                }
+                referenceInput.style.setProperty('--reference-suggestion-opacity',String(reducedSuggestionMotion?.5:(1-Math.cos(2*Math.PI*phase))*.25));
+                suggestionFrame=requestAnimationFrame(animateReferenceSuggestions);
+            };
+            const updateReferenceSuggestions=()=>{
+                const empty=!referenceInput.value;
+                referenceInput.classList.toggle('reference-suggestions',empty);
+                if(empty&&!suggestionFrame){suggestionStart=0;suggestionCycle=0;suggestionFrame=requestAnimationFrame(animateReferenceSuggestions);}
+                if(!empty&&suggestionFrame){cancelAnimationFrame(suggestionFrame);suggestionFrame=0;}
+            };
+            referenceInput.placeholder=referenceSuggestions[suggestionIndex];
+            referenceInput.addEventListener('input',updateReferenceSuggestions);
+            referenceInput.addEventListener('click',()=>{
+                if(!document.querySelector('#examplePresets button[data-reference][aria-pressed="true"]'))return;
+                referenceInput.value='';alphaFoldInput.value='';
+                referenceInput.dispatchEvent(new Event('input',{bubbles:true}));
+                alphaFoldInput.dispatchEvent(new Event('input',{bubbles:true}));
+                updateReferenceSuggestions();referenceInput.focus();
+            });
+            updateReferenceSuggestions();
             document.getElementById('themeToggle').addEventListener('click',()=>setLightMode(!document.body.classList.contains('light-mode')));
             initCanvases();
             initThreeJSPhysicsScene();
@@ -11379,8 +11591,14 @@
             animationEl('pdbInput1')?.value.trim()||'',animationEl('pdbInput2')?.value.trim()||''
         ]);
         const animationNodeSignature=()=>physicsNodes.map(node=>`${node.blockIdx}:${node.idx2??'x'}`).join(',');
-        const animationControls=()=>Array.from(document.querySelectorAll('.physics-simulation-panel input[type="range"], .physics-simulation-panel select'))
-            .filter(input=>!animationEl('animationEditor')?.contains(input));
+        const animationControls=()=>{
+            const controls=Array.from(document.querySelectorAll('.physics-simulation-panel input[type="range"], .physics-simulation-panel select'))
+                .filter(input=>!animationEl('animationEditor')?.contains(input)&&input.id!=='membraneSlicePercentSlider');
+            // Append the new control so positional settings in saved keyframes keep their original indices.
+            const slicePercent=animationEl('membraneSlicePercentSlider');
+            if(slicePercent)controls.push(slicePercent);
+            return controls;
+        };
         function animationSettings(){
             return {
                 controls:animationControls().map(input=>input.value),
@@ -11394,7 +11612,8 @@
                 buttonStates:Object.fromEntries(Array.from(document.querySelectorAll('.physics-simulation-panel button[id][aria-pressed]'))
                     .filter(button=>!animationEl('animationEditor')?.contains(button)).map(button=>[button.id,button.getAttribute('aria-pressed')])),
                 chainVisibility:{...chainVisibility},referenceOverlayVisibility:[...referenceOverlayVisibility],
-                symmetry:rotationalSymmetryGroups.map(group=>({key:group.key,angle:group.angle}))
+                symmetry:rotationalSymmetryGroups.map(group=>({key:group.key,angle:group.angle})),
+                chainRotations:[...singleChainRotations].map(([block,entry])=>({block,...entry}))
             };
         }
         function captureAnimationFrame(existing){
@@ -11483,6 +11702,7 @@
                 settings.referenceOverlayVisibility?.forEach((visible,index)=>{if(referenceOverlayVisibility[index]!==visible)setReferenceOverlayVisibility(index,visible);});
                 if(settings.chainVisibility){renderPhysicsChainToggles();applyPhysicsVisibility();}
                 for(const group of rotationalSymmetryGroups){group.angle=settings.symmetry?.find(item=>item.key===group.key)?.angle||0;}
+                singleChainRotations.clear();for(const entry of settings.chainRotations||[])singleChainRotations.set(Number(entry.block),{angle:Number(entry.angle)||0,axisKey:entry.axisKey||'self-z',overridden:entry.overridden===true});
                 updateResetRotationButton();
                 updateSymmetryRotationControls();
             }finally{animationApplying=false;}
@@ -11503,7 +11723,7 @@
             for(const id of ['quickPlayAnimationBtn','animationPlay']){
                 const button=animationEl(id);if(!button)continue;
                 const icon=document.createElement('i');icon.className=`fa-solid ${animationPlaying?'fa-pause':'fa-play'} mr-1`;icon.setAttribute('aria-hidden','true');
-                const label=animationPreparing?'Preparing…':animationPlaying?'Pause animation':id==='animationPlay'?'Play':'Play animation';
+                const label=animationPreparing?'Preparing…':animationPlaying?'Pause':id==='animationPlay'?'Play':'Play animation';
                 button.replaceChildren(icon,document.createTextNode(label));button.disabled=animationPreparing;
             }
             animationEl('loopAnimation')?.setAttribute('aria-pressed',String(animationLoop));
@@ -11514,13 +11734,19 @@
         let lastAnimationKeyframeClick=null,animationKeyframeDrag=null,suppressAnimationKeyframeClick=false;
         function editAnimationKeyframeName(frame,index,button){
             if(animationPlaying||animationPreparing)return;
+            const frameId=frame.id;
             const input=document.createElement('input');input.type='text';input.dataset.keyframeName='';
             input.maxLength=80;input.value=frame.name||`Keyframe ${index+1}`;input.setAttribute('aria-label',`Name for keyframe ${index+1}`);
             button.replaceWith(input);input.focus();input.select();
             let finished=false;
             const finish=commit=>{
                 if(finished)return;finished=true;
-                if(commit){frame.name=input.value.trim()||`Keyframe ${index+1}`;scheduleAnimationSave();}
+                if(commit){
+                    // A pending coordinate capture may replace the frame object while
+                    // this field is open, so resolve the current frame by its stable ID.
+                    const current=animationFrames.find(item=>item.id===frameId);
+                    if(current){current.name=input.value.trim()||`Keyframe ${animationFrames.indexOf(current)+1}`;scheduleAnimationSave();}
+                }
                 renderAnimationTimeline();
             };
             input.addEventListener('blur',()=>finish(true));
@@ -11691,6 +11917,9 @@
                 const end=b.settings.symmetry?.find(item=>item.key===group.key)?.angle||0;
                 group.angle=start+(end-start)*t;
             }
+            singleChainRotations.clear();
+            const chainEntries=new Map([...(a.settings.chainRotations||[]),...(b.settings.chainRotations||[])].map(entry=>[Number(entry.block),entry]));
+            for(const [block] of chainEntries){const start=a.settings.chainRotations?.find(entry=>Number(entry.block)===block),end=b.settings.chainRotations?.find(entry=>Number(entry.block)===block);const selected=(t<.5?start:end)||start||end;if(!selected?.overridden)continue;singleChainRotations.set(block,{angle:(start?.angle||0)+((end?.angle||0)-(start?.angle||0))*t,axisKey:selected.axisKey||'self-z',overridden:true});}
             // Apply the interpolated rotation angles as a display-only layer over
             // the interpolated true coordinates. This keeps rotational animation
             // independent from the coordinates saved for each keyframe.
@@ -11707,6 +11936,22 @@
             animationDisplayOverride.forEach((point,index)=>{if(!point)return;const node=physicsNodes[index];
                 original.push([node,node.x,node.y,node.z]);[node.x,node.y,node.z]=point;});
             return original;
+        }
+        function configureAutoSpinAnimation(){
+            const entry=animationLibrary.find(item=>item.autoGenerated||item.title==='Auto-generated spin animation');
+            if(!entry||entry.frames.length<2||animationPlaying)return;
+            const names=[...new Set(physicsNodes.map(node=>node.blockIdx))].map(block=>[block,chainProteinName(block).toLowerCase()]);
+            if(!names.some(([,name])=>name))return;
+            const excluded=name=>['atp synthase subunit alpha','atp synthase subunit beta','atp synthase subunit b'].some(item=>name===item);
+            const cGroup=rotationalSymmetryGroups.find(group=>[...group.blockIds].some(block=>names.find(item=>item[0]===block)?.[1]?.includes('atp synthase subunit c')));
+            for(let index=0;index<2;index++){
+                const settings=entry.frames[index].settings;if(!settings)continue;
+                settings.symmetry=rotationalSymmetryGroups.map(group=>({key:group.key,angle:[...group.blockIds].every(block=>excluded(names.find(item=>item[0]===block)?.[1]||''))?0:index?359*Math.PI/180:0}));
+                const special=names.filter(([,name])=>name.includes('atp synthase gamma chain')||name.includes('atp synthase epsilon chain'));
+                settings.chainRotations=special.length&&cGroup?special.map(([block])=>({block,angle:index?359*Math.PI/180:0,axisKey:`group:${cGroup.key}`,overridden:true})):[];
+            }
+            if(animationActiveId===entry.id)applyAnimationSettings(entry.frames[animationSelected]?.settings);
+            saveAnimation();
         }
         function animationOnModelReady(){
             stopAnimation();animationFrames=[];animationLibrary=[];animationActiveId=null;animationAutoSpinDismissed=false;animationSelected=0;keyframeDifferenceCache=null;bindingSiteCache=null;
@@ -11739,6 +11984,7 @@
                 if(!animationActiveId)activateAnimation(entry);
                 saveAnimation();
             }
+            configureAutoSpinAnimation();
             renderAnimationTimeline();
         }
         function animationRowDefinitions(){
