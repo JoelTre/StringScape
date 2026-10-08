@@ -629,6 +629,7 @@
         let physicsOriginColorMode = false;
         let physicsColorMode = 'chain';
         let rotationalSymmetryScores=[],rotationalSymmetryAxes=null,rotationalSymmetryGroups=[],rotationalAxesVisible=true,rotationalSymmetryLastUpdate=0;
+        let equivalentProteinShapeScores=[],equivalentProteinShapeLastUpdate=0;
         let simulationPhase = 1; // 1 = Phase 1 (TM-Align AlphaFold Structure), 2 = Phase 2 (Dynamic Elastic Simulation)
         let phase1AlignmentMetrics = { avgTmScore: 0, avgRmsd: 0, chainStats: {} };
         const physicsGraphHistory={startedAt:null,resetAt:null,samples:[],validationSamples:[],events:[],lastSampleAt:0,lastValidationAt:0,lastValidationAttemptAt:0,validationPending:false,lastPositions:null,lastDrawAt:0,validationCacheKey:null};
@@ -6827,7 +6828,9 @@
                 }
                 if(p.lipidPhase===undefined)p.lipidPhase=Math.random()*Math.PI*2;
                 const axes=lipidMoleculeAxes(geometry,p.x,p.y,p.side);
-                const bob=.85*Math.sin(now*.0015*lipidMotionScale()+p.lipidPhase);
+                const bob=sideChainJiggleEnabled
+                    ?.85*Math.sin(now*.0015*lipidMotionScale()+p.lipidPhase)
+                    :0;
                 const displayX=p.world.x+axes.inward[0]*bob,displayY=p.world.y+axes.inward[1]*bob,displayZ=p.world.z+axes.inward[2]*bob;
                 const sliceVisible=!membraneSliced||p.x*sliceCos+p.y*sliceSin>=sliceCutoff;
                 const selectionVisible=!linkedSelection||(i===selectedLipidIndex?selectedResiduesVisible:unselectedResiduesVisible);
@@ -6838,12 +6841,16 @@
                 }
                 if(molecular){
                     if(p.lipidAngle===undefined){p.lipidAngle=Math.random()*Math.PI*2;p.lipidSpin=(Math.random()-.5)*.5;}
-                    p.lipidAngle+=p.lipidSpin*dt*lipidMotionScale();
+                    if(sideChainJiggleEnabled)p.lipidAngle+=p.lipidSpin*dt*lipidMotionScale();
                     const angle=p.lipidAngle,cos=Math.cos(angle),sin=Math.sin(angle);
                     const tx=axes.tangent.map((v,k)=>v*cos+axes.bitangent[k]*sin);
                     const ty=axes.tangent.map((v,k)=>-v*sin+axes.bitangent[k]*cos);
-                    const tiltX=.10*Math.sin(now*.0025*lipidMotionScale()+p.lipidPhase);
-                    const tiltY=.10*Math.sin(now*.0021*lipidMotionScale()+p.lipidPhase*1.7);
+                    const tiltX=sideChainJiggleEnabled
+                        ?.10*Math.sin(now*.0025*lipidMotionScale()+p.lipidPhase)
+                        :0;
+                    const tiltY=sideChainJiggleEnabled
+                        ?.10*Math.sin(now*.0021*lipidMotionScale()+p.lipidPhase*1.7)
+                        :0;
                     const depthScale=Math.min(1,Math.max(.5,(geometry.halfThickness-1)/20));
                     const positions=LIPID_ATOMS.map(atom=>{
                         const z=atom.z*depthScale,x=atom.x+tiltX*Math.max(0,z),y=atom.y+tiltY*Math.max(0,z);
@@ -6958,6 +6965,7 @@
                 if(physicsColorMode==='residue-speed'&&physicsAfDifferenceFrame%10===0&&showModel1Overlay&&referenceColorMode==='same')updateModel1AlignmentColors();
             }
             if(physicsColorMode==='rotational-symmetry')updateRotationalSymmetry();
+            if(physicsColorMode==='equivalent-protein-shape')updateEquivalentProteinShape();
             updateInferredMembrane(performance.now());
             if (!physicsRunning) homologyEnergyStableSince = null;
             updateSpringDisplay();
@@ -8038,8 +8046,8 @@
                 const selected = button.dataset.reference === reference && button.dataset.alphafold.toUpperCase().replace(/\s*,\s*/g, ',') === alphaFold;
                 button.setAttribute('aria-pressed', String(selected));
                 button.className = selected
-                    ? 'bg-sky-300 hover:bg-sky-200 text-slate-950 text-xs px-2.5 py-1 rounded font-mono transition'
-                    : 'bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded text-slate-300 font-mono border border-slate-700 transition';
+                    ? 'bg-sky-300 hover:bg-sky-200 text-slate-950 text-xs px-2.5 py-1 rounded-lg font-mono transition'
+                    : 'bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded-lg text-slate-300 font-mono border border-slate-700 transition';
             });
         }
 
@@ -9332,6 +9340,56 @@
             if(deviation===null||deviation===undefined)return '#475569';
             return new THREE.Color('#38bdf8').lerp(new THREE.Color('#facc15'),Math.min(1,deviation/2.5)).lerp(new THREE.Color('#ef4444'),Math.max(0,Math.min(1,(deviation-2.5)/5)));
         }
+        function updateEquivalentProteinShape(force=false) {
+            if (!physicsNodes.length) return;
+            const now=performance.now();
+            if (!force&&now-equivalentProteinShapeLastUpdate<1000) return;
+            equivalentProteinShapeLastUpdate=now;
+            equivalentProteinShapeScores=Array(physicsNodes.length).fill(null);
+            const blocks=new Map();
+            physicsNodes.forEach((node,index)=>{
+                if(node.res.entityType!=='protein'||node.idx2===null)return;
+                if(!blocks.has(node.blockIdx))blocks.set(node.blockIdx,{nodes:[]});
+                blocks.get(node.blockIdx).nodes.push(index);
+            });
+            const byProtein=new Map();
+            for(const block of blocks.values()){
+                if(block.nodes.length<12)continue;
+                const atoms=block.nodes.map(index=>physicsNodes[index].res.atoms2[physicsNodes[index].idx2]).filter(Boolean);
+                const sequence=atoms.map(atom=>atom.singleChar||'X').join('');
+                const key=/[^X]/.test(sequence)?sequence:atoms[0]?.sourcePdbId||sequence;
+                if(!byProtein.has(key))byProtein.set(key,[]);
+                byProtein.get(key).push(block);
+            }
+            for(const members of byProtein.values()){
+                if(members.length<2)continue;
+                const maps=members.map(block=>new Map(block.nodes.map(index=>[physicsNodes[index].idx2,index])));
+                const common=[...maps[0].keys()].filter(index=>maps.every(map=>map.has(index))).sort((a,b)=>a-b);
+                if(common.length<12)continue;
+                const anchors=common.filter((_,index)=>index%Math.max(1,Math.floor(common.length/32))===0);
+                for(const residueIndex of common){
+                    const differences=[];
+                    for(const anchor of anchors){
+                        if(anchor===residueIndex)continue;
+                        const distances=maps.map(map=>{
+                            const residue=physicsNodes[map.get(residueIndex)],other=physicsNodes[map.get(anchor)];
+                            return Math.hypot(residue.x-other.x,residue.y-other.y,residue.z-other.z);
+                        });
+                        const mean=distances.reduce((sum,value)=>sum+value,0)/distances.length;
+                        differences.push(distances.map(value=>Math.abs(value-mean)));
+                    }
+                    if(!differences.length)continue;
+                    maps.forEach((map,memberIndex)=>{
+                        equivalentProteinShapeScores[map.get(residueIndex)]=differences.reduce((sum,row)=>sum+row[memberIndex],0)/differences.length;
+                    });
+                }
+            }
+        }
+        function equivalentProteinShapeColor(index){
+            const deviation=equivalentProteinShapeScores[index];
+            if(deviation===null||deviation===undefined)return '#475569';
+            return new THREE.Color('#38bdf8').lerp(new THREE.Color('#facc15'),Math.min(1,deviation/2.5)).lerp(new THREE.Color('#ef4444'),Math.max(0,Math.min(1,(deviation-2.5)/5)));
+        }
         let keyframeDifferenceCache=null, bindingSiteCache=null, mutationEffectCache=null;
         let keyframeDifferenceNormalized=false;
         const KEYFRAME_DIFF_ABSOLUTE_SCALE_ANGSTROM=5;
@@ -9579,6 +9637,8 @@
                     color = new THREE.Color(uniProtFeatureColor(atom,physicsColorMode));
                 } else if (physicsColorMode === 'rotational-symmetry') {
                     color = new THREE.Color(rotationalSymmetryColor(i));
+                } else if (physicsColorMode === 'equivalent-protein-shape') {
+                    color = new THREE.Color(equivalentProteinShapeColor(i));
                 } else if (afDistances) {
                     color = new THREE.Color(alignmentDistanceColor(afDistances[i]));
                 } else if (keyframeColors) {
@@ -9674,7 +9734,7 @@
             menu.querySelectorAll('button[data-color-mode]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.colorMode===physicsColorMode)));
         }
         function setPhysicsColorMode(mode) {
-            if (!['chain','uniform','protein-id','rotational-symmetry','keyframe-difference','residue-speed','binding-sites','binding-site-type','mutation-effect-basic','constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','qmeandisco','element','side-chains','origin','aligned','membrane','membrane-placement','membrane-repelled','charge','hydrophobicity','secondary','plddt','difference','af-difference',...Object.keys(UNI_PROT_FEATURE_MODES)].includes(mode)) return;
+            if (!['chain','uniform','protein-id','rotational-symmetry','equivalent-protein-shape','keyframe-difference','residue-speed','binding-sites','binding-site-type','mutation-effect-basic','constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','qmeandisco','element','side-chains','origin','aligned','membrane','membrane-placement','membrane-repelled','charge','hydrophobicity','secondary','plddt','difference','af-difference',...Object.keys(UNI_PROT_FEATURE_MODES)].includes(mode)) return;
             if(mode==='residue-speed'&&physicsColorMode!=='residue-speed')resetResidueSpeedTracking();
             physicsColorMode = mode;
             syncPhysicsColorMenu();
@@ -9683,6 +9743,7 @@
             if(mode==='qmeandisco'&&!validationState.qmean){document.getElementById('validationReport').open=true;renderValidationReport();}
             updateBindingSiteToggleVisibility();
             if(mode==='rotational-symmetry')updateRotationalSymmetry(true);
+            if(mode==='equivalent-protein-shape')updateEquivalentProteinShape(true);
             else {if(rotationalSymmetryAxes)rotationalSymmetryAxes.visible=false;document.getElementById('toggleSymmetryAxes')?.classList.add('hidden');}
             updateLipidColors();
             membraneRepelledColorMask=null;
@@ -9697,6 +9758,7 @@
                 uniform:'Uniform: all homology-model chains share one colour.',
                 'protein-id':'Protein ID: chains from the same AlphaFold structure share one colour.',
                 'rotational-symmetry':'Rotational symmetry: <span style="color:#38bdf8">low displacement</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">high</span>; dark grey: no detected rotational symmetry. Dashed yellow lines mark symmetry axes.',
+                'equivalent-protein-shape':'Equivalent protein shape: <span style="color:#38bdf8">low difference</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">high</span>; each residue is scored by deviations in its distances to other residues from the across-chain average; dark grey: no equivalent protein comparison.',
                 'keyframe-difference':`Keyframe conformation difference: <span style="color:#38bdf8">little change</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">large change</span> in distances to sampled residues across saved keyframes. ${keyframeDifferenceNormalized?'Colours are scaled to the current model’s 95th percentile.':'Medium change: 2.5 Å; large change: 5 Å or more (mean variation).'} Grey: unavailable. <button id="keyframeDifferenceNormalize" type="button" class="bg-slate-800 rounded-lg px-2 py-1">Normalised: ${keyframeDifferenceNormalized?'True':'False'}</button>`,
                 'residue-speed':'Residue speed: <span style="color:#38bdf8">stationary or slow</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">fast</span>. Colours use smoothed movement in Å/s relative to the current 95th-percentile protein-residue speed; non-protein atoms are grey.',
                 'binding-sites':'Binding sites: each distinct inter-protein contact patch has its own colour; grey residues are outside binding sites.',
@@ -9764,6 +9826,20 @@
         let cartoonRepresentation = null;
         let lastSurfaceUpdate = 0;
 
+        function syncPhysicsRepresentationMenu() {
+            const select=document.getElementById('physicsRepresentationSelect');
+            const trigger=document.getElementById('physicsRepresentationMenuButton');
+            const menu=document.getElementById('physicsRepresentationMenu');
+            if (!select || !trigger || !menu) return;
+            select.value=physicsRepresentation;
+            trigger.replaceChildren(document.createTextNode(select.selectedOptions[0]?.textContent || physicsRepresentation));
+            const chevron=document.createElement('i');
+            chevron.className='fa-solid fa-chevron-down ml-1';
+            chevron.setAttribute('aria-hidden','true');
+            trigger.append(chevron);
+            menu.querySelectorAll('button[data-representation]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.representation===physicsRepresentation)));
+        }
+
         function toggleSideChainJiggle() {
             sideChainJiggleEnabled = !sideChainJiggleEnabled;
             document.getElementById('sideChainJiggleBtn').setAttribute('aria-pressed',String(sideChainJiggleEnabled));
@@ -9779,11 +9855,7 @@
         function setPhysicsRepresentation(mode) {
             physicsRepresentation = mode;
             if (mode !== 'surface') document.getElementById('metaballLoading')?.classList.add('hidden');
-            for (const [id, selected] of [['physicsBackboneBtn', mode === 'backbone'], ['physicsBallStickBtn', mode === 'ball-stick'], ['physicsCartoonBtn', mode === 'cartoon'], ['physicsSurfaceBtn', mode === 'surface']]) {
-                const button = document.getElementById(id);
-                button.setAttribute('aria-pressed', String(selected));
-                button.className = 'px-3 py-1.5 rounded ' + (selected ? 'bg-violet-600 text-white' : 'text-slate-300');
-            }
+            syncPhysicsRepresentationMenu();
             document.getElementById('atomRepresentationNotice').classList.toggle('hidden', mode !== 'ball-stick');
             const jiggleControls = document.getElementById('sideChainJiggleControls');
             jiggleControls.classList.toggle('hidden', mode !== 'ball-stick');
@@ -10945,7 +11017,7 @@
                 function() { loadModelPair('6YKM, 8UCS', 'P09348, P0AF06, P0ABZ1') },
             ],
             input: [
-                function() { referenceSearchRequest++; referenceSearchLoading=false; siftsRequestToken++; if(siftsLookupLoading)clearSiftsLookupLoading(true); document.getElementById('fetchSiftsStatus').textContent=''; referenceSearchSessionId=null; clearUploadedStructure('reference'); cancelStringMatching(); hideStringMatchResults(); updateBuildButtonState(); updateFindMatchesReady(); updateExampleSelection(); updateReferenceSequenceSearchButton(true); document.getElementById('viewReferenceSearchResultsBtn').classList.add('hidden'); document.getElementById('referenceSearchResults').classList.add('hidden'); document.getElementById('referenceSequenceSearchStatus').textContent='' },
+                function() { referenceSearchRequest++; referenceSearchLoading=false; siftsRequestToken++; if(siftsLookupLoading)clearSiftsLookupLoading(true); document.getElementById('fetchSiftsStatus').textContent=''; referenceSearchSessionId=null; clearUploadedStructure('reference'); cancelStringMatching(); hideStringMatchResults(); if(!this.value.trim()){const alphaFoldInput=document.getElementById('pdbInput2'); if(alphaFoldInput.value){alphaFoldInput.value=''; alphaFoldInput.dispatchEvent(new Event('input',{bubbles:true}));}} updateBuildButtonState(); updateFindMatchesReady(); updateExampleSelection(); updateReferenceSequenceSearchButton(true); document.getElementById('viewReferenceSearchResultsBtn').classList.add('hidden'); document.getElementById('referenceSearchResults').classList.add('hidden'); document.getElementById('referenceSequenceSearchStatus').textContent='' },
                 function() { if(siftsLookupLoading){siftsRequestToken++;clearSiftsLookupLoading();} clearUploadedStructure('alphaFold'); this.classList.remove('string-id-glow'); updateBuildButtonState(); updateExampleSelection() },
                 function() { setViewerSize('alignment', 'residue', this.value) },
                 function() { setViewerSize('alignment', 'backbone', this.value) },
@@ -10965,6 +11037,7 @@
                 function() { setAlphaFoldMolstarColor(this.value) },
                 function() { setPhysicsColorMode(this.value) },
                 function() { setReferenceColorMode(this.value) },
+                function() { setPhysicsRepresentation(this.value) },
             ],
         };
         for (const eventName of ['click', 'input', 'change']) {
@@ -11016,6 +11089,52 @@
         }
         document.getElementById('mobileDragChainBtn')?.addEventListener('click',()=>setMobilePhysicsDragMode('chain'));
         document.getElementById('mobileDragResidueBtn')?.addEventListener('click',()=>setMobilePhysicsDragMode('residue'));
+        const physicsRepresentationSelect=document.getElementById('physicsRepresentationSelect');
+        const physicsRepresentationMenu=document.getElementById('physicsRepresentationMenu');
+        const physicsRepresentationMenuButton=document.getElementById('physicsRepresentationMenuButton');
+        if (physicsRepresentationSelect && physicsRepresentationMenu && physicsRepresentationMenuButton) {
+            [...physicsRepresentationSelect.options].forEach(option=>{
+                const button=document.createElement('button');
+                button.type='button';
+                button.dataset.representation=option.value;
+                button.textContent=option.textContent;
+                button.setAttribute('aria-pressed',String(option.value===physicsRepresentation));
+                button.addEventListener('click',()=>{
+                    setPhysicsRepresentation(option.value);
+                    physicsRepresentationMenu.classList.add('hidden');
+                    physicsRepresentationMenuButton.setAttribute('aria-expanded','false');
+                    physicsRepresentationMenuButton.focus();
+                });
+                physicsRepresentationMenu.append(button);
+            });
+            document.body.append(physicsRepresentationMenu);
+            const placePhysicsRepresentationMenu=()=>{
+                const rect=physicsRepresentationMenuButton.getBoundingClientRect();
+                const width=Math.min(240,window.innerWidth-16);
+                physicsRepresentationMenu.style.left=`${window.scrollX+Math.max(8,Math.min(rect.left,window.innerWidth-width-8))}px`;
+                physicsRepresentationMenu.style.top=`${window.scrollY+Math.min(rect.bottom+6,window.innerHeight-physicsRepresentationMenu.offsetHeight-8)}px`;
+            };
+            physicsRepresentationMenuButton.addEventListener('click',()=>{
+                const opening=physicsRepresentationMenu.classList.toggle('hidden')===false;
+                physicsRepresentationMenuButton.setAttribute('aria-expanded',String(opening));
+                if(opening)placePhysicsRepresentationMenu();
+            });
+            document.addEventListener('click',event=>{
+                if(!physicsRepresentationMenu.contains(event.target)&&!physicsRepresentationMenuButton.contains(event.target)){
+                    physicsRepresentationMenu.classList.add('hidden');
+                    physicsRepresentationMenuButton.setAttribute('aria-expanded','false');
+                }
+            });
+            document.addEventListener('keydown',event=>{
+                if(event.key==='Escape'&&!physicsRepresentationMenu.classList.contains('hidden')){
+                    physicsRepresentationMenu.classList.add('hidden');
+                    physicsRepresentationMenuButton.setAttribute('aria-expanded','false');
+                    physicsRepresentationMenuButton.focus();
+                }
+            });
+            window.addEventListener('resize',()=>{if(!physicsRepresentationMenu.classList.contains('hidden'))placePhysicsRepresentationMenu();});
+            syncPhysicsRepresentationMenu();
+        }
         const physicsColorSelect=document.getElementById('physicsColorSelect');
         const physicsColorMenu=document.getElementById('physicsColorMenu');
         const physicsColorMenuButton=document.getElementById('physicsColorMenuButton');
@@ -11025,7 +11144,7 @@
                 [['Main',['chain','protein-id','secondary','side-chains','origin','uniform']],
                  ['Properties',['element','charge','hydrophobicity','mutation-effect-basic','residue-speed']]],
                 [['Regions',['binding-sites','binding-site-type','aligned']],
-                 ['Comparison',['rotational-symmetry','keyframe-difference','difference','af-difference']],
+                 ['Comparison',['rotational-symmetry','equivalent-protein-shape','keyframe-difference','difference','af-difference']],
                  ['Scores',['constraint-confidence','alpha-pae','plddt','spring-strain','membrane-score','model-confidence','qmeandisco']]],
                 [['Membrane',['membrane','membrane-placement','membrane-repelled']],
                  ['UniProt',['uniprot-topological','uniprot-domain','uniprot-transmembrane','uniprot-intramembrane','uniprot-active-site','uniprot-binding-site','uniprot-signal','uniprot-transit','uniprot-region','uniprot-motif','uniprot-modified','uniprot-glycosylation','uniprot-disulfide']]]
@@ -12281,12 +12400,13 @@
             const colorIndex=controls.indexOf(animationEl('physicsColorSelect'));
             const frames=referenceFiles.map((file,index)=>{
                 const frame=cloneFrame();frame.name=file.pdbId;
+                frame.settings.flags.sideChainJiggleEnabled=false;
+                frame.settings.buttonStates.sideChainJiggleBtn='false';
                 frame.settings.color='keyframe-difference';
                 if(colorIndex>=0)frame.settings.controls[colorIndex]='keyframe-difference';
                 referenceSliders.forEach((slider,sliderIndex)=>{const controlIndex=controls.indexOf(slider);if(controlIndex>=0)frame.settings.controls[controlIndex]=sliderIndex===index?'1':'0';});
                 return frame;
             });
-            frames.at(-1).framesToNext=0;
             const change={id:animationId(),title:'Conformational change using PDBs',frames,loop:true,syncKeys:[],interpolation:{},conformationalChange:true,optimized:false};
             animationLibrary.push(blank,change);
             activateAnimation(change);
@@ -12490,10 +12610,30 @@
             const names=[...new Set(physicsNodes.map(node=>node.blockIdx))].map(block=>[block,chainProteinName(block).toLowerCase()]);
             if(!names.some(([,name])=>name))return;
             const excluded=name=>['atp synthase subunit alpha','atp synthase subunit beta','atp synthase subunit b'].some(item=>name===item);
+            const autoSpinProtein=name=>[
+                'motility protein a',
+                'biopolymer transport protein exbb',
+                'tol-pal system protein tolq',
+                'gldl',
+                'aglr',
+                'atp synthase subunit c',
+                'flif',
+                'flagellar m-ring protein',
+                'flagellar motor switch protein flig',
+                'flagellar motor switch protein flim',
+                'flagellar motor switch protein flin',
+                'flagellar motor switch phosphatase fliy',
+                'chemotaxis protein chey',
+                'flagellar hook protein flge',
+                'flic',
+                'archaeal flagellar atpase motor flai',
+                'flaj',
+                'flagella accessory protein j'
+            ].some(item=>name.includes(item))||/\bflagellin\b/.test(name);
             const cGroup=rotationalSymmetryGroups.find(group=>[...group.blockIds].some(block=>names.find(item=>item[0]===block)?.[1]?.includes('atp synthase subunit c')));
             for(let index=0;index<2;index++){
                 const settings=entry.frames[index].settings;if(!settings)continue;
-                settings.symmetry=rotationalSymmetryGroups.map(group=>({key:group.key,angle:[...group.blockIds].every(block=>excluded(names.find(item=>item[0]===block)?.[1]||''))?0:index?359*Math.PI/180:0}));
+                settings.symmetry=rotationalSymmetryGroups.map(group=>({key:group.key,angle:[...group.blockIds].some(block=>autoSpinProtein(names.find(item=>item[0]===block)?.[1]||'')&&!excluded(names.find(item=>item[0]===block)?.[1]||''))?index?359*Math.PI/180:0:0}));
                 const special=names.filter(([,name])=>name.includes('atp synthase gamma chain')||name.includes('atp synthase epsilon chain'));
                 settings.chainRotations=special.length&&cGroup?special.map(([block])=>({block,angle:index?359*Math.PI/180:0,axisKey:`group:${cGroup.key}`,overridden:true})):[];
             }
@@ -13658,7 +13798,7 @@
                 }
                 throw new Error('QMEANDisCo is still processing. Try Update again later.');
             }catch(error){if(version===validationState.version)status.textContent=error instanceof TypeError
-                ? 'QMEANDisCo could not be reached from this browser. The server may not allow cross-origin submission; use the PDB download and QMEAN website below.'
+                ? 'Unsure if QMEANDisCo recieved the pdb. if it did, you should recieve an email shortly. If you do not receive an email, try the PDB download and QMEAN website below.'
                 :error.message||'QMEANDisCo is unavailable.';}
             finally{validationState.qmeanBusy=false;validationElement('validationQmeanSend').disabled=false;}
         }
