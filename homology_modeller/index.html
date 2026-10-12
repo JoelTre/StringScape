@@ -541,9 +541,9 @@
         #PDBTitle, #AFTitle { overflow-wrap:anywhere; }
         #mobilePhysicsDragModes { display:none; }
         #mobilePhysicsDragModes button[aria-pressed="true"] { background:#d97706; color:white; box-shadow:0 0 0 1px #fbbf24aa,0 0 12px #fbbf2470; }
-        #physicsColorMenu { position:absolute; z-index:80; width:min(50rem,calc(100vw - 1rem)); max-height:calc(100vh - 1rem); overflow:auto; grid-template-columns:repeat(auto-fit,minmax(min(13rem,100%),1fr)); gap:.9rem; padding:.75rem; border:1px solid #475569; border-radius:.75rem; background:#0f172a; box-shadow:0 16px 38px #0009; }
-        #physicsColorMenuButton { min-width:12rem; display:inline-flex; align-items:center; justify-content:space-between; gap:1rem; background:#7c3aed; color:#fff; }
-        #physicsColorMenuButton:hover { background:#6d28d9; }
+        :is(#physicsColorMenu,.comparison-variable-menu) { position:absolute; z-index:80; width:min(50rem,calc(100vw - 1rem)); max-height:calc(100vh - 1rem); overflow:auto; grid-template-columns:repeat(auto-fit,minmax(min(13rem,100%),1fr)); gap:.9rem; padding:.75rem; border:1px solid #475569; border-radius:.75rem; background:#0f172a; box-shadow:0 16px 38px #0009; }
+        :is(#physicsColorMenuButton,.comparison-variable-button) { min-width:12rem; display:inline-flex; align-items:center; justify-content:space-between; gap:1rem; background:#7c3aed; color:#fff; }
+        :is(#physicsColorMenuButton,.comparison-variable-button):hover { background:#6d28d9; }
         #physicsRepresentationMenuButton { min-width:10rem; display:inline-flex; align-items:center; justify-content:space-between; gap:1rem; background:#7c3aed; color:#fff; }
         #physicsRepresentationMenuButton:hover { background:#6d28d9; }
         #physicsRepresentationMenu { position:absolute; z-index:80; min-width:10rem; max-width:calc(100vw - 1rem); overflow:auto; padding:.45rem; border:0; border-radius:.75rem; background:#0f172a; box-shadow:0 16px 38px #0009; }
@@ -568,20 +568,20 @@
         #membraneSideLeaders { position:absolute; inset:0; width:100%; height:100%; z-index:11; pointer-events:none; overflow:visible; }
         #membraneSideLeaders line { stroke:#67e8f9; stroke-width:1.5; opacity:.85; }
         body.light-mode .membrane-side-label { background:#ffffffd9; color:#075985; text-shadow:none; }
-        #physicsColorMenu:not(.hidden) { display:grid; }
-        #physicsColorMenu .color-menu-column, #physicsColorMenu .color-menu-group { display:flex; flex-direction:column; gap:.35rem; min-width:0; }
-        #physicsColorMenu .color-menu-column { gap:.9rem; }
-        #physicsColorMenu .color-menu-group h3 { margin:0 0 .15rem; color:#a5b4fc; font-size:.72rem; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
-        #physicsColorMenu button { min-width:0; padding:.55rem .7rem; border:0; border-radius:.5rem; background:#334155; color:#e2e8f0; text-align:left; font-size:.75rem; line-height:1.25; white-space:normal; }
-        #physicsColorMenu button:hover { background:#475569; }
-        #physicsColorMenu button[aria-pressed="true"] { background:#7c3aed; color:white; }
-        body.light-mode #physicsColorMenu { background:#f8fafc; border-color:#cbd5e1; box-shadow:0 16px 38px #33415555; }
-        body.light-mode #physicsColorMenu .color-menu-group h3 { color:#4f46e5; }
-        body.light-mode #physicsColorMenu button { background:#e2e8f0; color:#334155; }
-        body.light-mode #physicsColorMenu button:hover { background:#cbd5e1; }
-        body.light-mode #physicsColorMenu button[aria-pressed="true"] { background:#8849ee; color:white; }
-        body.light-mode #physicsColorMenuButton { background:#8849ee; color:#fff; }
-        body.light-mode #physicsColorMenuButton:hover { background:#8849ee; }
+        :is(#physicsColorMenu,.comparison-variable-menu):not(.hidden) { display:grid; }
+        :is(#physicsColorMenu,.comparison-variable-menu) .color-menu-column, :is(#physicsColorMenu,.comparison-variable-menu) .color-menu-group { display:flex; flex-direction:column; gap:.35rem; min-width:0; }
+        :is(#physicsColorMenu,.comparison-variable-menu) .color-menu-column { gap:.9rem; }
+        :is(#physicsColorMenu,.comparison-variable-menu) .color-menu-group h3 { margin:0 0 .15rem; color:#a5b4fc; font-size:.72rem; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+        :is(#physicsColorMenu,.comparison-variable-menu) button { min-width:0; padding:.55rem .7rem; border:0; border-radius:.5rem; background:#334155; color:#e2e8f0; text-align:left; font-size:.75rem; line-height:1.25; white-space:normal; }
+        :is(#physicsColorMenu,.comparison-variable-menu) button:hover { background:#475569; }
+        :is(#physicsColorMenu,.comparison-variable-menu) button[aria-pressed="true"] { background:#7c3aed; color:white; }
+        body.light-mode :is(#physicsColorMenu,.comparison-variable-menu) { background:#f8fafc; border-color:#cbd5e1; box-shadow:0 16px 38px #33415555; }
+        body.light-mode :is(#physicsColorMenu,.comparison-variable-menu) .color-menu-group h3 { color:#4f46e5; }
+        body.light-mode :is(#physicsColorMenu,.comparison-variable-menu) button { background:#e2e8f0; color:#334155; }
+        body.light-mode :is(#physicsColorMenu,.comparison-variable-menu) button:hover { background:#cbd5e1; }
+        body.light-mode :is(#physicsColorMenu,.comparison-variable-menu) button[aria-pressed="true"] { background:#8849ee; color:white; }
+        body.light-mode :is(#physicsColorMenuButton,.comparison-variable-button) { background:#8849ee; color:#fff; }
+        body.light-mode :is(#physicsColorMenuButton,.comparison-variable-button):hover { background:#8849ee; }
         body.light-mode #physicsRepresentationMenu { background:#f8fafc; box-shadow:0 16px 38px #33415555; }
         body.light-mode #physicsRepresentationMenu button { background:#e2e8f0; color:#334155; }
         body.light-mode #physicsRepresentationMenu button:hover { background:#cbd5e1; }
@@ -593,7 +593,8 @@
         body.light-mode button[class~="bg-indigo-600"] { background-color:#574cf0; color:#fff; }
         body.light-mode button[class~="bg-indigo-600"]:hover { background-color:#7e75e9; }
         body.light-mode button[class~="from-violet-600"][class~="to-indigo-600"] { background-image:linear-gradient(to right,#9161dd,#6d63e9); }
-        body.light-mode #aboutProteinComplex { background:#f1f5f9; border-color:#cbd5e1; }
+        #aboutProteinComplex, #physicsVariableComparison { background:rgba(15,23,42,.9); }
+        body.light-mode #aboutProteinComplex, body.light-mode #physicsVariableComparison { background:#e8eef5; border-color:#cbd5e1; }
         body.light-mode #aboutProteinComplex summary { color:#172033; }
         body.light-mode #aboutProteinComplexContent { color:#334155; }
         body.light-mode #aboutProteinComplexContent section { background:#fff; }
@@ -640,6 +641,17 @@
         body.light-mode .sequence-chain h4 { color:#334155; }
         body.light-mode #sequenceChainMenu button { background:#e2e8f0; color:#334155; }
         body.light-mode #sequenceChainMenu button[aria-pressed="true"] { background:#8849ee; color:white; }
+        #physicsVariableComparison > .comparison-summary { display:flex; align-items:center; justify-content:flex-start; gap:.5rem; list-style:none; }
+        #physicsVariableComparison > .comparison-summary::-webkit-details-marker { display:none; }
+        #physicsVariableComparison[open] .comparison-chevron { transform:rotate(180deg); }
+        .comparison-export { width:2rem; height:2rem; border:0; border-radius:.5rem; background:#1e293b; color:#e2e8f0; }
+        .comparison-export:hover { background:#334155; }
+        body.light-mode .comparison-export { background:#ffffff; color:#0f172a; }
+        body.light-mode .comparison-export:hover { background:#e2e8f0; }
+        .comparison-chain-toggle { display:inline-flex; align-items:center; gap:6px; border:0; padding:3px 5px; background:transparent; color:inherit; border-radius:4px; }
+        .comparison-chain-toggle:hover { background:#64748b33; }
+        .comparison-chain-toggle[aria-pressed="false"] { opacity:.5; }
+        .comparison-export:disabled { opacity:.4; cursor:default; }
     </style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col">
@@ -1363,6 +1375,26 @@
                        class="w-full md:w-7/12 h-2.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/50">
             </div>
             </div><!-- End Physics Controls -->
+            <details id="physicsVariableComparison" class="border-t border-slate-800 bg-slate-900/90">
+                <summary class="comparison-summary cursor-pointer px-5 py-3 text-sm font-semibold text-white"><span><i class="fa-solid fa-chart-line text-emerald-400 mr-2" aria-hidden="true"></i>Compare two variables</span><i class="comparison-chevron fa-solid fa-chevron-down" aria-hidden="true"></i></summary>
+                <div class="px-5 pb-4">
+                    <p id="physicsCompareDescription" class="text-xs text-slate-400 mb-2"></p>
+                    <p id="physicsCompareStatus" role="status" class="text-xs text-slate-300 mb-2">Build a model to compare its variables.</p>
+                    <div class="flex flex-wrap items-center gap-3 mb-2">
+                        <div class="inline-flex items-center gap-2 text-xs text-slate-300"><span class="font-semibold">X variable:</span><button id="physicsCompareXButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="physicsCompareXMenu" class="comparison-variable-button px-3 py-1.5 rounded-lg text-xs"></button><select id="physicsCompareX" class="hidden" aria-label="X variable"></select><div id="physicsCompareXMenu" class="comparison-variable-menu hidden" role="group" aria-label="X variable"></div></div>
+                        <div class="inline-flex items-center gap-2 text-xs text-slate-300"><span class="font-semibold">Y variable:</span><button id="physicsCompareYButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="physicsCompareYMenu" class="comparison-variable-button px-3 py-1.5 rounded-lg text-xs"></button><select id="physicsCompareY" class="hidden" aria-label="Y variable"></select><div id="physicsCompareYMenu" class="comparison-variable-menu hidden" role="group" aria-label="Y variable"></div></div>
+                        <button id="physicsCompareSwap" type="button" class="bg-slate-800 text-slate-200 px-3 py-2 rounded-lg text-xs">Swap X &amp; Y</button>
+                        <div class="flex items-center gap-2" style="margin-left:auto">
+                            <button id="physicsCompareTrend" type="button" disabled aria-pressed="false" class="bg-slate-800 text-slate-200 px-3 py-2 rounded-lg text-xs" title="Separate linear trends and Pearson correlations for each visible chain">Trend lines: Off</button>
+                            <button id="physicsCompareCopy" type="button" disabled class="comparison-export" title="Copy plot image" aria-label="Copy plot image"><i class="fa-regular fa-copy" aria-hidden="true"></i></button>
+                            <button id="physicsCompareDownload" type="button" disabled class="comparison-export" title="Download plot image" aria-label="Download plot image"><i class="fa-solid fa-download" aria-hidden="true"></i></button>
+                        </div>
+                    </div>
+                    <div style="overflow:auto;border-radius:.5rem"><canvas id="physicsComparePlot" role="img" aria-label="Comparison plot" style="display:block;max-width:none;border-radius:.5rem"></canvas></div>
+                    <div id="physicsCompareKey" class="flex flex-wrap gap-4 mt-3 text-xs text-slate-300" aria-label="Chain colour key"></div>
+                    <p id="physicsCompareHover" class="text-xs text-slate-400 mt-2" style="min-height:1.5em">Hover over the plot to inspect values.</p>
+                </div>
+            </details>
         </div>
 
         <!-- Section 7: View Simulation in Mol* Viewer -->
@@ -1489,6 +1521,7 @@
 
     <script src="performance-diagnostics.js"></script>
     <script src="lipid-renderer.js"></script>
+    <script src="variable-comparison.js"></script>
     <script id="appScript" src="script.js"></script>
     <div id="simulationLoadingPopup" class="hidden" role="status" aria-live="polite"><div><i class="fa-solid fa-circle-notch fa-spin mr-2" aria-hidden="true"></i>Loading...</div></div>
 </body>
