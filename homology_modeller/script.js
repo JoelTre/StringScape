@@ -10603,12 +10603,11 @@
         }
         function keyframeDifferenceColors(){
             if(keyframeDifferenceCache?.frames===animationFrames&&keyframeDifferenceCache?.count===animationFrames.length&&keyframeDifferenceCache?.nodes===physicsNodes&&keyframeDifferenceCache.normalized===keyframeDifferenceNormalized)return keyframeDifferenceCache.colors;
-            const colors=Array(physicsNodes.length).fill('#475569');
+            const colors=Array(physicsNodes.length).fill('#475569'),scores=[];
             const frames=animationFrames.filter(frame=>frame.coords?.length===physicsNodes.length);
             if(frames.length>1){
                 const proteinIndices=physicsNodes.flatMap((node,i)=>node.res.entityType==='protein'?[i]:[]);
                 const anchors=proteinIndices.filter((_,k)=>k%Math.max(1,Math.ceil(proteinIndices.length/64))===0);
-                const scores=[];
                 for(const i of proteinIndices){
                     let sum=0,count=0;
                     for(const j of anchors){if(i===j)continue;
@@ -10622,7 +10621,7 @@
                 const scale=keyframeDifferenceNormalized?Math.max(.01,sorted[Math.floor((sorted.length-1)*.95)]||0):KEYFRAME_DIFF_ABSOLUTE_SCALE_ANGSTROM;
                 for(const i of proteinIndices)colors[i]=deviationColor(scores[i],scale);
             }
-            keyframeDifferenceCache={frames:animationFrames,count:animationFrames.length,nodes:physicsNodes,normalized:keyframeDifferenceNormalized,colors};
+            keyframeDifferenceCache={frames:animationFrames,count:animationFrames.length,nodes:physicsNodes,normalized:keyframeDifferenceNormalized,colors,scores};
             return colors;
         }
         function afHomologyDistances(){
@@ -10660,6 +10659,7 @@
                     const block=morphMatrixBlocks[b],atoms=block.res.atoms2?.length?block.res.atoms2:block.res.atoms1;
                     let type=types.findIndex(other=>referenceTypeCompatible(other,atoms));if(type<0){type=types.length;types.push(atoms);}chainType.set(b,type);
                 }
+                const siteIds=Array(N).fill('No binding site'),typeIds=Array(N).fill('No binding site');
                 const unique=Array(N).fill('#475569'),typed=Array(N).fill('#475569'),siteMembers=new WeakSet();let siteIndex=0;
                 const hueColor=index=>new THREE.Color().setHSL((index*.61803398875)%1,.72,.53);
                 for(const [pair,site] of sites){if(site.edges.length<2)continue;
@@ -10674,10 +10674,10 @@
                     const [a,b]=pair.split(':').map(Number),typeKey=[chainType.get(a),chainType.get(b)].sort((x,y)=>x-y).join(':');
                     for(const part of parts.values()){if(part.length<3)continue;
                         const colour=hueColor(siteIndex++),typeColour=hueColor([...new Set([...sites.keys()].map(p=>p.split(':').map(Number).map(x=>chainType.get(x)).sort((x,y)=>x-y).join(':')))].sort().indexOf(typeKey));
-                        for(const i of part){unique[i]=colour;typed[i]=typeColour;siteMembers.add(physicsNodes[i]);}
+                        for(const i of part){unique[i]=colour;typed[i]=typeColour;siteIds[i]=`Binding site ${siteIndex}`;typeIds[i]=`Protein interface ${typeKey}`;siteMembers.add(physicsNodes[i]);}
                     }
                 }
-                bindingSiteCache={nodes:physicsNodes,time:now,unique,typed,members:siteMembers};
+                bindingSiteCache={nodes:physicsNodes,time:now,unique,typed,siteIds,typeIds,members:siteMembers};
             }
             return byType?bindingSiteCache.typed:bindingSiteCache.unique;
         }
@@ -10738,7 +10738,7 @@
                 }
                 const bin=key(x,y,z);if(!atomGrid.has(bin))atomGrid.set(bin,[]);atomGrid.get(bin).push(i);
             }
-            const binding=bindingSiteMembership(),colors=Array(N).fill('#475569');
+            const binding=bindingSiteMembership(),colors=Array(N).fill('#475569'),scores=Array(N).fill(null);
             for(let i=0;i<N;i++){const node=physicsNodes[i];if(node.res.entityType!=='protein')continue;
                 const residue=node.idx2!==null?node.res.atoms2[node.idx2]:node.res.atoms1[node.idx1];
                 if(!residue||residue.sequenceOnly)continue;
@@ -10746,9 +10746,9 @@
                 const membrane=!!(inferredMembrane?.memberSet?.has(i)||inferredMembrane?.transmembraneSet?.has(i));
                 const f=features[i],score=Math.min(1,.34*burial+.20*Number(binding.has(node))+.18*Number(f.salt)+
                     .12*Number(f.hydrogen)+.32*Number(f.disulfide)+.18*Number(f.ligand)+.15*Number(membrane));
-                colors[i]=deviationColor(score,1);
+                scores[i]=score;colors[i]=deviationColor(score,1);
             }
-            mutationEffectCache={nodes:physicsNodes,time:now,colors};return colors;
+            mutationEffectCache={nodes:physicsNodes,time:now,colors,scores};return colors;
         }
         function updateBindingSiteToggleVisibility(){
             document.getElementById('bindingSiteResidueToggles')?.classList.remove('hidden');
@@ -10837,6 +10837,7 @@
             if (instancedNodeMesh.instanceColor) instancedNodeMesh.instanceColor.needsUpdate = true;
 
             updatePhysicsSequences();
+            window.refreshPhysicsComparisonSelection?.();
 
             // Match backbone vertex colours to the residue spheres in every mode.
             for (const ch of backboneChains) {
@@ -12688,6 +12689,7 @@
         renderRecentModels();
         function setLightMode(enabled) {
             document.body.classList.toggle('light-mode',enabled);
+            window.refreshPhysicsComparisonSelection?.(true);
             if (physicsScene) physicsScene.background = new THREE.Color(enabled ? 0xffffff : 0x020617);
             if (referenceComparisonScene?.scene) {
                 referenceComparisonScene.scene.background = new THREE.Color(enabled ? 0xffffff : 0x020617);
@@ -15448,4 +15450,164 @@ if(window.AppPerformanceDiagnostics){
             geometries:physicsRenderer.info.memory.geometries,textures:physicsRenderer.info.memory.textures}:null});
     document.getElementById('recordPerformanceBtn')?.addEventListener('click',()=>diagnostic.active?diagnostic.stop():diagnostic.start());
     document.getElementById('downloadPerformanceBtn')?.addEventListener('click',()=>diagnostic.download());
+}
+
+
+// Comparison values share the same model and score calculations as the viewer.
+function physicsComparisonValues(mode){
+    const scoreModes={'constraint-confidence':'confidence','spring-strain':'strain','membrane-score':'membraneScore','model-confidence':'combined','alpha-pae':'pae'};
+    let scores=null;
+    if(scoreModes[mode]){
+        const sums=new Float64Array(physicsNodes.length),counts=new Uint32Array(physicsNodes.length);
+        for(const pair of validationState.pairs){const value=pair[scoreModes[mode]];if(!Number.isFinite(value))continue;for(const i of [pair.i,pair.j]){sums[i]+=value;counts[i]++;}}
+        scores=Array.from(sums,(value,i)=>counts[i]?value/counts[i]:null);
+    }
+    if(mode==='qmeandisco'){
+        scores=Array(physicsNodes.length).fill(null);
+        if(validationState.qmeanNodeOrder?.length===validationState.qmean?.local?.length)validationState.qmeanNodeOrder.forEach((i,k)=>scores[i]=validationState.qmean.local[k]);
+    }
+    if(mode==='pattern-variance'){updatePatternVariance(true);scores=patternVarianceScores;}
+    if(mode==='rotational-symmetry'){updateRotationalSymmetry();scores=rotationalSymmetryScores;}
+    if(mode==='equivalent-protein-shape'){updateEquivalentProteinShape(true);scores=equivalentProteinShapeScores;}
+    if(mode==='af-difference')scores=afHomologyDistances();
+    if(mode==='keyframe-difference'){keyframeDifferenceColors();scores=keyframeDifferenceCache.scores;}
+    if(mode==='mutation-effect-basic'){mutationEffectColors();scores=mutationEffectCache.scores;}
+    if(mode==='residue-speed'){updateResidueSpeeds(performance.now());scores=residueSpeedState.speeds;}
+    if(mode==='binding-sites'||mode==='binding-site-type')bindingSiteColors(mode==='binding-site-type');
+    return physicsNodes.map((node,i)=>{
+        const atom=node.idx2!==null?node.res.atoms2?.[node.idx2]:null,ref=node.idx1!==null?node.res.atoms1?.[node.idx1]:null,source=atom||ref;
+        if(scores)return scores[i]??null;
+        if(UNI_PROT_FEATURE_MODES[mode]){if(!atom||!uniProtAnnotationForAtom(atom))return null;const f=uniProtFeatureAt(atom,UNI_PROT_FEATURE_MODES[mode]);return f?`${uniProtAccession(atom.sourcePdbId)}: ${f.description||f.type} (${f.start}–${f.end})`:'No annotation';}
+        switch(mode){
+            case 'chain':return displayChainName(node.res.c1||node.res.c2||'A');
+            case 'protein-id':return source?.sourcePdbId||null;
+            case 'uniform':return 'All proteins';
+            case 'residue-index':return node.idx2??node.idx1;
+            case 'hydrophobicity':return HYDROPHOBICITY[atom?.singleChar]??null;
+            case 'plddt':return Number.isFinite(atom?.plddt)&&atom.plddt>0?atom.plddt:null;
+            case 'secondary':return atom?atom.secondaryType||'coil':null;
+            case 'charge':return !atom?.singleChar?null:['D','E'].includes(atom.singleChar)?'Negative':['K','R'].includes(atom.singleChar)?'Positive':atom.singleChar==='H'?'Partial positive':'Neutral';
+            case 'aligned':return node.usedInAlignment?'Aligned':'Not aligned';
+            case 'origin':return atom&&!node.res.referenceOnly?(ref?'Reference + AlphaFold':'AlphaFold'):ref?'Reference':null;
+            case 'difference':return physicsReferenceDistance(node);
+            case 'binding-sites':return bindingSiteCache.siteIds[i];
+            case 'binding-site-type':return bindingSiteCache.typeIds[i];
+            case 'membrane':{if(!inferredMembrane)return null;const color=membraneResidueDisplayColor(i);return color==='#ef4444'?'Transmembrane':color==='#f97316'?'Membrane associated':'Outside membrane';}
+            case 'membrane-repelled':return inferredMembrane?(isMembraneRepelledResidue(node,i,inferredMembrane,membraneRepulsionVal)?'Repelled':'Not repelled'):null;
+            case 'membrane-placement':{const residue=membraneResidue(node);if(!residue)return null;const aa=residue.aa,charge=['D','E','K','R'].includes(aa)?1:aa==='H'?.35:0;return Math.min(1,1.6*Math.sqrt(membranePlacementExposure(i))*(charge||Math.max(0,HYDROPHOBICITY[aa]??0)/4.5));}
+            default:return null;
+        }
+    });
+}
+const physicsComparisonPanel=document.getElementById('physicsVariableComparison');
+if(physicsComparisonPanel&&window.ProteinVariableComparison){
+    const api=window.ProteinVariableComparison,xSelect=document.getElementById('physicsCompareX'),ySelect=document.getElementById('physicsCompareY'),canvas=document.getElementById('physicsComparePlot');
+    for(const select of [xSelect,ySelect])for(const option of document.getElementById('physicsColorSelect').options){const meta=api.metadata[option.value];if(meta)select.add(new Option(option.textContent,option.value));}
+    xSelect.value='hydrophobicity';ySelect.value='plddt';
+    let plottedRows=[],plottedMetadata=null,plottedLabels=[],plotChains=[];
+    const hiddenComparisonChains=new Set();
+    let comparisonTrend=false;
+    const trendButton=document.getElementById('physicsCompareTrend');
+    function drawComparisonSelection(force=false){
+        if(!physicsComparisonPanel.open||!plottedRows.length)return;
+        let changed=force;
+        for(const row of plottedRows){const selected=selectionMatches(row.node);if(row.selected!==selected)changed=true;row.selected=selected;}
+        if(!changed)return;
+        const visible=api.visibleRows(plottedRows,hiddenComparisonChains);trendButton.disabled=api.plan(...plottedMetadata).kind!=='scatter'||!visible.length;
+        api.draw(canvas,plottedRows,...plottedMetadata,plottedLabels,{trend:comparisonTrend,hiddenChains:hiddenComparisonChains,light:document.body.classList.contains('light-mode'),fontFamily:getComputedStyle(document.body).fontFamily,onClear:()=>{clearLinkedSelection();drawComparisonSelection();},onSelect:(row,event)=>{
+            selectLinkedEntity(row.node.res.c1,row.atom?.resSeq,'residue',row.atom,event.ctrlKey||event.metaKey);
+            drawComparisonSelection();
+        }});
+    }
+    window.refreshPhysicsComparisonSelection=drawComparisonSelection;
+    function resetComparisonPlot(){
+        plottedRows=[];plotChains=[];trendButton.disabled=true;canvas.width=0;canvas.onclick=null;canvas.onmousemove=null;canvas.style.cursor='default';
+        document.getElementById('physicsCompareKey').replaceChildren();
+        for(const id of ['physicsCompareCopy','physicsCompareDownload'])document.getElementById(id).disabled=true;
+        document.getElementById('physicsCompareHover').textContent='Hover over the plot to inspect values.';
+    }
+    const comparisonMenuSync=[];
+    for(const [axis,select] of [['X',xSelect],['Y',ySelect]]){
+        const button=document.getElementById(`physicsCompare${axis}Button`),menu=document.getElementById(`physicsCompare${axis}Menu`);
+        // Clone category layout and shared styling, then bind this variable's actions.
+        menu.replaceChildren(...[...physicsColorMenu.children].map(column=>column.cloneNode(true)));
+        const close=()=>{menu.classList.add('hidden');button.setAttribute('aria-expanded','false');};
+        const sync=()=>{
+            button.replaceChildren(document.createTextNode(select.selectedOptions[0].textContent));const icon=document.createElement('i');icon.className='fa-solid fa-chevron-down ml-1';icon.setAttribute('aria-hidden','true');button.append(icon);
+            for(const choice of menu.querySelectorAll('[data-color-mode]'))choice.setAttribute('aria-pressed',String(choice.dataset.colorMode===select.value));
+        };
+        for(const choice of menu.querySelectorAll('[data-color-mode]'))choice.addEventListener('click',()=>{select.value=choice.dataset.colorMode;select.dispatchEvent(new Event('change'));close();button.focus();});
+        document.body.append(menu);
+        const place=()=>{const rect=button.getBoundingClientRect(),width=Math.min(800,window.innerWidth-16);menu.style.left=`${window.scrollX+Math.max(8,Math.min(rect.left,window.innerWidth-width-8))}px`;menu.style.maxHeight=`${Math.max(96,window.innerHeight-16)}px`;const height=Math.min(menu.scrollHeight,window.innerHeight-16);menu.style.top=`${window.scrollY+Math.max(8,Math.min(rect.bottom+6,window.innerHeight-height-8))}px`;};
+        button.addEventListener('click',()=>{const opening=menu.classList.toggle('hidden')===false;button.setAttribute('aria-expanded',String(opening));if(opening)place();});
+        button.addEventListener('keydown',event=>{if(event.key==='ArrowDown'){event.preventDefault();menu.classList.remove('hidden');button.setAttribute('aria-expanded','true');place();menu.querySelector('[aria-pressed="true"]')?.focus();}});
+        menu.addEventListener('keydown',event=>{if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();const choices=[...menu.querySelectorAll('button')],index=choices.indexOf(document.activeElement),next=event.key==='Home'?0:event.key==='End'?choices.length-1:(index+(event.key==='ArrowDown'?1:-1)+choices.length)%choices.length;choices[next]?.focus();}});
+        document.addEventListener('click',event=>{if(!menu.contains(event.target)&&!button.contains(event.target))close();});
+        document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!menu.classList.contains('hidden')){close();button.focus();}});
+        physicsComparisonPanel.addEventListener('toggle',()=>{if(!physicsComparisonPanel.open)close();});
+        window.addEventListener('resize',()=>{if(!menu.classList.contains('hidden'))place();});select.addEventListener('change',sync);comparisonMenuSync.push(sync);sync();
+    }
+    trendButton.addEventListener('click',()=>{comparisonTrend=!comparisonTrend;trendButton.textContent=`Trend lines: ${comparisonTrend?'On':'Off'}`;trendButton.setAttribute('aria-pressed',String(comparisonTrend));drawComparisonSelection(true);});
+    document.getElementById('physicsCompareSwap').addEventListener('click',()=>{
+        [xSelect.value,ySelect.value]=[ySelect.value,xSelect.value];
+        for(const sync of comparisonMenuSync)sync();
+        refreshPhysicsComparison();
+    });
+    function comparisonExportBlob(){
+        if(!plottedRows.length)return Promise.reject(new Error('No plot available.'));
+        const colors=api.palette(document.body.classList.contains('light-mode')),exportChains=api.exportKey(plotChains,hiddenComparisonChains,xSelect.value,ySelect.value);
+        const screenRatio=window.devicePixelRatio||1,width=canvas.width/screenRatio,ratio=3,exportPlot=document.createElement('canvas');
+        api.draw(exportPlot,plottedRows,...plottedMetadata,plottedLabels,{width,pixelRatio:ratio,trend:comparisonTrend,hiddenChains:hiddenComparisonChains,light:document.body.classList.contains('light-mode'),fontFamily:getComputedStyle(document.body).fontFamily});
+        const plotHeight=exportPlot.height/ratio,legendRows=Math.ceil(exportChains.length/Math.max(1,Math.floor((width-40)/180))),output=document.createElement('canvas');
+        output.width=exportPlot.width;output.height=(plotHeight+60+legendRows*24)*ratio;const ctx=output.getContext('2d');ctx.scale(ratio,ratio);ctx.fillStyle=colors.background;ctx.fillRect(0,0,width,output.height/ratio);ctx.fillStyle=colors.text;ctx.font=`bold 16px ${getComputedStyle(document.body).fontFamily}`;ctx.fillText(`${plottedLabels[0]} × ${plottedLabels[1]}`,20,25);ctx.drawImage(exportPlot,0,40,width,plotHeight);
+        const columns=Math.max(1,Math.floor((width-40)/180));ctx.font=`12px ${getComputedStyle(document.body).fontFamily}`;exportChains.forEach((entry,i)=>{const left=20+(i%columns)*180,top=plotHeight+58+Math.floor(i/columns)*24;ctx.fillStyle=entry.color;ctx.fillRect(left,top-9,10,10);ctx.fillStyle=colors.text;ctx.fillText(entry.chain,left+16,top);});
+        return new Promise((resolve,reject)=>output.toBlob(blob=>blob?resolve(blob):reject(new Error('PNG encoding failed.')),'image/png'));
+    }
+    document.getElementById('physicsCompareCopy').addEventListener('click',async()=>{
+        const status=document.getElementById('physicsCompareStatus');
+        try{const pending=comparisonExportBlob();await navigator.clipboard.write([new ClipboardItem({'image/png':pending})]);status.textContent='Plot image copied.';}
+        catch(error){status.textContent='Could not copy the plot image. Use Download instead.';}
+    });
+    document.getElementById('physicsCompareDownload').addEventListener('click',async()=>{
+        try{const blob=await comparisonExportBlob(),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`protein-comparison-${xSelect.value}-${ySelect.value}.png`;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+        catch(error){document.getElementById('physicsCompareStatus').textContent='Could not download the plot image.';}
+    });
+
+    function refreshPhysicsComparison(){
+        if(!physicsComparisonPanel.open||!physicsComparisonPanel.getClientRects().length||document.hidden)return;
+        const x=api.metadata[xSelect.value],y=api.metadata[ySelect.value],plan=api.plan(x,y),status=document.getElementById('physicsCompareStatus');
+        document.getElementById('physicsCompareDescription').textContent=`X: ${x.type}, per ${x.level}${x.unit?' ('+x.unit+')':''}. Y: ${y.type}, per ${y.level}${y.unit?' ('+y.unit+')':''}. ${plan.kind==='sequence'?'Residue category map: marks retain sequence positions, with a separate lane for each chain within each category':plan.kind==='scatter'?(plan.indexAxis?'Residue profile: points from each chain are connected in residue order':'Scatter plot'):plan.kind==='box'?'Box plots per chain: median, middle 50%, and min–max':'Count heatmap: chain-coloured segments show the proportion from each chain'}. ${xSelect.value==='side-chains'||ySelect.value==='side-chains'?'Backbone atoms are excluded. ':''}Categorical axes with more than 24 labels group less frequent labels as Other. ${plan.level==='chain'?'Each chain contributes once.':plan.level==='atom'?'Each protein atom contributes once; residue and chain values are repeated for its atoms.':'Each protein residue contributes once; chain values are repeated for its residues.'}`;
+        if(!physicsNodes.length){status.textContent='Build a model to compare its variables.';resetComparisonPlot();return;}
+        if([xSelect.value,ySelect.value].some(mode=>['constraint-confidence','spring-strain','membrane-score','model-confidence','alpha-pae'].includes(mode)))calculateValidationPairs();
+        const xs=physicsComparisonValues(xSelect.value),ys=physicsComparisonValues(ySelect.value),rows=[],seen=new Set(),chainKeys=morphMatrixBlocks.map(block=>block.c1);
+        physicsNodes.forEach((node,i)=>{
+            if(node.res.entityType!=='protein')return;
+            const atom=(node.idx2!==null?node.res.atoms2?.[node.idx2]:null)||(node.idx1!==null?node.res.atoms1?.[node.idx1]:null),label=`${displayChainName(node.res.c1||node.res.c2)} · ${atom?.resName||''} ${atom?.resSeq??i}`;
+            const chainId=node.res.c1||node.res.c2||'A',rowInfo={node,atom,chain:displayChainName(chainId),color:getChainColor(chainId,chainKeys),selected:selectionMatches(node)};
+            if(plan.level==='chain'){const key=node.blockIdx;if(seen.has(key))return;seen.add(key);}
+            if(plan.level==='atom'){
+                const atoms=atom?.sourceAtoms||[];
+                if(!atoms.length){rows.push({...rowInfo,x:null,y:null,label});return;}
+                for(const source of atoms){if((xSelect.value==='side-chains'||ySelect.value==='side-chains')&&isBackboneAtomName(source.atomName))continue;const value=(mode,values)=>mode==='element'?String(source.element||'').toUpperCase()||null:mode==='side-chains'?(['A','V','I','L','M','P'].includes(atom.singleChar)?'Nonpolar':['F','W','Y'].includes(atom.singleChar)?'Aromatic':['S','T','N','Q','C'].includes(atom.singleChar)?'Polar':['K','R','H'].includes(atom.singleChar)?'Basic':['D','E'].includes(atom.singleChar)?'Acidic':'Other side chain'):values[i];rows.push({...rowInfo,x:value(xSelect.value,xs),y:value(ySelect.value,ys),label:label+' · '+source.atomName});}
+            }else rows.push({...rowInfo,x:xs[i],y:ys[i],label});
+        });
+        const paired=api.pairRows(rows,x,y);status.textContent=`${paired.length.toLocaleString()} ${plan.level} observations; ${(rows.length-paired.length).toLocaleString()} excluded because a value is unavailable.${paired.length?'':' No paired data available for these variables.'}`;
+        if(!paired.length){resetComparisonPlot();canvas.setAttribute('aria-label','No paired data available');return;}
+        plottedRows=paired;plottedMetadata=[x,y];plottedLabels=[xSelect.selectedOptions[0].textContent,ySelect.selectedOptions[0].textContent];
+        plotChains=[...new Map(paired.map(row=>[row.chain,{chain:row.chain,color:row.color}])).values()];
+        const key=document.getElementById('physicsCompareKey');key.replaceChildren();
+        for(const entry of plotChains){
+            const item=document.createElement('button'),swatch=document.createElement('span'),icon=document.createElement('i');item.type='button';item.className='comparison-chain-toggle';
+            swatch.style.cssText=`display:inline-block;width:10px;height:10px;border-radius:50%;background:${entry.color}`;
+            const sync=()=>{const visible=!hiddenComparisonChains.has(entry.chain);item.setAttribute('aria-pressed',String(visible));item.setAttribute('aria-label',`${visible?'Hide':'Show'} ${entry.chain} in comparison plot`);item.title=`${visible?'Hide':'Show'} ${entry.chain}`;icon.className=`fa-solid fa-eye${visible?'':'-slash'}`;icon.setAttribute('aria-hidden','true');};
+            item.append(swatch,document.createTextNode(entry.chain),icon);sync();item.addEventListener('click',()=>{if(hiddenComparisonChains.has(entry.chain))hiddenComparisonChains.delete(entry.chain);else hiddenComparisonChains.add(entry.chain);sync();drawComparisonSelection(true);});key.append(item);
+        }
+        for(const id of ['physicsCompareCopy','physicsCompareDownload'])document.getElementById(id).disabled=false;
+        drawComparisonSelection(true);
+    }
+    xSelect.addEventListener('change',refreshPhysicsComparison);ySelect.addEventListener('change',refreshPhysicsComparison);
+    physicsComparisonPanel.addEventListener('toggle',refreshPhysicsComparison);
+    let comparisonResizeTimer;window.addEventListener('resize',()=>{clearTimeout(comparisonResizeTimer);comparisonResizeTimer=setTimeout(refreshPhysicsComparison,200);});
+    // Closed sections perform no scoring work. Refresh at most once every two seconds.
+    setInterval(refreshPhysicsComparison,2000);
 }
