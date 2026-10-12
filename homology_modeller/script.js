@@ -367,7 +367,7 @@
             rebuildTopologicalDomainColors();
             uniProtUnavailable=accessions.filter((_,index)=>results[index].status==='rejected');
             for(const result of results)if(result.status==='rejected')console.warn('UniProt annotation unavailable:',result.reason);
-            renderAboutProteinComplex();updateUniProtChainLabels();updateMembraneSideNames();updateSymmetryRotationControls();configureAutoSpinAnimation();
+            renderAboutProteinComplex();updateUniProtChainLabels();refreshMembranePresence();updateMembraneSideNames();updateSymmetryRotationControls();configureAutoSpinAnimation();
             if(UNI_PROT_FEATURE_MODES[physicsColorMode]){renderUniProtFeatureKey();updatePhysicsNodeColors();updateAtomRepresentation();updateModel1AlignmentColors();}
         }
 // uniProtAnnotations.js end
@@ -388,7 +388,7 @@
         const physicsNonSelectedOpacityUniform = {value:1};
         function updateSelectionGlow() {
             if (!selectionGlowMesh) return;
-            if(!selectionGlowVisible||!selectedGlowIndices.length||physicsRepresentation==='ball-stick'||linkedSelection?.kind==='lipid'){selectionGlowMesh.count=0;selectionGlowMesh.visible=false;return;}
+            if(linkedSelection?.mode==='atom'||!selectionGlowVisible||!selectedGlowIndices.length||physicsRepresentation==='ball-stick'||linkedSelection?.kind==='lipid'){selectionGlowMesh.count=0;selectionGlowMesh.visible=false;return;}
             const dummy=new THREE.Object3D();let shown=0;
             for (const index of selectedGlowIndices) {
                 const node=physicsNodes[index];
@@ -455,21 +455,63 @@
         function selectionMatchesOne(node,selection){
             if(!selection||selection.kind!=='model')return false;
             if (selection.mode==='chain') return node.res.c1===selection.chain;
+            if(selection.mode==='identical')return selection.identicalResults?.has(node.res)||false;
             if (node.res.c1!==selection.chain) return false;
             const reference=node.idx1===null?null:node.res.atoms1[node.idx1];
             const alpha=node.idx2===null?null:node.res.atoms2[node.idx2];
             return !!((reference&&reference===selection.referenceAtom)||(alpha&&alpha===selection.alphaAtom));
         }
-        function selectLinkedEntity(chain, resSeq=null, mode=selectionMode, atom=null, additive=false) {
+        function selectionColorsNode(node) {
+            if(linkedSelection?.kind==='pair')return selectionMatches(node);
+            return [linkedSelection,...additionalSelections].some(selection=>selection?.mode!=='atom'&&selectionMatchesOne(node,selection));
+        }
+        function moleculeSelectionSignature(res) {
+            if(!res)return '';
+            const atoms=res.atoms2?.length?res.atoms2:res.atoms1;
+            return `${res.entityType}:${atoms.map(atom=>atom.resName||atom.singleChar||'?').join('|')}`;
+        }
+        function atomEntrySelected(entry) {
+            const node=physicsNodes[entry.nodeIndex];
+            return [linkedSelection,...additionalSelections].some(selection=>selection?.mode==='atom'
+                ? selectionMatchesOne(node,selection)&&(!selection.sourceAtom||selection.sourceAtom===entry.source)
+                : selectionMatchesOne(node,selection)) || (linkedSelection?.kind==='pair'&&selectionMatches(node));
+        }
+        function updateSelectionDistance() {
+            const box=document.getElementById('physicsSelectionInfo');
+            if(!box||!linkedSelection)return;
+            let points=[],label='Residue anchor distance';
+            if(linkedSelection.kind==='pair')points=[linkedSelection.i,linkedSelection.j].map(i=>visualPointForNode(physicsNodes[i]));
+            else {
+                const selections=[linkedSelection,...additionalSelections];
+                if(selections.length!==2||!selections.every(item=>item.mode===selections[0].mode&&['atom','residue'].includes(item.mode))){box.querySelector('[data-selection-distance]')?.remove();return;}
+                points=selections.map(selection=>{
+                    const index=physicsNodes.findIndex(node=>selectionMatchesOne(node,selection));
+                    if(index<0)return null;
+                    if(selection.mode==='atom'&&selection.sourceAtom){label='Atom distance';return simulationAtomCoordinates([{nodeIndex:index,source:selection.sourceAtom}],true)[0];}
+                    return visualPointForNode(physicsNodes[index]);
+                });
+            }
+            if(points.length!==2||points.some(point=>!point))return;
+            let output=box.querySelector('[data-selection-distance]');
+            if(!output){output=document.createElement('div');output.dataset.selectionDistance='';box.append(output);}
+            const distance=Math.hypot(points[0].x-points[1].x,points[0].y-points[1].y,points[0].z-points[1].z);
+            output.textContent=`${label}: ${distance.toFixed(2)} Å`;
+        }
+        function selectLinkedEntity(chain, resSeq=null, mode=selectionMode, atom=null, additive=false, sourceAtom=null) {
             const res=alignmentResults.find(result=>result.c1===chain&&(!atom||result.atoms1.includes(atom)||result.atoms2.includes(atom)))||alignmentResults.find(result=>result.c1===chain);
             const column=atom&&res?.alignedPairs.findIndex(pair=>(pair.idx1!==null&&res.atoms1[pair.idx1]===atom)||(pair.idx2!==null&&res.atoms2[pair.idx2]===atom));
             const pair=column>=0?res.alignedPairs[column]:null;
+            const identicalResults=mode==='identical'?new Set():null;
+            if(identicalResults){
+                const signature=moleculeSelectionSignature(res);
+                for(const result of alignmentResults)if(moleculeSelectionSignature(result)===signature)identicalResults.add(result);
+            }
             if(!additive)additionalSelections=[];
             else if(linkedSelection?.kind==='model')additionalSelections.push(linkedSelection);
-            linkedSelection={kind:'model',mode,chain,resSeq,atom,res,column,
+            linkedSelection={kind:'model',mode,chain,resSeq,atom,res,column,sourceAtom,identicalResults,
                 referenceAtom:pair?.idx1!=null?res.atoms1[pair.idx1]:null,
                 alphaAtom:pair?.idx2!=null?res.atoms2[pair.idx2]:null};
-            if(additive)additionalSelections=additionalSelections.filter(selection=>selection.chain!==chain||selection.mode!==mode||selection.atom!==atom);
+            if(additive)additionalSelections=additionalSelections.filter(selection=>selection.chain!==chain||selection.mode!==mode||selection.atom!==atom||selection.sourceAtom!==sourceAtom);
             document.querySelectorAll('#alignmentTableBody tr').forEach(row=>{
                 const result=alignmentResults[Number(row.dataset.alignmentIndex)];
                 row.classList.toggle('linked-selected',result?.c1===chain);
@@ -484,14 +526,9 @@
             applyPhysicsVisibility();updateAtomRepresentation();updateCartoonRepresentation();
             alignmentTmViewer?.updateColors();
             drawIndividualMatrices(); drawDifferenceMatrix(); drawMorphMatrix();
-            if(additive&&mode==='residue'){
-                const selections=[linkedSelection,...additionalSelections].filter(selection=>selection.kind==='model'&&selection.mode==='residue');
-                if(selections.length===2){
-                    const indices=selections.map(selection=>physicsNodes.findIndex(node=>selectionMatchesOne(node,selection)));
-                    if(indices.every(index=>index>=0)&&indices[0]!==indices[1])selectValidationPairNodes(indices[0],indices[1]);
-                }
-            }
+            updateSelectionDistance();
         }
+
         function clearLinkedSelection() {
             if (!linkedSelection) return;
             linkedSelection=null;
@@ -539,14 +576,14 @@
                 first.textContent=labels[0];separator.className='selection-pair-separator';separator.textContent='↔';second.textContent=labels[1];
                 detail.append(first,separator,second);
                 const row=document.createElement('div');row.className='selection-info-heading';row.append(heading,glowButton);
-                box.replaceChildren(row,detail);box.classList.remove('hidden');return;
+                box.replaceChildren(row,detail);box.classList.remove('hidden');updateSelectionDistance();return;
             }
             const {chain,mode,referenceAtom,alphaAtom,atom}=linkedSelection;
             const selected=atom||referenceAtom||alphaAtom;
-            const heading=document.createElement('strong');heading.textContent=mode==='chain'?displayChainName(chain):`${selected?.resName||'Atom'} ${selected?.resSeq??''} · ${displayChainName(chain)}`;
+            const heading=document.createElement('strong');heading.textContent=['HOH','WAT','H2O','DOD'].includes(String(selected?.resName||'').toUpperCase())?`Water · ${displayChainName(chain)}`:mode==='identical'?'Identical molecules':mode==='atom'?`${linkedSelection.sourceAtom?.atomName||selected?.atomName||'Atom'} · ${selected?.resName||''} ${selected?.resSeq??''} · ${displayChainName(chain)}`:mode==='chain'?displayChainName(chain):`${selected?.resName||'Atom'} ${selected?.resSeq??''} · ${displayChainName(chain)}`;
             const detail=document.createElement('div');
             detail.textContent=mode==='chain'
-                ? `${linkedSelection.res?.entityType==='nucleotide'?'Polynucleotide':linkedSelection.res?.entityType==='other'?'Non-protein molecule':'Protein'} · ${linkedSelection.res?.atoms1.length||linkedSelection.res?.atoms2.length||0} residues/atoms`
+                ? `${linkedSelection.res?.entityType==='nucleotide'?'Polynucleotide':linkedSelection.res?.entityType==='other'?'Non-protein molecule':'Protein'} · ${linkedSelection.res?.atoms1.length||linkedSelection.res?.atoms2.length||0} ${linkedSelection.res?.entityType==='other'?'atoms':'residues'}`
                 : `${selected?.entityType==='nucleotide'?'Nucleotide':selected?.entityType==='other'?'Non-protein atom':'Residue'} · ${referenceAtom&&alphaAtom?'Reference PDB & AlphaFold':referenceAtom?'Reference PDB':alphaAtom?'AlphaFold':''}`;
             const headingRow=document.createElement('div');headingRow.className='selection-info-heading';headingRow.append(heading,glowButton);
             box.replaceChildren(headingRow,detail);box.classList.remove('hidden');
@@ -567,12 +604,15 @@
             alignmentTmViewer?.updateColors();drawIndividualMatrices();drawDifferenceMatrix();drawMorphMatrix();
         }
         function setSelectionMode(mode) {
-            selectionMode=mode==='chain'?'chain':'residue';
+            selectionMode=['atom','residue','chain','identical'].includes(mode)?mode:'residue';
+            document.getElementById('physicsSelectMode').value=selectionMode;
+            syncPhysicsSelectionMenu();
             document.querySelectorAll('[data-select-mode]').forEach(button=>{
                 const active=button.dataset.selectMode===selectionMode;
                 button.classList.toggle('bg-violet-600',active);
                 button.classList.toggle('text-white',active);
             });
+            updateSelectedResidueLabels();
             if(linkedSelection?.kind==='model')selectLinkedEntity(linkedSelection.chain,linkedSelection.resSeq,selectionMode,linkedSelection.atom);
         }
         let selectedPairKey = null;
@@ -3377,12 +3417,200 @@
         // 2) Cutoff-filtered sparse springs: for 6YKM, creates ~20,000 springs instead of 920,000!
         // 3) Pre-allocated dynamic buffer lines for backbone: zero geometry reallocation per frame!
         // 4) Spatial hashing: drops steric check from O(N^2) to O(N)!
+        let proteinSliced=false,proteinSliceAngle=0,proteinSliceTilt=0,proteinSliceAxisAzimuth=0,proteinSlicePercent=50;
+        let proteinSlicePlane=null,proteinSliceApplied=false,selectedResidueLabelsVisible=false,selectedResidueLabelCanvas=null;
+        const selectedResidueLabelElements=[];
+        function proteinSliceCutoff(min,max,percent){
+            return min+(max-min)*Math.max(0,Math.min(100,percent))/100;
+        }
+        function syncProteinSlice(scene){
+            if(!proteinSliced&&!proteinSliceApplied)return;
+            proteinSliceApplied=proteinSliced;
+            if(!proteinSlicePlane)proteinSlicePlane=new THREE.Plane();
+            const normal=new THREE.Vector3(...proteinSliceNormalForAngles(proteinSliceAngle,proteinSliceTilt,proteinSliceAxisAzimuth));
+            let min=Infinity,max=-Infinity;
+            if(proteinSliced)for(const node of physicsNodes){
+                const point=visualPointForNode(node),projection=normal.dot(point);
+                min=Math.min(min,projection);max=Math.max(max,projection);
+            }
+            const cutoff=Number.isFinite(min)?proteinSliceCutoff(min,max,proteinSlicePercent):0;
+            // Keep positive half-space; endpoints fully restore or fully hide molecules.
+            proteinSlicePlane.normal.copy(normal);
+            proteinSlicePlane.constant=proteinSlicePercent>=100?-1e12:proteinSlicePercent<=0?1e12:-cutoff;
+            scene.traverse(object=>{
+                let membrane=false;
+                for(let parent=object;parent;parent=parent.parent)if(parent===membraneMeshes){membrane=true;break;}
+                for(const material of (Array.isArray(object.material)?object.material:[object.material])){
+                    if(!material)continue;
+                    const planes=proteinSliced&&!membrane?[proteinSlicePlane]:[];
+                    if((material.clippingPlanes?.length||0)!==planes.length)material.needsUpdate=true;
+                    material.clippingPlanes=planes;
+                }
+            });
+        }
+        function isPhysicsPickPointVisible(point){
+            return !proteinSliced||(proteinSlicePercent<100&&point&&(!proteinSlicePlane||proteinSlicePlane.distanceToPoint(point)>=-1e-6));
+        }
+        function firstVisiblePhysicsHit(hits,accept){
+            return hits.find(hit=>isPhysicsPickPointVisible(hit.point)&&accept(hit));
+        }
+        function labelBoxesOverlap(a,b){
+            return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;
+        }
+        function residueLabelsAllowed(mode){
+            return mode!=='chain'&&mode!=='identical';
+        }
+        function proteinSliceAnglesForNormal(normal){
+            const [x,y,z]=normal,length=Math.hypot(x,y,z);
+            if(!length)return {angle:0,tilt:0};
+            return {angle:(Math.atan2(z,x)+Math.PI*2)%(Math.PI*2),tilt:Math.asin(Math.max(-1,Math.min(1,y/length)))};
+        }
+        function proteinSliceNormalForAngles(angle,tilt,axisAzimuth){
+            // The tilt defines the rotation axis. The cut plane contains that
+            // axis, and its normal rotates around it as the slice angle changes.
+            const ca=Math.cos(axisAzimuth),sa=Math.sin(axisAzimuth),st=Math.sin(tilt),ct=Math.cos(tilt);
+            const c=Math.cos(angle),s=Math.sin(angle);
+            return [-sa*c+st*ca*s,-ct*s,ca*c+st*sa*s];
+        }
+        function updateSelectedResidueLabels(){
+            const container=document.getElementById('physics3dCanvas');
+            if(!container)return;
+            for(const label of selectedResidueLabelElements)label.style.display='none';
+            if(!selectedResidueLabelsVisible||!linkedSelection||!residueLabelsAllowed(selectionMode)||!residueLabelsAllowed(linkedSelection.mode)){if(selectedResidueLabelCanvas)selectedResidueLabelCanvas.style.display='none';return;}
+            if(!selectedResidueLabelCanvas){
+                selectedResidueLabelCanvas=document.createElement('canvas');
+                selectedResidueLabelCanvas.setAttribute('aria-label','Selected residue labels');
+                selectedResidueLabelCanvas.style.cssText='position:absolute;inset:0;pointer-events:none;z-index:5';
+                container.append(selectedResidueLabelCanvas);
+            }
+            const canvas=selectedResidueLabelCanvas,w=container.clientWidth,h=container.clientHeight;
+            if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}
+            canvas.style.display='block';const ctx=canvas.getContext('2d');ctx.clearRect(0,0,w,h);
+            physicsCamera.updateMatrixWorld();
+            const anchors=[];
+            for(const node of physicsNodes){
+                if(!selectionMatches(node)||!isNodeVisibleInPhysics(node))continue;
+                const point=visualPointForNode(node);
+                if(proteinSliced&&proteinSlicePlane?.distanceToPoint(point)<0)continue;
+                const projected=new THREE.Vector3(point.x,point.y,point.z).project(physicsCamera);
+                if(projected.z < -1||projected.z>1)continue;
+                const x=(projected.x+1)*w/2,y=(1-projected.y)*h/2;
+                if(x<0||x>w||y<0||y>h)continue;
+                const distance=new THREE.Vector3(point.x,point.y,point.z).distanceTo(physicsCamera.position);
+                const radius=Math.max(10,viewerSizes.physics.residue*h/(2*Math.tan(physicsCamera.fov*Math.PI/360)*Math.max(.1,physicsCamera.isOrthographicCamera ? physicsCamera.position.distanceTo(camTarget) : distance))+6);
+                const atom=validationAtom(node,'af')||validationAtom(node,'reference');
+                anchors.push({x,y,radius,text:`${atom?.resName||'Residue'} ${atom?.resSeq??''}${atom?.insertionCode||''} · ${displayChainName(node.res.c1)}`});
+            }
+            const obstacles=anchors.map(a=>({x:a.x-a.radius,y:a.y-a.radius,w:a.radius*2,h:a.radius*2})),placed=[];
+            for(let index=0;index<anchors.length;index++){
+                const anchor=anchors[index];
+                let label=selectedResidueLabelElements[index];
+                if(!label){label=document.createElement('div');label.className='membrane-side-label';label.style.transform='none';container.append(label);selectedResidueLabelElements[index]=label;}
+                label.textContent=anchor.text;label.style.display='block';label.style.visibility='hidden';
+                const width=label.offsetWidth,height=label.offsetHeight;
+                let box=null;
+                for(let ring=0;ring<12&&!box;ring++)for(let direction=0;direction<16;direction++){
+                    const angle=direction*Math.PI/8,radius=anchor.radius+16+ring*18;
+                    const candidate={x:anchor.x+Math.cos(angle)*radius-width/2,y:anchor.y+Math.sin(angle)*radius-height/2,w:width,h:height};
+                    if(candidate.x<2||candidate.y<2||candidate.x+width>w-2||candidate.y+height>h-2)continue;
+                    if(obstacles.some(other=>labelBoxesOverlap(candidate,other))||placed.some(other=>labelBoxesOverlap(candidate,other)))continue;
+                    box=candidate;break;
+                }
+                // Crowded labels wait until camera movement makes space available.
+                if(!box){label.style.display='none';continue;}
+                placed.push({...box,x:box.x-3,y:box.y-3,w:box.w+6,h:box.h+6});
+                ctx.strokeStyle='#94a3b8';ctx.beginPath();ctx.moveTo(anchor.x,anchor.y);ctx.lineTo(box.x+box.w/2,box.y+box.h/2);ctx.stroke();
+                label.style.left=`${box.x}px`;label.style.top=`${box.y}px`;label.style.visibility='visible';
+            }
+        }
+        function refreshProteinSliceControls(){
+            const button=document.getElementById('sliceProteinBtn');
+            button.textContent=proteinSliced?'Show full protein':'Slice protein';button.setAttribute('aria-pressed',String(proteinSliced));
+            for(const id of ['proteinSliceAngleControl','proteinSliceTiltControl','proteinSlicePercentControl'])document.getElementById(id)?.classList.toggle('hidden',!proteinSliced);
+            if(physicsRenderer&&physicsScene)physicsRenderer.render(physicsScene,physicsCamera);
+        }
+        document.getElementById('sliceProteinBtn')?.addEventListener('click',()=>{
+            proteinSliced=!proteinSliced;
+            if(proteinSliced&&inferredMembrane){
+                // Snapshot the membrane orientation only when slicing is enabled.
+                const angles=proteinSliceAnglesForNormal(inferredMembrane.normal);
+                const degrees=0,tilt=Math.round(angles.tilt*180/Math.PI);
+                proteinSliceAxisAzimuth=angles.angle;
+                proteinSliceAngle=0;proteinSliceTilt=angles.tilt;
+                document.getElementById('proteinSliceAngleSlider').value=String(degrees);
+                document.getElementById('proteinSliceAngleValue').textContent=`${degrees}°`;
+                document.getElementById('proteinSliceTiltSlider').value=String(tilt);
+                document.getElementById('proteinSliceTiltValue').textContent=`${tilt}°`;
+            }
+            refreshProteinSliceControls();
+        });
+        document.getElementById('proteinSliceAngleSlider')?.addEventListener('input',event=>{
+            const degrees=Number(event.target.value);proteinSliceAngle=degrees*Math.PI/180;
+            document.getElementById('proteinSliceAngleValue').textContent=`${degrees}°`;refreshProteinSliceControls();
+        });
+        document.getElementById('proteinSliceTiltSlider')?.addEventListener('input',event=>{
+            const degrees=Number(event.target.value);proteinSliceTilt=degrees*Math.PI/180;
+            document.getElementById('proteinSliceTiltValue').textContent=`${degrees}°`;refreshProteinSliceControls();
+        });
+        document.getElementById('proteinSlicePercentSlider')?.addEventListener('input',event=>{
+            if(!event.target.value.trim())return;
+            const value=Number(event.target.value);if(!Number.isFinite(value))return;
+            proteinSlicePercent=Math.max(0,Math.min(100,value));event.target.value=String(proteinSlicePercent);refreshProteinSliceControls();
+        });
+        document.getElementById('toggleSelectedResidueLabels')?.addEventListener('click',()=>{
+            selectedResidueLabelsVisible=!selectedResidueLabelsVisible;
+            updatePhysicsToggleButton('toggleSelectedResidueLabels',selectedResidueLabelsVisible);
+            if(physicsRenderer&&physicsScene)physicsRenderer.render(physicsScene,physicsCamera);
+        });
+
+        let physicsBackgroundHidden = false;
+        const physicsPanOffset = { x: 0, y: 0 };
+        function syncPhysicsPanFraming() {
+            if (!physicsCamera || !physicsRenderer) return;
+            const canvas = physicsRenderer.domElement;
+            const width = canvas.clientWidth || 1230, height = canvas.clientHeight || 520;
+            physicsCamera.setViewOffset(width, height, physicsPanOffset.x * width, physicsPanOffset.y * height, width, height);
+        }
+        function panPhysicsCamera(dx, dy) {
+            if (!physicsCamera || !physicsRenderer) return;
+            const canvas = physicsRenderer.domElement;
+            physicsPanOffset.x -= dx / (canvas.clientWidth || 1230);
+            physicsPanOffset.y -= dy / (canvas.clientHeight || 520);
+            syncPhysicsPanFraming();
+        }
+        function syncPhysicsOrthographicCamera() {
+            if (!physicsCamera?.isOrthographicCamera) return;
+            const halfHeight = physicsCamera.position.distanceTo(camTarget) * Math.tan(Math.PI / 8);
+            physicsCamera.top = halfHeight;
+            physicsCamera.bottom = -halfHeight;
+            physicsCamera.left = -halfHeight * physicsCamera.aspect;
+            physicsCamera.right = halfHeight * physicsCamera.aspect;
+            physicsCamera.updateProjectionMatrix();
+        }
+        function togglePhysicsProjection() {
+            if (!physicsCamera) return;
+            const previous = physicsCamera;
+            physicsCamera = previous.isOrthographicCamera
+                ? new THREE.PerspectiveCamera(45, previous.aspect, previous.near, previous.far)
+                : new THREE.OrthographicCamera(-1, 1, 1, -1, previous.near, previous.far);
+            physicsCamera.aspect = previous.aspect;
+            physicsCamera.fov = 45;
+            physicsCamera.position.copy(previous.position);
+            physicsCamera.up.copy(previous.up);
+            physicsCamera.lookAt(camTarget);
+            syncPhysicsOrthographicCamera();
+            const orthographic = physicsCamera.isOrthographicCamera;
+            document.getElementById('physicsProjectionButton').innerHTML = `${orthographic ? 'Orthographic' : 'Perspective'} <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>`;
+            document.getElementById('physicsProjectionOption').textContent = orthographic ? 'Perspective' : 'Orthographic';
+            physicsRenderer?.render(physicsScene, physicsCamera);
+        }
+
         function initThreeJSPhysicsScene() {
             const container = document.getElementById('physics3dCanvas');
             if (!container) return;
 
             physicsScene = new THREE.Scene();
-            physicsScene.background = new THREE.Color(document.body.classList.contains('light-mode') ? 0xffffff : 0x020617);
+            physicsScene.background = physicsBackgroundHidden ? null : new THREE.Color(document.body.classList.contains('light-mode') ? 0xffffff : 0x020617);
 
             const width = container.clientWidth || 1230;
             const height = container.clientHeight || 520;
@@ -3390,21 +3618,22 @@
             physicsCamera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
             resetPhysicsCamera();
 
-            physicsRenderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+            physicsRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
             const renderPhysicsScene=physicsRenderer.render.bind(physicsRenderer);
-            physicsRenderer.render=(scene,camera)=>{syncPhysicsTransparency(scene);renderPhysicsScene(scene,camera);};
+            physicsRenderer.render=(scene,camera)=>{syncPhysicsOrthographicCamera();syncPhysicsPanFraming();syncPhysicsTransparency(scene);syncPhysicsMaterials(scene);updateSelectionDistance();syncProteinSlice(scene);updateSelectedResidueLabels();renderPhysicsScene(scene,camera);};
+            physicsRenderer.localClippingEnabled=true;
             physicsRenderer.setSize(width, height);
             physicsRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             container.appendChild(physicsRenderer.domElement);
 
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            const ambientLight = new THREE.AmbientLight(0xffffff, physicsMaterialSettings.ambient);
             physicsScene.add(ambientLight);
 
-            const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.8);
+            const dirLight1 = new THREE.DirectionalLight(0xffffff, physicsMaterialSettings.key);
             dirLight1.position.set(50, 100, 50);
             physicsScene.add(dirLight1);
 
-            const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.8);
+            const dirLight2 = new THREE.DirectionalLight(0xffffff, physicsMaterialSettings.fill);
             dirLight2.position.set(-50, -50, -50);
             physicsScene.add(dirLight2);
 
@@ -3444,12 +3673,7 @@
                 const dx=next.x-touchView.x,dy=next.y-touchView.y;
                 if (next.count===1) rotatePhysicsCamera(dx,dy);
                 else {
-                    physicsCamera.updateMatrixWorld();
-                    const right=new THREE.Vector3(),up=new THREE.Vector3();
-                    physicsCamera.matrixWorld.extractBasis(right,up,new THREE.Vector3());
-                    const distance=physicsCamera.position.distanceTo(camTarget);
-                    const pan=right.multiplyScalar(-dx*distance*.0016).add(up.multiplyScalar(dy*distance*.0016));
-                    camTarget.add(pan);physicsCamera.position.add(pan);
+                    panPhysicsCamera(dx, dy);
                     const ratio=touchView.distance>0?next.distance/touchView.distance:1;
                     const offset=physicsCamera.position.clone().sub(camTarget);
                     offset.setLength(Math.max(10,Math.min(5000,offset.length()/Math.max(.1,ratio))));
@@ -3502,27 +3726,12 @@
 
                 // Ctrl + Left Click: Click and drag on chains to move them
                 if (!animationPlaying&&!animationPreparing&&(e.ctrlKey || e.metaKey || mobilePhysicsDragMode==='chain') && e.button === 0 && physicsNodes.length > 0) {
-                    const rect = el.getBoundingClientRect();
-                    const mouseX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-                    const mouseY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-                    const raycaster = new THREE.Raycaster();
-                    raycaster.setFromCamera(new THREE.Vector2(mouseX, mouseY), physicsCamera);
-
-                    let closestNodeIdx = -1;
-                    let minRayDist = Infinity;
-                    const ray = raycaster.ray;
-                    const tempV = new THREE.Vector3();
-
-                    for (let i = 0; i < physicsNodes.length; i++) {
-                        const node = physicsNodes[i];
-                        if (chainVisibility[node.res.c1] === false) continue;
-                        tempV.copy(visualPointForNode(node));
-                        const d = ray.distanceToPoint(tempV);
-                        if (d < 5.0 && d < minRayDist) {
-                            minRayDist = d;
-                            closestNodeIdx = i;
-                        }
-                    }
+                    const picked=pickPhysicsObject(e);
+                    const closestNodeIdx=picked?.kind==='node'?physicsNodes.indexOf(picked.node):-1;
+                    const rect=el.getBoundingClientRect();
+                    const raycaster=new THREE.Raycaster();
+                    raycaster.setFromCamera(new THREE.Vector2((e.clientX-rect.left)/rect.width*2-1,-(e.clientY-rect.top)/rect.height*2+1),physicsCamera);
+                    const ray=raycaster.ray;
 
                     if (closestNodeIdx !== -1) {
                         isDraggingChain = true;
@@ -3558,19 +3767,51 @@
                 const raycaster=new THREE.Raycaster();raycaster.setFromCamera(mouse,physicsCamera);
                 let picked=null,best=Infinity;
                 if(physicsRepresentation==='ball-stick'&&atomRepresentation?.balls?.visible){
-                    const hit=raycaster.intersectObject(atomRepresentation.balls,false).find(item=>item.instanceId!==undefined&&isNodeVisibleInPhysics(physicsNodes[atomRepresentation.entries[item.instanceId]?.nodeIndex]));
-                    if(hit){picked={kind:'node',node:physicsNodes[atomRepresentation.entries[hit.instanceId].nodeIndex]};best=hit.distance;}
+                    const hit=firstVisiblePhysicsHit(raycaster.intersectObject(atomRepresentation.balls,false),item=>item.instanceId!==undefined&&isNodeVisibleInPhysics(physicsNodes[atomRepresentation.entries[item.instanceId]?.nodeIndex]));
+                    if(hit){picked={kind:'node',node:physicsNodes[atomRepresentation.entries[hit.instanceId].nodeIndex],sourceAtom:atomRepresentation.entries[hit.instanceId].source};best=hit.distance;}
                 }
                 if(membraneLipids&&lipidsVisible){
                     const hit=pickMembraneLipid(raycaster);
                     if(hit?.particle&&hit.distance<best){picked={kind:'lipid',particle:hit.particle};best=hit.distance;}
                 }
-                if(picked)return picked;
+                if(instancedNodeMesh?.visible){
+                    const hit=firstVisiblePhysicsHit(raycaster.intersectObject(instancedNodeMesh,false),item=>item.instanceId!==undefined&&isNodeVisibleInPhysics(physicsNodes[item.instanceId]));
+                    if(hit&&hit.distance<best){picked={kind:'node',node:physicsNodes[hit.instanceId]};best=hit.distance;}
+                }
+                const meshes=[];
+                if(atomRepresentation?.sticks?.visible)meshes.push(atomRepresentation.sticks);
+                if(physicsRepresentation==='surface'&&atomRepresentation?.balls?.visible)meshes.push(atomRepresentation.balls);
+                for(const representation of [cartoonRepresentation,curveRepresentation])for(const mesh of representation?.meshes||[])if(mesh.visible)meshes.push(mesh);
+                for(const chain of backboneChains)if(chain.line.visible)meshes.push(chain.line);
+                for(const hit of raycaster.intersectObjects(meshes,false)){
+                    if(hit.distance>=best||!isPhysicsPickPointVisible(hit.point))continue;
+                    let node=null,sourceAtom=null;
+                    if(hit.object===atomRepresentation?.sticks&&hit.instanceId!==undefined){
+                        const bond=atomRepresentation.bonds[hit.instanceId];
+                        const coords=simulationAtomCoordinates(bond.map(index=>atomRepresentation.entries[index]));
+                        const end=hit.point.distanceToSquared(coords[0])<=hit.point.distanceToSquared(coords[1])?0:1;
+                        const entry=atomRepresentation.entries[bond[end]];node=physicsNodes[entry.nodeIndex];sourceAtom=entry.source;
+                    }else if(hit.object===atomRepresentation?.balls&&hit.instanceId!==undefined){
+                        const entry=atomRepresentation.entries[hit.instanceId];node=physicsNodes[entry.nodeIndex];sourceAtom=entry.source;
+                    }else{
+                        let nearest=Infinity;
+                        for(const candidate of physicsNodes){
+                            if(!isNodeVisibleInPhysics(candidate))continue;
+                            const distance=hit.point.distanceToSquared(visualPointForNode(candidate));
+                            if(distance<nearest){nearest=distance;node=candidate;}
+                        }
+                    }
+                    if(node&&isNodeVisibleInPhysics(node)){picked={kind:'node',node,sourceAtom};best=hit.distance;}
+                }
+                if(picked||proteinSliced)return picked;
                 for (const node of physicsNodes) {
                     if (!isNodeVisibleInPhysics(node)) continue;
                     const point=visualPointForNode(node);
+                    if(!isPhysicsPickPointVisible(point))continue;
+                    const alongRay=point.clone().sub(raycaster.ray.origin).dot(raycaster.ray.direction);
+                    if(alongRay<0||!isPhysicsPickPointVisible(raycaster.ray.at(alongRay,new THREE.Vector3())))continue;
                     const distance=raycaster.ray.distanceToPoint(point);
-                    const depth=physicsCamera.position.distanceTo(point);
+                    const depth=alongRay;
                     if(distance<Math.max(1.8,depth*.012)&&depth<best){picked={kind:'node',node};best=depth;}
                 }
                 return picked;
@@ -3590,7 +3831,7 @@
                 else if (selected?.kind==='node') {
                     const node=selected.node;
                     const atom=node.idx1===null?node.res.atoms2[node.idx2]:node.res.atoms1[node.idx1];
-                    selectLinkedEntity(node.res.c1,atom?.resSeq,selectionMode,atom,event.shiftKey);
+                    selectLinkedEntity(node.res.c1,atom?.resSeq,selectionMode,atom,event.shiftKey,selected.sourceAtom);
                 } else clearLinkedSelection();
             });
 
@@ -3664,17 +3905,7 @@
                     prevMouse3dY = e.clientY;
 
                     if (mouse3dButton === 2) {
-                        // Pan camera: move camTarget in camera's view plane (right-click drag)
-                        physicsCamera.updateMatrixWorld();
-                        const right = new THREE.Vector3();
-                        const up = new THREE.Vector3();
-                        physicsCamera.matrixWorld.extractBasis(right, up, new THREE.Vector3());
-                        const curDist = physicsCamera.position.distanceTo(camTarget);
-                        const panSpeed = curDist * 0.0016;
-                        const panOffset = right.clone().multiplyScalar(-dx * panSpeed).add(up.clone().multiplyScalar(dy * panSpeed));
-                        camTarget.add(panOffset);
-                        physicsCamera.position.add(panOffset);
-                        physicsCamera.lookAt(camTarget);
+                        panPhysicsCamera(dx, dy);
                     } else {
                         // Full unrestricted orbit in 3D: rotate around camera's local right vector for pitch, and around up vector for yaw (NO limits up/down!)
                         rotatePhysicsCamera(dx, dy);
@@ -3706,7 +3937,7 @@
             });
         }
 
-        // Full unrestricted 3D orbit around camTarget with no pitch limits
+        // Orbit around the structure while retaining the panned framing.
         function rotatePhysicsCameraByAngles(yawAngle, pitchAngle) {
             if (!physicsCamera) return;
             physicsCamera.updateMatrixWorld();
@@ -3734,6 +3965,8 @@
         }
 
         function resetPhysicsCamera() {
+            physicsPanOffset.x = physicsPanOffset.y = 0;
+            physicsCamera?.clearViewOffset();
             camTarget.set(0, 0, 0);
             if (!physicsCamera) return;
             physicsCamera.up.set(0, 1, 0);
@@ -3744,6 +3977,8 @@
 
         function autoFitPhysicsCamera() {
             if (!physicsCamera || !physicsNodes.length) return;
+            physicsPanOffset.x = physicsPanOffset.y = 0;
+            physicsCamera.clearViewOffset();
             const points = physicsNodes.map(visualPointForNode);
             const bounds = new THREE.Box3().setFromPoints(points);
             const target = bounds.getCenter(new THREE.Vector3());
@@ -4237,8 +4472,12 @@
                     physicsCaptureContext.strokeStyle=style.stroke||'#67e8f9';physicsCaptureContext.lineWidth=Math.max(1,parseFloat(style.strokeWidth||'1.5')*Math.min(lineScaleX,lineScaleY));physicsCaptureContext.globalAlpha=parseFloat(style.opacity||'1');physicsCaptureContext.stroke();physicsCaptureContext.globalAlpha=1;
                 }
             }
-            for(const label of [document.getElementById('membraneSideLabelNegative'),document.getElementById('membraneSideLabelPositive')]){
-                if(!label||label.classList.contains('hidden')||!label.textContent.trim())continue;
+            if(selectedResidueLabelCanvas&&selectedResidueLabelCanvas.style.display!=='none'){
+                const overlayRect=selectedResidueLabelCanvas.getBoundingClientRect();
+                physicsCaptureContext.drawImage(selectedResidueLabelCanvas,(overlayRect.left-rect.left)*scaleX,(overlayRect.top-rect.top)*scaleY,overlayRect.width*scaleX,overlayRect.height*scaleY);
+            }
+            for(const label of [document.getElementById('membraneSideLabelNegative'),document.getElementById('membraneSideLabelPositive'),...selectedResidueLabelElements]){
+                if(!label||label.classList.contains('hidden')||label.style.display==='none'||label.style.visibility==='hidden'||!label.textContent.trim())continue;
                 const labelRect=label.getBoundingClientRect(),x=(labelRect.left-rect.left)*scaleX,y=(labelRect.top-rect.top)*scaleY;
                 const style=getComputedStyle(label),fontSize=Math.max(10,parseFloat(style.fontSize)*scaleY),paddingX=parseFloat(style.paddingLeft)*scaleX,width=labelRect.width*scaleX,height=labelRect.height*scaleY,radius=parseFloat(style.borderRadius||'0')*Math.min(scaleX,scaleY);
                 physicsCaptureContext.font=`${style.fontWeight} ${fontSize}px ${style.fontFamily}`;
@@ -4260,6 +4499,7 @@
         function togglePhysicsSnapshot() {
             const panel=document.getElementById('physicsSnapshotPanel');
             panel.classList.toggle('hidden');
+            closePhysicsProjectionMenu();
         }
         function capturePhysicsSnapshot() {
             if(!physicsRenderer||!physicsScene||!physicsCamera)return;
@@ -5262,7 +5502,7 @@
                     : mode === 'difference' ? alignmentDistanceColor(distanceByChain.get(chainId)?.get(atomIdx) ?? null)
                     : physicsResidueColor(atom, mode, matched.get(chainId)?.has(atomIdx), afAtom);
                 const shade=group.userData.occlusionFactors?.get(atom)??1;
-                return physicsAtomColor(mode,source,atom,new THREE.Color(color).multiplyScalar(shade),shade);
+                return physicsAtomColor(mode,source,atom,new THREE.Color(color).multiplyScalar(1-(1-shade)*physicsMaterialSettings.occlusion),shade);
             };
             for (const child of group.children) {
                 if (child.userData.updateRibbon) {
@@ -6431,25 +6671,66 @@
         let membranePlacementExposureCache = null;
         let membraneRepelledColorMask = null;
         const membraneRepulsionActive = new Set();
+        let membranePresenceMode = 'auto';
+        function uniProtMembraneEvidence(){
+            const evidence=[];
+            for(const [accession,entry] of uniProtAnnotations){
+                for(const feature of entry.features||[]){
+                    if(['Topological domain','Transmembrane','Intramembrane'].includes(feature.type))
+                        evidence.push(`${accession}: ${feature.type}${feature.description?` (${feature.description})`:''}`);
+                }
+                for(const comment of entry.comments||[]){
+                    if((comment.commentType||comment.type)==='SUBCELLULAR LOCATION'){
+                        const text=uniProtCommentText(comment);
+                        if(/\bmembrane\b/i.test(text))evidence.push(`${accession}: ${text}`);
+                    }
+                }
+            }
+            return [...new Set(evidence)];
+        }
+        function refreshMembranePresence(){
+            membraneDetectionGeneration++;
+            membraneDetectionWorker?.terminate();membraneDetectionWorker=null;
+            membraneDetectionPending=false;membraneLastInference=0;
+            if(membranePresenceMode==='no'){
+                inferredMembrane=null;membraneVisible=false;
+                renderMembraneGeometry(null);
+                membraneDetectionStats={detected:false,reason:'Disabled by your No setting',samples:0,durationMs:0};
+            }else{
+                membraneDetectionStats=null;
+            }
+            if(['membrane','membrane-placement','membrane-repelled','membrane-score'].includes(physicsColorMode))updatePhysicsNodeColors();
+            renderMembraneDetectionStats();updateMembraneToggleUI();
+        }
         function renderMembraneDetectionStats(){
-            const label=document.getElementById('membraneDetectionStats');
+            const label=document.getElementById('membraneDetectionStatsContent');
             if(!label)return;
+            label.replaceChildren();
             const s=membraneDetectionStats;
-            if(!s){label.textContent='Membrane: waiting for structure.';return;}
-            const parts=[`Membrane: ${s.detected?'detected':`not detected${s.reason?` (${s.reason})`:''}`}`,
-                `${s.samples} residues sampled`,`${s.candidates??0} orientations`,
-                `${s.helixWindows??0} hydrophobic helix windows`];
-            if(s.axis){parts.push(`axis [${s.axis.map(v=>v.toFixed(2)).join(', ')}]`,`coherence ${s.coherence.toFixed(2)}`);}
-            if(s.score!==undefined)parts.push(`score ${s.score.toFixed(3)}`,`hydrophobic inside/outside ${s.insideDensity.toFixed(2)}/${s.outsideDensity.toFixed(2)}`,
-                `effective hydrophobic/inside residues ${s.effectiveHydrophobicCount.toFixed(1)}/${s.effectiveInsideCount.toFixed(1)}`,
-                `mean exposure ${s.meanExposure.toFixed(3)}`,`candidate half-thickness ${s.halfThickness.toFixed(1)} Å`);
-            if(s.offset!==undefined)parts.push(`offset ${s.offset.toFixed(1)} Å`,`${s.validatedCandidates} candidates validated`,`${s.spanningMotifs} spanning hydrophobic segments`,`${s.beltCoverage}/4 belt sectors`);
-            if(s.curvatureGain!==undefined)parts.push(`curvature ${s.curved?'accepted':'rejected'} (gain ${s.curvatureGain.toFixed(3)})`);
-            if(s.detected)parts.push(`${s.members} associated residues`,
-                `${s.transmembraneHelices??0} spanning helices · ${s.transmembraneSheets??0} spanning sheets`,
-                `${s.curved?'curved':'flat'} · ${s.thickness.toFixed(1)} Å thick`);
-            parts.push(`${s.durationMs.toFixed(1)} ms`);
-            label.textContent=parts.join(' · ');
+            const add=(title,value)=>{
+                const row=document.createElement('div');row.className='membrane-stat-card';
+                const name=document.createElement('div');name.className='membrane-stat-name';name.textContent=title;
+                const detail=document.createElement('div');detail.className='membrane-stat-value';detail.textContent=value;
+                row.append(name,detail);label.append(row);
+            };
+            add('Membrane status',membranePresenceMode==='no'?'Disabled by your No setting':!s?'Waiting for structure / membrane fit':s.detected?(s.forced?'Best available membrane fit':'Membrane detected'):'No membrane detected');
+            const evidence=uniProtMembraneEvidence();
+            const calculationSupport=membranePresenceMode==='no'?'Not evaluated (disabled)':!s?'Pending':s.structuralSupport===true?'Yes':s.structuralSupport===false?'No':'Unavailable';
+            const uniProtSupport=evidence.length?'Yes':uniProtLookupPending?'Lookup pending':uniProtAnnotations.size?'No supporting annotations':'No UniProt data available';
+            add('Decision source',`Setting: ${membranePresenceMode==='auto'?'Auto':membranePresenceMode==='yes'?'Yes — fit requested':'No — disabled'}\nUniProt supports a membrane: ${uniProtSupport}\nApp calculations support a membrane: ${calculationSupport}`);
+            if(evidence.length)add('UniProt membrane evidence',evidence.join('; '));
+            if(!s)return;
+            if(s.reason)add(s.detected?'Fit limitations':'Detection result',s.reason);
+            if(s.detected)add('Geometry',`${s.curved?'Curved':'Flat'} · ${s.thickness.toFixed(1)} Å thick · ${s.members} associated residues`);
+            add('Structural support',`${s.transmembraneHelices??0} spanning helices · ${s.transmembraneSheets??0} spanning sheets · ${s.helixWindows??0} hydrophobic helix windows`);
+            add('Search',`${s.samples} residues sampled · ${s.candidates??0} orientations · ${s.validatedCandidates??0} candidates validated · ${(s.durationMs??0).toFixed(1)} ms`);
+            if(s.score!==undefined){
+                add('Fit score',`${s.score.toFixed(3)} · hydrophobic density inside / outside: ${s.insideDensity.toFixed(2)} / ${s.outsideDensity.toFixed(2)}`);
+                add('Residue support',`${s.effectiveHydrophobicCount.toFixed(1)} effective hydrophobic · ${s.effectiveInsideCount.toFixed(1)} effective inside · exposure ${s.meanExposure.toFixed(3)}`);
+            }
+            if(s.axis)add('Preferred axis',`[${s.axis.map(v=>v.toFixed(2)).join(', ')}] · coherence ${s.coherence.toFixed(2)}`);
+            if(s.offset!==undefined)add('Placement',`Offset ${s.offset.toFixed(1)} Å · ${s.spanningMotifs} spanning segments · ${s.beltCoverage}/4 belt sectors`);
+            if(s.curvatureGain!==undefined)add('Curvature fit',`${s.curved?'Accepted':'Rejected'} · gain ${s.curvatureGain.toFixed(3)}`);
         }
         function membraneCoordinates(point,geometry){
             const d=[point.x-geometry.center[0],point.y-geometry.center[1],point.z-geometry.center[2]];
@@ -6877,7 +7158,7 @@
             return {score:reward/Math.max(1,samples.length),insideHydro,insidePolar,insideExposure,insideDensity,outsideDensity};
         }
         function inferMembraneGeometry(samples,diagnostics={}){
-            if(samples.length<35){diagnostics.reason='too few protein residues';return null;}
+            if(!samples.length||(!diagnostics.requireMembrane&&samples.length<35)){diagnostics.reason='too few protein residues';return null;}
             const meanExposure=samples.reduce((sum,s)=>sum+s.exposure,0)/samples.length;
             let best=null;
             let candidates=[];
@@ -6992,7 +7273,8 @@
                 effectiveHydrophobicCount,effectiveInsideCount,meanExposure,halfThickness:best.halfThickness});
             if(selected.failures.length){
                 diagnostics.reason=selected.failures.join(', ');
-                return null;
+                if(!diagnostics.requireMembrane)return null;
+                diagnostics.forced=true;
             }
             const {n,u,v}=membraneBasis(best.normal),origin=new THREE.Vector3(...best.center);
             const associated=[];let maxR=0;
@@ -7001,7 +7283,19 @@
                 const x=d.dot(u),y=d.dot(v),z=d.dot(n);
                 if(Math.abs(z)<best.halfThickness+3&&s.hydrophobic>.35){associated.push({index:s.index,x,y,z,weight:s.exposure*s.hydrophobic,initial:[s.node.x,s.node.y,s.node.z]});maxR=Math.max(maxR,Math.hypot(x,y));}
             }
-            if(associated.length<18){diagnostics.reason='too few membrane-associated residues';return null;}
+            if(associated.length<18){
+                diagnostics.reason=[diagnostics.reason,'too few membrane-associated residues'].filter(Boolean).join('; ');
+                if(!diagnostics.requireMembrane)return null;
+                diagnostics.forced=true;
+                // Sparse / polar proteins still need stable anchors for a requested fit.
+                associated.length=0;
+                for(const s of samples){
+                    const d=new THREE.Vector3(s.node.x-origin.x,s.node.y-origin.y,s.node.z-origin.z);
+                    const x=d.dot(u),y=d.dot(v),z=d.dot(n);
+                    associated.push({index:s.index,x,y,z,weight:Math.max(.01,s.exposure*s.hydrophobic),initial:[s.node.x,s.node.y,s.node.z]});
+                    maxR=Math.max(maxR,Math.hypot(x,y));
+                }
+            }
             // Fit a shallow quadratic around the selected midplane, without an
             // intercept that would duplicate the fitted plane offset.
             let curvature=[0,0,0];
@@ -7174,7 +7468,7 @@
                 if(node.res?.entityType!=='protein')continue;
                 const displayPoint=nodes===physicsNodes&&animationPlaying&&animationDisplayOverride?.[nodeIndex]
                     ? animationDisplayOverride[nodeIndex] : visualPointForNode(node);
-                const p=membraneCoordinates({...node,x:displayPoint[0],y:displayPoint[1],z:displayPoint[2]},geometry);
+                const p=membraneCoordinates({...node,x:displayPoint.x??displayPoint[0],y:displayPoint.y??displayPoint[1],z:displayPoint.z??displayPoint[2]},geometry);
                 if(Math.abs(p.signed-side*geometry.halfThickness)>7||
                     Math.abs(p.x)>geometry.extent+8||Math.abs(p.y)>geometry.extent+8)continue;
                 const key=`${Math.floor(p.x/cell)}:${Math.floor(p.y/cell)}`;
@@ -7400,7 +7694,7 @@
             if(!physicsCamera||!physicsRenderer)return 10;
             const distance=Math.max(1,physicsCamera.position.distanceTo(new THREE.Vector3(...geometry.center)));
             const height=physicsRenderer.domElement.clientHeight||560;
-            const pixels=.34*viewerSizes.physics.atom*height/(2*Math.tan(physicsCamera.fov*Math.PI/360)*distance);
+            const pixels=.34*viewerSizes.physics.atom*height/(2*Math.tan(physicsCamera.fov*Math.PI/360)*(physicsCamera.isOrthographicCamera ? physicsCamera.position.distanceTo(camTarget) : distance));
             // Hysteresis avoids repeatedly swapping geometry near a boundary.
             const current=system.gpu.detail;
             if(current===10&&pixels>2.4)return 10;
@@ -7499,7 +7793,7 @@
         function pickMembraneLipid(raycaster){
             const system=membraneLipids;if(!system||!lipidsVisible)return null;
             if(physicsRepresentation!=='ball-stick'){
-                const hit=raycaster.intersectObject(system.mesh,false)[0];
+                const hit=firstVisiblePhysicsHit(raycaster.intersectObject(system.mesh,false),item=>Boolean(system.visibleParticles[item.instanceId]));
                 return hit?{particle:system.visibleParticles[hit.instanceId],distance:hit.distance}:null;
             }
             // GPU deformation has no CPU triangle representation. Resolve the
@@ -7520,11 +7814,11 @@
                 });
                 for(let i=0;i<coords.length;i++){
                     sphere.center.copy(coords[i]);sphere.radius=.34*viewerSizes.physics.atom*elementAtomScale(LIPID_ATOMS[i].element);
-                    if(ray.intersectSphere(sphere,point)){const distance=ray.origin.distanceTo(point);if(distance<best){best=distance;result={particle:p,distance};}}
+                    if(ray.intersectSphere(sphere,point)&&isPhysicsPickPointVisible(point)){const distance=ray.origin.distanceTo(point);if(distance<best){best=distance;result={particle:p,distance};}}
                 }
                 for(const [from,to] of LIPID_BONDS){
                     a.copy(coords[from]);b.copy(coords[to]);
-                    if(ray.distanceSqToSegment(a,b,onRay,onBond)<(.07*viewerSizes.physics.stick)**2){
+                    if(ray.distanceSqToSegment(a,b,onRay,onBond)<(.07*viewerSizes.physics.stick)**2&&isPhysicsPickPointVisible(onBond)&&isPhysicsPickPointVisible(onRay)){
                         const distance=ray.origin.distanceTo(onRay);if(distance<best){best=distance;result={particle:p,distance};}
                     }
                 }
@@ -7576,11 +7870,12 @@
                 const started=performance.now();
                 try{
                     physicsNodes=data.nodes;
-                    const samples=membraneSamples();
-                    const diagnostics={samples:samples.length};
+                    const samples=membraneSamples(Boolean(data.requireMembrane));
+                    const diagnostics={samples:samples.length,requireMembrane:Boolean(data.requireMembrane)};
                     const geometry=inferMembraneGeometry(samples,diagnostics);
                     if(geometry)completeMembraneMembers(geometry,physicsNodes);
                     diagnostics.detected=Boolean(geometry);
+                    diagnostics.structuralSupport=Boolean(geometry)&&!diagnostics.forced;
                     diagnostics.durationMs=performance.now()-started;
                     if(geometry)Object.assign(diagnostics,{members:geometry.memberIndices.length,
                         transmembraneHelices:geometry.transmembraneHelices,transmembraneSheets:geometry.transmembraneSheets,
@@ -7628,7 +7923,7 @@
             return worker;
         }
         function updateInferredMembrane(now){
-            if(!physicsNodes.length||!physicsScene)return;
+            if(!physicsNodes.length||!physicsScene||membranePresenceMode==='no')return;
             if(inferredMembrane)inferredMembrane=trackMembraneGeometry(inferredMembrane);
             if(!membraneDetectionPending&&(!membraneLastInference||now-membraneLastInference>=1000)){
                 membraneLastInference=now;
@@ -7642,7 +7937,7 @@
                             res:{entityType:residue?'protein':'other',atoms1:residue?[{singleChar:residue.aa,secondaryType:residue.secondary}]:[]}};
                     });
                     membraneDetectionPending=true;
-                    worker.postMessage({generation:membraneDetectionGeneration,nodes,needExposure:physicsColorMode==='membrane-placement'||referenceColorMode==='membrane-placement'});
+                    worker.postMessage({generation:membraneDetectionGeneration,nodes,requireMembrane:membranePresenceMode==='yes'||uniProtMembraneEvidence().length>0,needExposure:physicsColorMode==='membrane-placement'||referenceColorMode==='membrane-placement'});
                 }catch(error){
                     membraneDetectionPending=false;
                     membraneDetectionStats={detected:Boolean(inferredMembrane),samples:0,reason:error.message,durationMs:0};
@@ -9607,6 +9902,9 @@
             });
             document.getElementById('molstar-simulation-container')?.addEventListener('pointerdown',()=>{simulationViewerInteracted=true;},true);
             document.getElementById('homologyViewerToggle')?.addEventListener('click',()=>{simulationViewerInteracted=true;});
+            document.getElementById('membranePresenceSelect')?.addEventListener('change',event=>{
+                membranePresenceMode=event.target.value;refreshMembranePresence();
+            });
             document.getElementById('toggleMembraneStatsBtn')?.addEventListener('click',event=>{
                 const stats=document.getElementById('membraneDetectionStats');
                 const shown=stats.classList.toggle('hidden')===false;
@@ -10076,6 +10374,7 @@
         };
         function isBackboneAtomName(name) { return /^(N|CA|C|O|OXT|H|H[123]|HA|HA[23])$/.test(String(name||'').toUpperCase()); }
         function physicsAtomColor(mode,source,residue,chainColor,shade=1) {
+            if(typeof physicsMaterialSettings!=='undefined')shade=1-(1-shade)*physicsMaterialSettings.occlusion;
             if(mode==='element')return new THREE.Color(ELEMENT_COLORS[String(source?.element||'C').toUpperCase()]||'#aeb7c4').multiplyScalar(shade);
             if(mode==='side-chains'){
                 if(isBackboneAtomName(source?.atomName))return new THREE.Color(chainColor).multiplyScalar(.55);
@@ -10755,11 +11054,20 @@
             updatePhysicsToggleButton('toggleBindingSiteResidues',bindingSiteResiduesVisible);
             updatePhysicsToggleButton('toggleNonBindingSiteResidues',nonBindingSiteResiduesVisible);
         }
+        let accessibleSurfaceCache = null;
+        function accessibleSurfaceValues() {
+            const now=performance.now();
+            if(!accessibleSurfaceCache||accessibleSurfaceCache.nodes!==physicsNodes||accessibleSurfaceCache.count!==physicsNodes.length||now-accessibleSurfaceCache.time>1000){
+                accessibleSurfaceCache={nodes:physicsNodes,count:physicsNodes.length,time:now,values:new Map(membraneSamples(true).map(item=>[item.index,item.sasa]))};
+            }
+            return accessibleSurfaceCache.values;
+        }
         function updatePhysicsNodeColors() {
             if (!instancedNodeMesh || !physicsNodes.length) { updatePhysicsSequences(); return; }
             const N = physicsNodes.length;
             const chainKeys = morphMatrixBlocks.map(b => b.c1);
 
+            const accessibleAreas=physicsColorMode==='accessible-surface-area'?accessibleSurfaceValues():null;
             const AFColor = new THREE.Color('#2eccbf');
             const afDistances=physicsColorMode==='af-difference'?afHomologyDistances():null;
             const keyframeColors=physicsColorMode==='keyframe-difference'?keyframeDifferenceColors():null;
@@ -10789,6 +11097,10 @@
                     color = new THREE.Color(membranePlacementResidueColor(i));
                 } else if (physicsColorMode === 'membrane-repelled') {
                     color = new THREE.Color(isMembraneRepelledResidue(node,i,inferredMembrane,membraneRepulsionVal)?'#f97316':'#94a3b8');
+                } else if (accessibleAreas) {
+                    const value=accessibleAreas.get(i);
+                    color=new THREE.Color(value===undefined?'#94a3b8':'#2563eb');
+                    if(value!==undefined)color.lerp(new THREE.Color('#f97316'),Math.max(0,Math.min(1,value)));
                 } else if (physicsColorMode === 'residue-index') {
                     color = new THREE.Color(residueIndexColor(node));
                 } else if (physicsColorMode === 'chain' || physicsColorMode === 'side-chains') {
@@ -10830,8 +11142,8 @@
                 // Origin colours above are shared constants; copy before shading
                 // so one buried residue cannot darken every subsequent instance.
                 sequenceBaseColors.set(node, '#'+color.getHexString());
-                color=color.clone().multiplyScalar(physicsOcclusionFactors[i]??1);
-                if (selectionGlowVisible&&selectionMatches(node)) color.set('#facc15');
+                color=color.clone().multiplyScalar(1-(1-(physicsOcclusionFactors[i]??1))*physicsMaterialSettings.occlusion);
+                if (selectionGlowVisible&&selectionColorsNode(node)) color.set('#facc15');
                 instancedNodeMesh.setColorAt(i, color);
             }
             if (instancedNodeMesh.instanceColor) instancedNodeMesh.instanceColor.needsUpdate = true;
@@ -10901,6 +11213,91 @@
                 const selected=String(selectionMatches(node));if(button.getAttribute('aria-pressed')!==selected)button.setAttribute('aria-pressed',selected);
             }
         }
+        const physicsMaterialDefaults={ambient:.85,key:.4,fill:.4,azimuth:45,specular:.03,shininess:6,occlusion:1};
+        const physicsMaterialSettings={...physicsMaterialDefaults};
+        const physicsMaterialOverrides=new Set();
+        const physicsMaterialApplied=new WeakMap();
+        const physicsMaterialOriginals=new WeakMap();
+        const physicsLightOriginals=new WeakMap();
+        function syncPhysicsMaterials(scene){
+            const signature=`${physicsMaterialSettings.shininess}:${physicsMaterialSettings.specular}:${[...physicsMaterialOverrides].join(',')}`;
+            scene.traverse(object=>{
+                if(object.isDirectionalLight&&!physicsLightOriginals.has(object))physicsLightOriginals.set(object,object.position.clone());
+                if(object.isAmbientLight)object.intensity=physicsMaterialSettings.ambient;
+                if(object.isDirectionalLight){
+                    const fill=object.position.y<0;
+                    object.intensity=physicsMaterialSettings[fill?'fill':'key'];
+                    const angle=physicsMaterialSettings.azimuth*Math.PI/180;
+                    if(physicsMaterialOverrides.has('azimuth'))object.position.set(Math.cos(angle)*70*(fill?-1:1),fill?-50:100,Math.sin(angle)*70*(fill?-1:1));
+                    else object.position.copy(physicsLightOriginals.get(object));
+                }
+                for(const material of (Array.isArray(object.material)?object.material:[object.material])){
+                    if(!material?.isMeshPhongMaterial)continue;
+                    if(!physicsMaterialOriginals.has(material))physicsMaterialOriginals.set(material,{shininess:material.shininess,specular:material.specular.clone()});
+                    const original=physicsMaterialOriginals.get(material);
+                    if(physicsMaterialApplied.get(material)===signature)continue;
+                    material.shininess=physicsMaterialOverrides.has('shininess')?physicsMaterialSettings.shininess:original.shininess;
+                    if(physicsMaterialOverrides.has('specular'))material.specular.setRGB(physicsMaterialSettings.specular,physicsMaterialSettings.specular,physicsMaterialSettings.specular);
+                    else material.specular.copy(original.specular);
+                    physicsMaterialApplied.set(material,signature);
+                }
+            });
+        }
+        document.getElementById('physicsOtherSettingsButton')?.addEventListener('click',event=>{
+            const opening=!document.getElementById('physicsOtherSettingsPanel').classList.toggle('hidden');
+            event.currentTarget.setAttribute('aria-expanded',String(opening));
+            event.currentTarget.querySelector('.other-settings-chevron').className=`other-settings-chevron fa-solid fa-chevron-${opening?'up':'down'}`;
+        });
+        document.getElementById('physicsLightingButton')?.addEventListener('click',event=>{
+            const opening=!document.getElementById('physicsLightingPanel').classList.toggle('hidden');
+            event.currentTarget.setAttribute('aria-expanded',String(opening));
+            event.currentTarget.querySelector('.lighting-chevron').className=`lighting-chevron fa-solid fa-chevron-${opening?'up':'down'}`;
+        });
+        function setPhysicsMaterialControl(key,value,reset=false){
+            physicsMaterialSettings[key]=Number(value);
+            if(reset||Number(value)===physicsMaterialDefaults[key])physicsMaterialOverrides.delete(key);
+            else physicsMaterialOverrides.add(key);
+            document.getElementById(`physicsMaterial-${key}`).value=value;
+            document.getElementById(`physicsMaterialValue-${key}`).value=value;
+            document.getElementById(`physicsMaterialReset-${key}`).classList.toggle('hidden',!physicsMaterialOverrides.has(key));
+            if(key==='occlusion'){
+                updatePhysicsNodeColors();updateAtomRepresentation();updateCartoonRepresentation();
+                updateModel1AlignmentColors();
+            }
+            if(physicsScene&&physicsRenderer)physicsRenderer.render(physicsScene,physicsCamera);
+        }
+        for(const key of Object.keys(physicsMaterialSettings)){
+            document.getElementById(`physicsMaterial-${key}`)?.addEventListener('input',event=>setPhysicsMaterialControl(key,event.target.value));
+            document.getElementById(`physicsMaterialReset-${key}`)?.addEventListener('click',()=>setPhysicsMaterialControl(key,physicsMaterialDefaults[key],true));
+        }
+        document.getElementById('physicsVisibilityButton')?.addEventListener('click',event=>{
+            const opening=document.getElementById('physicsVisibilityPanel').classList.toggle('hidden')===false;
+            event.currentTarget.setAttribute('aria-expanded',String(opening));
+            event.currentTarget.querySelector('.visibility-chevron').className=`visibility-chevron fa-solid fa-chevron-${opening?'up':'down'}`;
+        });
+        let sequenceCopyResetTimer=null;
+        document.getElementById('copySequencesButton')?.addEventListener('click',async()=>{
+            const status=document.getElementById('sequenceCopyStatus');
+            const nodes=physicsNodes.filter(node=>node.res.entityType==='protein'&&(sequenceChainFilter===null||node.res.c1===sequenceChainFilter));
+            if(!nodes.length){status.textContent='No sequences to copy.';return;}
+            const chains=[...new Set(nodes.map(node=>node.res.c1))];
+            const text=chains.map(chain=>{
+                const sequence=nodes.filter(node=>node.res.c1===chain).map(node=>{
+                    const atom=(node.idx2!==null?node.res.atoms2[node.idx2]:null)||(node.idx1!==null?node.res.atoms1[node.idx1]:null);
+                    return atom?.singleChar||'X';
+                }).join('');
+                return `>${displayChainName(chain)}\n${sequence.match(/.{1,80}/g).join('\n')}`;
+            }).join('\n');
+            try{
+                await navigator.clipboard.writeText(text);
+                status.textContent='Sequences copied.';
+                const label=document.getElementById('sequenceCopyLabel');
+                label.textContent='Copied!';
+                clearTimeout(sequenceCopyResetTimer);
+                sequenceCopyResetTimer=setTimeout(()=>{label.textContent='Copy';status.textContent='';},2000);
+            }
+            catch{status.textContent='Could not copy sequences. Check clipboard permissions.';}
+        });
         const viewSequencesButton=document.getElementById('viewSequencesButton');
         viewSequencesButton?.addEventListener('click',()=>{
             const panel=document.getElementById('physicsSequencePanel'),opening=panel.classList.toggle('hidden')===false;
@@ -10967,8 +11364,9 @@
             menu.querySelectorAll('button[data-color-mode]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.colorMode===physicsColorMode)));
         }
         function setPhysicsColorMode(mode) {
-            if (!['chain','residue-index','uniform','protein-id','rotational-symmetry','pattern-variance','equivalent-protein-shape','keyframe-difference','residue-speed','binding-sites','binding-site-type','mutation-effect-basic','constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','qmeandisco','element','side-chains','origin','aligned','membrane','membrane-placement','membrane-repelled','charge','hydrophobicity','secondary','plddt','difference','af-difference',...Object.keys(UNI_PROT_FEATURE_MODES)].includes(mode)) return;
+            if (!['chain','residue-index','uniform','protein-id','rotational-symmetry','pattern-variance','equivalent-protein-shape','keyframe-difference','residue-speed','binding-sites','binding-site-type','mutation-effect-basic','constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','qmeandisco','element','side-chains','origin','aligned','membrane','membrane-placement','membrane-repelled','charge','hydrophobicity','accessible-surface-area','secondary','plddt','difference','af-difference',...Object.keys(UNI_PROT_FEATURE_MODES)].includes(mode)) return;
             if(mode==='residue-speed'&&physicsColorMode!=='residue-speed')resetResidueSpeedTracking();
+            if(mode==='accessible-surface-area')accessibleSurfaceCache=null;
             physicsColorMode = mode;
             syncPhysicsColorMenu();
             updateUniProtFetchingBadge();
@@ -11016,6 +11414,7 @@
                 'membrane-placement':'Membrane placement influence: <span style="color:#ef4444">red</span> hydrophobic · <span style="color:#2563eb">blue</span> charged · <span style="color:#94a3b8">grey</span> other. Stronger colour means greater exposed-surface influence.',
                 'membrane-repelled':'<span style="color:#f97316">Orange</span>: currently repelled from the detected membrane to improve model · <span style="color:#94a3b8">Grey</span>: not repelled.',
                 charge:'Charge: <span style="color:#2563eb">blue</span> positive (Lys/Arg) · <span style="color:#93c5fd">pale blue</span> His · <span style="color:#ef4444">red</span> negative (Asp/Glu) · <span style="color:#94a3b8">grey</span> neutral.',
+                'accessible-surface-area':'Accessible surface area (residue-level estimate): blue = buried; orange = exposed. Estimated from C-alpha probe accessibility and local packing.',
                 hydrophobicity:'Hydrophobicity: <span style="color:#38bdf8">hydrophilic</span> → <span style="color:#f97316">hydrophobic</span>',
                 secondary:'Secondary structure: <span style="color:#d946ef">helix</span> · <span style="color:#facc15">sheet</span> · <span style="color:#94a3b8">coil</span>',
                 plddt:'AlphaFold pLDDT: <span style="color:#ff7d45">&lt;50</span> · <span style="color:#ffdb13">50–70</span> · <span style="color:#65cbf3">70–90</span> · <span style="color:#1964b0">≥90</span> · grey: unavailable',
@@ -11075,6 +11474,20 @@
             chevron.setAttribute('aria-hidden','true');
             trigger.append(chevron);
             menu.querySelectorAll('button[data-representation]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.representation===physicsRepresentation)));
+        }
+
+        function syncPhysicsSelectionMenu() {
+            const select=document.getElementById('physicsSelectMode');
+            const trigger=document.getElementById('physicsSelectionMenuButton');
+            const menu=document.getElementById('physicsSelectionMenu');
+            if (!select || !trigger || !menu) return;
+            select.value=selectionMode;
+            trigger.replaceChildren(document.createTextNode(select.selectedOptions[0]?.textContent || selectionMode));
+            const chevron=document.createElement('i');
+            chevron.className='fa-solid fa-chevron-down ml-1';
+            chevron.setAttribute('aria-hidden','true');
+            trigger.append(chevron);
+            menu.querySelectorAll('button[data-select-mode]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.selectMode===selectionMode)));
         }
 
         function toggleSideChainJiggle() {
@@ -11317,7 +11730,7 @@
                 const lengths=path.getLengths(Math.max(200,segments)),total=lengths[lengths.length-1];
                 const residueColors=run.map(i=>{
                     const c=new THREE.Color();instancedNodeMesh.getColorAt(i,c);
-                    if(selectionGlowVisible&&selectionMatches(physicsNodes[i]))c.set('#fff176');
+                    if(selectionGlowVisible&&selectionColorsNode(physicsNodes[i]))c.set('#fff176');
                     return c;
                 });
                 for(let ring=0;ring<=segments;ring++) {
@@ -11806,8 +12219,8 @@
                 dummy.scale.setScalar(isNodeVisibleInPhysics(node)?radius:0);
                 dummy.updateMatrix(); balls.setMatrixAt(i,dummy.matrix);
                 instancedNodeMesh.getColorAt(entry.nodeIndex,color);
-                balls.setColorAt(i,selectionGlowVisible&&selectionMatches(node)?new THREE.Color('#fff176'):physicsAtomColor(physicsColorMode,entry.source,node.res.atoms2[node.idx2],color,physicsOcclusionFactors[entry.nodeIndex]??1));
-                if(atomGlow&&selectionGlowVisible&&selectionMatches(node)&&isNodeVisibleInPhysics(node)){
+                balls.setColorAt(i,selectionGlowVisible&&selectionColorsNode(node)?new THREE.Color('#fff176'):physicsAtomColor(physicsColorMode,entry.source,node.res.atoms2[node.idx2],color,physicsOcclusionFactors[entry.nodeIndex]??1));
+                if(atomGlow&&selectionGlowVisible&&atomEntrySelected(entry)&&isNodeVisibleInPhysics(node)){
                     dummy.scale.setScalar(radius*1.24);dummy.updateMatrix();atomGlow.setMatrixAt(glowing++,dummy.matrix);
                 }
             });
@@ -12441,6 +12854,37 @@
             event.currentTarget.setAttribute('aria-expanded',String(!expanded));
             event.currentTarget.querySelector('i').className=expanded?'fa-solid fa-table-list':'fa-solid fa-chevron-up';
         });
+        const physicsProjectionButton = document.getElementById('physicsProjectionButton');
+        const physicsProjectionMenu = document.getElementById('physicsProjectionMenu');
+        function closePhysicsProjectionMenu() {
+            physicsProjectionMenu?.classList.add('hidden');
+            physicsProjectionButton?.setAttribute('aria-expanded', 'false');
+        }
+        physicsProjectionButton?.addEventListener('click', () => {
+            const opening = physicsProjectionMenu.classList.toggle('hidden') === false;
+            physicsProjectionButton.setAttribute('aria-expanded', String(opening));
+        });
+        document.getElementById('physicsProjectionOption')?.addEventListener('click', () => {
+            togglePhysicsProjection();
+            closePhysicsProjectionMenu();
+            physicsProjectionButton.focus();
+        });
+        document.addEventListener('click', event => {
+            if (!physicsProjectionMenu?.contains(event.target) && !physicsProjectionButton?.contains(event.target)) closePhysicsProjectionMenu();
+        });
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Escape' && !physicsProjectionMenu?.classList.contains('hidden')) {
+                closePhysicsProjectionMenu();
+                physicsProjectionButton?.focus();
+            }
+        });
+        document.getElementById('physicsBackgroundButton')?.addEventListener('click', event => {
+            physicsBackgroundHidden = !physicsBackgroundHidden;
+            event.currentTarget.textContent = physicsBackgroundHidden ? 'Show background' : 'Hide background';
+            event.currentTarget.setAttribute('aria-pressed', String(physicsBackgroundHidden));
+            if (physicsScene) physicsScene.background = physicsBackgroundHidden ? null : new THREE.Color(document.body.classList.contains('light-mode') ? 0xffffff : 0x020617);
+            physicsRenderer?.render(physicsScene, physicsCamera);
+        });
         document.getElementById('physicsSnapBtn')?.addEventListener('click',capturePhysicsSnapshot);
         document.getElementById('physicsRecordBtn')?.addEventListener('click',togglePhysicsRecording);
         document.getElementById('autoFitPhysicsBtn')?.addEventListener('click',autoFitPhysicsCamera);
@@ -12502,6 +12946,106 @@
             window.addEventListener('resize',()=>{if(!physicsRepresentationMenu.classList.contains('hidden'))placePhysicsRepresentationMenu();});
             syncPhysicsRepresentationMenu();
         }
+        const membranePresenceSelect=document.getElementById('membranePresenceSelect');
+        const membranePresenceMenu=document.getElementById('membranePresenceMenu');
+        const membranePresenceMenuButton=document.getElementById('membranePresenceMenuButton');
+        function syncMembranePresenceMenu(){
+            if(!membranePresenceMenuButton||!membranePresenceSelect)return;
+            membranePresenceMenuButton.replaceChildren(document.createTextNode(`${membranePresenceSelect.selectedOptions[0].textContent} `));
+            const icon=document.createElement('i');icon.className='fa-solid fa-chevron-down ml-1';icon.setAttribute('aria-hidden','true');membranePresenceMenuButton.append(icon);
+            for(const button of membranePresenceMenu.querySelectorAll('button'))button.setAttribute('aria-pressed',String(button.dataset.representation===membranePresenceMode));
+        }
+        if (membranePresenceSelect && membranePresenceMenu && membranePresenceMenuButton) {
+            [...membranePresenceSelect.options].forEach(option=>{
+                const button=document.createElement('button');
+                button.type='button';
+                button.dataset.representation=option.value;
+                button.textContent=option.textContent;
+                button.setAttribute('aria-pressed',String(option.value===membranePresenceMode));
+                button.addEventListener('click',()=>{
+                    membranePresenceSelect.value=option.value;
+                    membranePresenceSelect.dispatchEvent(new Event('change',{bubbles:true}));
+                    syncMembranePresenceMenu();
+                    membranePresenceMenu.classList.add('hidden');
+                    membranePresenceMenuButton.setAttribute('aria-expanded','false');
+                    membranePresenceMenuButton.focus();
+                });
+                membranePresenceMenu.append(button);
+            });
+            document.body.append(membranePresenceMenu);
+            const placeMembranePresenceMenu=()=>{
+                const rect=membranePresenceMenuButton.getBoundingClientRect();
+                const width=Math.min(240,window.innerWidth-16);
+                membranePresenceMenu.style.left=`${window.scrollX+Math.max(8,Math.min(rect.left,window.innerWidth-width-8))}px`;
+                membranePresenceMenu.style.top=`${window.scrollY+Math.min(rect.bottom+6,window.innerHeight-membranePresenceMenu.offsetHeight-8)}px`;
+            };
+            membranePresenceMenuButton.addEventListener('click',()=>{
+                const opening=membranePresenceMenu.classList.toggle('hidden')===false;
+                membranePresenceMenuButton.setAttribute('aria-expanded',String(opening));
+                if(opening)placeMembranePresenceMenu();
+            });
+            document.addEventListener('click',event=>{
+                if(!membranePresenceMenu.contains(event.target)&&!membranePresenceMenuButton.contains(event.target)){
+                    membranePresenceMenu.classList.add('hidden');
+                    membranePresenceMenuButton.setAttribute('aria-expanded','false');
+                }
+            });
+            document.addEventListener('keydown',event=>{
+                if(event.key==='Escape'&&!membranePresenceMenu.classList.contains('hidden')){
+                    membranePresenceMenu.classList.add('hidden');
+                    membranePresenceMenuButton.setAttribute('aria-expanded','false');
+                    membranePresenceMenuButton.focus();
+                }
+            });
+            window.addEventListener('resize',()=>{if(!membranePresenceMenu.classList.contains('hidden'))placeMembranePresenceMenu();});
+            syncMembranePresenceMenu();
+        }
+        const physicsSelectionSelect=document.getElementById('physicsSelectMode');
+        const physicsSelectionMenu=document.getElementById('physicsSelectionMenu');
+        const physicsSelectionMenuButton=document.getElementById('physicsSelectionMenuButton');
+        if (physicsSelectionSelect && physicsSelectionMenu && physicsSelectionMenuButton) {
+            [...physicsSelectionSelect.options].forEach(option=>{
+                const button=document.createElement('button');
+                button.type='button';
+                button.dataset.selectMode=option.value;
+                button.textContent=option.textContent;
+                button.setAttribute('aria-pressed',String(option.value===selectionMode));
+                button.addEventListener('click',()=>{
+                    setSelectionMode(option.value);
+                    physicsSelectionMenu.classList.add('hidden');
+                    physicsSelectionMenuButton.setAttribute('aria-expanded','false');
+                    physicsSelectionMenuButton.focus();
+                });
+                physicsSelectionMenu.append(button);
+            });
+            document.body.append(physicsSelectionMenu);
+            const placePhysicsSelectionMenu=()=>{
+                const rect=physicsSelectionMenuButton.getBoundingClientRect();
+                const width=Math.min(240,window.innerWidth-16);
+                physicsSelectionMenu.style.left=`${window.scrollX+Math.max(8,Math.min(rect.left,window.innerWidth-width-8))}px`;
+                physicsSelectionMenu.style.top=`${window.scrollY+Math.min(rect.bottom+6,window.innerHeight-physicsSelectionMenu.offsetHeight-8)}px`;
+            };
+            physicsSelectionMenuButton.addEventListener('click',()=>{
+                const opening=physicsSelectionMenu.classList.toggle('hidden')===false;
+                physicsSelectionMenuButton.setAttribute('aria-expanded',String(opening));
+                if(opening)placePhysicsSelectionMenu();
+            });
+            document.addEventListener('click',event=>{
+                if(!physicsSelectionMenu.contains(event.target)&&!physicsSelectionMenuButton.contains(event.target)){
+                    physicsSelectionMenu.classList.add('hidden');
+                    physicsSelectionMenuButton.setAttribute('aria-expanded','false');
+                }
+            });
+            document.addEventListener('keydown',event=>{
+                if(event.key==='Escape'&&!physicsSelectionMenu.classList.contains('hidden')){
+                    physicsSelectionMenu.classList.add('hidden');
+                    physicsSelectionMenuButton.setAttribute('aria-expanded','false');
+                    physicsSelectionMenuButton.focus();
+                }
+            });
+            window.addEventListener('resize',()=>{if(!physicsSelectionMenu.classList.contains('hidden'))placePhysicsSelectionMenu();});
+            syncPhysicsSelectionMenu();
+        }
         const physicsColorSelect=document.getElementById('physicsColorSelect');
         const physicsColorMenu=document.getElementById('physicsColorMenu');
         const physicsColorMenuButton=document.getElementById('physicsColorMenuButton');
@@ -12509,7 +13053,7 @@
             const colorOptions=new Map([...physicsColorSelect.options].map(option=>[option.value,option]));
             const colorColumns=[
                 [['Main',['chain','residue-index','protein-id','secondary','origin','uniform']],
-                 ['Properties',['side-chains','element','charge','hydrophobicity','mutation-effect-basic','residue-speed']]],
+                 ['Properties',['side-chains','element','charge','hydrophobicity','accessible-surface-area','mutation-effect-basic','residue-speed']]],
                 [['Regions',['binding-sites','binding-site-type','aligned']],
                  ['Comparison',['rotational-symmetry','pattern-variance','equivalent-protein-shape','keyframe-difference','difference','af-difference']],
                  ['Scores',['model-confidence','constraint-confidence','alpha-pae','plddt','spring-strain','membrane-score']]],
@@ -12654,7 +13198,7 @@
                 void readCrossLinkEvidence(file,kind);
             });
         }
-        document.querySelectorAll('[data-select-mode]').forEach(button=>button.addEventListener('click',()=>setSelectionMode(button.dataset.selectMode)));
+        document.getElementById('physicsSelectMode')?.addEventListener('change',event=>setSelectionMode(event.target.value));
         document.getElementById('toggleSelectedResidues')?.addEventListener('click',()=>{
             selectedResiduesVisible=!selectedResiduesVisible;updateSelectionToggleVisibility();
             applyPhysicsVisibility();updateAtomRepresentation();updateCartoonRepresentation();updateSelectionGlow();
@@ -12690,7 +13234,7 @@
         function setLightMode(enabled) {
             document.body.classList.toggle('light-mode',enabled);
             window.refreshPhysicsComparisonSelection?.(true);
-            if (physicsScene) physicsScene.background = new THREE.Color(enabled ? 0xffffff : 0x020617);
+            if (physicsScene) physicsScene.background = physicsBackgroundHidden ? null : new THREE.Color(enabled ? 0xffffff : 0x020617);
             if (referenceComparisonScene?.scene) {
                 referenceComparisonScene.scene.background = new THREE.Color(enabled ? 0xffffff : 0x020617);
                 referenceComparisonScene.render();
@@ -15472,6 +16016,7 @@ function physicsComparisonValues(mode){
     if(mode==='af-difference')scores=afHomologyDistances();
     if(mode==='keyframe-difference'){keyframeDifferenceColors();scores=keyframeDifferenceCache.scores;}
     if(mode==='mutation-effect-basic'){mutationEffectColors();scores=mutationEffectCache.scores;}
+    if(mode==='accessible-surface-area'){const values=accessibleSurfaceValues();scores=physicsNodes.map((node,index)=>values.get(index)??null);}
     if(mode==='residue-speed'){updateResidueSpeeds(performance.now());scores=residueSpeedState.speeds;}
     if(mode==='binding-sites'||mode==='binding-site-type')bindingSiteColors(mode==='binding-site-type');
     return physicsNodes.map((node,i)=>{
