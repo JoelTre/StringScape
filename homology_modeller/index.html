@@ -133,6 +133,11 @@
         #simulationLoadingPopup { position:fixed; inset:0; z-index:900; display:flex; align-items:center; justify-content:center; background:rgba(2,6,23,.35); }
         #simulationLoadingPopup.hidden { display:none!important; }
         #simulationLoadingPopup > div { border-radius:1rem; background:#0f172a; border:1px solid #38bdf8; color:#e0f2fe; padding:1.1rem 1.5rem; box-shadow:0 12px 36px #0008; font-weight:600; }
+        #fetchSiftsStatus.discovery-warning { font-size:1.5rem; line-height:1.5; font-weight:700; color:#fb923c; }
+        body.light-mode #fetchSiftsStatus.discovery-warning { color:#c2410c; }
+        #errorModal.warning-modal > div { border-color:#fb923c; }
+        #errorModal.warning-modal > div > div:first-child { color:#fb923c; }
+        #errorModal.warning-modal #errorMessage { font-size:1.125rem; line-height:1.6; color:#fb923c; }
         #animationTableDialog { position:fixed; inset:0; z-index:1000; }
         #animationTableDialog { background:rgba(2,6,23,.82); }
         body.light-mode #animationTableDialog { background:rgba(255,255,255,.72); }
@@ -428,6 +433,51 @@
         body.light-mode .string-file-name { color:#0f766e; }
         body.light-mode label[for="pdbInput1"] { color:#075985; }
         body.light-mode label[for="pdbInput2"] { color:#0f766e; }
+        .chain-mapping-box { border:1px solid #334155; border-radius:0.75rem; overflow:hidden; }
+        .chain-mapping-toggle { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:0.8rem 1rem; cursor:pointer; color:#5eead4; font-size:0.875rem; font-weight:600; list-style:none; }
+        .chain-mapping-toggle::-webkit-details-marker { display:none; }
+        .chain-mapping-toggle:focus-visible { outline:2px solid #2dd4bf; outline-offset:-3px; }
+        .chain-mapping-toggle i { transition:transform 0.15s ease; }
+        .chain-mapping-box[open] .chain-mapping-toggle i { transform:rotate(180deg); }
+        .chain-mapping-content { padding:0 1rem 1rem; color:#cbd5e1; font-size:0.75rem; line-height:1.5; }
+        .chain-mapping-note { margin:0 0 0.65rem; }
+        .chain-mapping-scroll { overflow:auto; max-height:26rem; border:1px solid #334155; border-radius:0.5rem; }
+        .chain-mapping-table { width:100%; min-width:38rem; border-collapse:collapse; text-align:left; }
+        .chain-mapping-table th { position:sticky; top:0; padding:0.65rem 0.75rem; background:#1e293b; color:#94a3b8; font-size:0.7rem; font-weight:600; }
+        .chain-mapping-table td { padding:0.75rem; vertical-align:top; border-top:1px solid #334155; }
+        .chain-mapping-table tbody tr:nth-child(even) { background:#0f172a; }
+        .chain-mapping-chain { font-weight:600; white-space:nowrap; }
+        .chain-mapping-protein { display:block; margin-top:0.2rem; color:#94a3b8; max-width:18rem; }
+        .chain-mapping-id { color:#5eead4; font-family:monospace; font-weight:600; }
+        .chain-mapping-source { display:inline-block; padding:0.15rem 0.45rem; border-radius:0.3rem; background:#134e4a; color:#99f6e4; white-space:nowrap; }
+        .chain-mapping-source.unresolved { background:#78350f; color:#fde68a; }
+        .chain-mapping-detail { min-width:12rem; max-width:22rem; }
+        body.light-mode .chain-mapping-box, body.light-mode .chain-mapping-scroll { border-color:#cbd5e1; }
+        body.light-mode .chain-mapping-toggle { color:#0f766e; }
+        body.light-mode .chain-mapping-content { color:#334155; }
+        body.light-mode .chain-mapping-table th { background:#f1f5f9; color:#475569; }
+        body.light-mode .chain-mapping-table td { border-color:#e2e8f0; }
+        body.light-mode .chain-mapping-table tbody tr:nth-child(even) { background:#f8fafc; }
+        body.light-mode .chain-mapping-protein { color:#64748b; }
+        body.light-mode .chain-mapping-id { color:#0f766e; }
+        body.light-mode .chain-mapping-source { background:#ccfbf1; color:#115e59; }
+        body.light-mode .chain-mapping-source.unresolved { background:#fef3c7; color:#92400e; }
+        @media (max-width:640px) {
+            .chain-mapping-table { display:block; min-width:0; }
+            .chain-mapping-table thead { display:none; }
+            .chain-mapping-table tbody { display:block; }
+            .chain-mapping-table tbody tr { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); border-top:1px solid #334155; padding:0.4rem; }
+            .chain-mapping-table tbody tr:first-child { border-top:0; }
+            .chain-mapping-table td { display:block; border:0; padding:0.4rem; min-width:0; }
+            .chain-mapping-table td:first-child, .chain-mapping-table td:last-child { grid-column:1 / -1; }
+            .chain-mapping-table td:nth-child(2)::before, .chain-mapping-table td:nth-child(3)::before { display:block; margin-bottom:0.2rem; color:#94a3b8; font-size:0.65rem; font-family:inherit; font-weight:400; }
+            .chain-mapping-table td:nth-child(2)::before { content:'UniProt ID'; }
+            .chain-mapping-table td:nth-child(3)::before { content:'ID source'; }
+            .chain-mapping-chain, .chain-mapping-source { white-space:normal; }
+            .chain-mapping-detail { min-width:0; max-width:none; }
+            body.light-mode .chain-mapping-table tbody tr { border-color:#e2e8f0; }
+            body.light-mode .chain-mapping-table td:nth-child(2)::before, body.light-mode .chain-mapping-table td:nth-child(3)::before { color:#64748b; }
+        }
         body.light-mode #stringFinderToggle { color:#fff; }
         body.light-mode .string-file-picker, body.light-mode .string-file-picker.has-file { background:#ccfbf1; }
         body.light-mode #stringFinderContent .text-teal-400 { color:#0f766e; }
@@ -492,8 +542,7 @@
         body.light-mode .reference-visibility-row button { background-color:#e2e8f0 !important; }
         #toggleRigidBodyBtn, #resetPhysicsSimulationBtn,
         #resetResidueRepulsionBtn, #resetOtherConstraintsBtn,
-        .physics-simulation-panel #toggleMembraneStatsBtn,
-        .responsive-viewer-header button, .aligned-matrix-header button,
+                .responsive-viewer-header button, .aligned-matrix-header button,
         #sideChainJiggleBtn, #sequenceAlignmentDownloadBtn, #alignmentDistanceBtn { border:0 !important; border-radius:.5rem !important; }
         #examplePresets button { border:0 !important; }
         #examplePresets button[data-reference][aria-pressed="true"] { background-color:#7dd3fc !important; color:#082f49 !important; }
@@ -567,12 +616,12 @@
         body.light-mode .membrane-stat-name { color:#475569; }
         body.light-mode .membrane-stat-value, body.light-mode .membrane-presence-label { color:#172033; }
         body.light-mode .membrane-stats-heading { color:#0e7490; }
-        #toggleMembraneStatsBtn, #sliceMembraneBtn, #sliceProteinBtn { height:30px; box-sizing:border-box; }
-        :is(#physicsVisibilityButton,#physicsLightingButton,#physicsOtherSettingsButton) { border-bottom:1px solid #1e293b; display:flex; align-items:center; justify-content:flex-start; gap:.5rem; background:rgba(15,23,42,.9); }
-        :is(#physicsVisibilityButton,#physicsLightingButton,#physicsOtherSettingsButton):hover, #aboutProteinComplex > summary:hover, #physicsVariableComparison > summary:hover { background:#1e293b; }
-        body.light-mode :is(#physicsVisibilityButton,#physicsLightingButton,#physicsOtherSettingsButton) { background:#e8eef5; border-color:#cbd5e1; color:#172033; }
+        #sliceMembraneBtn, #sliceProteinBtn { height:30px; box-sizing:border-box; }
+        :is(#physicsVisibilityButton,#physicsLightingButton,#physicsMembraneDetailsButton,#physicsOtherSettingsButton) { border-bottom:1px solid #1e293b; display:flex; align-items:center; justify-content:flex-start; gap:.5rem; background:rgba(15,23,42,.9); }
+        :is(#physicsVisibilityButton,#physicsLightingButton,#physicsMembraneDetailsButton,#physicsOtherSettingsButton):hover, #aboutProteinComplex > summary:hover, #physicsVariableComparison > summary:hover { background:#1e293b; }
+        body.light-mode :is(#physicsVisibilityButton,#physicsLightingButton,#physicsMembraneDetailsButton,#physicsOtherSettingsButton) { background:#e8eef5; border-color:#cbd5e1; color:#172033; }
         body.light-mode #physicsVariableComparison > summary { color:#172033; }
-        body.light-mode :is(#physicsVisibilityButton,#physicsLightingButton,#physicsOtherSettingsButton):hover, body.light-mode #aboutProteinComplex > summary:hover, body.light-mode #physicsVariableComparison > summary:hover, body.light-mode #physicsControlsToggle:hover { background:#f8fafc; }
+        body.light-mode :is(#physicsVisibilityButton,#physicsLightingButton,#physicsMembraneDetailsButton,#physicsOtherSettingsButton):hover, body.light-mode #aboutProteinComplex > summary:hover, body.light-mode #physicsVariableComparison > summary:hover, body.light-mode #physicsControlsToggle:hover { background:#f8fafc; }
         #aboutProteinComplex summary { display:flex; align-items:center; justify-content:flex-start; gap:.5rem; list-style:none; }
         #aboutProteinComplex summary::-webkit-details-marker { display:none; }
         #aboutProteinComplex[open] .about-chevron { transform:rotate(180deg); }
@@ -678,7 +727,17 @@
         .comparison-chain-toggle:hover { background:#64748b33; }
         .comparison-chain-toggle[aria-pressed="false"] { opacity:.5; }
         .comparison-export:disabled { opacity:.4; cursor:default; }
-    </style>
+    
+        .about-protein-name { color: inherit; text-align: left; cursor: pointer; border: 0; border-radius: 8px; padding: 6px 10px; background: #334155; }
+        .about-protein-name:hover { background: #475569; }
+        .about-protein-name:focus-visible { outline: 2px solid #facc15; outline-offset: 3px; }
+        .about-protein-name.protein-name-selected { color: #fef08a; text-shadow: 0 0 5px #facc15, 0 0 12px #eab308; }
+        body.light-mode .about-protein-name { background: #e2e8f0; color: #075985; }
+        body.light-mode .about-protein-name:hover { background: #cbd5e1; }
+        body.light-mode .about-protein-name.protein-name-selected { color: #a16207; text-shadow: 0 0 6px rgba(234,179,8,.35); }
+        #aboutProteinComplexContent sup a { color: #7dd3fc; padding: 0 2px; text-decoration: none; font-weight: 700; }
+        #aboutProteinComplexContent sup a:hover { text-decoration: underline; }
+</style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col">
 
@@ -742,6 +801,7 @@
                 <button data-reference="5T4P" data-alphafold="P0ABB0, P0ABB4, P0ABA6, P0A6E6, P0ABA0, P0AB98, P0ABA4, P68699" data-action-click="1" class="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded-lg text-slate-300 font-mono border border-slate-700 "><i>E. coli</i> ATP synthase </button>
                 <button data-reference="1C17" data-alphafold="P68699, P0AB98" data-action-click="2" class="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded-lg text-slate-300 font-mono border border-slate-700 ">Subcomplex of <i>E. coli</i> ATP synthase </button>
                 <button data-reference="5DUD" data-alphafold="P77611, P0A7Z4, P0A8V2, P0A8T7, P0A7R5, P0AFG0, P0A780, P0AFF6, P0A800" data-action-click="3" class="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded-lg text-slate-300 font-mono border border-slate-700 "><i>E. coli</i> RNA polymerase antitermination complex </button>
+                <button data-reference="6IOK, 6IOL" data-alphafold="Q51487, P52002, P52477" data-action-click="57" class="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded-lg text-slate-300 font-mono border border-slate-700 ">Efflux pump (animated)</button>
                 <div class="w-full flex flex-wrap items-center gap-2 pt-2"><label for="recentModels" class="text-slate-300 text-base font-semibold">Recent:</label><select id="recentModels" class="bg-slate-800 text-slate-100 rounded-lg px-3 py-1.5 text-xs max-w-full"><option value="">Select a previous build</option></select><span id="recentModelStatus" role="status" class="text-xs text-amber-300"></span></div>
             </div>
 
@@ -775,8 +835,12 @@
             
 <textarea id="pdbInput2" rows="1" data-action-input="1" placeholder="Click 'Build Homology Model' to auto-fill this box" class="w-full bg-slate-950 text-white rounded-lg p-3 focus:outline-none uppercase structure-id-input text-xl font-semibold" style="border: 1px solid #2eccbf66;"></textarea></div>
                 </div>
+                <details id="chainMappingBox" class="hidden w-full chain-mapping-box">
+                    <summary class="chain-mapping-toggle"><span>Chain mapping and ID sources</span><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></summary>
+                    <div id="chainMappingInfo" class="chain-mapping-content" aria-live="polite"></div>
+                </details>
                 <button type="submit" id="loadBtn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 text-xs"><i class="fa-solid fa-code-compare"></i> Build Homology model</button>
-                <p id="sequenceOnlyNotice" class="text-xs text-amber-300 hidden"></p>
+                <p id="sequenceOnlyNotice" class="text-amber-300 hidden" style="font-size:1.125rem;line-height:1.6;font-weight:600" role="status"></p>
             </form>
             <section id="extraEvidenceBox" class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-2xl"><h2><button id="extraEvidenceToggle" type="button" aria-expanded="false" aria-controls="extraEvidenceContent" class="w-full flex items-center justify-between gap-3 text-left font-semibold text-teal-300 hover:text-teal-200"><span>Add extra evidence</span><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button></h2><div id="extraEvidenceContent" class="hidden space-y-3 pt-3 text-slate-300"><p>If you have extra evidence that can be used to guide the homology modelling process, such as cross-link data, add them below.</p><div class="grid grid-cols-1 md:grid-cols-2 gap-3"><div><label class="string-file-picker evidence-file-picker"><input id="crossLinkEvidenceFile" type="file" accept=".csv,.tsv,.txt"><span class="string-file-button">Choose cross-links file (.csv/.tsv)</span><span class="string-file-name">No file selected</span></label><p class="text-xs text-slate-400 mt-2">Columns: chain1, residue1, chain2, residue2, max_distance_angstrom. Cα–Cα upper bounds in Å.</p></div><div><label class="string-file-picker evidence-file-picker"><input id="distanceEvidenceFile" type="file" accept=".csv,.tsv,.txt"><span class="string-file-button">Choose measured distances file (.csv/.tsv)</span><span class="string-file-name">No file selected</span></label><p class="text-xs text-slate-400 mt-2">Columns: chain1, residue1, chain2, residue2, distance_angstrom. Gently pulls Cα pairs toward measured values.</p></div></div><p class="text-xs text-slate-400">Residue numbers must match the input structures. Files are checked before use.</p><p id="extraEvidenceStatus" role="status" class="text-xs text-teal-300"></p></div></section>
             <div class="flex flex-wrap items-center justify-between gap-4 w-full">
@@ -1115,7 +1179,7 @@
             </div>
 
 
-            <button id="physicsVisibilityButton" type="button" aria-expanded="false" aria-controls="physicsVisibilityPanel" class="w-full border-t border-slate-800 px-5 py-3 text-left text-sm font-semibold text-white"><span><i class="fa-solid fa-layer-group text-emerald-400 mr-2" aria-hidden="true"></i>Visibility toggles</span><i class="visibility-chevron fa-solid fa-chevron-down" aria-hidden="true"></i></button>
+            <button id="physicsVisibilityButton" type="button" aria-expanded="false" aria-controls="physicsVisibilityPanel" class="w-full border-t border-slate-800 px-5 py-3 text-left text-sm font-semibold text-white"><span><i class="fa-solid fa-eye text-emerald-400 mr-2" aria-hidden="true"></i>Visibility toggles</span><i class="visibility-chevron fa-solid fa-chevron-down" aria-hidden="true"></i></button>
             <div id="physicsVisibilityPanel" class="hidden">
             <!-- Chain Visibility Toggle Bar -->
             <div class="physics-toggle-row bg-slate-900/60 px-5 py-2 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
@@ -1153,12 +1217,22 @@
             <div class="physics-toggle-row bg-slate-900/60 px-5 py-2 border-b border-slate-800 flex flex-wrap items-center gap-2 text-xs"><span class="text-slate-400 font-medium uppercase text-[10px] tracking-wider"><i class="fa-solid fa-layer-group text-emerald-400"> </i> Residue toggles:</span><button id="toggleAlignedResidues" type="button" data-action-click="35" class="px-2.5 py-1 rounded border border-slate-700 bg-slate-900 text-white">Aligned residues <i class="fa-solid fa-eye"></i></button><button id="toggleUnalignedResidues" type="button" data-action-click="36" class="px-2.5 py-1 rounded border border-slate-700 bg-slate-900 text-white">Unaligned residues <i class="fa-solid fa-eye"></i></button><button id="toggleNonProteinAtoms" type="button" aria-pressed="true" class="px-2.5 py-1 rounded border border-slate-700 bg-slate-900 text-white">Non-protein atoms <i class="fa-solid fa-eye"></i></button><span id="bindingSiteResidueToggles" class="inline-flex flex-wrap gap-2"><button id="toggleBindingSiteResidues" type="button" aria-pressed="true" class="px-2.5 py-1 rounded bg-slate-800 text-white">Binding site residues <i class="fa-solid fa-eye"></i></button><button id="toggleNonBindingSiteResidues" type="button" aria-pressed="true" class="px-2.5 py-1 rounded bg-slate-800 text-white">Non-binding site residues <i class="fa-solid fa-eye"></i></button></span><span id="selectedResidueToggles" class="hidden"><button id="toggleSelectedResidues" type="button" aria-pressed="true" class="px-2.5 py-1 rounded border border-slate-700 bg-slate-900 text-white">Selected residues <i class="fa-solid fa-eye"></i></button><button id="toggleUnselectedResidues" type="button" aria-pressed="true" class="px-2.5 py-1 rounded border border-slate-700 bg-slate-900 text-white">Unselected residues <i class="fa-solid fa-eye"></i></button></span></div>
             </div>
             <button id="physicsLightingButton" type="button" aria-expanded="false" aria-controls="physicsLightingPanel" class="w-full border-t border-slate-800 px-5 py-3 text-left text-sm font-semibold text-white"><span><i class="fa-solid fa-lightbulb text-emerald-400 mr-2" aria-hidden="true"></i>Lighting and material settings</span><i class="lighting-chevron fa-solid fa-chevron-down" aria-hidden="true"></i></button><div id="physicsLightingPanel" class="hidden px-5 py-3 text-xs text-slate-300"><div class="flex flex-wrap gap-3"><label class="flex items-center gap-2">Ambient light <input id="physicsMaterial-ambient" type="range" min="0" max="2" step="0.05" value="0.85"><button id="physicsMaterialReset-ambient" type="button" class="hidden" style="background:#7c3aed;color:white;border:0;border-radius:.5rem;padding:.35rem .5rem" aria-label="Reset ambient" title="Reset to default"><i class="fa-solid fa-arrow-rotate-left" aria-hidden="true"></i></button><output id="physicsMaterialValue-ambient">0.85</output></label><label class="flex items-center gap-2">Key light <input id="physicsMaterial-key" type="range" min="0" max="3" step="0.05" value="0.4"><button id="physicsMaterialReset-key" type="button" class="hidden" style="background:#7c3aed;color:white;border:0;border-radius:.5rem;padding:.35rem .5rem" aria-label="Reset key" title="Reset to default"><i class="fa-solid fa-arrow-rotate-left" aria-hidden="true"></i></button><output id="physicsMaterialValue-key">0.4</output></label><label class="flex items-center gap-2">Fill light <input id="physicsMaterial-fill" type="range" min="0" max="3" step="0.05" value="0.4"><button id="physicsMaterialReset-fill" type="button" class="hidden" style="background:#7c3aed;color:white;border:0;border-radius:.5rem;padding:.35rem .5rem" aria-label="Reset fill" title="Reset to default"><i class="fa-solid fa-arrow-rotate-left" aria-hidden="true"></i></button><output id="physicsMaterialValue-fill">0.4</output></label><label class="flex items-center gap-2">Light direction (degrees) <input id="physicsMaterial-azimuth" type="range" min="0" max="360" step="1" value="45"><button id="physicsMaterialReset-azimuth" type="button" class="hidden" style="background:#7c3aed;color:white;border:0;border-radius:.5rem;padding:.35rem .5rem" aria-label="Reset azimuth" title="Reset to default"><i class="fa-solid fa-arrow-rotate-left" aria-hidden="true"></i></button><output id="physicsMaterialValue-azimuth">45</output></label><label class="flex items-center gap-2">Specular strength (reflectivity) <input id="physicsMaterial-specular" type="range" min="0" max="1" step="0.01" value="0.03"><button id="physicsMaterialReset-specular" type="button" class="hidden" style="background:#7c3aed;color:white;border:0;border-radius:.5rem;padding:.35rem .5rem" aria-label="Reset specular" title="Reset to default"><i class="fa-solid fa-arrow-rotate-left" aria-hidden="true"></i></button><output id="physicsMaterialValue-specular">0.03</output></label><label class="flex items-center gap-2">Shininess <input id="physicsMaterial-shininess" type="range" min="0" max="150" step="1" value="6"><button id="physicsMaterialReset-shininess" type="button" class="hidden" style="background:#7c3aed;color:white;border:0;border-radius:.5rem;padding:.35rem .5rem" aria-label="Reset shininess" title="Reset to default"><i class="fa-solid fa-arrow-rotate-left" aria-hidden="true"></i></button><output id="physicsMaterialValue-shininess">6</output></label><label class="flex items-center gap-2">Ambient occlusion <input id="physicsMaterial-occlusion" type="range" min="0" max="2" step="0.05" value="1"><button id="physicsMaterialReset-occlusion" type="button" class="hidden" style="background:#7c3aed;color:white;border:0;border-radius:.5rem;padding:.35rem .5rem" aria-label="Reset ambient occlusion" title="Reset to default"><i class="fa-solid fa-arrow-rotate-left" aria-hidden="true"></i></button><output id="physicsMaterialValue-occlusion">1</output></label></div><p class="mt-2">Specular strength adjusts highlight brightness; shininess adjusts highlight sharpness. Shift-click to select two atoms or residues and measure their distance.</p><hr class="physics-lighting-divider"></div>
+            <button id="physicsMembraneDetailsButton" type="button" aria-expanded="false" aria-controls="membraneDetectionStats" class="w-full border-t border-slate-800 px-5 py-3 text-left text-sm font-semibold text-white"><span><i class="fa-solid fa-layer-group text-emerald-400 mr-2" aria-hidden="true"></i>Membrane details</span><i class="membrane-details-chevron fa-solid fa-chevron-down" aria-hidden="true"></i></button>
+            <section id="membraneDetectionStats" class="hidden" aria-live="polite" style="flex-basis:100%;min-width:0;padding:18px 20px;border:0;background:none;font-size:16px">
+                    <h3 class="membrane-stats-heading">Membrane statistics</h3>
+                    <label for="membranePresenceSelect" class="membrane-presence-label">Should there be a membrane:
+                        <button id="membranePresenceMenuButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="membranePresenceMenu" class="px-3 py-1.5 rounded-lg text-xs">Auto <i class="fa-solid fa-chevron-down ml-1" aria-hidden="true"></i></button>
+                        <select id="membranePresenceSelect" class="hidden" aria-label="Should there be a membrane"><option value="auto" selected>Auto</option><option value="yes">Yes - 1</option><option value="yes2">Yes - 2</option><option value="no">No</option></select>
+                        <div id="membranePresenceMenu" class="hidden" role="group" aria-label="Membrane presence options"></div>
+                    </label>
+                    <div id="membraneDetectionStatsContent" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:10px">Membrane: waiting for structure.</div>
+                </section>
             <button id="physicsOtherSettingsButton" type="button" aria-expanded="false" aria-controls="physicsOtherSettingsPanel" class="w-full border-t border-slate-800 px-5 py-3 text-left text-sm font-semibold text-white"><span><i class="fa-solid fa-sliders text-emerald-400 mr-2" aria-hidden="true"></i>Other settings</span><i class="other-settings-chevron fa-solid fa-chevron-down" aria-hidden="true"></i></button>
             <div id="physicsOtherSettingsPanel" class="hidden pb-3">
             <div class="physics-visual-controls flex flex-wrap items-center gap-3 px-3 pt-4 text-xs text-slate-300">
                 <div id="sideChainJiggleControls" class="hidden items-center gap-3">
                     <button id="sideChainJiggleBtn" type="button" data-action-click="41" aria-pressed="true" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded text-xs border border-slate-700 " title="Animate side-chain atoms without changing the residue simulation physics"><i class="fa-solid fa-wave-square"></i> <span id="sideChainJiggleText">Stop Jiggle</span></button>
-                    <label class="inline-flex items-center gap-2 text-xs text-slate-300 whitespace-nowrap">Jiggle speed <output id="sideChainJiggleSpeedValue">3.0×</output><input aria-label="Jiggle speed" type="range" min="0.5" max="5" step="0.1" value="3" data-action-input="4"></label><span id="atomRepresentationNotice" class="hidden text-slate-400">The jiggling does not affect the homology model simulation</span>
+                    <label class="inline-flex items-center gap-2 text-xs text-slate-300 whitespace-nowrap">Jiggle speed <output id="sideChainJiggleSpeedValue">3.0×</output><input data-animation-key="sideChainJiggleSpeed" aria-label="Jiggle speed" type="range" min="0.5" max="5" step="0.1" value="3" data-action-input="4"></label><span id="atomRepresentationNotice" class="hidden text-slate-400">The jiggling does not affect the homology model simulation</span>
                 </div>
                 <!-- Colour by controls -->
                     <div id="referenceColorControl" class="hidden inline-flex shrink-0 items-center gap-2 whitespace-nowrap"><label for="referenceColorSelect" class="text-slate-300">Colour Reference chains by</label><select id="referenceColorSelect" data-action-change="6" class="bg-slate-800 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs"><option value="same" selected>Same as homology model chains (default)</option><option value="chain">Chain (default)</option><option value="uniform">Uniform</option><option value="protein-id">Protein ID</option><option value="element">Element</option><option value="side-chains">Side chains</option><option value="origin">Origin</option><option value="aligned">Aligned residues</option><option value="membrane">Membrane</option><option value="membrane-placement">Membrane placement residues</option><option value="membrane-repelled">Repelled from membrane</option><option value="charge">Charge</option><option value="hydrophobicity">Hydrophobicity</option><option value="secondary">Secondary structure</option><option value="plddt">pLDDT (from AlphaFold)</option><option value="difference">PDB vs Homology model</option></select></div>
@@ -1177,28 +1251,20 @@
                             <i class="fa-solid fa-eye text-[10px] text-teal-400" id="originAFEyeIcon"></i>
                         </button>
                     </div>
-                <button id="toggleMembraneStatsBtn" type="button" aria-expanded="false" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded text-[11px] border border-slate-700">View membrane stats</button><button id="sliceMembraneBtn" type="button" aria-pressed="false" disabled class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded-lg text-[11px] disabled:opacity-50">Slice membrane</button><label class="inline-flex items-center gap-2 text-[11px] text-slate-300">Membrane size <output id="membraneSizeValue">1.00×</output><input id="membraneSizeSlider" type="range" min="0.5" max="2" step="0.05" value="1" disabled aria-label="Membrane size" style="width:7rem" class="accent-sky-500"></label><label id="membraneSliceAngleControl" class="hidden inline-flex items-center gap-2 text-[11px] text-slate-300">Slice angle <output id="membraneSliceAngleValue">0°</output><input id="membraneSliceAngleSlider" type="range" min="0" max="360" step="1" value="0" aria-label="Slice angle"></label><label id="membraneSlicePercentControl" class="hidden inline-flex items-center gap-2 text-[11px] text-slate-300">Slice <input id="membraneSlicePercentSlider" type="text" inputmode="decimal" value="50" aria-label="Membrane slice percentage" title="Type a percentage, or drag up/right to increase it" class="w-14 rounded-lg border-0 bg-slate-800 px-2 py-1 text-center text-xs text-white"><span>%</span></label><button id="sliceProteinBtn" type="button" aria-pressed="false" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded-lg text-[11px]">Slice protein</button><label id="proteinSliceAngleControl" class="hidden inline-flex items-center gap-2 text-[11px] text-slate-300">Protein slice angle <output id="proteinSliceAngleValue">0°</output><input id="proteinSliceAngleSlider" type="range" min="0" max="360" step="1" value="0" aria-label="Protein slice angle"></label><label id="proteinSliceTiltControl" class="hidden inline-flex items-center gap-2 text-[11px] text-slate-300">Protein slice tilt <output id="proteinSliceTiltValue">0°</output><input id="proteinSliceTiltSlider" type="range" min="-90" max="90" step="1" value="0" aria-label="Protein slice tilt"></label><label id="proteinSlicePercentControl" class="hidden inline-flex items-center gap-2 text-[11px] text-slate-300">Protein slice <input id="proteinSlicePercentSlider" type="number" min="0" max="100" step="1" value="50" aria-label="Protein slice percentage" class="w-14 rounded-lg border-0 bg-slate-800 px-2 py-1 text-center text-xs text-white"><span>%</span></label><section id="membraneDetectionStats" class="hidden" aria-live="polite" style="flex-basis:100%;min-width:0;padding:18px 0;border:0;background:none;font-size:16px">
-                    <h3 class="membrane-stats-heading">Membrane statistics</h3>
-                    <label for="membranePresenceSelect" class="membrane-presence-label">Should there be a membrane:
-                        <button id="membranePresenceMenuButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="membranePresenceMenu" class="px-3 py-1.5 rounded-lg text-xs">Auto <i class="fa-solid fa-chevron-down ml-1" aria-hidden="true"></i></button>
-                        <select id="membranePresenceSelect" class="hidden" aria-label="Should there be a membrane"><option value="auto" selected>Auto</option><option value="yes">Yes</option><option value="no">No</option></select>
-                        <div id="membranePresenceMenu" class="hidden" role="group" aria-label="Membrane presence options"></div>
-                    </label>
-                    <div id="membraneDetectionStatsContent" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:10px">Membrane: waiting for structure.</div>
-                </section>
+                <button id="sliceMembraneBtn" type="button" aria-pressed="false" disabled class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded-lg text-[11px] disabled:opacity-50">Slice membrane</button><label class="inline-flex items-center gap-2 text-[11px] text-slate-300">Membrane size <output id="membraneSizeValue">1.00×</output><input id="membraneSizeSlider" type="range" min="0.5" max="2" step="0.05" value="1" disabled aria-label="Membrane size" style="width:7rem" class="accent-sky-500"></label><label id="membraneSliceAngleControl" class="hidden inline-flex items-center gap-2 text-[11px] text-slate-300">Slice angle <output id="membraneSliceAngleValue">0°</output><input id="membraneSliceAngleSlider" type="range" min="0" max="360" step="1" value="0" aria-label="Slice angle"></label><label id="membraneSlicePercentControl" class="hidden inline-flex items-center gap-2 text-[11px] text-slate-300">Slice <input id="membraneSlicePercentSlider" type="text" inputmode="decimal" value="50" aria-label="Membrane slice percentage" title="Type a percentage, or drag up/right to increase it" class="w-14 rounded-lg border-0 bg-slate-800 px-2 py-1 text-center text-xs text-white"><span>%</span></label><button id="sliceProteinBtn" type="button" aria-pressed="false" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded-lg text-[11px]">Slice protein</button><label id="proteinSliceAngleControl" class="hidden inline-flex items-center gap-2 text-[11px] text-slate-300">Protein slice angle <output id="proteinSliceAngleValue">0°</output><input id="proteinSliceAngleSlider" type="range" min="0" max="360" step="1" value="0" aria-label="Protein slice angle"></label><label id="proteinSliceTiltControl" class="hidden inline-flex items-center gap-2 text-[11px] text-slate-300">Protein slice tilt <output id="proteinSliceTiltValue">0°</output><input id="proteinSliceTiltSlider" type="range" min="-90" max="90" step="1" value="0" aria-label="Protein slice tilt"></label><label id="proteinSlicePercentControl" class="hidden inline-flex items-center gap-2 text-[11px] text-slate-300">Protein slice <input id="proteinSlicePercentSlider" type="number" min="0" max="100" step="1" value="50" aria-label="Protein slice percentage" class="w-14 rounded-lg border-0 bg-slate-800 px-2 py-1 text-center text-xs text-white"><span>%</span></label>
             </div>
             <div class="physics-visual-controls flex flex-wrap gap-5 items-center p-3 text-xs text-slate-300">
-<label id="physicsResidueSizeControl">Residue size <output id="physicsResidueValue">1.0×</output> <input aria-label="physics residue size" type="range" min="0" max="3" step="0.1" value="1" data-action-input="5"></label>
-<label id="physicsBackboneSizeControl">Backbone size <output id="physicsBackboneValue">2.0×</output> <input aria-label="physics backbone size" type="range" min="0" max="8" step="0.1" value="2" data-action-input="6"></label>
-<label id="physicsAtomSizeControl" class="hidden">Atom size <output id="physicsAtomValue">3.0×</output> <input aria-label="physics atom size" type="range" min="0" max="5" step="0.1" value="3" data-action-input="7"></label>
+<label id="physicsResidueSizeControl">Residue size <output id="physicsResidueValue">1.0×</output> <input data-animation-key="physicsResidueSize" aria-label="physics residue size" type="range" min="0" max="3" step="0.1" value="1" data-action-input="5"></label>
+<label id="physicsBackboneSizeControl">Backbone size <output id="physicsBackboneValue">2.0×</output> <input data-animation-key="physicsBackboneSize" aria-label="physics backbone size" type="range" min="0" max="8" step="0.1" value="2" data-action-input="6"></label>
+<label id="physicsAtomSizeControl" class="hidden">Atom size <output id="physicsAtomValue">3.0×</output> <input data-animation-key="physicsAtomSize" aria-label="physics atom size" type="range" min="0" max="5" step="0.1" value="3" data-action-input="7"></label>
 <label id="physicsElementSizeControl" class="hidden">Atom size by element <output id="physicsElementSizeValue">100%</output> <input id="physicsElementSizeSlider" aria-label="Atom size by element" type="range" min="0" max="1" step="0.01" value="1"></label>
-<label id="physicsStickSizeControl" class="hidden">Stick size <output id="physicsStickValue">1.0×</output> <input aria-label="physics stick size" type="range" min="0" max="8" step="0.1" value="1" data-action-input="8"></label>
+<label id="physicsStickSizeControl" class="hidden">Stick size <output id="physicsStickValue">1.0×</output> <input data-animation-key="physicsStickSize" aria-label="physics stick size" type="range" min="0" max="8" step="0.1" value="1" data-action-input="8"></label>
 <label id="physicsNonSelectedOpacityControl">Opacity of non-selected residues <output id="physicsNonSelectedOpacityValue">100%</output> <input id="physicsNonSelectedOpacitySlider" aria-label="Opacity of non-selected residues" type="range" min="0" max="1" step="0.01" value="1" data-action-input="10"></label>
 <label id="physicsPatternExtensionControl" class="hidden inline-flex items-center gap-1 whitespace-nowrap">Extend pattern by <input id="physicsPatternExtensionUnits" aria-label="Extend pattern by units" type="text" inputmode="numeric" value="0" style="touch-action:none" title="Type 0–100 copies at each open end, or drag up/right to increase the value"> units</label>
 <div id="symmetryRotationControls" class="hidden flex flex-wrap items-center gap-3"></div>
 <button id="singleChainRotationsToggle" type="button" aria-expanded="false" class="rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs text-white hover:bg-slate-700">Single-chain rotations <i class="fa-solid fa-chevron-down ml-1" aria-hidden="true"></i></button>
 <label id="physicsCurveSizeControl" class="hidden">Curve thickness <output id="physicsCurveValue">8.0×</output> <input id="physicsCurveThickness" aria-label="physics curve thickness" type="range" min="0" max="12" step="0.1" value="8"></label>
-<label id="physicsSurfaceSizeControl" class="hidden">Probe radius <output id="physicsSurfaceValue">1.4 Å</output> <input aria-label="physics surface probe radius in angstroms" type="range" min="0" max="3" step="0.1" value="1.4" data-action-input="9"></label></div>
+<label id="physicsSurfaceSizeControl" class="hidden">Probe radius <output id="physicsSurfaceValue">1.4 Å</output> <input data-animation-key="physicsSurfaceProbeRadius" aria-label="physics surface probe radius in angstroms" type="range" min="0" max="3" step="0.1" value="1.4" data-action-input="9"></label></div>
 
             <div id="singleChainRotationsPanel" class="hidden max-h-72 overflow-auto rounded-lg bg-slate-800/70 p-3 text-xs text-slate-200"><table class="w-full text-left"><thead><tr><th class="p-2">Chain</th><th class="p-2">Rotation (°)</th><th class="p-2">Axis</th><th class="p-2">Action</th></tr></thead><tbody id="singleChainRotationsRows"></tbody></table></div>
             </div>
@@ -1242,7 +1308,7 @@
                     <div id="springColorKey" class="hidden"><span id="springStrainKey"><span style="color:#93c5fd">Compressed</span> · <span style="color:#a78bfa">At rest</span> · <span style="color:#fca5a5">Stretched</span> (±50% strain)</span><span id="springOriginKey" class="hidden"></span>
                         <button id="showSpringHistogramBtn" type="button" data-action-click="47" class="ml-2 px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[10px]">Show Histogram</button>
                     </div>
-                    <div id="physicsPulseKey" class="flex flex-wrap items-center gap-2"><i class="fa-solid fa-palette text-sky-400"></i> Pulsing residues are not in the Reference PDB(s) <button id="pausePhysicsPulseBtn" type="button" data-action-click="48" class="rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-0.5 text-[10px]">Pause Pulsing</button></div>
+                    <div id="physicsPulseKey" class="flex flex-wrap items-center gap-2"><i class="fa-solid fa-palette text-sky-400"></i> Pulsing residues are not in the Reference PDB(s) <button id="pausePhysicsPulseBtn" type="button" aria-pressed="false" data-action-click="48" class="rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-0.5 text-[10px]">Pause Pulsing</button></div>
                     <div id="physicsColourKey">Chain: each molecule has a distinct colour.</div>
                     <div id="physicsDifferenceKey" class="hidden">PDB–Homology Cα distance: <span style="color:#38bdf8">0 Å</span> · <span style="color:#facc15">5 Å</span> · <span style="color:#ef4444">≥10 Å</span> · Grey and pulsing: no reference equivalent</div>
                     <div id="physicsMouseGestureHint" class="text-[10px] text-slate-400 mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
@@ -1547,11 +1613,11 @@
     </main>
 
     <!-- Error Modal Alert -->
-    <div id="errorModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+    <div id="errorModal" role="alertdialog" aria-modal="true" aria-labelledby="errorModalTitle" aria-describedby="errorMessage" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
         <div class="bg-slate-900 border border-red-500/50 p-6 rounded-2xl shadow-2xl max-w-md w-full">
             <div class="flex items-center gap-3 text-red-400 mb-3">
                 <i class="fa-solid fa-triangle-exclamation text-2xl"></i>
-                <h3 class="text-base font-semibold text-white">Error Processing Request</h3>
+                <h3 id="errorModalTitle" class="text-base font-semibold text-white">Error Processing Request</h3>
             </div>
             <p id="errorMessage" class="text-slate-300 text-xs leading-relaxed mb-6">Failed to load or align requested structures.</p>
             <div class="flex justify-end">
