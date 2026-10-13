@@ -236,7 +236,7 @@
         function selectUniProtFeature(accession,feature){
             const matches=[];
             for(const node of physicsNodes){
-                const atom=node.idx2==null?null:node.res.atoms2[node.idx2];
+                const atom=node.idx2==null?node.res.atoms1?.[node.idx1]:node.res.atoms2?.[node.idx2];
                 if(uniProtAccession(atom?.sourcePdbId)!==accession)continue;
                 const position=Number(atom.resSeq);
                 if(feature.type==='Disulfide bond'?(position!==feature.start&&position!==feature.end):(position<feature.start||position>feature.end))continue;
@@ -265,6 +265,41 @@
             }
             return [...new Set(pieces)].join(' ');
         }
+        function appendProteinCitations(host,text,citations) {
+            const pattern=/\(?PubMed:\s*\d+(?:\s*[,;]\s*PubMed:\s*\d+)*\)?|DOI:\s*10\.\d{4,9}\/[^\s)]+/gi;
+            let offset=0;
+            for(const match of text.matchAll(pattern)){
+                host.append(document.createTextNode(text.slice(offset,match.index)));
+                const superscript=document.createElement('sup');
+                const references=match[0].match(/PubMed:\s*\d+|DOI:\s*10\.\d{4,9}\/[^\s)]+/gi)||[];
+                references.forEach((reference,index)=>{
+                    const id=reference.replace(/^(?:PubMed|DOI):\s*/i,'');
+                    const url=/^PubMed:/i.test(reference)?`https://pubmed.ncbi.nlm.nih.gov/${id}/`:`https://doi.org/${id}`;
+                    if(!citations.has(url))citations.set(url,citations.size+1);
+                    if(index)superscript.append(document.createTextNode(','));
+                    const link=document.createElement('a');link.href=url;link.target='_blank';link.rel='noopener noreferrer';
+                    link.textContent=String(citations.get(url));link.title=reference;link.setAttribute('aria-label',`Reference ${citations.get(url)}: ${reference}`);superscript.append(link);
+                });
+                host.append(superscript);offset=match.index+match[0].length;
+            }
+            host.append(document.createTextNode(text.slice(offset)));
+        }
+        function proteinResultsForAccession(accession) {
+            return alignmentResults.filter(result=>result.atoms2?.some(atom=>uniProtAccession(atom.sourcePdbId)===accession));
+        }
+        function selectAboutProtein(accession) {
+            proteinResultsForAccession(accession).forEach((result,index)=>selectLinkedEntity(result.c1,null,'chain',result.atoms2.find(atom=>uniProtAccession(atom.sourcePdbId)===accession),index>0));
+            document.getElementById('physicsContainer')?.scrollIntoView({behavior:'smooth',block:'start'});
+        }
+        function updateAboutProteinSelection() {
+            const selections=[linkedSelection,...additionalSelections].filter(Boolean);
+            document.querySelectorAll('#aboutProteinComplexContent [data-protein-accession]').forEach(button=>{
+                const selected=proteinResultsForAccession(button.dataset.proteinAccession).some(result=>selections.some(selection=>
+                    selection.kind==='model'&&(selection.res===result||selection.identicalResults?.has(result))||
+                    selection.kind==='pair'&&[selection.i,selection.j].some(index=>physicsNodes[index]?.res===result)));
+                button.classList.toggle('protein-name-selected',selected);button.setAttribute('aria-pressed',String(selected));
+            });
+        }
         function renderAboutProteinComplex(status='') {
             const host=document.getElementById('aboutProteinComplexContent');
             if(!host)return;
@@ -277,19 +312,21 @@
             };
             if(status){host.textContent=status;return;}
             if(!uniProtAnnotations.size){host.textContent=uniProtUnavailable.length?`UniProt information could not be loaded for: ${uniProtUnavailable.join(', ')}.`:'No UniProt annotations are available for the current AlphaFold inputs.';if(uniProtUnavailable.length)addRetry();return;}
+            const citations=new Map();
             for(const [accession,entry] of uniProtAnnotations){
                 const card=document.createElement('section');card.className='rounded-lg bg-slate-800/70 p-3 mb-3';
-                const title=document.createElement('h3');title.className='font-semibold text-sky-300';title.textContent=`${entry.name||accession} · ${accession}`;card.append(title);
+                const title=document.createElement('h3');title.className='font-semibold text-sky-300';const name=document.createElement('button');name.type='button';name.className='about-protein-name';name.dataset.proteinAccession=accession;name.textContent=entry.name?`${entry.name} · ${accession}`:accession;name.title='Select this protein in the 3D viewer';name.addEventListener('click',()=>selectAboutProtein(accession));title.append(name);card.append(title);
                 if(entry.organism){const organism=document.createElement('p');organism.className='text-xs text-slate-400';organism.textContent=entry.organism;card.append(organism);}
                 for(const [type,label] of [['FUNCTION','Function'],['CATALYTIC ACTIVITY','Catalytic activity'],['SUBCELLULAR LOCATION','Subcellular location'],['TISSUE SPECIFICITY','Tissue specificity']]){
                     const values=entry.comments.filter(comment=>(comment.commentType||comment.type)===type).map(uniProtCommentText).filter(Boolean);
                     if(!values.length)continue;
                     const row=document.createElement('p');row.className='mt-2 leading-relaxed';
-                    const strong=document.createElement('strong');strong.textContent=`${label}: `;row.append(strong,document.createTextNode(values.join(' ')));card.append(row);
+                    const strong=document.createElement('strong');strong.textContent=`${label}: `;row.append(strong);appendProteinCitations(row,values.join(' '),citations);card.append(row);
                 }
                 const count=document.createElement('p');count.className='mt-2 text-xs text-slate-400';count.textContent=`${entry.features.length} UniProt positional annotations`;card.append(count);
                 host.append(card);
             }
+            updateAboutProteinSelection();
             if(uniProtUnavailable.length){const notice=document.createElement('p');notice.className='text-amber-300 text-xs';notice.textContent=`UniProt information unavailable for: ${uniProtUnavailable.join(', ')}.`;host.append(notice);addRetry();}
         }
         function updateUniProtChainLabels() {
@@ -545,6 +582,7 @@
             drawIndividualMatrices();drawDifferenceMatrix();drawMorphMatrix();
         }
         function updatePhysicsSelectionInfo() {
+            updateAboutProteinSelection();
             const box=document.getElementById('physicsSelectionInfo');
             if (!box) return;
             if (!linkedSelection) {box.classList.add('hidden');box.replaceChildren();return;}
@@ -1617,6 +1655,7 @@
             input.classList.remove('string-id-glow'); void input.offsetWidth; input.classList.add('string-id-glow');
             setTimeout(() => input.classList.remove('string-id-glow'), 3100);
             clearUploadedStructure('reference');
+            renderChainMappingReport(null);
             cancelStringMatching(); hideStringMatchResults();
             updateSiftsButton(true); updateFindMatchesReady(); updateBuildButtonState(); updateExampleSelection();
             saveRecentModel({updateExistingOnly:true});
@@ -2321,6 +2360,7 @@
                 }
                 status.textContent=`Searched ${response.count.toLocaleString()} proteins. Loaded ${added.length} unique UniProt ID(s).`;
                 renderStringMatchResults(response.matches);
+                renderChainMappingReport({referenceText:document.getElementById('pdbInput1').value,targetText:input.value,notes:['IDs fetched from STRING sequence matching and UniProt aliases.'],records:response.matches.map(match=>({pdbId:'',chains:[match.chain],name:'',accessions:match.accession?[match.accession]:[],origin:'STRING sequence search',detail:match.accession?'': 'No UniProt alias found'}))});
                 if (added.length) void loadModelPair(document.getElementById('pdbInput1').value.trim(), input.value.trim().toUpperCase());
             } catch(error) {status.textContent=error.message;syncStringMatchStatusVisibility();}
             finally {button.disabled=false;}
@@ -4463,7 +4503,7 @@
             const leaders=document.getElementById('membraneSideLeaders'),leaderRect=leaders?.getBoundingClientRect();
             if(leaders&&!leaders.classList.contains('hidden')&&leaderRect?.width&&leaderRect?.height){
                 const lineScaleX=physicsCaptureCanvas.width/leaderRect.width,lineScaleY=physicsCaptureCanvas.height/leaderRect.height;
-                for(const line of [document.getElementById('membraneSideLeaderNegative'),document.getElementById('membraneSideLeaderPositive')]){
+                for(const line of leaders.querySelectorAll('line')){
                     if(!line||line.style.display==='none')continue;
                     const x1=Number(line.getAttribute('x1')),y1=Number(line.getAttribute('y1')),x2=Number(line.getAttribute('x2')),y2=Number(line.getAttribute('y2'));
                     if(![x1,y1,x2,y2].every(Number.isFinite))continue;
@@ -4476,7 +4516,7 @@
                 const overlayRect=selectedResidueLabelCanvas.getBoundingClientRect();
                 physicsCaptureContext.drawImage(selectedResidueLabelCanvas,(overlayRect.left-rect.left)*scaleX,(overlayRect.top-rect.top)*scaleY,overlayRect.width*scaleX,overlayRect.height*scaleY);
             }
-            for(const label of [document.getElementById('membraneSideLabelNegative'),document.getElementById('membraneSideLabelPositive'),...selectedResidueLabelElements]){
+            for(const label of [document.getElementById('membraneSideLabelNegative'),document.getElementById('membraneSideLabelPositive'),document.getElementById('membraneSideLabelNegativeSecond'),document.getElementById('membraneSideLabelPositiveSecond'),...selectedResidueLabelElements]){
                 if(!label||label.classList.contains('hidden')||label.style.display==='none'||label.style.visibility==='hidden'||!label.textContent.trim())continue;
                 const labelRect=label.getBoundingClientRect(),x=(labelRect.left-rect.left)*scaleX,y=(labelRect.top-rect.top)*scaleY;
                 const style=getComputedStyle(label),fontSize=Math.max(10,parseFloat(style.fontSize)*scaleY),paddingX=parseFloat(style.paddingLeft)*scaleX,width=labelRect.width*scaleX,height=labelRect.height*scaleY,radius=parseFloat(style.borderRadius||'0')*Math.min(scaleX,scaleY);
@@ -6307,7 +6347,7 @@
                 if(state.needsReset||edited){packet.resetCoordinates=state.baseline.slice();transfer.push(packet.resetCoordinates.buffer);}
                 if(inferredMembrane){
                     const {center,normal,u,v,curvature,halfThickness,extent,memberSet,transmembraneSet}=inferredMembrane;
-                    packet.membrane={center,normal,u,v,curvature,halfThickness,extent};
+                    packet.membrane={center,normal,u,v,curvature,halfThickness,extent,secondGeometry:secondMembrane};
                     if(state.memberSet!==memberSet||state.transmembraneSet!==transmembraneSet){
                         packet.membraneMembership={memberSet,transmembraneSet};
                         state.memberSet=memberSet;state.transmembraneSet=transmembraneSet;
@@ -6459,6 +6499,7 @@
             // membrane set feel this weak visual-environment constraint.
             if (inferredMembrane && membraneRepulsionVal > 0) {
                 applyMembraneRepulsion(physicsNodes, fx, fy, fz, inferredMembrane, membraneRepulsionVal);
+                if(inferredMembrane?.secondGeometry)applyMembraneRepulsion(physicsNodes, fx, fy, fz, inferredMembrane.secondGeometry, membraneRepulsionVal);
             }
 
             // 3. Integration Step: Rigid Body vs Flexible Particles
@@ -6646,6 +6687,11 @@
         // Membrane inference is independent of the elastic network. The detector returns
         // plain geometry; only the renderer below knows about Three.js.
         let inferredMembrane = null;
+        let secondMembrane = null;
+        let secondMembraneMeshes = null;
+        let secondMembraneLipids = null;
+        const secondMembraneLabelState = {};
+        let membraneLabelSuffix = '';
         let membraneMeshes = null;
         let membraneLipids = null;
         let membraneLastInference = 0;
@@ -6693,7 +6739,7 @@
             membraneDetectionWorker?.terminate();membraneDetectionWorker=null;
             membraneDetectionPending=false;membraneLastInference=0;
             if(membranePresenceMode==='no'){
-                inferredMembrane=null;membraneVisible=false;
+                inferredMembrane=null;secondMembrane=null;renderSecondMembrane(0);membraneVisible=false;
                 renderMembraneGeometry(null);
                 membraneDetectionStats={detected:false,reason:'Disabled by your No setting',samples:0,durationMs:0};
             }else{
@@ -6706,6 +6752,8 @@
             const label=document.getElementById('membraneDetectionStatsContent');
             if(!label)return;
             label.replaceChildren();
+            const selectedMode=document.getElementById('membranePresenceSelect')?.value;
+            if(['auto','yes','yes2','no'].includes(selectedMode))membranePresenceMode=selectedMode;
             const s=membraneDetectionStats;
             const add=(title,value)=>{
                 const row=document.createElement('div');row.className='membrane-stat-card';
@@ -6717,20 +6765,26 @@
             const evidence=uniProtMembraneEvidence();
             const calculationSupport=membranePresenceMode==='no'?'Not evaluated (disabled)':!s?'Pending':s.structuralSupport===true?'Yes':s.structuralSupport===false?'No':'Unavailable';
             const uniProtSupport=evidence.length?'Yes':uniProtLookupPending?'Lookup pending':uniProtAnnotations.size?'No supporting annotations':'No UniProt data available';
-            add('Decision source',`Setting: ${membranePresenceMode==='auto'?'Auto':membranePresenceMode==='yes'?'Yes — fit requested':'No — disabled'}\nUniProt supports a membrane: ${uniProtSupport}\nApp calculations support a membrane: ${calculationSupport}`);
+            add('Decision source',`Setting: ${membranePresenceMode==='auto'?'Auto':membranePresenceMode==='no'?'No — disabled':membranePresenceMode==='yes2'?'Yes - 2 — fit requested':'Yes - 1 — fit requested'}\nUniProt supports a membrane: ${uniProtSupport}\nApp calculations support a membrane: ${calculationSupport}`);
             if(evidence.length)add('UniProt membrane evidence',evidence.join('; '));
             if(!s)return;
-            if(s.reason)add(s.detected?'Fit limitations':'Detection result',s.reason);
-            if(s.detected)add('Geometry',`${s.curved?'Curved':'Flat'} · ${s.thickness.toFixed(1)} Å thick · ${s.members} associated residues`);
-            add('Structural support',`${s.transmembraneHelices??0} spanning helices · ${s.transmembraneSheets??0} spanning sheets · ${s.helixWindows??0} hydrophobic helix windows`);
-            add('Search',`${s.samples} residues sampled · ${s.candidates??0} orientations · ${s.validatedCandidates??0} candidates validated · ${(s.durationMs??0).toFixed(1)} ms`);
-            if(s.score!==undefined){
-                add('Fit score',`${s.score.toFixed(3)} · hydrophobic density inside / outside: ${s.insideDensity.toFixed(2)} / ${s.outsideDensity.toFixed(2)}`);
-                add('Residue support',`${s.effectiveHydrophobicCount.toFixed(1)} effective hydrophobic · ${s.effectiveInsideCount.toFixed(1)} effective inside · exposure ${s.meanExposure.toFixed(3)}`);
-            }
-            if(s.axis)add('Preferred axis',`[${s.axis.map(v=>v.toFixed(2)).join(', ')}] · coherence ${s.coherence.toFixed(2)}`);
-            if(s.offset!==undefined)add('Placement',`Offset ${s.offset.toFixed(1)} Å · ${s.spanningMotifs} spanning segments · ${s.beltCoverage}/4 belt sectors`);
-            if(s.curvatureGain!==undefined)add('Curvature fit',`${s.curved?'Accepted':'Rejected'} · gain ${s.curvatureGain.toFixed(3)}`);
+            if(s.detected)add('Membranes',String(s.membraneCount||1));
+            const fits=s.membraneCount===2&&s.second?[s,s.second]:[s];
+            fits.forEach((fit,index)=>{
+                const prefix=fits.length>1?`Membrane ${index+1} · `:'';
+                const detail=(title,value)=>add(prefix+title,value);
+                if(fit.reason)detail(fit.detected?'Fit limitations':'Detection result',fit.reason);
+                if(fit.detected)detail('Geometry',`${fit.curved?'Curved':'Flat'} · ${fit.thickness.toFixed(1)} Å thick · ${fit.members} associated residues`);
+                detail('Structural support',`${fit.transmembraneHelices??0} spanning helices · ${fit.transmembraneSheets??0} spanning sheets · ${fit.helixWindows??0} hydrophobic helix windows`);
+                detail('Search',`${fit.samples??0} residues sampled · ${fit.candidates??0} orientations · ${fit.validatedCandidates??0} candidates validated · ${(fit.durationMs??0).toFixed(1)} ms`);
+                if(fit.score!==undefined){
+                    detail('Fit score',`${fit.score.toFixed(3)} · hydrophobic density inside / outside: ${fit.insideDensity.toFixed(2)} / ${fit.outsideDensity.toFixed(2)}`);
+                    detail('Residue support',`${fit.effectiveHydrophobicCount.toFixed(1)} effective hydrophobic · ${fit.effectiveInsideCount.toFixed(1)} effective inside · exposure ${fit.meanExposure.toFixed(3)}`);
+                }
+                if(fit.axis)detail('Preferred axis',`[${fit.axis.map(v=>v.toFixed(2)).join(', ')}] · coherence ${fit.coherence.toFixed(2)}`);
+                if(fit.offset!==undefined)detail('Placement',`Offset ${fit.offset.toFixed(1)} Å · ${fit.spanningMotifs} spanning segments · ${fit.beltCoverage}/4 belt sectors`);
+                if(fit.curvatureGain!==undefined)detail('Curvature fit',`${fit.curved?'Accepted':'Rejected'} · gain ${fit.curvatureGain.toFixed(3)}`);
+            });
         }
         function membraneCoordinates(point,geometry){
             const d=[point.x-geometry.center[0],point.y-geometry.center[1],point.z-geometry.center[2]];
@@ -6767,17 +6821,15 @@
             if(geometry&&physicsCamera)physicsCamera.updateMatrixWorld();
             let showing=0;
             for(const [side,id,lineId,sign] of [['negative','membraneSideLabelNegative','membraneSideLeaderNegative',-1],['positive','membraneSideLabelPositive','membraneSideLeaderPositive',1]]){
-                const label=document.getElementById(id),line=document.getElementById(lineId);if(!label||!line)continue;
-                label.textContent=membraneSideNames[side];
-                if(!membraneLabelsVisible||!geometry||!membraneSideNames[side]||!canvas){label.classList.add('hidden');line.style.display='none';continue;}
+                const label=document.getElementById(id+membraneLabelSuffix),line=document.getElementById(lineId+membraneLabelSuffix);if(!label||!line)continue;
+                label.textContent=membraneSideNames[side] || (geometry ? (side==='negative'?'Side 1':'Side 2') : '');
+                if(!(membraneVisible||lipidsVisible)||!membraneLabelsVisible||!geometry||!canvas){label.classList.add('hidden');line.style.display='none';continue;}
                 const width=canvas.clientWidth,height=canvas.clientHeight;
                 const project=(x,y)=>{
                     const point=membranePlatePoint(geometry,x,y,sign);
                     const p=new THREE.Vector3(...point).project(physicsCamera);
-                    return p.z<1?{x:(p.x+1)*width/2,y:(1-p.y)*height/2,distance:physicsCamera.position.distanceTo(new THREE.Vector3(...point))}:null;
+                    return p.z>=-1&&p.z<=1&&Number.isFinite(p.x)&&Number.isFinite(p.y)?{x:(p.x+1)*width/2,y:(1-p.y)*height/2,distance:physicsCamera.position.distanceTo(new THREE.Vector3(...point))}:null;
                 };
-                const center=project(0,0);
-                if(!center){label.classList.add('hidden');line.style.display='none';continue;}
                 // Prefer the front-right corner, but require a sustained,
                 // meaningful improvement before switching to another corner.
                 const corners=[[-1,-1],[-1,1],[1,-1],[1,1]];
@@ -6787,7 +6839,7 @@
                 const scores=projected.map(point=>point?point.x/width*.7+(far-point.distance)/Math.max(1,far-near)*.3:-Infinity);
                 const best=scores.indexOf(Math.max(...scores));
                 if(!Number.isFinite(scores[best])){label.classList.add('hidden');line.style.display='none';continue;}
-                if(membraneLabelCorners[side]===null)membraneLabelCorners[side]=best;
+                if(membraneLabelCorners[side]==null||!Number.isFinite(scores[membraneLabelCorners[side]]))membraneLabelCorners[side]=best;
                 else if(best!==membraneLabelCorners[side]&&scores[best]>scores[membraneLabelCorners[side]]+.08){
                     const candidate=membraneLabelCornerCandidates[side],now=performance.now();
                     if(candidate?.index!==best)membraneLabelCornerCandidates[side]={index:best,since:now};
@@ -6803,8 +6855,10 @@
                 }
                 membraneLabelLeaderPositions[side]=leader;
                 label.classList.remove('hidden');
-                const targetX=width-(width<600?12:48);
-                let targetY=Math.max(22,Math.min(height-22,center.y));
+                // Anchor each pair beside its own projected edge rather than the viewport margin.
+                const labelWidth=label.offsetWidth||100;
+                const targetX=Math.max(labelWidth+12,Math.min(width-12,edge.x+labelWidth+24));
+                let targetY=Math.max(22,Math.min(height-22,edge.y+(side==='negative'?-18:18)));
                 if(side==='positive'&&membraneLabelScreenPositions.negative&&Math.abs(targetY-membraneLabelScreenPositions.negative.y)<34)
                     targetY=Math.max(22,Math.min(height-22,membraneLabelScreenPositions.negative.y+(targetY>=membraneLabelScreenPositions.negative.y?34:-34)));
                 const previous=membraneLabelScreenPositions[side];
@@ -7141,13 +7195,19 @@
         }
         function scoreMembrane(samples,center,normal,halfThickness,curvature=null){
             const {n,u,v}=membraneBasis(normal);
+            const excluded=samples.excludedMembrane;
+            if(excluded){
+                const parallel=Math.abs(normal.reduce((sum,v,i)=>sum+v*excluded.normal[i],0));
+                const separation=Math.abs(center.reduce((sum,v,i)=>sum+(v-excluded.center[i])*excluded.normal[i],0));
+                if(parallel<.98||separation<halfThickness+excluded.halfThickness+10)return {score:-Infinity,insideHydro:0,insidePolar:0,insideExposure:0,insideDensity:0,outsideDensity:0};
+            }
             let reward=0,insideHydro=0,insidePolar=0,outsideHydro=0,insideExposure=0,outsideExposure=0;
             for(const s of samples){
                 const p=s.node,dx=p.x-center[0],dy=p.y-center[1],dz=p.z-center[2];
                 const x=dx*u.x+dy*u.y+dz*u.z,y=dx*v.x+dy*v.y+dz*v.z,z=dx*n.x+dy*n.y+dz*n.z;
                 const curve=curvature?curvature[0]*x*x+curvature[1]*x*y+curvature[2]*y*y:0;
                 const inside=Math.max(0,Math.min(1,(halfThickness+2-Math.abs(z-curve))/4));
-                const e=s.exposure,h=s.hydrophobic,polar=s.polar,charge=s.charge??0;
+                const e=s.exposure*(s.node.alignmentWeight??(s.node.idx1!=null&&s.node.idx2!=null?2:1)),h=s.hydrophobic,polar=s.polar,charge=s.charge??0;
                 // Gain relative to leaving every residue in aqueous solvent.
                 reward+=e*inside*(2.35*h-2.05*polar-3*charge);
                 insideHydro+=e*inside*h;insidePolar+=e*inside*polar;insideExposure+=e*inside;
@@ -7192,13 +7252,19 @@
                 const projections=samples.map(item=>project([item.node.x,item.node.y,item.node.z])).sort((a,b)=>a-b);
                 for(const q of [0,.2,.4,.6,.8,1])seeds.push(projections[Math.round(q*(projections.length-1))]);
                 seeds.push(0);
+                for(const label of ['cytoplasmic','periplasmic','extracellular']){
+                    const region=samples.filter(s=>s.node.topology===label);
+                    if(region.length)seeds.push(region.reduce((sum,s)=>sum+project([s.node.x,s.node.y,s.node.z]),0)/region.length);
+                }
+                const regions=['cytoplasmic','periplasmic','extracellular'].map(label=>samples.filter(s=>s.node.topology===label)).filter(r=>r.length).map(r=>r.reduce((sum,s)=>sum+project([s.node.x,s.node.y,s.node.z]),0)/r.length).sort((a,b)=>a-b);
+                for(let i=1;i<regions.length;i++)seeds.push((regions[i-1]+regions[i])/2);
                 // Bound position work per orientation; favour motif-supported bins.
                 const bins=new Map();
                 for(const seed of seeds){const key=Math.round(seed/6)*6;bins.set(key,(bins.get(key)||0)+1);}
                 const offsets=[...bins].sort((a,b)=>b[1]-a[1]).slice(0,12).map(([offset])=>offset);
                 for(const offset of offsets)for(const half of [11,14,17])test(normal,offset,half);
             }
-            if(!best)return null;
+            if(!best||!Number.isFinite(best.score))return null;
             // Refine distinct alternatives so a failing winner cannot hide a valid belt.
             const refined=[];
             for(const seed of candidates){
@@ -7296,6 +7362,19 @@
                     maxR=Math.max(maxR,Math.hypot(x,y));
                 }
             }
+            // Centre the finite patch on its own membrane-associated footprint.
+            // This is a translation within the fitted plane: orientation, depth,
+            // thickness and the flat placement score are unchanged. Do it before
+            // fitting curvature so the quadratic uses this same local origin.
+            const minX=Math.min(...associated.map(p=>p.x)),maxX=Math.max(...associated.map(p=>p.x));
+            const minY=Math.min(...associated.map(p=>p.y)),maxY=Math.max(...associated.map(p=>p.y));
+            const lateralX=(minX+maxX)/2,lateralY=(minY+maxY)/2;
+            best.center=best.center.map((value,i)=>value+u.getComponent(i)*lateralX+v.getComponent(i)*lateralY);
+            maxR=0;
+            for(const p of associated){
+                p.x-=lateralX;p.y-=lateralY;
+                maxR=Math.max(maxR,Math.hypot(p.x,p.y));
+            }
             // Fit a shallow quadratic around the selected midplane, without an
             // intercept that would duplicate the fitted plane offset.
             let curvature=[0,0,0];
@@ -7380,6 +7459,7 @@
             return {...geometry,center:center.toArray(),normal:n.toArray(),u:u.toArray(),v:v.toArray()};
         }
         function disposeMembrane(){
+            secondMembrane=null;renderSecondMembrane(0);
             membraneDetectionGeneration++;
             membraneDetectionWorker?.terminate();membraneDetectionWorker=null;
             membraneDetectionPending=false;membranePlacementExposureCache=null;
@@ -7571,7 +7651,22 @@
         }
         function updateLipidColors(){
             const system=membraneLipids;if(!system)return;
-            LipidRenderer.colors(system.gpu,LIPID_ATOMS,LIPID_BONDS,(atom,index)=>new THREE.Color(lipidAtomColor(physicsColorMode,atom,index)));
+            const palette=LIPID_ATOMS.map((atom,index)=>new THREE.Color(lipidAtomColor(physicsColorMode,atom,index)));
+            LipidRenderer.colors(system.gpu,LIPID_ATOMS,LIPID_BONDS,(_,index)=>palette[index]);
+            // Each simplified part represents a group of atoms. Average their
+            // ball-and-stick colours, including element and charge colouring.
+            const groupColor=(start,end)=>{
+                const color=new THREE.Color(0,0,0);
+                for(let i=start;i<end;i++)color.add(palette[i]);
+                return color.multiplyScalar(1/(end-start));
+            };
+            const head=groupColor(0,16),tails=groupColor(16,palette.length);
+            const colors=system.mesh.geometry.attributes.color;
+            for(let i=0;i<colors.count;i++){
+                const color=i<system.mesh.geometry.userData.headVertexCount?head:tails;
+                colors.setXYZ(i,color.r,color.g,color.b);
+            }
+            colors.needsUpdate=true;
         }
         function constrainMembraneLipidHead(p,geometry){
             // Smooth lateral motion, but keep the head on its current leaflet.
@@ -7590,26 +7685,45 @@
             const bitangent=[inward[1]*tangent[2]-inward[2]*tangent[1],inward[2]*tangent[0]-inward[0]*tangent[2],inward[0]*tangent[1]-inward[1]*tangent[0]];
             return {inward,tangent,bitangent};
         }
+        function simplifiedLipidGeometry(){
+            // One spherical head and two capsules, pointing along the inward axis.
+            const parts=[new THREE.SphereGeometry(1.8,10,8)];
+            for(const x of [-.85,.85]){
+                const tail=new THREE.CylinderGeometry(.65,.65,16,8,1);
+                tail.rotateX(Math.PI/2);tail.translate(x,0,9);parts.push(tail);
+                for(const z of [1,17])parts.push(new THREE.SphereGeometry(.65,8,6).translate(x,0,z));
+            }
+            const merged=new THREE.BufferGeometry();
+            const flat=parts.map(part=>part.toNonIndexed());
+            for(const name of ['position','normal','uv']){
+                const size=flat[0].attributes[name].itemSize;
+                const values=new Float32Array(flat.reduce((sum,part)=>sum+part.attributes[name].array.length,0));
+                let offset=0;
+                for(const part of flat){values.set(part.attributes[name].array,offset);offset+=part.attributes[name].array.length;}
+                merged.setAttribute(name,new THREE.BufferAttribute(values,size));
+            }
+            merged.userData.headVertexCount=flat[0].attributes.position.count;
+            merged.setAttribute('color',new THREE.BufferAttribute(new Float32Array(merged.attributes.position.count*3).fill(1),3));
+            for(const part of [...parts,...flat])part.dispose();
+            merged.computeBoundingSphere();return merged;
+        }
         function createMembraneLipids(geometry,now,retainedParticles=null,previousExtent=null){
             const leaves=[-1,1].map(side=>({side,footprints:membraneLipidFootprints(geometry,side)}));
             const particles=retainedParticles||leaves.flatMap(leaf=>seedMembraneLipids(geometry,leaf.footprints).map(p=>({...p,side:leaf.side})));
             if(!particles.length)return;
-            const mesh=new THREE.InstancedMesh(new THREE.SphereGeometry(1.5,10,8),
-                new THREE.MeshPhongMaterial({color:0xffffff,shininess:24,specular:0x252525}),particles.length);
+            const mesh=new THREE.InstancedMesh(simplifiedLipidGeometry(),
+                new THREE.MeshPhongMaterial({color:0xffffff,vertexColors:true,shininess:6,specular:0x080a0d}),particles.length);
             mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);mesh.frustumCulled=false;
-            particles.forEach((p,i)=>mesh.setColorAt(i,new THREE.Color(p.side<0?'#66c6dd':'#74d6c3').multiplyScalar(.87+Math.random()*.26)));
-            if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;
             const radii=Object.fromEntries(Object.entries(atomCovalentRadii).map(([element,radius])=>[element,radius/atomCovalentRadii.C]));
             const gpu=LipidRenderer.create(LIPID_ATOMS,LIPID_BONDS,particles.length,radii);
             const {atomMesh,stickMesh,atomGlowMesh}=gpu;
-            const glowMesh=new THREE.InstancedMesh(new THREE.SphereGeometry(1.75,12,10),
+            const glowMesh=new THREE.InstancedMesh(simplifiedLipidGeometry(),
                 new THREE.MeshBasicMaterial({color:0xffe85a,transparent:true,opacity:.58,depthWrite:false,blending:THREE.AdditiveBlending}),1);
             glowMesh.count=0;glowMesh.frustumCulled=false;glowMesh.renderOrder=15;
             for(const item of [mesh,atomMesh,stickMesh,glowMesh,atomGlowMesh])physicsScene.add(item);
             for(const p of particles){
                 p.lipidPhase??=Math.random()*Math.PI*2;p.lipidAngle??=Math.random()*Math.PI*2;p.lipidSpin??=(Math.random()-.5)*.5;
                 p.baseAngle=p.lipidAngle;p.renderX=p.x;p.renderY=p.y;
-                p.simpleColor??=new THREE.Color(p.side<0?'#66c6dd':'#74d6c3').multiplyScalar(.87+Math.random()*.26);
             }
             membraneLipids={mesh,atomMesh,stickMesh,glowMesh,atomGlowMesh,gpu,particles,leaves,dummy:new THREE.Object3D(),
                 lastFrame:now,lastFootprints:now,lastRecount:now,extent:previousExtent??geometry.extent,spinClock:0,
@@ -7780,9 +7894,11 @@
                 }else{
                     const bob=sideChainJiggleEnabled?.85*Math.sin(now*.0015*lipidMotionScale()+p.lipidPhase):0;
                     system.dummy.position.copy(p.world).addScaledVector(inward.set(...axes.inward),bob);
-                    system.dummy.scale.setScalar(1);system.dummy.updateMatrix();system.mesh.setMatrixAt(index,system.dummy.matrix);
-                    system.mesh.setColorAt(index,p.simpleColor);
-                    if(selectionGlowVisible&&p===selected){system.glowMesh.setMatrixAt(0,system.dummy.matrix);system.glowMesh.count=1;system.glowMesh.instanceMatrix.needsUpdate=true;}
+                    basis.makeBasis(tangent.set(...axes.tangent),bitangent.set(...axes.bitangent),inward.set(...axes.inward));
+                    system.dummy.quaternion.setFromRotationMatrix(basis);
+                    system.dummy.rotateZ(p.lipidAngle);
+                    system.dummy.scale.set(1,1,gpu.uniforms.lipidDepth.value);system.dummy.updateMatrix();system.mesh.setMatrixAt(index,system.dummy.matrix);
+                    if(selectionGlowVisible&&p===selected){system.dummy.scale.multiplyScalar(1.16);system.dummy.updateMatrix();system.glowMesh.setMatrixAt(0,system.dummy.matrix);system.glowMesh.count=1;system.glowMesh.instanceMatrix.needsUpdate=true;}
                 }
             }
             system.geometry=geometry;
@@ -7852,6 +7968,36 @@
                 mesh.geometry.attributes.position.needsUpdate=true;mesh.geometry.computeVertexNormals();mesh.geometry.computeBoundingSphere();
             }
         }
+        function renderSecondMembrane(now){
+            // Use the first membrane as the shared lateral reference on every frame,
+            // including motion between detector replies. Re-express curvature and
+            // anchors with the existing frame transform rather than twisting them.
+            if(secondMembrane)secondMembrane=alignMembraneFrame(trackMembraneGeometry(secondMembrane),inferredMembrane);
+            for(const id of ['membraneSideLabelNegative','membraneSideLabelPositive','membraneSideLeaderNegative','membraneSideLeaderPositive']){
+                const original=document.getElementById(id);
+                if(original&&!document.getElementById(id+'Second')){const copy=original.cloneNode(true);copy.id=id+'Second';original.parentNode.append(copy);}
+            }
+            const primary=inferredMembrane,meshes=membraneMeshes,names=membraneSideNames,lipids=membraneLipids;
+            const states=[membraneLabelScreenPositions,membraneLabelCorners,membraneLabelCornerCandidates,membraneLabelLeaderPositions,membraneLabelLeaderTransitions];
+            const saved=states.map(state=>({...state}));
+            states.forEach((state,i)=>Object.assign(state,secondMembraneLabelState[i]||{negative:null,positive:null}));
+            try{
+                inferredMembrane=secondMembrane;membraneMeshes=secondMembraneMeshes;membraneLipids=secondMembraneLipids;membraneLabelSuffix='Second';
+                updateMembraneSideNames();
+                const geometry=secondMembrane?{...secondMembrane,extent:secondMembrane.extent*membraneSizeScale}:null;
+                // Removing a second plate must not dispose the first plate's lipids.
+                if(!geometry){
+                    updateMembraneSideLabels(null);disposeMembraneLipids();
+                    if(membraneMeshes){physicsScene.remove(membraneMeshes);membraneMeshes.traverse(c=>{c.geometry?.dispose();c.material?.dispose();});membraneMeshes=null;}
+                }else {renderMembraneGeometry(geometry);updateMembraneLipids(geometry,now);}
+                secondMembraneMeshes=membraneMeshes;secondMembraneLipids=membraneLipids;
+                states.forEach((state,i)=>secondMembraneLabelState[i]={...state});
+            }finally{
+                inferredMembrane=primary;membraneMeshes=meshes;membraneLipids=lipids;membraneSideNames=names;membraneLabelSuffix='';
+                states.forEach((state,i)=>Object.assign(state,saved[i]));
+            }
+            if(primary&&membraneLabelsVisible&&(membraneVisible||lipidsVisible))document.getElementById('membraneSideLeaders')?.classList.remove('hidden');
+        }
         // Self-contained arithmetic used only in the detection worker. The
         // renderer keeps THREE; no network imports or DOM access are needed here.
         function membraneWorkerRuntime(){
@@ -7873,6 +8019,24 @@
                     const samples=membraneSamples(Boolean(data.requireMembrane));
                     const diagnostics={samples:samples.length,requireMembrane:Boolean(data.requireMembrane)};
                     const geometry=inferMembraneGeometry(samples,diagnostics);
+                    let secondGeometry=null;
+                    if(geometry&&data.testSecond){
+                        const remaining=samples.filter(s=>Math.abs(membraneCoordinates(s.node,geometry).signed)>geometry.halfThickness+12);
+                        remaining.excludedMembrane=geometry;
+                        const secondStarted=performance.now();
+                        const secondDiagnostics={samples:remaining.length,requireMembrane:Boolean(data.requireSecond)};
+                        secondGeometry=inferMembraneGeometry(remaining,secondDiagnostics);
+                        if(secondGeometry){
+                            completeMembraneMembers(secondGeometry,physicsNodes);
+                            Object.assign(secondDiagnostics,{detected:true,structuralSupport:!secondDiagnostics.forced,
+                                members:secondGeometry.memberIndices.length,transmembraneHelices:secondGeometry.transmembraneHelices,
+                                transmembraneSheets:secondGeometry.transmembraneSheets,curved:secondGeometry.curvature.some(Boolean),
+                                thickness:secondGeometry.halfThickness*2});
+                        }else secondDiagnostics.detected=false;
+                        secondDiagnostics.durationMs=performance.now()-secondStarted;
+                        diagnostics.second=secondDiagnostics;
+                    }
+                    diagnostics.membraneCount=geometry?(secondGeometry?2:1):0;
                     if(geometry)completeMembraneMembers(geometry,physicsNodes);
                     diagnostics.detected=Boolean(geometry);
                     diagnostics.structuralSupport=Boolean(geometry)&&!diagnostics.forced;
@@ -7882,7 +8046,7 @@
                         curved:geometry.curvature.some(Boolean),thickness:geometry.halfThickness*2});
                     const exposures=data.needExposure?membraneSamples(true).map(item=>[item.index,item.exposure]):null;
                     diagnostics.durationMs=performance.now()-started;
-                    self.postMessage({generation:data.generation,geometry,diagnostics,exposures});
+                    self.postMessage({generation:data.generation,geometry,secondGeometry,diagnostics,exposures});
                 }catch(error){self.postMessage({generation:data.generation,error:error.message});}
             };
         }
@@ -7914,6 +8078,7 @@
                 // to the current coordinates before the next rendering frame.
                 const next=data.geometry?trackMembraneGeometry(data.geometry):null;
                 inferredMembrane=alignMembraneFrame(next,inferredMembrane);
+                secondMembrane=alignMembraneFrame(data.secondGeometry?trackMembraneGeometry(data.secondGeometry):null,inferredMembrane);
                 membraneDetectionStats=data.diagnostics;
                 if(data.exposures)membranePlacementExposureCache={nodes:physicsNodes,count:physicsNodes.length,values:new Map(data.exposures)};
                 updateMembraneSideNames();
@@ -7924,7 +8089,7 @@
         }
         function updateInferredMembrane(now){
             if(!physicsNodes.length||!physicsScene||membranePresenceMode==='no')return;
-            if(inferredMembrane)inferredMembrane=trackMembraneGeometry(inferredMembrane);
+            if(inferredMembrane){inferredMembrane=trackMembraneGeometry(inferredMembrane);inferredMembrane.secondGeometry=secondMembrane;}
             if(!membraneDetectionPending&&(!membraneLastInference||now-membraneLastInference>=1000)){
                 membraneLastInference=now;
                 try{
@@ -7933,11 +8098,15 @@
                     // alignment objects. Preserve indices for membership and anchors.
                     const nodes=physicsNodes.map(node=>{
                         const residue=membraneResidue(node);
-                        return {x:node.x,y:node.y,z:node.z,blockIdx:node.blockIdx,idx1:0,idx2:null,
+                        const atom=node.idx2==null?node.res.atoms1?.[node.idx1]:node.res.atoms2?.[node.idx2];
+                        const description=(uniProtFeatureAt(atom,'Topological domain')?.description||'').toLowerCase();
+                        const topology=['cytoplasmic','periplasmic','extracellular'].find(label=>description.includes(label))||description;
+                        return {x:node.x,y:node.y,z:node.z,topology,alignmentWeight:node.idx1!=null&&node.idx2!=null?2:1,blockIdx:node.blockIdx,idx1:0,idx2:null,
                             res:{entityType:residue?'protein':'other',atoms1:residue?[{singleChar:residue.aa,secondaryType:residue.secondary}]:[]}};
                     });
                     membraneDetectionPending=true;
-                    worker.postMessage({generation:membraneDetectionGeneration,nodes,requireMembrane:membranePresenceMode==='yes'||uniProtMembraneEvidence().length>0,needExposure:physicsColorMode==='membrane-placement'||referenceColorMode==='membrane-placement'});
+                    worker.postMessage({generation:membraneDetectionGeneration,nodes,requireMembrane:membranePresenceMode==='yes'||membranePresenceMode==='yes2'||uniProtMembraneEvidence().length>0,
+                        testSecond:membranePresenceMode!=='yes',requireSecond:membranePresenceMode==='yes2'||['cytoplasmic','periplasmic','extracellular'].every(label=>nodes.some(n=>n.topology.includes(label))),needExposure:physicsColorMode==='membrane-placement'||referenceColorMode==='membrane-placement'});
                 }catch(error){
                     membraneDetectionPending=false;
                     membraneDetectionStats={detected:Boolean(inferredMembrane),samples:0,reason:error.message,durationMs:0};
@@ -7948,6 +8117,7 @@
             const visualGeometry=membraneVisualGeometry(inferredMembrane,now);
             renderMembraneGeometry(visualGeometry);
             updateMembraneLipids(visualGeometry,now);
+            renderSecondMembrane(now);
         }
 
 // membraneAndLipids.js end
@@ -8862,11 +9032,163 @@
         let completedModelInputKey = null;
         const uploadedStructureFiles = { reference: null, alphaFold: null };
         const RECENT_MODELS_KEY = 'stringscape-recent-models-v1';
+        let chainMappingReport = null;
+        let siftsLookupController = null;
+        function renderChainMappingReport(report = chainMappingReport) {
+            const previous = chainMappingReport;
+            chainMappingReport = report;
+            const box = document.getElementById('chainMappingBox');
+            const content = document.getElementById('chainMappingInfo');
+            if (!box || !content) return;
+            box.classList.toggle('hidden', !report);
+            content.replaceChildren();
+            // Progress updates preserve the user's open/closed choice; a new lookup starts closed.
+            if (!report || previous !== report) box.removeAttribute('open');
+            if (!report) return;
+            for (const note of report.notes || []) {
+                const paragraph = document.createElement('p');
+                paragraph.className = 'chain-mapping-note'; paragraph.textContent = note;
+                content.appendChild(paragraph);
+            }
+            if (!report.records.length) return;
+            const scroll = document.createElement('div'); scroll.className = 'chain-mapping-scroll';
+            const table = document.createElement('table'); table.className = 'chain-mapping-table';
+            const head = document.createElement('thead'), header = document.createElement('tr');
+            for (const title of ['Reference chain / protein', 'UniProt ID', 'ID source', 'Match details']) {
+                const cell = document.createElement('th'); cell.scope = 'col'; cell.textContent = title; header.appendChild(cell);
+            }
+            head.appendChild(header); table.appendChild(head);
+            const body = document.createElement('tbody');
+            for (const record of report.records) {
+                const row = document.createElement('tr');
+                const reference = document.createElement('td');
+                const chain = document.createElement('span'); chain.className = 'chain-mapping-chain';
+                chain.textContent = `${record.pdbId ? record.pdbId + ' · ' : ''}${record.chains.join(', ') || 'Chain not reported'}`;
+                reference.appendChild(chain);
+                if (record.name) {
+                    const protein = document.createElement('span'); protein.className = 'chain-mapping-protein';
+                    protein.textContent = record.name; reference.appendChild(protein);
+                }
+                const ids = document.createElement('td');
+                ids.className = 'chain-mapping-id'; ids.textContent = record.accessions.join(', ') || 'No ID found';
+                const origin = document.createElement('td'), badge = document.createElement('span');
+                badge.className = 'chain-mapping-source' + (record.accessions.length ? '' : ' unresolved');
+                badge.textContent = record.origin || 'Unresolved'; origin.appendChild(badge);
+                const detail = document.createElement('td'); detail.className = 'chain-mapping-detail';
+                detail.textContent = record.detail || (record.origin === 'SIFTS' ? 'Mapped by PDBe SIFTS' : '—');
+                row.append(reference, ids, origin, detail); body.appendChild(row);
+            }
+            table.appendChild(body); scroll.appendChild(table); content.appendChild(scroll);
+        }
+        async function fetchDiscoveryEntities(pdbId, signal) {
+            const query = `{entry(entry_id:"${pdbId}"){polymer_entities{rcsb_polymer_entity{pdbx_description}entity_poly{rcsb_entity_polymer_type pdbx_seq_one_letter_code_can}rcsb_polymer_entity_container_identifiers{entity_id asym_ids auth_asym_ids}rcsb_entity_source_organism{ncbi_taxonomy_id ncbi_scientific_name}}}}`;
+            const response = await fetch('https://data.rcsb.org/graphql?query=' + encodeURIComponent(query), {signal});
+            if (!response.ok) throw new Error(`RCSB metadata returned HTTP ${response.status}`);
+            const data = await response.json();
+            if (data.errors || !data.data?.entry) throw new Error('Reference chain metadata unavailable');
+            return (data.data.entry.polymer_entities || []).filter(entity => entity.entity_poly?.rcsb_entity_polymer_type === 'Protein').map(entity => ({
+                pdbId, entityId: entity.rcsb_polymer_entity_container_identifiers.entity_id,
+                chains: entity.rcsb_polymer_entity_container_identifiers.asym_ids || [],
+                sequence: (entity.entity_poly.pdbx_seq_one_letter_code_can || '').replace(/\s/g, '').toUpperCase(),
+                taxa: [...new Set((entity.rcsb_entity_source_organism || []).map(source => source.ncbi_taxonomy_id).filter(Number.isInteger))],
+                name: entity.rcsb_polymer_entity?.pdbx_description || '', accessions: [], origin: null, detail: ''
+            }));
+        }
+        function applySiftsDiscoveryMappings(entities, item) {
+            const mappings = item.UniProt || item.uniprot || {};
+            return entities.flatMap(entity => {
+                const groups = new Map();
+                for (const chain of entity.chains) {
+                    const accessions = Object.entries(mappings).filter(([, protein]) => (protein.mappings || []).some(mapping =>
+                        String(mapping.entity_id) === String(entity.entityId) && mapping.struct_asym_id === chain
+                    )).map(([accession]) => accession).sort();
+                    const key = accessions.join(',');
+                    if (!groups.has(key)) groups.set(key, {...entity, chains:[], accessions, origin:accessions.length ? 'SIFTS' : null});
+                    groups.get(key).chains.push(chain);
+                }
+                return [...groups.values()];
+            });
+        }
+        async function fetchSequenceDiscoveryCandidates(entity, signal) {
+            if (!entity.taxa.length) throw new Error('No source species recorded; sequence search could not be restricted to the reference species');
+            const minLength = Math.max(1, Math.floor(entity.sequence.length * .5));
+            const maxLength = Math.ceil(entity.sequence.length * 2);
+            const query = `(${entity.taxa.map(taxon => 'organism_id:' + taxon).join(' OR ')}) AND length:[${minLength} TO ${maxLength}]`;
+            let url = 'https://rest.uniprot.org/uniprotkb/search?' + new URLSearchParams({query, format:'json', fields:'accession,sequence,reviewed', size:'500'});
+            const candidates = [];
+            // Bound the search explicitly; never call a truncated search a complete result.
+            for (let page = 0; url; page++) {
+                if (page >= 40) throw new Error('Sequence search exceeded 20,000 candidates; narrow the reference species or provide an ID');
+                const response = await fetch(url, {signal});
+                if (!response.ok) throw new Error(`UniProt sequence search returned HTTP ${response.status}`);
+                const data = await response.json();
+                if (!Array.isArray(data.results)) throw new Error('Invalid UniProt sequence search response');
+                for (const entry of data.results) if (entry.primaryAccession && entry.sequence?.value) candidates.push({
+                    accession:entry.primaryAccession, sequence:entry.sequence.value,
+                    reviewed:entry.entryType === 'UniProtKB reviewed (Swiss-Prot)'
+                });
+                const next = response.headers.get('Link')?.match(/<([^>]+)>;\s*rel="next"/);
+                url = next ? next[1] : null;
+                if (url && !url.startsWith('https://rest.uniprot.org/uniprotkb/search?')) throw new Error('Unexpected UniProt pagination URL');
+            }
+            return candidates;
+        }
+        function selectSequenceDiscoveryMatch(sequence, candidates) {
+            const words = new Set();
+            for (let i=0;i<=sequence.length-3;i++) if (!sequence.slice(i,i+3).includes('X')) words.add(sequence.slice(i,i+3));
+            const shortlist = candidates.map(candidate => {
+                let hits=0;
+                const candidateWords = new Set();
+                for(let i=0;i<=candidate.sequence.length-3;i++) candidateWords.add(candidate.sequence.slice(i,i+3));
+                for(const word of words) if(candidateWords.has(word)) hits++;
+                return {...candidate,hits};
+            }).sort((a,b)=>b.hits-a.hits || Number(b.reviewed)-Number(a.reviewed) || a.accession.localeCompare(b.accession)).slice(0,50);
+            const knownLength = sequence.replace(/X/g,'').length;
+            if (knownLength < 10) return null;
+            const matches=[];
+            for(const candidate of shortlist) {
+                const alignment=alignProteinSequences(sequence,candidate.sequence,'semiglobal');
+                const pairs=alignment.alignedPairs.filter(pair=>pair.idx1!==null && pair.idx2!==null && sequence[pair.idx1]!=='X');
+                const identity=pairs.length ? 100*pairs.filter(pair=>sequence[pair.idx1]===candidate.sequence[pair.idx2]).length/pairs.length : 0;
+                const coverage=100*pairs.length/knownLength;
+                const targetCoverage=100*alignment.map2To1.size/candidate.sequence.length;
+                // Full deposited sequences may contain tags, variants and unknown residues.
+                // Reject short incidental similarities and rank accepted matches by alignment score.
+                if(alignment.score>0 && identity>=85 && coverage>=85 && targetCoverage>=80)
+                    matches.push({accession:candidate.accession,identity,coverage,targetCoverage,score:alignment.score,reviewed:candidate.reviewed});
+            }
+            matches.sort((a,b)=>b.score-a.score || b.identity-a.identity || Number(b.reviewed)-Number(a.reviewed) || a.accession.localeCompare(b.accession));
+            return matches[0] ? {...matches[0],alternatives:matches.filter(match=>match.score===matches[0].score && match.identity===matches[0].identity).map(match=>match.accession)} : null;
+        }
+        function sequenceDiscoveryWorkerSource() {
+            return `const BLOSUM62_ALPHABET=${JSON.stringify(BLOSUM62_ALPHABET)}, BLOSUM62_VALUES=${JSON.stringify(BLOSUM62_VALUES)};
+                const BLOSUM62_INDEX=Object.fromEntries([...BLOSUM62_ALPHABET].map((letter,i)=>[letter,i]));
+                let alignmentMode='semiglobal',alignmentGapOpen=-10,alignmentGapExtend=-1;
+                ${getBLOSUM62Score.toString()}\n${isSimilarAA.toString()}\n${alignProteinSequences.toString()}\n${selectSequenceDiscoveryMatch.toString()}
+                self.onmessage=({data})=>{try{self.postMessage({match:selectSequenceDiscoveryMatch(data.sequence,data.candidates)});}catch(error){self.postMessage({error:error.message});}};`;
+        }
+        function runSequenceDiscovery(sequence, candidates, signal) {
+            return new Promise((resolve,reject)=>{
+                if(signal.aborted){reject(new DOMException('Lookup cancelled','AbortError'));return;}
+                const url=URL.createObjectURL(new Blob([sequenceDiscoveryWorkerSource()],{type:'text/javascript'}));
+                let worker;
+                try {worker=new Worker(url);} catch(error){URL.revokeObjectURL(url);reject(error);return;}
+                URL.revokeObjectURL(url);
+                const finish=(error,result)=>{worker.terminate();signal.removeEventListener('abort',abort);error?reject(error):resolve(result);};
+                const abort=()=>finish(new DOMException('Lookup cancelled','AbortError'));
+                signal.addEventListener('abort',abort,{once:true});
+                worker.onmessage=({data})=>finish(data.error?new Error(data.error):null,data.match);
+                worker.onerror=event=>finish(new Error(event.message||'Sequence search failed'));
+                worker.postMessage({sequence,candidates});
+            });
+        }
         let siftsReferenceKey=null;
         let siftsRequestToken=0;
         let siftsLookupLoading=false;
         let alphaFoldBeforeSiftsLookup=null;
         function clearSiftsLookupLoading(restore=false) {
+            siftsLookupController?.abort();
+            siftsLookupController=null;
             const input=document.getElementById('pdbInput2');
             if(restore && input.value==='Loading...' && alphaFoldBeforeSiftsLookup!==null) input.value=alphaFoldBeforeSiftsLookup;
             input.classList.remove('sifts-loading');
@@ -8889,42 +9211,91 @@
         }
         async function fetchSiftsUniProtIds({autoBuild=false}={}) {
             const ids=referencePdbIdsForSifts();if(!ids.length)return;
+            siftsLookupController?.abort();
+            const controller=new AbortController();siftsLookupController=controller;
+            const signal=controller.signal;
+            const timeout=setTimeout(()=>controller.abort(),180000);
             const token=++siftsRequestToken,button=document.getElementById('fetchSiftsBtn'),status=document.getElementById('fetchSiftsStatus');
+            status.classList.remove('discovery-warning');
             const referenceText=document.getElementById('pdbInput1').value;
             const alphaFoldInput=document.getElementById('pdbInput2');
+            const current=()=>token===siftsRequestToken && referenceText===document.getElementById('pdbInput1').value && ids.join(',')===referencePdbIdsForSifts().join(',');
             if(!siftsLookupLoading)alphaFoldBeforeSiftsLookup=alphaFoldInput.value;
             alphaFoldInput.value='Loading...';
-            alphaFoldInput.classList.remove('string-id-glow');
-            alphaFoldInput.classList.add('sifts-loading');
-            siftsLookupLoading=true;
-            updateBuildButtonState();
-            button.disabled=true;status.textContent=`Looking up ${ids.join(', ')} in PDBe SIFTS…`;
+            alphaFoldInput.classList.remove('string-id-glow');alphaFoldInput.classList.add('sifts-loading');
+            siftsLookupLoading=true;updateBuildButtonState();button.disabled=true;
+            const report={referenceText,targetText:null,records:[],notes:['Looking up reference protein chains and SIFTS mappings…']};
+            renderChainMappingReport(report);
+            status.textContent=`Looking up ${ids.join(', ')} in PDBe SIFTS…`;
             try {
                 const responses=await Promise.all(ids.map(async id=>{
-                    try {
-                        const response=await fetch(`https://www.ebi.ac.uk/pdbe/api/mappings/uniprot/${id.toLowerCase()}`);
-                        if(!response.ok)throw new Error(`HTTP ${response.status}`);
-                        const data=await response.json();return {id,item:data[id.toLowerCase()]||data[id]||{}};
-                    } catch(error) {return {id,item:{},error:error.message};}
+                    const results=await Promise.allSettled([
+                        fetchDiscoveryEntities(id,signal),
+                        (async()=>{const response=await fetch(`https://www.ebi.ac.uk/pdbe/api/mappings/uniprot/${id.toLowerCase()}`,{signal});
+                            if(!response.ok)throw new Error(`HTTP ${response.status}`);
+                            const data=await response.json();return data[id.toLowerCase()]||data[id]||{};})()
+                    ]);
+                    return {id,entities:results[0].status==='fulfilled'?results[0].value:null,
+                        metadataError:results[0].status==='rejected'?results[0].reason.message:null,
+                        item:results[1].status==='fulfilled'?results[1].value:{},
+                        error:results[1].status==='rejected'?results[1].reason.message:null};
                 }));
-                if(token!==siftsRequestToken||referenceText!==document.getElementById('pdbInput1').value||ids.join(',')!==referencePdbIdsForSifts().join(','))return;
-                const accessions=[...new Set(responses.flatMap(({item})=>Object.keys(item.UniProt||item.uniprot||{})))];
-                const failed=responses.filter(result=>result.error).map(result=>`${result.id} (${result.error})`);
-                if(!accessions.length){status.textContent=failed.length?`Could not fetch SIFTS mappings: ${failed.join(', ')}.`:'No UniProt mappings were found for these reference PDBs.';return;}
-                clearUploadedStructure('alphaFold');
-                alphaFoldInput.value=accessions.join(', ');
-                status.textContent=`Found ${accessions.length} unique UniProt ${accessions.length===1?'ID':'IDs'}: ${accessions.join(', ')}.${failed.length?` Unavailable: ${failed.join(', ')}.`:''}`;
-                clearSiftsLookupLoading();
-                updateBuildButtonState();updateExampleSelection();saveRecentModel({updateExistingOnly:true});
-                if(autoBuild && token===siftsRequestToken && referenceText===document.getElementById('pdbInput1').value)
-                    void loadModelPair(referenceText,alphaFoldInput.value);
-            } catch(error) {if(token===siftsRequestToken)status.textContent=`Could not fetch SIFTS mappings: ${error.message}`;}
-            finally {
-                if(token===siftsRequestToken){
-                    if(siftsLookupLoading)clearSiftsLookupLoading(true);
-                    button.disabled=!referencePdbIdsForSifts().length;
-                    updateBuildButtonState();
+                if(!current())return;
+                const notes=[];
+                for(const response of responses){
+                    if(response.entities)report.records.push(...applySiftsDiscoveryMappings(response.entities,response.item));
+                    else notes.push(`${response.id}: chain coverage could not be checked (${response.metadataError}).`);
+                    // Every automatically added ID has provenance, including service failures.
+                    for(const [accession,protein] of Object.entries(response.item.UniProt||response.item.uniprot||{})) {
+                        if(report.records.some(record=>record.pdbId===response.id && record.accessions.includes(accession)))continue;
+                        report.records.push({pdbId:response.id,chains:[...new Set((protein.mappings||[]).map(mapping=>mapping.struct_asym_id).filter(Boolean))],
+                            name:'',accessions:[accession],origin:'SIFTS',detail:'Full reference chain coverage could not be verified'});
+                    }
+                    if(response.error)notes.push(`${response.id}: SIFTS unavailable (${response.error}); using sequence search where possible.`);
                 }
+                const missing=report.records.filter(record=>!record.accessions.length);
+                report.notes=[`SIFTS: ${report.records.length-missing.length}/${report.records.length} protein entities mapped. Searching ${missing.length} missing entities by sequence…`,...notes];
+                renderChainMappingReport(report);
+                const candidateCache=new Map(),matchCache=new Map();
+                for(const record of missing){
+                    if(!current())return;
+                    status.textContent=`Searching UniProt sequences for ${record.pdbId} chains ${record.chains.join(', ')}…`;
+                    try {
+                        if(!record.sequence)throw new Error('No deposited protein sequence available');
+                        const candidateKey=record.taxa.join(',')+':'+record.sequence.length;
+                        if(!candidateCache.has(candidateKey))candidateCache.set(candidateKey,fetchSequenceDiscoveryCandidates(record,signal));
+                        const candidates=await candidateCache.get(candidateKey);
+                        const matchKey=record.taxa.join(',')+':'+record.sequence;
+                        if(!matchCache.has(matchKey))matchCache.set(matchKey,runSequenceDiscovery(record.sequence,candidates,signal));
+                        const match=await matchCache.get(matchKey);
+                        if(match){record.accessions=[match.accession];record.origin='UniProt sequence search';
+                            record.detail=`${match.identity.toFixed(1)}% identity, ${match.coverage.toFixed(1)}% coverage of known deposited residues, same source species${match.alternatives.length>1?'; equally scoring IDs: '+match.alternatives.join(', '):''}`;}
+                        else record.detail='No match passed 85% identity, 85% reference coverage and 80% target coverage';
+                    } catch(error){record.detail=signal.aborted?'Search timed out or was cancelled':`Sequence search failed: ${error.message}`;}
+                    if(current())renderChainMappingReport(report);
+                }
+                if(!current())return;
+                // Retain SIFTS IDs even when the independent metadata service failed.
+                const accessions=[...new Set([...responses.flatMap(({item})=>Object.keys(item.UniProt||item.uniprot||{})),...report.records.flatMap(record=>record.accessions)])];
+                const unresolved=report.records.filter(record=>!record.accessions.length);
+                const coverageIncomplete=responses.some(response=>response.metadataError);
+                report.notes=[`Found ${accessions.length} unique UniProt IDs. ${unresolved.length ? 'Unresolved protein chains: '+unresolved.flatMap(record=>record.chains.map(chain=>record.pdbId+' '+chain)).join(', ')+'. Automatic build paused; review the missing targets.' : coverageIncomplete ? 'Reference chain coverage could not be fully verified. Automatic build paused.' : 'All checked protein chains have an ID.'}`,...notes];
+                report.targetText=accessions.join(', ');
+                renderChainMappingReport(report);
+                if(!accessions.length){status.textContent='No suitable UniProt IDs found. See chain mapping information.';status.classList.add('discovery-warning');showWarning(status.textContent);return;}
+                clearUploadedStructure('alphaFold');alphaFoldInput.value=report.targetText;
+                status.textContent=`Found ${accessions.length} unique UniProt IDs${unresolved.length?' with unresolved chains':''}. See chain mapping information.`;
+                if(unresolved.length){status.classList.add('discovery-warning');showWarning(status.textContent);}
+                clearSiftsLookupLoading();resizeStructureIdInputs();
+                updateBuildButtonState();updateExampleSelection();saveRecentModel({updateExistingOnly:true});
+                if(autoBuild && current() && !unresolved.length && !coverageIncomplete)
+                    void loadModelPair(referenceText,alphaFoldInput.value);
+            } catch(error){if(current()){
+                status.textContent=signal.aborted?'UniProt discovery timed out. Retry the lookup.':`Could not discover UniProt IDs: ${error.message}`;
+                report.notes=[status.textContent];renderChainMappingReport(report);
+            }} finally {
+                clearTimeout(timeout);
+                if(token===siftsRequestToken){if(siftsLookupLoading)clearSiftsLookupLoading(true);button.disabled=!referencePdbIdsForSifts().length;updateBuildButtonState();}
             }
         }
         function recentFileKey(slot,info) { return `${slot}:${info.name}:${info.size??''}:${info.lastModified??''}`; }
@@ -9081,6 +9452,7 @@
             const inputValue=selected.map(file=>file.name).join(', ');
             uploadedStructureFiles[slot] = { file:selected[0], files:selected, inputValue:inputValue.toUpperCase(), revision: ++uploadedStructureRevision };
             target.value = inputValue;
+            renderChainMappingReport(null);
             if (slot === 'reference') {
                 referenceSearchRequest++;
                 referenceSearchLoading=false;
@@ -9235,6 +9607,7 @@
             updatePhysicsToggleButton('toggleUnalignedResidues', true);
             updatePhysicsToggleButton('toggleNonProteinAtoms', true);
             document.getElementById('pausePhysicsPulseBtn').textContent = 'Pause Pulsing';
+            document.getElementById('pausePhysicsPulseBtn').setAttribute('aria-pressed','false');
             if(rotationalSymmetryAxes){physicsScene?.remove(rotationalSymmetryAxes);rotationalSymmetryAxes.traverse(item=>{item.geometry?.dispose();item.material?.dispose();});rotationalSymmetryAxes=null;}
             disposePatternExtensions();patternExtensionUnits=0;
             document.getElementById('physicsPatternExtensionControl')?.classList.add('hidden');
@@ -9290,6 +9663,7 @@
             if (document.getElementById('pdbInput1').value.trim().toUpperCase() !== pdbId1.trim().toUpperCase()) hideStringMatchResults();
             if (uploadedStructureFiles.reference && pdbId1.toUpperCase() !== uploadedStructureFiles.reference.inputValue) clearUploadedStructure('reference');
             if (uploadedStructureFiles.alphaFold && pdbId2Raw.toUpperCase() !== uploadedStructureFiles.alphaFold.inputValue) clearUploadedStructure('alphaFold');
+            if(chainMappingReport && (chainMappingReport.referenceText!==pdbId1 || chainMappingReport.targetText!==pdbId2Raw))renderChainMappingReport(null);
             document.getElementById('pdbInput1').value = pdbId1;
             updateReferenceSequenceSearchButton();
             let currentSequences=[]; try { currentSequences=referenceInputParts(pdbId1).sequences; } catch (_) {}
@@ -9391,6 +9765,9 @@
                     ? 'Sequence inputs start as compact synthetic Cα chains. Their synthetic distances are blank in the matrix and do not set non-backbone spring lengths. Expect low model accuracy. For higher accuracy, run the missing sequences through AlphaFold and upload them to this box.' : '';
                 if (fallbackIds.length) notice.textContent = `No AlphaFold model found for ${fallbackIds.join(', ')}; using UniProt sequences. ` + notice.textContent;
                 notice.classList.toggle('hidden', !notice.textContent);
+                if (fallbackIds.length) {
+                    showWarning(`No AlphaFold model found for ${fallbackIds.join(', ')}; using UniProt sequences instead. Expect low model accuracy. For higher accuracy, run the missing sequences through AlphaFold and upload them to the AlphaFold IDs box.`);
+                }
 
                 modelData1.pdbId = files1.map(file=>file.pdbId).join(' + ');
                 modelData1.chains = referenceAssembly ? referenceAssembly.chains : parsed1.chains;
@@ -9454,6 +9831,8 @@
                 drawDifferenceMatrix();
 
                 initPhysicsSimulation();
+                const accuracyWarning = modelAccuracyWarning(physicsNodes);
+                if (accuracyWarning) showWarning(accuracyWarning);
                 if(!physicsNodes.length)hidePhysicsViewerLoading();
                 if (backboneLinesGroup) backboneLinesGroup.visible = true;
                 readyModelGeneration = generation;
@@ -9896,7 +10275,7 @@
                 const button=event.target.closest('button');if(!button||button.closest('#physicsGraphPanel'))return;
                 const viewer=document.getElementById('physicsContainer');
                 if(viewer&&(button.compareDocumentPosition(viewer)&Node.DOCUMENT_POSITION_FOLLOWING))return;
-                if(['physicsGraphToggle','resetPhysicsSimulationBtn','physicsControlsToggle','toggleMembraneStatsBtn','resetPhysicsViewBtn','createAnimationBtn','quickPlayAnimationBtn'].includes(button.id))return;
+                if(['physicsGraphToggle','resetPhysicsSimulationBtn','physicsControlsToggle','physicsMembraneDetailsButton','resetPhysicsViewBtn','createAnimationBtn','quickPlayAnimationBtn'].includes(button.id))return;
                 if(!button.closest('#physicsControlsPanel,.physics-toggle-row,[role="group"][aria-label="Physics representation"]'))return;
                 markPhysicsGraphControl(graphControlLabel(button),button.id||button.textContent.trim());
             });
@@ -9905,11 +10284,11 @@
             document.getElementById('membranePresenceSelect')?.addEventListener('change',event=>{
                 membranePresenceMode=event.target.value;refreshMembranePresence();
             });
-            document.getElementById('toggleMembraneStatsBtn')?.addEventListener('click',event=>{
+            document.getElementById('physicsMembraneDetailsButton')?.addEventListener('click',event=>{
                 const stats=document.getElementById('membraneDetectionStats');
                 const shown=stats.classList.toggle('hidden')===false;
                 event.currentTarget.setAttribute('aria-expanded',String(shown));
-                event.currentTarget.textContent=shown?'Hide membrane stats':'View membrane stats';
+                event.currentTarget.querySelector('.membrane-details-chevron').className=`membrane-details-chevron fa-solid fa-chevron-${shown?'up':'down'}`;
             });
             document.getElementById('sliceMembraneBtn')?.addEventListener('click',()=>{
                 if(!inferredMembrane)return;
@@ -10900,6 +11279,12 @@
             const t=Math.max(0,Math.min(1,value/(scale||1)));
             return new THREE.Color(t<.5?'#38bdf8':'#facc15').lerp(new THREE.Color(t<.5?'#facc15':'#ef4444'),t<.5?t*2:(t-.5)*2);
         }
+        function setKeyframeDifferenceNormalized(value){
+            if(keyframeDifferenceNormalized===value)return;
+            keyframeDifferenceNormalized=value;
+            keyframeDifferenceCache=null;
+            if(physicsColorMode==='keyframe-difference')setPhysicsColorMode('keyframe-difference');
+        }
         function keyframeDifferenceColors(){
             if(keyframeDifferenceCache?.frames===animationFrames&&keyframeDifferenceCache?.count===animationFrames.length&&keyframeDifferenceCache?.nodes===physicsNodes&&keyframeDifferenceCache.normalized===keyframeDifferenceNormalized)return keyframeDifferenceCache.colors;
             const colors=Array(physicsNodes.length).fill('#475569'),scores=[];
@@ -11393,7 +11778,7 @@
                 'rotational-symmetry':'Rotational symmetry: <span style="color:#38bdf8">low displacement</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">high</span>; dark grey: no detected rotational symmetry. Dashed yellow lines mark symmetry axes.',
                 'pattern-variance':'Pattern variance: <span style="color:#38bdf8">low deviation</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">high</span>; repeated translations and rotations of equivalent proteins, scored in Å using corresponding residues; grey: no supported pattern. Pattern markers show 3D arrows at protein centres pointing along the repeat, with lines connecting the centres. Separate repeats are fitted independently; two-copy patterns establish a movement but cannot validate its repetition.',
                 'equivalent-protein-shape':'Equivalent protein shape: <span style="color:#38bdf8">low difference</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">high</span>; each residue is scored by deviations in its distances to other residues from the across-chain average; dark grey: no equivalent protein comparison.',
-                'keyframe-difference':`Keyframe conformation difference: <span style="color:#38bdf8">little change</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">large change</span> in distances to sampled residues across saved keyframes. ${keyframeDifferenceNormalized?'Colours are scaled to the current model’s 95th percentile.':'Medium change: 2.5 Å; large change: 5 Å or more (mean variation).'} Grey: unavailable. <button id="keyframeDifferenceNormalize" type="button" class="bg-slate-800 rounded-lg px-2 py-1">Normalised: ${keyframeDifferenceNormalized?'True':'False'}</button>`,
+                'keyframe-difference':`Keyframe conformation difference: <span style="color:#38bdf8">little change</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">large change</span> in distances to sampled residues across saved keyframes. ${keyframeDifferenceNormalized?'Colours are scaled to the current model’s 95th percentile.':'Medium change: 2.5 Å; large change: 5 Å or more (mean variation).'} Grey: unavailable. <button id="keyframeDifferenceNormalize" type="button" aria-pressed="${keyframeDifferenceNormalized}" class="bg-slate-800 rounded-lg px-2 py-1">Normalised: ${keyframeDifferenceNormalized?'True':'False'}</button>`,
                 'residue-speed':'Residue speed: <span style="color:#38bdf8">stationary or slow</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">fast</span>. Colours use smoothed movement in Å/s relative to the current 95th-percentile protein-residue speed; non-protein atoms are grey.',
                 'binding-sites':'Binding sites: each distinct inter-protein contact patch has its own colour; grey residues are outside binding sites.',
                 'binding-site-type':'Binding site type: contact patches between the same pair of protein types share a colour; grey residues are outside binding sites.',
@@ -11428,9 +11813,8 @@
             colourKey.innerHTML = keys[mode];
             renderUniProtFeatureKey();
             document.getElementById('keyframeDifferenceNormalize')?.addEventListener('click',()=>{
-                keyframeDifferenceNormalized=!keyframeDifferenceNormalized;
-                keyframeDifferenceCache=null;
-                setPhysicsColorMode('keyframe-difference');
+                setKeyframeDifferenceNormalized(!keyframeDifferenceNormalized);
+                scheduleAnimationCapture();
             });
             document.getElementById('qmeanKeyUpdate')?.addEventListener('click',()=>{document.getElementById('validationReport').open=true;document.getElementById('validationQmeanEmail')?.focus();});
             if (mode === 'origin' && referenceFiles.length > 1) {
@@ -12718,7 +13102,31 @@
             if (bar) bar.style.width = `${pct}%`;
         }
 
+        function modelAccuracyWarning(nodes) {
+            // App heuristic: warn when at least 30% lack both reference alignment
+            // and confident AlphaFold coordinates (pLDDT < 70).
+            let total = 0, lowConfidenceUnaligned = 0;
+            for (const node of nodes) {
+                if (node.res.entityType !== 'protein' || node.res.referenceOnly || node.idx2 === null) continue;
+                const atom = node.res.atoms2[node.idx2];
+                if (!atom) continue;
+                total++;
+                if (!node.usedInAlignment && !atom.sequenceOnly && Number.isFinite(atom.plddt) && atom.plddt >= 0 && atom.plddt < 70) lowConfidenceUnaligned++;
+            }
+            if (!total || lowConfidenceUnaligned / total < 0.3) return '';
+            const percent = (100 * lowConfidenceUnaligned / total).toFixed(1);
+            return `${lowConfidenceUnaligned} of ${total} protein residues in the complex (${percent}%) are both unaligned to the reference structures and have low AlphaFold confidence (pLDDT below 70). A large proportion of the complex therefore lacks reliable structural support. The model is unlikely to be accurate.`;
+        }
+
+        function showWarning(msg) {
+            showError(msg);
+            document.getElementById('errorModal').classList.add('warning-modal');
+            document.getElementById('errorModalTitle').textContent = 'Warning';
+        }
+
         function showError(msg) {
+            document.getElementById('errorModal').classList.remove('warning-modal');
+            document.getElementById('errorModalTitle').textContent = 'Error Processing Request';
             document.getElementById('errorMessage').textContent = msg;
             document.getElementById('errorModal').classList.remove('hidden');
         }
@@ -12794,6 +13202,7 @@
                 function() { downloadSimulationAsMmCif() },
                 function() { closeErrorModal() },
                 function() { loadModelPair('6YKM, 8UCS', 'P09348, P0AF06, P0ABZ1') },
+                function() { loadModelPair('6IOK, 6IOL', 'Q51487, P52002, P52477') },
             ],
             input: [
                 function() { referenceSearchRequest++; referenceSearchLoading=false; siftsRequestToken++; if(siftsLookupLoading)clearSiftsLookupLoading(true); document.getElementById('fetchSiftsStatus').textContent=''; referenceSearchSessionId=null; clearUploadedStructure('reference'); cancelStringMatching(); hideStringMatchResults(); if(!this.value.trim()){const alphaFoldInput=document.getElementById('pdbInput2'); if(alphaFoldInput.value){alphaFoldInput.value=''; alphaFoldInput.dispatchEvent(new Event('input',{bubbles:true}));}} updateBuildButtonState(); updateFindMatchesReady(); updateExampleSelection(); updateReferenceSequenceSearchButton(true); document.getElementById('viewReferenceSearchResultsBtn').classList.add('hidden'); document.getElementById('referenceSearchResults').classList.add('hidden'); document.getElementById('referenceSequenceSearchStatus').textContent='' },
@@ -13180,7 +13589,7 @@
             updateSymmetryRotationControls();
         });
         document.getElementById('pdbInput1')?.addEventListener('input',()=>{siftsRequestToken++;updateSiftsButton(true);});
-        for(const id of ['pdbInput1','pdbInput2'])document.getElementById(id)?.addEventListener('input',renderRecentModels);
+        for(const id of ['pdbInput1','pdbInput2'])document.getElementById(id)?.addEventListener('input',()=>{renderRecentModels();renderChainMappingReport(null);});
         updateSiftsButton();
         updateReferenceSequenceSearchButton();
         for (const id of ['pdbInput1','pdbInput2']) document.getElementById(id)?.addEventListener('change',saveRecentModel);
@@ -13581,7 +13990,7 @@
             host.querySelector('label')?.classList.add('hidden');host.querySelectorAll('.extra-reference-slider').forEach(el=>el.remove());
             referenceInfluences=referenceFiles.map(()=>1);
             referenceFiles.forEach((file,i)=>{const label=document.createElement('label');label.className='extra-reference-slider block text-xs mt-2';label.style.color=referenceColor(i);
-                const value=document.createElement('span');value.textContent=' 100%';const range=document.createElement('input');range.type='range';range.min='0';range.max='1';range.step='0.01';range.value='1';range.className='w-full';
+                const value=document.createElement('span');value.textContent=' 100%';const range=document.createElement('input');range.type='range';range.min='0';range.max='1';range.step='0.01';range.value='1';range.defaultValue='1';range.dataset.animationKey=`referenceInfluence:${file.pdbId}:${referenceFiles.slice(0,i).filter(other=>other.pdbId===file.pdbId).length}`;range.className='w-full';
                 label.append(document.createTextNode(`${file.pdbId} influence on spring lengths and strengths`),value,range);host.append(label);
                 range.addEventListener('input',()=>{referenceInfluences[i]=Number(range.value);value.textContent=` ${Math.round(referenceInfluences[i]*100)}%`;model1Influence=referenceInfluences.reduce((a,b)=>a+b,0)/referenceInfluences.length;const total=referenceInfluences.reduce((a,b)=>a+b,0)+model2Influence;morphAlpha=total?model2Influence/total:0.5;updateReferenceCoordinateLockTargets();offscreenCaches.morph.dirty=true;drawMorphMatrix();});
             });
@@ -14006,7 +14415,7 @@
 // animation.js start
         // Animation frames keep simulation coordinates separate from the optional
         // display-only rotations of rotationally symmetric chains.
-        const ANIMATION_STORAGE_PREFIX='proteomatrix-animation-v1:';
+        const ANIMATION_STORAGE_PREFIX='proteomatrix-animation-v2:';
         let animationFrames=[],animationSelected=0,animationLoop=true,animationPlaying=false,animationPreparing=false;
         let animationLibrary=[],animationActiveId=null,animationTitle='Animation 1',animationSyncKeys=new Set(),animationInterpolation={},animationAutoSpinDismissed=false;
         let animationPlaybackOrigin=0;
@@ -14053,41 +14462,60 @@
             animationEl('pdbInput1')?.value.trim()||'',animationEl('pdbInput2')?.value.trim()||''
         ]);
         const animationNodeSignature=()=>physicsNodes.map(node=>`${node.blockIdx}:${node.idx2??'x'}`).join(',');
+        // IDs and explicit data-animation-key values are permanent storage identifiers.
+        // Never derive them from DOM order or reuse a retired key for another setting.
+        function animationControlKey(input){
+            const key=input.dataset.animationKey||input.id;
+            if(!key)throw Error('Animatable controls require an id or data-animation-key.');
+            return key;
+        }
         const animationControls=()=>{
             const controls=Array.from(document.querySelectorAll('.physics-simulation-panel input[type="range"], .physics-simulation-panel select'))
-                .filter(input=>!animationEl('animationEditor')?.contains(input)&&input.id!=='membraneSlicePercentSlider'&&input.id!=='physicsNonSelectedOpacitySlider');
-            // Append controls added after keyframe storage existed so saved frames keep their original indices.
-            const nonSelectedOpacity=animationEl('physicsNonSelectedOpacitySlider');
-            if(nonSelectedOpacity)controls.push(nonSelectedOpacity);
-            const slicePercent=animationEl('membraneSlicePercentSlider');
-            if(slicePercent)controls.push(slicePercent);
+                .filter(input=>!animationEl('animationEditor')?.contains(input)&&!input.closest('#physicsGraphPanel')&&!input.closest('#singleChainRotationsRows'));
+            const keys=new Set();
+            for(const input of controls){
+                const key=animationControlKey(input);
+                if(keys.has(key))throw Error(`Duplicate animation control key: ${key}`);
+                keys.add(key);
+            }
             return controls;
         };
+        function animationControlDefault(input){
+            if(input.tagName==='SELECT')return Array.from(input.options).find(option=>option.defaultSelected)?.value??input.options[0]?.value??'';
+            return input.defaultValue||String((Number(input.min||0)+Number(input.max||100))/2);
+        }
+        function initializeAnimationControls(frame){
+            frame.settings.flags??={};
+            frame.settings.flags.keyframeDifferenceNormalized??=false;
+            // Materialize defaults once, so subsequent edits of one frame do not
+            // change the fallback used by other frames from an older animation.
+            for(const input of animationControls()){
+                const key=animationControlKey(input);
+                if(!Object.hasOwn(frame.settings.controls,key))frame.settings.controls[key]=animationControlDefault(input);
+            }
+        }
         function stripAnimationGraphSettings(frame){
             const settings=frame?.settings;if(!settings)return;
-            const graphIndex=animationControls().findIndex(input=>input.id==='physicsGraphRange');
-            if(graphIndex>=0&&Array.isArray(settings.controls))settings.controls[graphIndex]=null;
+            delete settings.controls?.physicsGraphRange;
             if(settings.buttonStates)for(const id of ['physicsGraphLogScale','physicsGraphNormalize'])delete settings.buttonStates[id];
         }
         function stripAnimationGraphMetadata(entry){
-            const graphIndex=animationControls().findIndex(input=>input.id==='physicsGraphRange');
-            const graphControlKey=`control:${graphIndex}`;
-            const excluded=key=>key===graphControlKey||key==='button:physicsGraphLogScale'||key==='button:physicsGraphNormalize';
+            const excluded=key=>key==='control:physicsGraphRange'||key==='button:physicsGraphLogScale'||key==='button:physicsGraphNormalize';
             entry.syncKeys=(entry.syncKeys||[]).filter(key=>!excluded(key));
             if(entry.interpolation)for(const key of Object.keys(entry.interpolation))if(excluded(key))delete entry.interpolation[key];
         }
         function animationSettings(){
             return {
-                controls:animationControls().map(input=>input.closest('#physicsGraphPanel')?null:input.value),
+                controls:Object.fromEntries(animationControls().map(input=>[animationControlKey(input),input.value])),
                 representation:physicsRepresentation,color:physicsColorMode,
                 referenceColor:animationEl('referenceColorSelect')?.value,
                 springColor:animationEl('springColorSelect')?.value,
                 flags:{homologyStructureVisible,alignedResiduesVisible,unalignedResiduesVisible,bindingSiteResiduesVisible,nonBindingSiteResiduesVisible,
                     nonProteinAtomsVisible,selectedResiduesVisible,unselectedResiduesVisible,
                     lipidsVisible,membraneVisible,showSprings,rigidBodySimulation,sideChainJiggleEnabled,
-                    rotationalAxesVisible,physicsPulsePaused},
+                    rotationalAxesVisible,physicsPulsePaused,keyframeDifferenceNormalized},
                 buttonStates:Object.fromEntries(Array.from(document.querySelectorAll('.physics-simulation-panel button[id][aria-pressed]'))
-                    .filter(button=>!animationEl('animationEditor')?.contains(button)&&!button.closest('#physicsGraphPanel')).map(button=>[button.id,button.getAttribute('aria-pressed')])),
+                    .filter(button=>!animationEl('animationEditor')?.contains(button)&&!button.closest('#physicsGraphPanel')&&!['pausePhysicsPulseBtn','keyframeDifferenceNormalize'].includes(button.id)).map(button=>[button.id,button.getAttribute('aria-pressed')])),
                 chainVisibility:{...chainVisibility},referenceOverlayVisibility:[...referenceOverlayVisibility],
                 symmetry:rotationalSymmetryGroups.map(group=>({key:group.key,angle:group.angle})),
                 chainRotations:[...singleChainRotations].map(([block,entry])=>({block,...entry}))
@@ -14138,6 +14566,7 @@
         }
         function activateAnimation(entry){
             if(!entry)return;
+            entry.frames.forEach(initializeAnimationControls);
             animationActiveId=entry.id;animationTitle=entry.title;animationFrames=entry.frames;
             animationLoop=entry.loop!==false;animationSyncKeys=new Set(entry.syncKeys||[]);animationInterpolation={...entry.interpolation};
             if(animationSyncKeys.has('conformation')){
@@ -14192,8 +14621,9 @@
             if(!settings)return;
             animationApplying=true;
             try{
+                if(typeof settings.flags?.keyframeDifferenceNormalized==='boolean')setKeyframeDifferenceNormalized(settings.flags.keyframeDifferenceNormalized);
                 const controls=animationControls();
-                settings.controls?.forEach((value,index)=>{const input=controls[index];if(input&&value!==null&&!input.closest('#physicsGraphPanel'))applyAnimationControlValue(input,value);});
+                controls.forEach(input=>{const value=settings.controls?.[animationControlKey(input)]??animationControlDefault(input);applyAnimationControlValue(input,value);});
                 if(settings.representation&&settings.representation!==physicsRepresentation)setPhysicsRepresentation(settings.representation);
                 if(settings.color&&settings.color!==physicsColorMode){animationEl('physicsColorSelect').value=settings.color;setPhysicsColorMode(settings.color);}
                 const flags=settings.flags||{};
@@ -14212,7 +14642,7 @@
                 if(typeof flags.physicsPulsePaused==='boolean'&&flags.physicsPulsePaused!==physicsPulsePaused)togglePhysicsPulse();
                 for(const [id,pressed] of Object.entries(settings.buttonStates||{})){
                     const button=animationEl(id);
-                    if(button?.closest('#physicsGraphPanel'))continue;
+                    if(button?.closest('#physicsGraphPanel')||['pausePhysicsPulseBtn','keyframeDifferenceNormalize'].includes(id))continue;
                     if(button&&button.getAttribute('aria-pressed')!==null&&button.getAttribute('aria-pressed')!==pressed)button.click();
                 }
                 if(settings.chainVisibility)for(const [chain,visible] of Object.entries(settings.chainVisibility))if(chainVisibility[chain]!==visible)chainVisibility[chain]=visible;
@@ -14243,11 +14673,12 @@
         }
         function applyInterpolatedAnimationControls(a,b,t){
             const controls=animationControls();
-            controls.forEach((input,index)=>{
+            controls.forEach(input=>{
+                const key=animationControlKey(input);
                 if(input.type!=='range'||input.closest('#physicsGraphPanel'))return;
-                const start=Number(a.settings.controls?.[index]),end=Number(b.settings.controls?.[index]);
+                const start=Number(a.settings.controls?.[key]??animationControlDefault(input)),end=Number(b.settings.controls?.[key]??animationControlDefault(input));
                 if(!Number.isFinite(start)||!Number.isFinite(end)||start===end)return;
-                const value=start+(end-start)*animationEasedProgress(`control:${index}`,t);
+                const value=start+(end-start)*animationEasedProgress(`control:${key}`,t);
                 applyAnimationControlValue(input,value);
             });
         }
@@ -14378,15 +14809,17 @@
             const cloneFrame=()=>{const frame=structuredClone(base);frame.id=animationId();frame.framesToNext=30;return frame;};
             const blank={id:animationId(),title:'Blank animation',frames:[cloneFrame(),cloneFrame()],loop:true,syncKeys:[],interpolation:{}};
             blank.frames[1].framesToNext=0;
-            const controls=animationControls(),referenceSliders=[...document.querySelectorAll('#referenceInfluenceControls .extra-reference-slider input[type="range"]')];
-            const colorIndex=controls.indexOf(animationEl('physicsColorSelect'));
+            const referenceSliders=[...document.querySelectorAll('#referenceInfluenceControls .extra-reference-slider input[type="range"]')];
+            const colorControl=animationEl('physicsColorSelect');
             const frames=referenceFiles.map((file,index)=>{
                 const frame=cloneFrame();frame.name=file.pdbId;
                 frame.settings.flags.sideChainJiggleEnabled=false;
+                frame.settings.flags.keyframeDifferenceNormalized=true;
+                frame.settings.buttonStates.lockAlignedResiduesBtn='true';
                 frame.settings.buttonStates.sideChainJiggleBtn='false';
                 frame.settings.color='keyframe-difference';
-                if(colorIndex>=0)frame.settings.controls[colorIndex]='keyframe-difference';
-                referenceSliders.forEach((slider,sliderIndex)=>{const controlIndex=controls.indexOf(slider);if(controlIndex>=0)frame.settings.controls[controlIndex]=sliderIndex===index?'1':'0';});
+                if(colorControl)frame.settings.controls[animationControlKey(colorControl)]='keyframe-difference';
+                referenceSliders.forEach((slider,sliderIndex)=>{frame.settings.controls[animationControlKey(slider)]=sliderIndex===index?'1':'0';});
                 return frame;
             });
             const change={id:animationId(),title:'Conformational change using PDBs',frames,loop:true,syncKeys:[],interpolation:{},conformationalChange:true,optimized:false};
@@ -14661,7 +15094,7 @@
             if(repairedSpin)saveAnimation();
             if(rotationalSymmetryGroups.length&&!animationAutoSpinDismissed&&!animationLibrary.some(item=>item.autoGenerated||item.title==='Auto-generated spin animation')){
                 const first=captureAnimationFrame(),second=captureAnimationFrame();
-                first.framesToNext=30;second.framesToNext=0;
+                first.framesToNext=100;second.framesToNext=0;
                 first.settings.symmetry=rotationalSymmetryGroups.map(group=>({key:group.key,angle:0}));
                 second.settings.symmetry=rotationalSymmetryGroups.map(group=>({key:group.key,angle:359*Math.PI/180}));
                 const entry={id:animationId(),title:'Auto-generated spin animation',frames:[first,second],loop:true,syncKeys:['conformation'],autoGenerated:true};
@@ -14689,14 +15122,15 @@
             });
             for(let i=0;i<controlNames.length;i++){
                 if(controls[i]?.dataset.symmetryRotation||controls[i]?.closest('#physicsGraphPanel'))continue;
-                rows.push({key:`control:${i}`,category:controls[i]?.closest('#physicsControlsPanel')?'Physics variables':'Visual variables',label:controlNames[i],graphable:controls[i]?.type==='range',step:Number(controls[i]?.step)||0,
-                    get:frame=>frame.settings.controls?.[i],set:(frame,value)=>{frame.settings.controls[i]=value;}});
+                const key=animationControlKey(controls[i]);
+                rows.push({key:`control:${key}`,category:controls[i]?.closest('#physicsControlsPanel')?'Physics variables':'Visual variables',label:controlNames[i],graphable:controls[i]?.type==='range',step:Number(controls[i]?.step)||0,
+                    get:frame=>frame.settings.controls?.[key]??animationControlDefault(controls[i]),set:(frame,value)=>{frame.settings.controls[key]=value;}});
             }
             for(const flag of Object.keys(first.settings.flags||{}))rows.push({key:`flag:${flag}`,category:flag==='rigidBodySimulation'?'Physics variables':'Visual variables',label:flag.replace(/([A-Z])/g,' $1'),get:frame=>String(frame.settings.flags?.[flag]),set:(frame,value)=>{frame.settings.flags[flag]=value==='true';}});
             for(const chain of Object.keys(first.settings.chainVisibility||{}))rows.push({key:`chain:${chain}`,category:'Visual variables',label:`${displayChainName(chain)} visible`,get:frame=>String(frame.settings.chainVisibility?.[chain]!==false),set:(frame,value)=>{frame.settings.chainVisibility[chain]=value==='true';}});
             first.settings.referenceOverlayVisibility?.forEach((_,index)=>rows.push({key:`reference:${index}`,category:'Visual variables',label:`Reference PDB ${index+1} visible`,get:frame=>String(frame.settings.referenceOverlayVisibility?.[index]===true),set:(frame,value)=>{frame.settings.referenceOverlayVisibility[index]=value==='true';}}));
             for(const id of Object.keys(first.settings.buttonStates||{})){
-                if(animationEl(id)?.closest('#physicsGraphPanel'))continue;
+                if(animationEl(id)?.closest('#physicsGraphPanel')||['pausePhysicsPulseBtn','keyframeDifferenceNormalize'].includes(id))continue;
                 rows.push({key:`button:${id}`,category:animationEl(id)?.closest('#physicsControlsPanel')?'Physics variables':'Visual variables',label:id.replace(/([A-Z])/g,' $1'),get:frame=>frame.settings.buttonStates?.[id],set:(frame,value)=>{frame.settings.buttonStates[id]=value==='true'?'true':'false';}});
             }
             for(const property of ['representation','color','referenceColor','springColor'])rows.push({key:`property:${property}`,category:'Visual variables',label:property.replace(/([A-Z])/g,' $1'),get:frame=>frame.settings[property],set:(frame,value)=>{frame.settings[property]=value;}});
@@ -14714,8 +15148,7 @@
         }
         function animationSyncDefinitions(){
             if(!animationFrames.length)return [];
-            const controls=animationControls();
-            const rows=animationRowDefinitions().filter(row=>row.key&&(!row.key.startsWith('control:')||!controls[Number(row.key.slice(8))]?.id?.startsWith('physicsGraph')));
+            const rows=animationRowDefinitions().filter(row=>row.key);
             const conformation={key:'conformation',category:'Conformation',label:'Conformation',get:frame=>frame.coords,
                 set:(frame,value)=>{frame.coords=structuredClone(value);}};
             const rotations=[...new Set(physicsNodes.map(node=>node.blockIdx))].map(block=>({key:`chainRotation:${block}`,category:'Visual variables',label:`${chainProteinName(block)} single-chain rotation`,
@@ -14839,7 +15272,7 @@
         function buildAnimationTableCsv(){
             if(!animationFrames.length)throw Error('There is no animation to save.');
             const count=animationFrames.length;
-            const metadata={version:1,signature:animationCsvModelSignature(),references:referenceFiles.map(file=>file.pdbId),title:animationTitle,loop:animationLoop,
+            const metadata={version:2,signature:animationCsvModelSignature(),references:referenceFiles.map(file=>file.pdbId),title:animationTitle,loop:animationLoop,
                 syncKeys:[...animationSyncKeys],interpolation:{...animationInterpolation},
                 conformationalChange:animationLibrary.find(item=>item.id===animationActiveId)?.conformationalChange===true,
                 optimized:animationLibrary.find(item=>item.id===animationActiveId)?.optimized===true};
@@ -14886,23 +15319,23 @@
             for(let part=0;byKey.has(`@metadata:${part}`);part++)metadataChunks.push(byKey.get(`@metadata:${part}`)[2]);
             if(!metadataChunks.length)throw Error('The CSV is missing its animation metadata.');
             const metadata=JSON.parse(metadataChunks.join(''));
-            if(metadata?.version!==1||metadata.signature!==animationCsvModelSignature()||
+            if(metadata?.version!==2||metadata.signature!==animationCsvModelSignature()||
                 JSON.stringify(metadata.references)!==JSON.stringify(referenceFiles.map(file=>file.pdbId)))
                 throw Error('This animation table belongs to a different model or an unsupported format.');
             const frameChunks=[];
             for(let part=0;byKey.has(`@frame:${part}`);part++)frameChunks.push(byKey.get(`@frame:${part}`));
             if(!frameChunks.length)throw Error('The CSV is missing its keyframe data.');
-            const controlsCount=animationControls().length;
             const frames=Array.from({length:count},(_,index)=>{
                 const frame=JSON.parse(frameChunks.map(chunk=>chunk[index+2]).join(''));
                 if(!frame||!Array.isArray(frame.coords)||frame.coords.length!==physicsNodes.length||
                     !frame.coords.every(point=>Array.isArray(point)&&point.length===3&&point.every(Number.isFinite))||
-                    !frame.settings||!Array.isArray(frame.settings.controls)||frame.settings.controls.length!==controlsCount)
+                    !frame.settings||!frame.settings.controls||typeof frame.settings.controls!=='object'||Array.isArray(frame.settings.controls))
                     throw Error(`Keyframe ${index+1} is incomplete or has coordinates for another model.`);
                 frame.id=animationId();frame.name=String(frame.name||`Keyframe ${index+1}`).slice(0,80);
                 frame.framesToNext=animationSegmentFrames(frame);
                 if(!Array.isArray(frame.displayCoords)||frame.displayCoords.length!==physicsNodes.length)frame.displayCoords=structuredClone(frame.coords);
                 stripAnimationGraphSettings(frame);
+                initializeAnimationControls(frame);
                 return frame;
             });
             const names=byKey.get('@name'),durations=byKey.get('@framesToNext');
