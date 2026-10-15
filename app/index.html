@@ -63,7 +63,8 @@
     <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js" integrity="sha384-b4IZetZNE8bVncsQqlcH4ZZFC58BslGU2LVj47xUtIMOw72axMESbPe8spBylXnd" crossorigin="anonymous"></script>
     <!-- expr-eval -->
     <script src="https://cdn.jsdelivr.net/npm/expr-eval@2.0.2/dist/bundle.min.js" integrity="sha384-/4W8jQ+DhKy3zhz8s0HRh/l4kEliBAJQmAWqrrtJr7BAuODvB2MKsjR8h5MGefjl" crossorigin="anonymous"></script>
-    <!-- Cloudflare Web Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "de64078fa2a4407fba94310b9fc51393"}'></script><!-- End Cloudflare Web Analytics -->
+    <!-- Load analytics only when the visitor has enabled it. -->
+    <script src="analytics.js"></script>
     <style>
         :root {
             --link-base-opacity: 0.5;
@@ -131,9 +132,10 @@
             position: absolute;
             top: 10px;
             right: calc(10px + var(--ai-panel-offset));
-            bottom: 285px;
+            bottom: var(--right-lower-clearance, 285px);
             width: 310px;
-            max-height: calc(100vh - 195px);
+            min-height: 0;
+            max-height: calc(100vh - var(--right-lower-clearance, 285px) - 10px);
             z-index: 20; overflow: visible;
             background: var(--surface-color); padding: 15px; border-radius: 8px;
             border: 1px solid var(--border-color); display: flex; flex-direction: column; 
@@ -145,7 +147,7 @@
             display: flex;
             flex-direction: column;
             min-height: 0;
-            flex: 1 1 auto;
+            flex: 1 1 0;
         }
         #right-panel-static {
             display: flex;
@@ -159,7 +161,7 @@
             min-height: 0;
         }
         #legend-content {
-            flex: 1 1 auto;
+            flex: 1 1 0;
             min-height: 0;
             overflow-y: auto;
             overflow-x: hidden;
@@ -168,11 +170,9 @@
         
         #legend-content.hidden { display: none; }
         #right-panel-footer {
+            flex: 0 0 auto;
             margin-top: auto;
             padding-top: 10px;
-            min-height: 72px;
-            max-height: clamp(96px, 18vh, 190px);
-            overflow-y: auto;
         }
         #right-panel-footer-text {
             font-size: 11px;
@@ -219,6 +219,7 @@
             display: flex;
             flex-direction: column;
             gap: 10px;
+            max-height: calc(100vh - 80px);
             transition: right 0.4s cubic-bezier(0.4, 0, 0.2, 1);
             align-items: flex-end;
         }
@@ -275,26 +276,6 @@
             opacity: 0.5;
             cursor: not-allowed;
         }
-        #ask-ai-btn {
-            width: auto;
-            padding: 8px 18px;
-            border: 1px solid transparent; 
-            border-radius: 999px;
-            background-image: linear-gradient(var(--surface-color-strong), var(--surface-color-strong)), 
-                            linear-gradient(155deg, var(--accent-color) 0%, var(--accent-color-strong) 50%, var(--accent-color) 100%);
-            background-origin: border-box;
-            background-clip: padding-box, border-box;
-
-            color: var(--accent-color);
-            font-weight: bold;
-            letter-spacing: 0.3px;
-            cursor: pointer;
-            transition: filter 0.2s ease, transform 0.2s ease;
-        }
-        #ask-ai-btn:hover {
-            filter: brightness(1.12);
-            transform: translateY(-2px);
-        }
         #ai-launch-buttons {
             display: flex;
             gap: 8px;
@@ -302,28 +283,21 @@
             justify-content: flex-end;
             width: 100%;
         }
-        #ai-python-console-btn,
-        #ai-history-launch-btn {
+        #ask-ai-btn,
+        #ai-history-launch-btn,
+        #ai-python-console-btn {
             width: auto;
-            padding: 8px 18px;
-            border: 1px solid transparent;
-            border-radius: 999px;
-            background-image: linear-gradient(var(--surface-color-strong), var(--surface-color-strong)), 
-                            linear-gradient(155deg, var(--accent-color) 0%, var(--accent-color-strong) 50%, var(--accent-color) 100%);
-            background-origin: border-box;
-            background-clip: padding-box, border-box;
-            color: var(--accent-color);
+            height: 36px;
+            margin: 0;
+            padding: 0 18px;
+            border: none;
+            border-radius: 14px;
             font-weight: bold;
-            letter-spacing: 0.3px;
             cursor: pointer;
-            transition: filter 0.2s ease, transform 0.2s ease;
-        }
-        #ai-python-console-btn:hover,
-        #ai-history-launch-btn:hover {
-            filter: brightness(1.12);
-            transform: translateY(-2px);
+            transition: filter 0.2s ease;
         }
         #info-box {
+            min-height: 0;
             position: relative;
             bottom: auto;
             right: auto;
@@ -1543,6 +1517,30 @@
             font-size: 0.9rem;
             word-wrap: break-word;
             word-break: break-word;
+        }
+        .ai-bubble code {
+            font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+            font-size: 0.9em;
+            background: var(--button-bg-hover);
+            border-radius: 4px;
+            padding: 0.1em 0.3em;
+        }
+        .ai-bubble .markdown-code-block {
+            max-width: 100%;
+            overflow-x: auto;
+            white-space: pre;
+            word-break: normal;
+            overflow-wrap: normal;
+            background: var(--button-bg-hover);
+            border-radius: 8px;
+            margin: 10px 0;
+            padding: 12px;
+            tab-size: 4;
+        }
+        .ai-bubble .markdown-code-block code {
+            background: transparent;
+            padding: 0;
+            border-radius: 0;
         }
         .ai-user-bubble {
             background-color: var(--chat-user-bg);
@@ -2856,6 +2854,8 @@
 
         #shortest-path-control {
             position: relative;
+            display: flex;
+            flex-direction: column;
             margin-top: 6px;
         }
 
@@ -2870,10 +2870,13 @@
 
         #shortest-path-menu {
             position: absolute;
+            box-sizing: border-box;
+            max-height: max(100px, calc(100vh - 360px));
+            overflow-y: auto;
             right: 0;
             z-index: 35;
             display: none;
-            width: min(250px, 84vw);
+            width: 100%;
             padding: 12px;
             border: 1px solid var(--border-color);
             border-radius: 14px;
@@ -2894,6 +2897,8 @@
             top: calc(100% + 8px);
             bottom: auto;
         }
+
+        #shortest-path-options { margin-top: 10px; }
 
         #shortest-path-menu .shortest-path-menu-title {
             font-size: 12px;
@@ -3187,6 +3192,57 @@
         #physics-drop > label { font-size: 15px; color: var(--accent-color-soft); font-weight: 600; }
         .slider-val { float: right; color: var(--accent-color); font-weight: bold; }
         input, select, button { width: 100%; padding: 8px; margin: 5px 0; border-radius: 4px; border: 1px solid var(--input-border); background: var(--input-bg); color: var(--text-color); box-sizing: border-box; }
+        .analytics-toggle-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            width: fit-content;
+            max-width: 100%;
+            cursor: pointer;
+        }
+        #analytics-toggle {
+            appearance: none;
+            -webkit-appearance: none;
+            position: relative;
+            flex: 0 0 44px;
+            width: 44px;
+            height: 26px;
+            margin: 0;
+            padding: 0;
+            border: 1px solid var(--input-border);
+            border-radius: 999px;
+            background: var(--button-bg);
+            cursor: pointer;
+            transition: background-color 180ms ease, border-color 180ms ease;
+        }
+        #analytics-toggle::before {
+            content: '';
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: var(--text-color);
+            box-shadow: 0 1px 3px var(--shadow-color);
+            transition: transform 180ms ease, background-color 180ms ease;
+        }
+        #analytics-toggle:checked {
+            background: var(--accent-color);
+            border-color: var(--accent-color);
+        }
+        #analytics-toggle:checked::before {
+            transform: translateX(18px);
+            background: var(--accent-contrast);
+        }
+        #analytics-toggle:focus-visible {
+            outline: 2px solid var(--accent-color-soft);
+            outline-offset: 3px;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            #analytics-toggle, #analytics-toggle::before { transition: none; }
+        }
+
         input[type="range"] { padding: 0; cursor: pointer; }
         input[type="color"] { height: 30px; border: none; background: none; cursor: pointer; padding: 0; border-radius: 8px; overflow: hidden; }
         
@@ -4472,6 +4528,28 @@
             background: #444;
             margin: 0;
         }
+        /* Main controls share the theme's button highlight colour. */
+        #pill-blue-btn,
+        .upload-inline-open-btn,
+        .upload-inline-open-btn:hover,
+        #ai-open-connection-btn,
+        #drawFrameBtn,
+        #ask-ai-btn,
+        #ai-history-launch-btn,
+        #ai-python-console-btn,
+        #searchBtn {
+            background: var(--button-bg-hover) !important;
+            color: var(--text-color) !important;
+        }
+        #nodeVisibilityToggle .link-direction-option.active,
+        #nodeLabelToggle .link-direction-option.active,
+        #linkLabelToggle .link-direction-option.active,
+        #linkDirectionToggle .link-direction-option.active,
+        #darkModeToggle::before {
+            background: var(--button-bg-hover);
+            color: var(--text-color);
+        }
+
         .ratio-btn.active, .res-btn.active, #drawFrameBtn.active {
             background: #ff9800 !important;
         }
@@ -4950,9 +5028,9 @@
         <hr class="dropdown-divider">
         <span class="dropdown-toggle">Physics <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
         <div id="physics-drop" class="dropdown-content">
-            <button id="fullNetworkPhysBtn" style="width:100%; margin-bottom:10px; background:#3498db; color:#fff; border:none; padding:8px 10px; border-radius:999px;">Pause Full Network Physics</button>
-            <button id="subnetworkPhysBtn" style="width:100%; margin-bottom:10px; background:#3498db; color:#fff; border:none; padding:8px 10px; border-radius:999px;">Pause Subnetwork Physics</button>
-            <button id="stopPhysBtn" style="width:100%; margin-bottom:10px; background:#3498db; color:#fff; border:none; padding:8px 10px; border-radius:999px;">Stop Physics</button>
+            <button id="fullNetworkPhysBtn" style="width:100%; margin-bottom:10px; background:var(--button-bg-hover); color:var(--text-color); border:none; padding:8px 10px; border-radius:999px;">Pause Full Network Physics</button>
+            <button id="subnetworkPhysBtn" style="width:100%; margin-bottom:10px; background:var(--button-bg-hover); color:var(--text-color); border:none; padding:8px 10px; border-radius:999px;">Pause Subnetwork Physics</button>
+            <button id="stopPhysBtn" style="width:100%; margin-bottom:10px; background:var(--button-bg-hover); color:var(--text-color); border:none; padding:8px 10px; border-radius:999px;">Stop Physics</button>
             <div id="physics-runtime-label" style="font-size:11px; color:#9ad0ff; margin-top:4px; line-height:1.35;">Physics run on local CPU</div>
             <label>Energy (alpha) <span id="val-alp" class="slider-val">1</span></label>
             <input type="range" id="alphaSlider" min="0.001" max="1" step="0.001" value="1.0">
@@ -5053,6 +5131,12 @@
         <p>2. Click ‘Go to download page’ → Download one of the Interaction Data files (I recommend ...protein.physical.links.detailed...) and one or more of the Accessory Data files (I recommend downloading all except the last three). Move these files to your desired location.</p>
         <p>3. Open Interaction Data files and one or more of the Accessory Data files in this app.</p>
         <p>4. Click ‘Build Network’.</p>
+        <p style="font-size:0.9em; color: var(--muted-text-color);">When analytics is enabled, StringScape sends anonymous usage and performance information to Cloudflare, including the page you’re visiting, how long it took to load, how quickly it responds to your interactions, your browser, operating system, device type (desktop or mobile), country, and the referring page URL when available.</p>
+        <label class="analytics-toggle-row" style="font-size:1.1em;">
+            <span>Allow anonymous analytics</span>
+            <input id="analytics-toggle" type="checkbox" role="switch" checked aria-describedby="analytics-preference-status">
+        </label>
+        <p id="analytics-preference-status" role="status" style="font-size:0.9em; color: var(--muted-text-color);"></p>
         <hr style="border:0; border-top:1px solid var(--border-color);">
         <p style="font-size:0.9em; color: var(--muted-text-color);">
         <b>App basics:</b><br>
@@ -5456,10 +5540,12 @@
             </div>
         </div>
         <div id="info-content" style="font-size:11px; margin-bottom: 5px;">Select Nodes to View Information</div>
-        <button id="node-info-table-btn" class="action-btn" style="margin-top:6px; width:100%; justify-content:center;">Node Info Table</button>
-        <div id="shortest-path-control" style="display:none;">
-            <button id="shortest-path-toggle-btn" class="action-btn">Shortest Path Tools</button>
-            <div id="shortest-path-menu" aria-label="Shortest path options">
+        <button id="node-info-table-btn" class="action-btn" style="margin-top:6px; width:100%; justify-content:center;"><i class="fa-solid fa-table" aria-hidden="true" style="margin-right:8px;"></i>Node Info Table</button>
+        <div id="shortest-path-control">
+            <button id="shortest-path-toggle-btn" type="button" class="action-btn" aria-expanded="false" aria-controls="shortest-path-menu">Actions <i class="fa-solid fa-chevron-down" aria-hidden="true" style="margin-left:8px;"></i></button>
+            <div id="shortest-path-menu" aria-label="Selection actions">
+                <div id="coll-add-btn-container"></div>
+                <div id="shortest-path-options">
                 <div class="shortest-path-menu-title" style="display:flex; justify-content:space-between; gap:10px; align-items:center">
                     <span>Path options</span>
                     <span id="shortest-path-length-display" style="color:var(--accent-color); font-size:11px; white-space:nowrap;">Shortest path length: -</span>
@@ -5470,6 +5556,7 @@
                     <button id="shortest-path-select-btn" class="btn-secondary">Select nodes along path(s)</button>
                     <button id="shortest-path-groups-tool-btn" class="btn-secondary">Shortest paths between two groups</button>
                 </div>
+            </div>
             </div>
         </div>
         <div id="shortest-path-groups-box" style="display:none; position:fixed; right:12px; bottom:12px; width:min(420px, calc(100vw - 24px)); padding:10px; border:1px solid var(--border-color); border-radius:10px; background:var(--surface-color-soft); box-shadow:0 8px 24px var(--shadow-color); z-index:10000; color:var(--text-color);">
@@ -5486,7 +5573,6 @@
                 <button id="shortest-path-groups-select-btn" class="btn-secondary" type="button" style="width:100%;">Select all nodes along paths</button>
             </div>
         </div>
-        <div id="coll-add-btn-container"></div>
     </div>
 </div>
 
@@ -5525,6 +5611,12 @@
             <input type="checkbox" class="download-session-option" id="downloadSessionUploadedFiles" style="margin-top: 3px; grid-column: 1;">
             <label for="downloadSessionUploadedFiles" style="grid-column: 2; cursor: pointer; text-align: left; white-space: normal; line-height: 1.4;">
                 Uploaded files
+            </label>
+
+            <input type="checkbox" class="download-session-option" id="downloadSessionPythonVariables" checked style="margin-top: 3px; grid-column: 1;">
+            <label for="downloadSessionPythonVariables" style="grid-column: 2; cursor: pointer; text-align: left; white-space: normal; line-height: 1.4;">
+                Custom Python variables
+                <span style="color: var(--muted-text-color); font-size: 0.85em;">[python_variables.json with variable names and values for each node]</span>
             </label>
 
             <input type="checkbox" class="download-session-option" id="downloadSessionCollections" style="margin-top: 3px; grid-column: 1;">
