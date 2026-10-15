@@ -737,6 +737,98 @@ function drawChevronCanvasLabel(context, label, x, y) {
     })();
 
     //AI tools
+    const AI_PYTHON_SCRIPT_INSTRUCTIONS_TEXT = `You can write Python scripts that run inside StringScape using Pyodide. These scripts can perfom actions in the app and analyze uploaded data.
+
+        Available data:
+        - app_data["nodes"]: list of node objects
+        - app_data["links"]: list of links
+        - app_data["python_variables"]: ready-to-use variable arrays
+        - app_data["colour_nodes_by_variables"] and app_data["current_colour_mode"]
+
+        Built-in colour nodes by options (these are also the available python variables):
+                    { key: 'layer', label: 'Degrees of Separation', type: 'Numerical - Discrete' },
+                    { key: 'centrality', label: 'Centrality', type: 'Numerical - Continuous' },
+                    { key: 'local_clustering_coefficient', label: 'Local Clustering Coefficient', type: 'Numerical - Continuous' },
+                    { key: 'eigen', label: 'Eigenvector centrality', type: 'Numerical - Continuous' },
+                    { key: 'pdb_structure_count', label: 'PDB structure count', type: 'Numerical - Continuous' },
+                    { key: 'complex_pdbs', label: 'Complex PDBs', type: 'Categorical - Nominal' },
+                    { key: 'embeddings', label: 'Embeddings', type: 'Numerical - Continuous' },
+                    { key: 'collection', label: 'Collection', type: 'Categorical - Nominal' },
+                    { key: 'annotation', label: 'Annotation length', type: 'Numerical - Discrete' },
+                    { key: 'characterization', label: 'Characterization', type: 'Categorical - Nominal' },
+                    { key: 'localization', label: 'Protein localisation', type: 'Categorical - Nominal' },
+                    { key: 'biological_process', label: 'Biological process (mind-map most specific)', type: 'Categorical - Nominal' },
+                    { key: 'size', label: 'Protein size', type: 'Numerical - Continuous' },
+                    { key: 'random', label: 'Random', type: 'Categorical - Nominal' },
+                    { key: 'mono', label: 'Mono', type: 'Categorical - Nominal' }
+
+        You can also use python_variables['nodes'] (lists 'id', 'layer', 'x', 'y', 'centrality', 'randColor', 'r', 'col', 'gpuColorValue', 'renderAlpha', 'gpuIsPath', 'gpuIsHigh', 'index', 'vy', and 'vx'), python_variables['node_ids'] (lists ids), and python_variables['links'] (lists 'source' 'target' and 'value').
+
+        Important:
+        - Do not import app_data. It is already available.
+        - For variable stats, use values from app_data["python_variables"] rather than scanning app_data["nodes"].
+        - Use print(...) to show output.
+
+        StringScape API (ss is already available; import stringscape as ss is also supported). Every method returns a dictionary containing at least {"status": "success" | "warning" | "error"}:
+        - ss.search_and_select(query, scope='all', animate=False) -> Returns {"status", "query", "scope", "matched_count", "selected_node_ids", "message"}
+        - ss.select(node_ids, mode='replace', animate=False) -> Returns {"status", "mode", "requested_node_ids", "selected_node_ids", "selected_count", "missing_node_ids", "message"} (modes: replace, add, subtract, intersect, invert)
+        - ss.set_selection_target(target='nodes'|'links', animate=False) -> Sets whether nodes or links are selected. If nodes are selected, switching the target to "links" causes the links between the selected nodes to become selected and the nodes to be deselected. If links are selected, switching the toggle to "nodes" causes the nodes at the ends of selected links to become selected and the links to become deselected. 
+        - ss.select_links(link_ids, mode='replace', animate=False) -> Selects links by undirected endpoint key.
+        - ss.invert_selection(animate=False) -> Returns {"status", "selected_node_ids", "selected_count", "message"}
+        - ss.deselect_all() -> Returns {"status": "success", "selected_count": 0, "selected_node_ids": []}
+        - ss.select_neighbors(node_id, depth=1, animate=False) -> Returns {"status", "node_id", "depth", "neighbor_node_ids", "selected_node_ids", "message"}
+        - ss.expand_to_connected() -> Returns {"status", "previous_count", "selected_count", "selected_node_ids", "message"}
+        - ss.get_selected_nodes() -> Returns {"status": "success", "selected_count", "selected_node_ids"}
+        - ss.get_action_history() -> Returns {"status": "success", "script", "line_count"} for the recorded action-history Python script
+        - ss.set_node_variable(name, values) -> Creates or replaces a named node variable, displayed as "Python-generated: {name}". values is a dictionary keyed by exact node ID, or a sequence in app_data["node_ids"] order. Numbers and categorical strings are supported; None means missing. Omitted nodes have no value. Returns {status, name, key, label, type, assigned_count}. Use ss.set_node_colouring(result["key"]) to colour by it.
+        - ss.list_variables() -> Returns {"status": "success", "variables": [{key, label, type}]}
+        - ss.get_variable_range(variable_key) -> Returns {"status", "variable_key", "min", "max", "message"}
+        - ss.get_variable_categories(variable_key) -> Returns {"status", "variable_key", "categories", "message"}
+        - ss.select_by_range(variable_key, min=None, max=None, animate=False, mode='replace') -> Returns {"status", "variable_key", "mode", "selected_node_ids", "selected_count"}; mode combines matches with the current selection: replace starts a new selection, add includes matches, subtract removes matches, and intersect keeps only matches already selected.
+        - ss.select_by_category(variable_key, category, animate=False, mode='replace') -> Returns {"status", "variable_key", "mode", "selected_node_ids", "selected_count"}; mode combines matches with the current selection: replace starts a new selection, add includes matches, subtract removes matches, and intersect keeps only matches already selected.
+        - ss.set_node_size(nodes='all', size=10), ss.set_node_glow(nodes='all', magnitude=0) -> Returns {"status", "affected_count", "message"}
+        - ss.set_node_visibility(nodes='all', visibility='show'), ss.set_node_label_visibility(nodes='all', visibility='show') -> Returns {"status", "affected_count", "message"}
+        - ss.set_node_label(nodes='all', label_key='') -> Returns {"status", "affected_count"}
+        - ss.set_node_size_by_variable(key, magnitude=0.5) -> Returns {"status", "key", "magnitude", "message"}
+        - ss.set_node_comparison_variables(variable_a, variable_b, normalized=True, animate=False) -> Sets Variable A and Variable B for Compare two variables node colouring. Both variables must have the same type.
+        - ss.color_links_by(link_variable_key) -> Returns {"status": "success", "link_variable_key"}
+        - ss.set_link_comparison_variables(variable_a, variable_b, animate=False) -> Sets Variable A and Variable B for Compare two variables link colouring. Both variables must have the same type.
+        - ss.merge_networks() -> Merges the two uploaded species networks, or splits them if already merged.
+        - ss.set_show_nodes_from(selection) -> Sets merged-network node filtering to first, second, first-only, second-only, and, or.
+        - ss.set_show_links_from(selection) -> Sets merged-network link filtering to first, second, first-only, second-only, and, or.
+        - ss.set_link_color(links='selected', color='#ff0055') -> Returns {"status", "affected_count", "message"}
+        - ss.set_link_label_visibility(links='selected', visibility='show'), ss.set_link_label(links='selected', label_key='') -> Returns {"status", "affected_count", "message"}
+        - ss.set_link_direction_arrow_visibility(links='selected', visibility='show') -> Returns {"status", "affected_count", "message"}
+        - ss.set_link_width(links='selected', magnitude=1) -> Returns {"status", "affected_count", "message"}; magnitude is 0.2 to 5. With links='selected' this updates the global link-width control, while a link ID list targets individual links.
+        - ss.set_link_opacity(links='selected', opacity=1) -> Returns {"status", "affected_count", "message"}
+        - ss.when_nodes_are_selected_display(mode='all links') -> Returns {"status", "mode", "message"}
+        - ss.set_app_style(color_theme='blue', mode='dark') -> Returns {"status", "color_theme", "mode", "message"}
+        - ss.set_app_background_colour(color='#171c24') -> Returns {"status", "color", "message"}
+        - ss.set_app_background_by(mode='mono') -> Returns {"status", "mode", "message"}
+        - ss.set_physics(physics='on', target='active', alpha=None) -> target is 'full', 'subnetwork', 'both', or 'active'; returns {"status", "physics", "target", "alpha", "message"}
+        - ss.export_selection(format='json') -> Returns {"status", "format", "exported_count", "message"}
+        - ss.reset_visuals() -> Returns {"status": "success"}
+        - ss.focus_on(node_ids) -> Returns {"status", "node_ids", "message"}
+        - ss.set_as_layer_zero(node_ids) -> Returns {"status": "success", "node_ids"}
+        - ss.set_mono_node_color(color='#ff0055') -> Returns {"status", "color", "message"}
+        - ss.set_frame(top_left_x, top_left_y, bottom_right_x, bottom_right_y, enable=True, animate=False) -> Returns {"status", "frame", "enabled", "animate", "message"}
+        - ss.download_frame(target_resolution=None) -> Returns {"status", "frame", "target_resolution", "message"}
+        - ss.get_node_data(node_id, attribute=None) -> Returns {"status", "node_id", "data", "message"}
+        - ss.build_network(score_threshold=0) -> Returns {"status", "score_threshold", "message"}
+        - ss.message_ai(system='', prompt='') -> Returns {"status", "reply", "message"}
+        - ss.create_collection(name) -> Returns {"status", "collection", "created", "node_count", "message"}
+        - ss.delete_collection(name) -> Returns {"status", "collection", "deleted", "removed_node_count", "message"}
+        - ss.add_to_collection(name) -> Returns {"status", "collection", "created", "added_count", "collection_count", "node_ids", "message"}
+        - ss.list_collections() -> Returns {"status": "success", "collections": [{name, node_count}]}
+        - ss.list_views() -> Returns {"status": "success", "current_view", "views"}
+        - ss.set_view(view) -> Returns {"status", "view", "animate", "message"}
+        - ss.set_node_colouring(variable) -> Returns {"status", "variable", "animate", "message"}
+        - ss.set_node_color(node_id=None, color='#ff0055', nodes=None) -> Returns {"status", "node_ids", "requested_nodes", "color", "affected_count"}; accepts node IDs or preferred names, and defaults to the current selection when node_id/nodes is omitted.
+        - await ss.display_notification(text, button1_text='Close', button2_text=None, auto_close=False, default_button_index=0, auto_close_ms=5000) -> Returns {"status", "button_index", "button_text", "auto_closed"}
+        - ss.begin_batch(), ss.end_batch() -> Returns {"status": "success", "batch_depth"}
+        - Use with ss.batch_update(): around large edit loops; it renders once when the block exits.
+        - App state updates immediately. Set animate=True only when a visual transition is wanted.`;
+
     const aiTools = [
         {"type": "function", "function": {"name": "list_files", "description": "List virtual workspace roots or a folder. Local enumeration requires consent.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": []}}},
         {"type": "function", "function": {"name": "read_file", "description": "Read raw file text without line-number prefixes. Use raw content for SEARCH/REPLACE edits when using edit_file. Read a virtual workspace file. Local reads require human consent. Paginated by lines.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "offset": {"type": "integer"}, "limit": {"type": "integer"}}, "required": ["path"]}}},
@@ -863,13 +955,13 @@ function drawChevronCanvasLabel(context, label, x, y) {
             type: 'function', 
             function: { 
                 name: 'Run_python_logic',
-                description: 'Executes Python code (Pyodide) to analyze the research network. You have access to "app_data", which contains: "nodes", "links", "accessory_files", "accessory_values", and Colour Nodes By metadata such as "colour_nodes_by_variables" and "current_colour_mode". Example: print(len(app_data["nodes"])) or print(app_data["colour_nodes_by_variables"]); When you use Run_python_logic, `app_data` already contains Python-ready variable arrays in `app_data["python_variables"]`. For variable stats, always use this pattern: `vals = app_data["python_variables"].get("size", [])` or `vals = app_data["python_variables"].get(variable_name, [])`; then clean values with `clean = [float(v) for v in vals if v is not None and str(v).strip() != ""]`. Do not loop over `app_data["nodes"]` to find these variables because it may be empty. Do not write "import app_data" in Python — `app_data` is already injected as a global variable; reference it directly. These are some of the available python_variables: layer, centrality, eigen, pdb_structure_count, embeddings, collection, annotation, localization, size, and there are many more (use print(app_data["python_variables"].keys()) to see them all).',
+                description: 'Executes Python code (Pyodide) to analyze the research network. You have access to "app_data", which contains: "nodes", "links", "accessory_files", "accessory_values", and Colour Nodes By metadata such as "colour_nodes_by_variables" and "current_colour_mode". Example: print(len(app_data["nodes"])) or print(app_data["colour_nodes_by_variables"]); When you use Run_python_logic, `app_data` already contains Python-ready variable arrays in `app_data["python_variables"]`. For variable stats, always use this pattern: `vals = app_data["python_variables"].get("size", [])` or `vals = app_data["python_variables"].get(variable_name, [])`; then clean values with `clean = [float(v) for v in vals if v is not None and str(v).strip() != ""]`. Do not loop over `app_data["nodes"]` to find these variables because it may be empty. Do not write "import app_data" in Python — `app_data` is already injected as a global variable; reference it directly. These are some of the available python_variables: layer, centrality, eigen, pdb_structure_count, embeddings, collection, annotation, localization, size, and there are many more (use print(app_data["python_variables"].keys()) to see them all).' + '\n\nUsage: Call Run_python_logic with a JSON object containing the required code string. Supply executable Python without Markdown fences. Use print(...) to report results; do not use a top-level return. app_data and ss are injected globals.\n\n' + AI_PYTHON_SCRIPT_INSTRUCTIONS_TEXT,
                 parameters: {
                     type: 'object',
                     properties: {
                         code: { 
                             type: 'string', 
-                            description: 'The Python code to execute. Example: "import numpy as np\nreturn np.mean(app_data)"' 
+                            description: 'Executable Pyodide Python source without Markdown fences. app_data and ss are already available. Print results, for example: print(len(app_data["python_variables"].get("size", [])))' 
                         }
                     },
                     required: ['code']
@@ -1376,96 +1468,7 @@ function drawChevronCanvasLabel(context, label, x, y) {
     const AI_CHAT_HISTORY_STORAGE_KEY = 'stringscape_ai_chat_history_v1';
     const AI_SCRIPT_HISTORY_STORAGE_KEY = 'stringscape_ai_script_history_v1';
     const AI_PYTHON_CONSOLE_SYSTEM_PROMPT = 'You are a Python script generator for StringScape. Return only Python code that can run in Pyodide. Do not include markdown code fences. app_data and ss are already injected. For app actions use ss.search_and_select(), ss.add_to_collection(), ss.set_view(), ss.set_node_colouring(), ss.select(), and ss.set_node_color(); every method returns a structured status dictionary. Use with ss.batch_update(): for many mutations. Keep scripts concise and safe.';
-    const AI_PYTHON_SCRIPT_INSTRUCTIONS_TEXT = `You can write Python scripts that run inside StringScape using Pyodide. These scripts can perfom actions in the app and analyze uploaded data.
 
-        Available data:
-        - app_data["nodes"]: list of node objects
-        - app_data["links"]: list of links
-        - app_data["python_variables"]: ready-to-use variable arrays
-        - app_data["colour_nodes_by_variables"] and app_data["current_colour_mode"]
-
-        Built-in colour nodes by options (these are also the available python variables):
-                    { key: 'layer', label: 'Degrees of Separation', type: 'Numerical - Discrete' },
-                    { key: 'centrality', label: 'Centrality', type: 'Numerical - Continuous' },
-                    { key: 'local_clustering_coefficient', label: 'Local Clustering Coefficient', type: 'Numerical - Continuous' },
-                    { key: 'eigen', label: 'Eigenvector centrality', type: 'Numerical - Continuous' },
-                    { key: 'pdb_structure_count', label: 'PDB structure count', type: 'Numerical - Continuous' },
-                    { key: 'complex_pdbs', label: 'Complex PDBs', type: 'Categorical - Nominal' },
-                    { key: 'embeddings', label: 'Embeddings', type: 'Numerical - Continuous' },
-                    { key: 'collection', label: 'Collection', type: 'Categorical - Nominal' },
-                    { key: 'annotation', label: 'Annotation length', type: 'Numerical - Discrete' },
-                    { key: 'characterization', label: 'Characterization', type: 'Categorical - Nominal' },
-                    { key: 'localization', label: 'Protein localisation', type: 'Categorical - Nominal' },
-                    { key: 'biological_process', label: 'Biological process (mind-map most specific)', type: 'Categorical - Nominal' },
-                    { key: 'size', label: 'Protein size', type: 'Numerical - Continuous' },
-                    { key: 'random', label: 'Random', type: 'Categorical - Nominal' },
-                    { key: 'mono', label: 'Mono', type: 'Categorical - Nominal' }
-
-        You can also use python_variables['nodes'] (lists 'id', 'layer', 'x', 'y', 'centrality', 'randColor', 'r', 'col', 'gpuColorValue', 'renderAlpha', 'gpuIsPath', 'gpuIsHigh', 'index', 'vy', and 'vx'), python_variables['node_ids'] (lists ids), and python_variables['links'] (lists 'source' 'target' and 'value').
-
-        Important:
-        - Do not import app_data. It is already available.
-        - For variable stats, use values from app_data["python_variables"] rather than scanning app_data["nodes"].
-        - Use print(...) to show output.
-
-        StringScape API (ss is already available; import stringscape as ss is also supported). Every method returns a dictionary containing at least {"status": "success" | "warning" | "error"}:
-        - ss.search_and_select(query, scope='all', animate=False) -> Returns {"status", "query", "scope", "matched_count", "selected_node_ids", "message"}
-        - ss.select(node_ids, mode='replace', animate=False) -> Returns {"status", "mode", "requested_node_ids", "selected_node_ids", "selected_count", "missing_node_ids", "message"} (modes: replace, add, subtract, intersect, invert)
-        - ss.set_selection_target(target='nodes'|'links', animate=False) -> Sets whether nodes or links are selected. If nodes are selected, switching the target to "links" causes the links between the selected nodes to become selected and the nodes to be deselected. If links are selected, switching the toggle to "nodes" causes the nodes at the ends of selected links to become selected and the links to become deselected. 
-        - ss.select_links(link_ids, mode='replace', animate=False) -> Selects links by undirected endpoint key.
-        - ss.invert_selection(animate=False) -> Returns {"status", "selected_node_ids", "selected_count", "message"}
-        - ss.deselect_all() -> Returns {"status": "success", "selected_count": 0, "selected_node_ids": []}
-        - ss.select_neighbors(node_id, depth=1, animate=False) -> Returns {"status", "node_id", "depth", "neighbor_node_ids", "selected_node_ids", "message"}
-        - ss.expand_to_connected() -> Returns {"status", "previous_count", "selected_count", "selected_node_ids", "message"}
-        - ss.get_selected_nodes() -> Returns {"status": "success", "selected_count", "selected_node_ids"}
-        - ss.get_action_history() -> Returns {"status": "success", "script", "line_count"} for the recorded action-history Python script
-        - ss.list_variables() -> Returns {"status": "success", "variables": [{key, label, type}]}
-        - ss.get_variable_range(variable_key) -> Returns {"status", "variable_key", "min", "max", "message"}
-        - ss.get_variable_categories(variable_key) -> Returns {"status", "variable_key", "categories", "message"}
-        - ss.select_by_range(variable_key, min=None, max=None, animate=False, mode='replace') -> Returns {"status", "variable_key", "mode", "selected_node_ids", "selected_count"}; mode combines matches with the current selection: replace starts a new selection, add includes matches, subtract removes matches, and intersect keeps only matches already selected.
-        - ss.select_by_category(variable_key, category, animate=False, mode='replace') -> Returns {"status", "variable_key", "mode", "selected_node_ids", "selected_count"}; mode combines matches with the current selection: replace starts a new selection, add includes matches, subtract removes matches, and intersect keeps only matches already selected.
-        - ss.set_node_size(nodes='all', size=10), ss.set_node_glow(nodes='all', magnitude=0) -> Returns {"status", "affected_count", "message"}
-        - ss.set_node_visibility(nodes='all', visibility='show'), ss.set_node_label_visibility(nodes='all', visibility='show') -> Returns {"status", "affected_count", "message"}
-        - ss.set_node_label(nodes='all', label_key='') -> Returns {"status", "affected_count"}
-        - ss.set_node_size_by_variable(key, magnitude=0.5) -> Returns {"status", "key", "magnitude", "message"}
-        - ss.set_node_comparison_variables(variable_a, variable_b, normalized=True, animate=False) -> Sets Variable A and Variable B for Compare two variables node colouring. Both variables must have the same type.
-        - ss.color_links_by(link_variable_key) -> Returns {"status": "success", "link_variable_key"}
-        - ss.set_link_comparison_variables(variable_a, variable_b, animate=False) -> Sets Variable A and Variable B for Compare two variables link colouring. Both variables must have the same type.
-        - ss.merge_networks() -> Merges the two uploaded species networks, or splits them if already merged.
-        - ss.set_show_nodes_from(selection) -> Sets merged-network node filtering to first, second, first-only, second-only, and, or.
-        - ss.set_show_links_from(selection) -> Sets merged-network link filtering to first, second, first-only, second-only, and, or.
-        - ss.set_link_color(links='selected', color='#ff0055') -> Returns {"status", "affected_count", "message"}
-        - ss.set_link_label_visibility(links='selected', visibility='show'), ss.set_link_label(links='selected', label_key='') -> Returns {"status", "affected_count", "message"}
-        - ss.set_link_direction_arrow_visibility(links='selected', visibility='show') -> Returns {"status", "affected_count", "message"}
-        - ss.set_link_width(links='selected', magnitude=1) -> Returns {"status", "affected_count", "message"}; magnitude is 0.2 to 5. With links='selected' this updates the global link-width control, while a link ID list targets individual links.
-        - ss.set_link_opacity(links='selected', opacity=1) -> Returns {"status", "affected_count", "message"}
-        - ss.when_nodes_are_selected_display(mode='all links') -> Returns {"status", "mode", "message"}
-        - ss.set_app_style(color_theme='blue', mode='dark') -> Returns {"status", "color_theme", "mode", "message"}
-        - ss.set_app_background_colour(color='#171c24') -> Returns {"status", "color", "message"}
-        - ss.set_app_background_by(mode='mono') -> Returns {"status", "mode", "message"}
-        - ss.set_physics(physics='on', target='active', alpha=None) -> target is 'full', 'subnetwork', 'both', or 'active'; returns {"status", "physics", "target", "alpha", "message"}
-        - ss.export_selection(format='json') -> Returns {"status", "format", "exported_count", "message"}
-        - ss.reset_visuals() -> Returns {"status": "success"}
-        - ss.focus_on(node_ids) -> Returns {"status", "node_ids", "message"}
-        - ss.set_as_layer_zero(node_ids) -> Returns {"status": "success", "node_ids"}
-        - ss.set_mono_node_color(color='#ff0055') -> Returns {"status", "color", "message"}
-        - ss.set_frame(top_left_x, top_left_y, bottom_right_x, bottom_right_y, enable=True, animate=False) -> Returns {"status", "frame", "enabled", "animate", "message"}
-        - ss.download_frame(target_resolution=None) -> Returns {"status", "frame", "target_resolution", "message"}
-        - ss.get_node_data(node_id, attribute=None) -> Returns {"status", "node_id", "data", "message"}
-        - ss.build_network(score_threshold=0) -> Returns {"status", "score_threshold", "message"}
-        - ss.message_ai(system='', prompt='') -> Returns {"status", "reply", "message"}
-        - ss.create_collection(name) -> Returns {"status", "collection", "created", "node_count", "message"}
-        - ss.delete_collection(name) -> Returns {"status", "collection", "deleted", "removed_node_count", "message"}
-        - ss.add_to_collection(name) -> Returns {"status", "collection", "created", "added_count", "collection_count", "node_ids", "message"}
-        - ss.list_collections() -> Returns {"status": "success", "collections": [{name, node_count}]}
-        - ss.list_views() -> Returns {"status": "success", "current_view", "views"}
-        - ss.set_view(view) -> Returns {"status", "view", "animate", "message"}
-        - ss.set_node_colouring(variable) -> Returns {"status", "variable", "animate", "message"}
-        - ss.set_node_color(node_id=None, color='#ff0055', nodes=None) -> Returns {"status", "node_ids", "requested_nodes", "color", "affected_count"}; accepts node IDs or preferred names, and defaults to the current selection when node_id/nodes is omitted.
-        - await ss.display_notification(text, button1_text='Close', button2_text=None, auto_close=False, default_button_index=0, auto_close_ms=5000) -> Returns {"status", "button_index", "button_text", "auto_closed"}
-        - ss.begin_batch(), ss.end_batch() -> Returns {"status": "success", "batch_depth"}
-        - Use with ss.batch_update(): around large edit loops; it renders once when the block exits.
-        - App state updates immediately. Set animate=True only when a visual transition is wanted.`;
 
     const AI_EXAMPLE_SCRIPTS = [
     `# Summary of selected nodes by centrality\nvals = app_data["python_variables"].get("centrality", [])\nclean = [float(v) for v in vals if v is not None and str(v).strip() != ""]\nprint("Selected centrality values:", len(clean))\nif clean:\n    print("Mean:", sum(clean) / len(clean))`,
@@ -1509,6 +1512,7 @@ function drawChevronCanvasLabel(context, label, x, y) {
     }
 
     function undoCurrentState(type, state) {
+        if (type === 'python-script') return aiCapturePythonScriptEditorState();
         if (type === 'selection') return { ids: Array.from(getEffectiveSelectedNodesSet() || []) };
         if (type === 'view') return { view: currentViewId };
         if (type === 'collection') {
@@ -1596,7 +1600,8 @@ function drawChevronCanvasLabel(context, label, x, y) {
 
     function undoRestoreAction(action) {
         const { type, state } = action || {};
-        if (type === 'selection') undoRestoreSelection(state.ids);
+        if (type === 'python-script') aiRestorePythonScriptEditorState(state);
+        else if (type === 'selection') undoRestoreSelection(state.ids);
         else if (type === 'view') switchView(state.view, { skipUndo: true });
         else if (type === 'collection') {
             if (!state.existed) collections.delete(state.name);
@@ -1953,6 +1958,74 @@ function drawChevronCanvasLabel(context, label, x, y) {
         matches[aiActionHistoryMatchIndex]?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
 
+    function aiCapturePythonScriptEditorState() {
+        const editor = document.getElementById('ai-python-script-editor');
+        return { value: editor?.value || '', start: editor?.selectionStart || 0, end: editor?.selectionEnd || 0, scrollTop: editor?.scrollTop || 0, scrollLeft: editor?.scrollLeft || 0 };
+    }
+
+    function aiRecordPythonScriptEdit(before) {
+        const after = aiCapturePythonScriptEditorState();
+        if (!undoApplying && before && before.value !== after.value) {
+            undoActionStack.push({ type: 'python-script', state: before, after, hasHistory: false });
+            redoActionStack.length = 0;
+        }
+        const editor = document.getElementById('ai-python-script-editor');
+        if (editor) editor._pythonUndoState = after;
+        aiRenderPythonScriptEditorHighlight();
+    }
+
+    function aiRestorePythonScriptEditorState(state) {
+        const editor = document.getElementById('ai-python-script-editor');
+        if (!editor) return;
+        editor.value = state.value;
+        editor.setSelectionRange(state.start, state.end);
+        editor.scrollTop = state.scrollTop;
+        editor.scrollLeft = state.scrollLeft;
+        editor._pythonUndoState = aiCapturePythonScriptEditorState();
+        aiRenderPythonScriptEditorHighlight();
+    }
+
+    function aiSetPythonScriptEditorText(text) {
+        const editor = document.getElementById('ai-python-script-editor');
+        if (!editor) return;
+        const before = aiCapturePythonScriptEditorState();
+        editor.value = String(text || '');
+        editor.setSelectionRange(0, 0);
+        editor.scrollTop = 0;
+        editor.scrollLeft = 0;
+        aiRecordPythonScriptEdit(before);
+    }
+
+    function aiInstallPythonScriptEditorRefresh(editor) {
+        // Assigning textarea.value does not emit input. Cover every writer,
+        // including integrations that bypass aiSetPythonScriptEditorText.
+        const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+        let refreshFrame = null;
+        const refresh = () => {
+            aiRenderPythonScriptEditorHighlight();
+            if (refreshFrame !== null) cancelAnimationFrame(refreshFrame);
+            refreshFrame = requestAnimationFrame(() => {
+                refreshFrame = null;
+                aiRenderPythonScriptEditorHighlight();
+            });
+        };
+        Object.defineProperty(editor, 'value', {
+            configurable: true,
+            get() { return descriptor.get.call(this); },
+            set(value) {
+                descriptor.set.call(this, value);
+                refresh();
+            }
+        });
+        // Hidden panels have no layout. Re-sync after opening or resizing,
+        // when the browser has resolved the editor's actual dimensions.
+        if (typeof ResizeObserver === 'function') {
+            const observer = new ResizeObserver(refresh);
+            observer.observe(editor);
+        }
+        refresh();
+    }
+
     function aiRenderPythonScriptEditorHighlight() {
         const editor = document.getElementById('ai-python-script-editor');
         const mirror = document.getElementById('ai-python-script-highlight');
@@ -2049,11 +2122,12 @@ function drawChevronCanvasLabel(context, label, x, y) {
         const nextBlock = [`# Human: ${String(actionText)} (${aiGetHistoryTime()})`, ...cleanedLines].join('\n');
         const existing = String(editor.value || '');
         const trimmedEnd = existing.replace(/\s*$/, '');
+        const before = aiCapturePythonScriptEditorState();
         editor.value = trimmedEnd.length
             ? `${trimmedEnd}\n\n${nextBlock}\n`
             : `${nextBlock}\n`;
         editor.scrollTop = editor.scrollHeight;
-        aiRenderPythonScriptEditorHighlight();
+        aiRecordPythonScriptEdit(before);
     }
 
     function aiAppendActionHistory(actor, actionText, pythonLines, category = 'Actions') {
@@ -2829,98 +2903,6 @@ function drawChevronCanvasLabel(context, label, x, y) {
     function aiBuildPythonInstructionsText() {
         // Keep the copyable instructions identical to the system prompt sent to the AI.
         return AI_PYTHON_SCRIPT_INSTRUCTIONS_TEXT;
-
-        const lines = [];
-        lines.push('You can write Python scripts that run inside StringScape using Pyodide. These scripts can perfom actions in the app and analyze uploaded data.');
-        lines.push('');
-        lines.push('These instructions can be given to any AI along with a description of what you want the script to do.');
-        lines.push('');
-        lines.push('Available data:');
-        lines.push('- app_data["nodes"]: list of node objects');
-        lines.push('- app_data["links"]: list of links');
-        lines.push('- app_data["python_variables"]: ready-to-use variable arrays');
-        lines.push('- app_data["colour_nodes_by_variables"] and app_data["current_colour_mode"]');
-        lines.push('');
-        lines.push('Built-in colour nodes by options (these are also the available python variables):');
-        lines.push("            { key: 'layer', label: 'Degrees of Separation', type: 'Numerical - Discrete' },");
-        lines.push("            { key: 'centrality', label: 'Centrality', type: 'Numerical - Continuous' },");
-        lines.push("            { key: 'local_clustering_coefficient', label: 'Local Clustering Coefficient', type: 'Numerical - Continuous' },");
-        lines.push("            { key: 'eigen', label: 'Eigenvector centrality', type: 'Numerical - Continuous' },");
-        lines.push("            { key: 'pdb_structure_count', label: 'PDB structure count', type: 'Numerical - Continuous' },");
-        lines.push("            { key: 'complex_pdbs', label: 'Complex PDBs', type: 'Categorical - Nominal' },");
-        lines.push("            { key: 'embeddings', label: 'Embeddings', type: 'Numerical - Continuous' },");
-        lines.push("            { key: 'collection', label: 'Collection', type: 'Categorical - Nominal' },");
-        lines.push("            { key: 'annotation', label: 'Annotation length', type: 'Numerical - Discrete' },");
-        lines.push("            { key: 'characterization', label: 'Characterization', type: 'Categorical - Nominal' },");
-        lines.push("            { key: 'localization', label: 'Protein localisation', type: 'Categorical - Nominal' },");
-        lines.push("            { key: 'biological_process', label: 'Biological process (mind-map most specific)', type: 'Categorical - Nominal' },");
-        lines.push("            { key: 'size', label: 'Protein size', type: 'Numerical - Continuous' },");
-        lines.push("            { key: 'random', label: 'Random', type: 'Categorical - Nominal' },");
-        lines.push("            { key: 'mono', label: 'Mono', type: 'Categorical - Nominal' }");
-        lines.push('        ];');
-        lines.push('');
-        lines.push("You can also use python_variables['nodes'] (lists 'id', 'layer', 'x', 'y', 'centrality', 'randColor', 'r', 'col', 'gpuColorValue', 'renderAlpha', 'gpuIsPath', 'gpuIsHigh', 'index', 'vy', and 'vx'), python_variables['node_ids'] (lists ids), and python_variables['links'] (lists 'source' 'target' and 'value').");
-        lines.push('');
-        lines.push('Important:');
-        lines.push('- Do not import app_data. It is already available.');
-        lines.push('- For variable stats, use values from app_data["python_variables"] rather than scanning app_data["nodes"].');
-        lines.push('- Use print(...) to show output.');
-        lines.push('');
-        lines.push('StringScape API (ss is already injected; import stringscape as ss is also supported). Every method returns a dictionary containing at least {"status": "success" | "warning" | "error"}:');
-        lines.push('- ss.search_and_select(query, scope="all", animate=False) -> Returns {"status", "query", "scope", "matched_count", "selected_node_ids", "message"}');
-        lines.push('- ss.select(node_ids, mode="replace", animate=False) -> Returns {"status", "mode", "requested_node_ids", "selected_node_ids", "selected_count", "missing_node_ids", "message"} (modes: replace, add, subtract, intersect, invert)');
-        lines.push('- ss.invert_selection(animate=False) -> Returns {"status", "selected_node_ids", "selected_count", "message"}');
-        lines.push('- ss.deselect_all() -> Returns {"status": "success", "selected_count": 0, "selected_node_ids": []}');
-        lines.push('- ss.select_neighbors(node_id, depth=1, animate=False) -> Returns {"status", "node_id", "depth", "neighbor_node_ids", "selected_node_ids", "message"}');
-        lines.push('- ss.expand_to_connected() -> Returns {"status", "previous_count", "selected_count", "selected_node_ids", "message"}');
-        lines.push('- ss.get_selected_nodes() -> Returns {"status": "success", "selected_count", "selected_node_ids"}');
-        lines.push('- ss.get_action_history() -> Returns {"status": "success", "script", "line_count"} for the recorded action-history Python script');
-        lines.push('- ss.list_variables() -> Returns {"status": "success", "variables": [{key, label, type}]}');
-        lines.push('- ss.get_variable_range(variable_key) -> Returns {"status", "variable_key", "min", "max", "message"}');
-        lines.push('- ss.get_variable_categories(variable_key) -> Returns {"status", "variable_key", "categories", "message"}');
-        lines.push('- ss.select_by_range(variable_key, min=None, max=None, animate=False, mode="replace") -> Returns {"status", "variable_key", "mode", "selected_node_ids", "selected_count"}; mode is replace, add, subtract, or intersect and controls how matches combine with the current selection.');
-        lines.push('- ss.select_by_category(variable_key, category, animate=False, mode="replace") -> Returns {"status", "variable_key", "mode", "selected_node_ids", "selected_count"}; mode is replace, add, subtract, or intersect and controls how matches combine with the current selection.');
-        lines.push('- ss.set_node_size(nodes="all", size=10), ss.set_node_glow(nodes="all", magnitude=0) -> Returns {"status", "affected_count", "message"}');
-        lines.push('- ss.set_node_visibility(nodes="all", visibility="show"), ss.set_node_label_visibility(nodes="all", visibility="show") -> Returns {"status", "affected_count", "message"}');
-        lines.push('- ss.set_node_label(nodes="all", label_key="") -> Returns {"status", "affected_count"}');
-        lines.push('- ss.set_node_size_by_variable(key, magnitude=0.5) -> Returns {"status", "key", "magnitude", "message"}');
-        lines.push('- ss.color_links_by(link_variable_key) -> Returns {"status": "success", "link_variable_key"}');
-        lines.push('- ss.merge_networks() -> Merges the two uploaded species networks, or splits them if already merged.');
-        lines.push('- ss.set_show_nodes_from(selection) -> Sets merged-network node filtering to first, second, first-only, second-only, and, or.');
-        lines.push('- ss.set_show_links_from(selection) -> Sets merged-network link filtering to first, second, first-only, second-only, and, or.');
-        lines.push('- ss.set_link_color(links="all", color="#ff0055") -> Returns {"status", "affected_count", "message"}');
-        lines.push('- ss.set_link_label_visibility(links="all", visibility="show"), ss.set_link_label(links="all", label_key="") -> Returns {"status", "affected_count", "message"}');
-        lines.push('- ss.set_link_direction_arrow_visibility(links="all", visibility="show") -> Returns {"status", "affected_count", "message"}');
-        lines.push('- ss.set_link_width(links="all", magnitude=1) -> Returns {"status", "affected_count", "message"}; magnitude is 0.2 to 5. With links="all" this updates the global link-width control, while a link ID list targets individual links.');
-        lines.push('- ss.set_link_opacity(links="all", opacity=1) -> Returns {"status", "affected_count", "message"}');
-        lines.push('- ss.when_nodes_are_selected_display(mode="all links") -> Returns {"status", "mode", "message"}');
-        lines.push('- ss.set_app_style(color_theme="blue", mode="dark") -> Returns {"status", "color_theme", "mode", "message"}');
-        lines.push('- ss.set_app_background_colour(color="#171c24") -> Returns {"status", "color", "message"}');
-        lines.push('- ss.set_app_background_by(mode="mono") -> Returns {"status", "mode", "message"}');
-        lines.push('- ss.set_physics(physics="on", target="active", alpha=None) -> target is full, subnetwork, both, or active; returns {"status", "physics", "target", "alpha", "message"}');
-        lines.push('- ss.export_selection(format="json") -> Returns {"status", "format", "exported_count", "message"}');
-        lines.push('- ss.reset_visuals() -> Returns {"status": "success"}');
-        lines.push('- ss.focus_on(node_ids) -> Returns {"status", "node_ids", "message"}');
-        lines.push('- ss.set_as_layer_zero(node_ids) -> Returns {"status": "success", "node_ids"}');
-        lines.push('- ss.set_mono_node_color(color="#ff0055") -> Returns {"status", "color", "message"}');
-        lines.push('- ss.set_frame(top_left_x, top_left_y, bottom_right_x, bottom_right_y, enable=True, animate=False) -> Returns {"status", "frame", "enabled", "animate", "message"}');
-        lines.push('- ss.download_frame(target_resolution=None) -> Returns {"status", "frame", "target_resolution", "message"}');
-        lines.push('- ss.get_node_data(node_id, attribute=None) -> Returns {"status", "node_id", "data", "message"}');
-        lines.push('- ss.build_network(score_threshold=0) -> Returns {"status", "score_threshold", "message"}');
-        lines.push('- ss.message_ai(system="", prompt="") -> Returns {"status", "reply", "message"}');
-        lines.push('- ss.create_collection(name) -> Returns {"status", "collection", "created", "node_count", "message"}');
-        lines.push('- ss.delete_collection(name) -> Returns {"status", "collection", "deleted", "removed_node_count", "message"}');
-        lines.push('- ss.add_to_collection(name) -> Returns {"status", "collection", "created", "added_count", "collection_count", "node_ids", "message"}');
-        lines.push('- ss.list_collections() -> Returns {"status": "success", "collections": [{name, node_count}]}');
-        lines.push('- ss.list_views() -> Returns {"status": "success", "current_view", "views"}');
-        lines.push('- ss.set_view(view) -> Returns {"status", "view", "animate", "message"}');
-        lines.push('- ss.set_node_colouring(variable) -> Returns {"status", "variable", "animate", "message"}');
-        lines.push('- ss.set_node_color(node_id=None, color="#ff0055", nodes=None) -> Returns {"status", "node_ids", "requested_nodes", "color", "affected_count"}; accepts node IDs or preferred names and defaults to the current selection when omitted.');
-        lines.push('- await ss.display_notification(text, button1_text="Close", button2_text=None, auto_close=False, default_button_index=0, auto_close_ms=5000) -> Returns {"status", "button_index", "button_text", "auto_closed"}');
-        lines.push('- ss.begin_batch(), ss.end_batch() -> Returns {"status": "success", "batch_depth"}');
-        lines.push('- For large edits: with ss.batch_update(): ...  This produces one render on exit.');
-        lines.push('- State changes are applied before each result is returned; animate=False is the instant default.');
-        return lines.join('\n').replace(/&quot;/g, '"');
     }
 
     function aiRefreshFloatingConsoleButton() {
@@ -3461,7 +3443,7 @@ function drawChevronCanvasLabel(context, label, x, y) {
         aiActiveScriptId = record.id;
         aiPythonPromptHistory = Array.isArray(record.messages) ? record.messages.map(message => aiSafeClone(message)).filter(msg => msg?.role === 'user' || msg?.role === 'assistant') : [];
         const scriptEditor = document.getElementById('ai-python-script-editor');
-        if (scriptEditor) scriptEditor.value = String(record.script || '');
+        if (scriptEditor) aiSetPythonScriptEditorText(record.script || '');
         aiRenderPythonScriptEditorHighlight();
         aiActiveScriptId = record.id;
         const runOut = document.getElementById('ai-python-run-output');
@@ -3490,7 +3472,7 @@ function drawChevronCanvasLabel(context, label, x, y) {
             aiActiveScriptId = null;
             aiPythonPromptHistory = [];
             const scriptEditor = document.getElementById('ai-python-script-editor');
-            if (scriptEditor) scriptEditor.value = '';
+            if (scriptEditor) aiSetPythonScriptEditorText('');
             aiRenderPythonScriptEditorHighlight();
             const runOut = document.getElementById('ai-python-run-output');
             if (runOut) runOut.textContent = '';
@@ -3531,7 +3513,7 @@ function drawChevronCanvasLabel(context, label, x, y) {
             if (currentScript) {
                 aiNewChat();
             }
-            if (scriptEditor) scriptEditor.value = String(promptText || '').trim();
+            if (scriptEditor) aiSetPythonScriptEditorText(String(promptText || '').trim());
             aiRenderPythonScriptEditorHighlight();
             aiPromptsPanelOpen = false;
             refreshAiTopPanels(false);
@@ -3951,7 +3933,7 @@ function drawChevronCanvasLabel(context, label, x, y) {
             aiActiveScriptId = null;
             aiPythonPromptHistory = [];
             const scriptEditor = document.getElementById('ai-python-script-editor');
-            if (scriptEditor) scriptEditor.value = '';
+            if (scriptEditor) aiSetPythonScriptEditorText('');
             aiRenderPythonScriptEditorHighlight();
             const runOut = document.getElementById('ai-python-run-output');
             if (runOut) runOut.textContent = '';
@@ -4144,7 +4126,7 @@ function drawChevronCanvasLabel(context, label, x, y) {
     function openAiAttachmentViewer(item) {
         currentFileViewer = {
             fileName: item.name,
-            separator: item.type === 'image' ? null : detectDefaultSeparator(item.data || ''),
+            separator: item.type === 'image' ? null : detectDefaultSeparator(item.data || '', item.name || ''),
             isFasta: false,
             embeddedItem: item
         };
@@ -4515,6 +4497,11 @@ function drawChevronCanvasLabel(context, label, x, y) {
                     aiRecordSelectNeighboursHistory(nodeId, depth, 'AI');
                     const neighborIds = [...seen].filter(id => id !== nodeId); selectNodes(activeNodes().filter(node => seen.has(String(node.id))), false, 'Python API neighbor selection', null, false, { actor: 'AI' }); queueDraw(animate);
                     return result('success', { node_id: nodeId, depth, neighbor_node_ids: neighborIds, selected_node_ids: selected() });
+                }
+                if (method === 'set_node_variable') {
+                    const response = setPythonNodeVariable(args.name, args.values);
+                    queueDraw(animate);
+                    return response;
                 }
                 if (method === 'list_variables') return result('success', { variables: (getVisibleColorModeVariableEntries?.() || []).map(({ key, label, type }) => ({ key, label, type })) });
                 if (method === 'get_variable_range') {
@@ -5750,23 +5737,43 @@ function drawChevronCanvasLabel(context, label, x, y) {
             return aiGetHistoryPage(args);
         }
         if (toolName === 'View_Stringscape_app_info') {
-            return `StringScape is an open-source, high-performance web app for exploring protein-protein interaction networks from the STRING database.
+            return `StringScape is an open-source, high-performance web app for exploring protein-protein interaction networks from the STRING database. It was developed by Joel Tregurtha as part of a PhD at the University of Canterbury, New Zealand. The app is avalible at https://stringscape.org and the source code is available at https://github.com/JoelTre/StringScape. Send feedback to stringscape.net/contact
 
 Basic workflow:
 1. Upload an interaction file and any accessory data files using the upload controls.
-2. Enter seed protein IDs if required, set the interaction score threshold, and build the network.
+2. Set the interaction score threshold (or leave it at the default, zero), and build the network.
 3. Click nodes to select them. Use Shift/Ctrl or the selection controls to add, subtract, or intersect selections. Press A to select all and I to invert the selection.
 4. Use the search box to find proteins by ID, name, annotation, localisation, size, centrality, or uploaded variables.
-5. Use the view selector to switch between the full network, selected nodes, collections, scatter plot, Venn diagram, histogram, pie chart, mind map, and embeddings views.
+5. Use the view selector to switch between the full network, selected nodes, collections, scatter plot, Venn diagram, histogram, pie chart, mind map, embeddings views, and protein complex structures dashboard. Homology models of proteins complexes can be generated in the protein complex structures view.
 6. Use Colour Nodes By to colour nodes by a variable. Use node and link controls to adjust size, glow, visibility, labels, link colour, width, opacity, and direction arrows.
 7. Save selections to collections to compare or revisit groups of proteins. Collections can also be viewed in the Venn, histogram, pie, and network views.
-8. Select nodes to inspect their preferred name, annotation, localisation, description, sequence, protein size, centrality, and eigenvector data in the information panel.
+8. Select nodes to inspect their preferred name, annotation, localisation, description, sequence, protein size, centrality, eigenvector data, links to information of the protein on other websites, links to relevant pubmed paprts, and more in the information box at the bottom, or in the Node info table.
+9. Use the Python panel to run Pyodide scripts with app_data and the StringScape API object ss already available. Use ss.select(), ss.search_and_select(), ss.set_node_colouring(), ss.set_node_color(), ss.add_to_collection(), and ss.set_view() for common scripted workflows.
+10. Use the Action history panel to see the history of all actions performed in the app.
+11. Use the console to view logs, errors, and debug messages. Use the console to run JavaScript commands in the app context.
+12. Use the AI agent to ask questions about the app, the data, and the network. The AI can also perform actions in the app on your behalf through tool calls. Use the AI to generate Python scripts for analysis and automation.
 
-AI assistance:
-- The AI Agent can answer questions and operate the app through its tools.
-- The Python panel can run Pyodide scripts with app_data and the StringScape API object ss already available.
-- Use ss.select(), ss.search_and_select(), ss.set_node_colouring(), ss.set_node_color(), ss.add_to_collection(), and ss.set_view() for common scripted workflows.
-- Use View_variables before working with an uploaded variable, and use View_action_history to inspect the generated action script.`;
+Shortcuts and Hotkeys:
+            • Spacebar → Toggle physics<br>
+            • F → Toggle between Full Network and previous view<br>
+            • S → Toggle between Selected Nodes view and previous view<br>
+            • Z → Zoom to selected nodes<br>
+            • A or Ctrl+A → Select all<br>
+            • I → Invert selection<br>
+            • + → increases selection to include nodes connected to the currently selected nodes<br>
+            • - → decreases selection (undoing the selection increase)<br>
+            • B → Toggle Brush Select<br>
+            • L → Toggle Lasso Select<br>
+            • Right click → Cancel operation (e.g., turns off brush select if brush select is active)<br>
+            • M → Add (“move”) selection to a collection<br>
+            • G → Toggles grab nodes mode (allows you to click and drag nodes to move them)<br>
+            • Backspace → With your mouse hovered over a slider, value input box, or colour selector, backspace resets it to the default value. <br>
+            • Backspace → With your mouse hovered over the main part of the screen (the canvas), backspace goes back to the previous view (e.g., from a graph view back to the Full Network view)
+
+Using custom files (advanced):
+            Custom files can be used in this app. For custom link files, the first two columns should list pairs of nodes that are linked/connected. The other columns can contain data on any variables associated with the links.<br><br>
+            For custom node info files, the first column should have the node ID (matching the node IDs in the links file), and the other columns can contain data on any variables associated with the nodes. Files for variables with a hierarchical nature should have one column heading containing the word “parent” and another column heading containing the word “child” with the rows of the columns containing the variable category names. Upload a separate file assigning each network node to a category (i.e., assigning each network node to a mind map node).
+            The app accepts CSV, TSV, Pipe-separated, semicolon-separated, Space-separated, and .h5 files.`;
         }
         if (toolName === 'See_view_options') {
             const coreViews = ["Full Network (ID: base)", "Selected Nodes (ID: selected)", "Scatter Plot", "Venn Diagram", "Histogram", "Pie Chart", "Mind Map", "Embeddings"];
@@ -5985,6 +5992,14 @@ class _StringScapeAPI:
     def select_links(self, link_ids, mode='replace', animate=False): return self._call('select_links', link_ids=[link_ids] if isinstance(link_ids, str) else list(link_ids), mode=mode, animate=animate)
     def invert_selection(self, animate=False): return self._call('invert_selection', animate=animate)
     def select_neighbors(self, node_id, depth=1, animate=False): return self._call('select_neighbors', node_id=node_id, depth=depth, animate=animate)
+    def set_node_variable(self, name, values):
+        if not isinstance(values, dict):
+            values = list(values)
+            ids = app_data['node_ids']
+            if len(values) != len(ids):
+                raise ValueError('Values must match app_data[\"node_ids\"] in length and order.')
+            values = dict(zip(ids, values))
+        return self._call('set_node_variable', name=name, values=values)
     def list_variables(self): return self._call('list_variables')
     def get_variable_range(self, variable_key): return self._call('get_variable_range', variable_key=variable_key)
     def get_variable_categories(self, variable_key): return self._call('get_variable_categories', variable_key=variable_key)
@@ -6744,7 +6759,7 @@ sys.modules['stringscape'] = _stringscape_module
             aiPythonPromptHistory.push({ role: 'assistant', content });
 
             const editor = document.getElementById('ai-python-script-editor');
-            if (editor && content) editor.value = content;
+            if (editor && content) aiSetPythonScriptEditorText(content);
             if (output) output.textContent = content ? 'Script generated and pasted into editor.' : 'No script text was returned.';
             if (input) {
                 input.value = '';
@@ -9473,18 +9488,39 @@ self.onmessage = async (event) => {
     // This function takes a string containing simple markdown syntax and converts it into HTML for rendering in the info box or other UI elements. It supports headers, bold text, inline code, bullet points, and line breaks.
     // Convert only already-escaped text into a tiny, known-safe markdown subset so untrusted input cannot create executable HTML.
     function buildSimpleMarkdownHtml(value) {
-        const safeText = escapeHtml(value ?? '');
-        return safeText
+        const renderProse = text => escapeHtml(text).split(/(`+)([\s\S]*?)\1/g).map((part, index) => {
+            if (index % 3 === 1) return '';
+            if (index % 3 === 2) return `<code>${part}</code>`;
+            return part
             .replace(/^##### (.+)$/gm, '<h5>$1</h5>')    
             .replace(/^#### (.+)$/gm, '<h4>$1</h4>')
             .replace(/^### (.+)$/gm, '<h3>$1</h3>')
             .replace(/^## (.+)$/gm, '<h2>$1</h2>')
             .replace(/^# (.+)$/gm, '<h1>$1</h1>')
             .replace(/\*\*(.+?)\*\*/gs, '<strong>$1</strong>')
-            .replace(/`([^`]+)`/g, '<code>$1</code>')
             .replace(/^\* (.+)$/gm, '<li>$1</li>')
             .replace(/(<li>.+<\/li>)(\n<li>.+<\/li>)*/gm, '<ul>$&</ul>')
             .replace(/\n/g, '<br>');
+        }).join('');
+        const lines = String(value ?? '').replace(/\r\n?/g, '\n').split('\n');
+        const output = [];
+        let prose = [];
+        for (let i = 0; i < lines.length; i++) {
+            const fence = lines[i].match(/^ {0,3}(`{3,}|~{3,})\s*([^\s`~]*)[^`~]*$/);
+            if (!fence) {
+                prose.push(lines[i]);
+                continue;
+            }
+            output.push(renderProse(prose.join('\n')));
+            prose = [];
+            const code = [];
+            const closing = new RegExp(`^ {0,3}${fence[1][0]}{${fence[1].length},}\\s*$`);
+            while (++i < lines.length && !closing.test(lines[i])) code.push(lines[i]);
+            const language = fence[2].replace(/[^a-zA-Z0-9_+-]/g, '');
+            output.push(`<pre class="markdown-code-block"><code${language ? ` class="language-${language}"` : ''}>${escapeHtml(code.join('\n'))}</code></pre>`);
+        }
+        output.push(renderProse(prose.join('\n')));
+        return output.join('');
     }
 
     // This function renders LaTeX math expressions within a given HTML element using the KaTeX library. 
@@ -10789,6 +10825,62 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
             updateSecondaryViewControls();
             renderSecondaryView();
         });
+
+    function supportsRightDragPan(viewId) {
+        return ['base', 'selected', 'Scatter Plot', 'Venn Diagram', 'Mind Map'].includes(viewId)
+            || collections.has(viewId);
+    }
+
+    // Right-button gestures pan immediately over the canvas. Using
+    // zoom.transform keeps wheel zoom and each view's saved framing in sync.
+    function installRightDragPan(surface, behavior, isEnabled) {
+        if (!surface) return;
+        let gesture = null;
+        const stop = () => {
+            window.removeEventListener('mousemove', move, true);
+            window.removeEventListener('mouseup', up, true);
+            window.removeEventListener('blur', stop);
+            gesture = null;
+        };
+        const move = event => {
+            if (!gesture) return;
+            if (!(event.buttons & 2)) { stop(); return; }
+            const dx = event.clientX - gesture.x;
+            const dy = event.clientY - gesture.y;
+            if (!isEnabled()) { stop(); return; }
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            const start = gesture.transform;
+            d3.select(surface).interrupt().call(behavior.transform,
+                d3.zoomIdentity.translate(start.x + dx, start.y + dy).scale(start.k));
+        };
+        const up = event => {
+            if (event.button !== 2) return;
+            if (gesture) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+            }
+            stop();
+        };
+        surface.addEventListener('mousedown', event => {
+            if (event.button !== 2 || !isEnabled()) return;
+            stop();
+            gesture = { x: event.clientX, y: event.clientY, transform: d3.zoomTransform(surface) };
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            window.addEventListener('mousemove', move, true);
+            window.addEventListener('mouseup', up, true);
+            window.addEventListener('blur', stop);
+        }, true);
+        surface.addEventListener('contextmenu', event => {
+            event.preventDefault();
+            if (isEnabled()) event.stopImmediatePropagation();
+        }, true);
+    }
+
+    installRightDragPan(canvas, zoomBehavior, () => supportsRightDragPan(currentViewId));
+    installRightDragPan(secondaryCanvas, secondaryZoomBehavior,
+        () => splitViewOpen && supportsRightDragPan(secondaryViewId));
 
         // This function determines the set of nodes that should be considered "active" for the pie chart view, based on the current data source selection (e.g., selected nodes, specific collection, or all nodes).
     function getPieChartActiveNodes() {
@@ -13336,6 +13428,43 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         return changed;
     }
 
+    function isPythonVariablesSessionFile(name) {
+        return String(name).toLowerCase() === 'python_variables.json';
+    }
+
+    function collectPythonVariablesForSession() {
+        return {
+            format: 'StringScape Python variables',
+            version: 1,
+            variables: variableConfigs.filter(cfg => cfg.fileName === 'Python-generated').map(cfg => ({
+                name: cfg.label.replace(/^Python-generated: /, ''),
+                type: cfg.type,
+                values: Object.fromEntries(accessoryVariableValues[cfg.fileName]?.[cfg.variable] || [])
+            }))
+        };
+    }
+
+    function restorePythonVariablesFromSession() {
+        const source = Object.entries(uploadedAccessoryFiles || {}).find(([name]) => isPythonVariablesSessionFile(name));
+        if (!source) return;
+        try {
+            const payload = JSON.parse(source[1]);
+            if (payload.format !== 'StringScape Python variables' || payload.version !== 1 || !Array.isArray(payload.variables)) throw new Error('Unsupported Python variables file.');
+            const knownIds = new Set(nodes.map(node => String(node.id)));
+            for (const variable of payload.variables) {
+                if (!variable.values || typeof variable.values !== 'object' || Array.isArray(variable.values)) throw new Error('Invalid node variable values.');
+                const values = Object.fromEntries(Object.entries(variable.values).filter(([id]) => knownIds.has(id)));
+                const response = setPythonNodeVariable(variable.name, values);
+                const cfg = variableConfigs.find(cfg => getVariableModeKey(cfg) === response.key);
+                if (['Categorical - Nominal', 'Categorical - Ordinal', 'Numerical - Discrete', 'Numerical - Continuous'].includes(variable.type)) cfg.type = variable.type;
+            }
+            buildVariableConfigs();
+            updateColorModeOptions();
+        } catch (error) {
+            console.warn('Could not restore Python variables from session', error);
+        }
+    }
+
     async function applyUploadedSessionFiles() {
         if (!nodes.length || !nodeMap.size) {
             pendingSessionRestore = true;
@@ -13351,6 +13480,7 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         pendingSessionRestore = false;
         let positionsApplied = applyNodePositionsFromSession();
         restoreCollectionsFromSession();
+        restorePythonVariablesFromSession();
         restoreChangedSettingsFromSession();
         restoreSelectedNodesFromSession();
         if (positionsApplied) {
@@ -13370,12 +13500,16 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
             nodePositions: document.getElementById('downloadSessionNodePositions')?.checked ?? true,
             collections: document.getElementById('downloadSessionCollections')?.checked ?? true,
             selectedNodes: document.getElementById('downloadSessionSelectedNodes')?.checked ?? true,
-            changedSettings: document.getElementById('downloadSessionChangedSettings')?.checked ?? true
+            changedSettings: document.getElementById('downloadSessionChangedSettings')?.checked ?? true,
+            pythonVariables: document.getElementById('downloadSessionPythonVariables')?.checked ?? true
         };
         const files = [];
         if (choices.uploadedFiles) {
             Object.entries(uploadedInteractionFiles || {}).forEach(([name, text]) => files.push([name, text, 'text/plain;charset=utf-8;']));
-            Object.entries(uploadedAccessoryFiles || {}).forEach(([name, text]) => files.push([name, text, 'text/plain;charset=utf-8;']));
+            Object.entries(uploadedAccessoryFiles || {}).filter(([name]) => !isPythonVariablesSessionFile(name)).forEach(([name, text]) => files.push([name, text, 'text/plain;charset=utf-8;']));
+        }
+        if (choices.pythonVariables) {
+            files.push(['python_variables.json', JSON.stringify(collectPythonVariablesForSession(), null, 2), 'application/json;charset=utf-8;']);
         }
         if (choices.nodePositions) {
             const payload = {
@@ -14143,6 +14277,32 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             renderVariableTable();
             updateColorModeOptions();
         }, 10);
+    }
+
+    // Script variables use the existing custom-variable pipeline for colouring,
+    // selection, comparison, and subsequent Python reads.
+    function setPythonNodeVariable(name, values) {
+        if (typeof name !== 'string' || !name.trim()) throw new Error('Variable name must be a non-empty string.');
+        name = name.trim();
+        if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Error('values must be a dictionary keyed by node ID.');
+        const entries = Object.entries(values);
+        const knownIds = new Set(nodes.map(node => String(node.id)));
+        const missing = entries.filter(([id]) => !knownIds.has(id)).map(([id]) => id);
+        if (missing.length) throw new Error('Unknown node IDs: ' + missing.join(', '));
+        if (entries.some(([, value]) => value !== null && !['string', 'number', 'boolean'].includes(typeof value))) throw new Error('Values must be numbers, strings, booleans, or None.');
+        if (entries.some(([, value]) => typeof value === 'number' && !Number.isFinite(value))) throw new Error('Numeric values must be finite; use None for missing values.');
+        const fileName = 'Python-generated';
+        const variable = 'python_' + Array.from(name).map(char => char.codePointAt(0).toString(16)).join('_');
+        const type = inferVarType(entries.map(([, value]) => value));
+        const existing = variableConfigs.find(cfg => cfg.fileName === fileName && cfg.variable === variable);
+        const config = { fileName, variable, label: 'Python-generated: ' + name, type, hidden: false, split: false, splitBase: null, splitChildren: {} };
+        if (existing) Object.assign(existing, config);
+        else variableConfigs.push(config);
+        if (!Object.hasOwn(accessoryVariableValues, fileName)) accessoryVariableValues[fileName] = Object.create(null);
+        accessoryVariableValues[fileName][variable] = new Map(entries);
+        buildVariableConfigs();
+        updateColorModeOptions();
+        return { status: 'success', name, key: getVariableModeKey(config), label: config.label, type, assigned_count: entries.length };
     }
 
     function getVariableModeKey(cfg) {
@@ -17263,11 +17423,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         
         if (nodeInfoBtn) {
             if (currentViewId === 'Mind Map') {
-                nodeInfoBtn.textContent = 'Mind Map Node Info Table';
+                nodeInfoBtn.innerHTML = '<i class="fa-solid fa-table" aria-hidden="true" style="margin-right:8px;"></i>Mind Map Node Info Table';
                 nodeInfoBtn.onclick = () => openMindMapNodeInfoTable();
                 nodeInfoBtn.style.display = 'inline-flex';
             } else {
-                nodeInfoBtn.textContent = 'Node Info Table';
+                nodeInfoBtn.innerHTML = '<i class="fa-solid fa-table" aria-hidden="true" style="margin-right:8px;"></i>Node Info Table';
                 nodeInfoBtn.onclick = () => openNodeInfoTable();
                 nodeInfoBtn.style.display = hasSelection ? 'inline-flex' : 'none';
             }
@@ -17870,6 +18030,33 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         URL.revokeObjectURL(link.href);
     }
 
+    function appendFileViewerDownloadButton(controls) {
+        const button = document.createElement('button');
+        button.id = 'file-viewer-download-btn';
+        button.type = 'button';
+        button.title = 'Download file';
+        button.style.marginLeft = 'auto';
+        button.style.gap = '6px';
+        button.innerHTML = '<i class="fas fa-download" aria-hidden="true"></i> Download file';
+        button.onclick = downloadFileViewerFile;
+        controls.appendChild(button);
+    }
+
+    function downloadFileViewerFile() {
+        const { fileName, embeddedItem } = currentFileViewer;
+        const data = embeddedItem || accessoryDataFiles[fileName] || uploadedFileViewerData[fileName];
+        if (!data) return;
+        const link = document.createElement('a');
+        const isImage = embeddedItem?.type === 'image';
+        const url = isImage ? embeddedItem.data : URL.createObjectURL(new Blob([embeddedItem ? embeddedItem.data || '' : data.text || ''], { type: 'text/plain;charset=utf-8' }));
+        link.href = url;
+        link.download = fileName || embeddedItem?.name || 'file.txt';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        if (!isImage) setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
     function showFileViewerProgress(percent) {
         console.log("function showFileViewerProgress(percent)")
         const wrapper = document.getElementById('file-viewer-loading');
@@ -17888,11 +18075,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     function detectDefaultSeparator(text, fileName = '') {
         console.log("function detectDefaultSeparator(text)")
-        if (!text || !text.trim()) return '\t';
+        if (!text || !text.trim()) return 'none';
         
         // Check for plain text files that should not be parsed as tables (case-insensitive)
         const lowerFileName = fileName.toLowerCase();
-        if (lowerFileName.includes('selected_nodes.txt')) {
+        if (lowerFileName.includes('selected_nodes.txt') || /\.(fa|fasta|faa|fna|fas|ffn|frn)$/i.test(fileName) || text.trimStart().startsWith('>')) {
             return 'none'; // Return 'none' to indicate no separator (plain text)
         }
         
@@ -17907,7 +18094,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             return '\t';
         }
         
-        const sampleRows = text.trim().split(/\r?\n/).slice(0, 20);
+        const sampleRows = text.trim().split(/\r?\n/).filter(row => row.trim()).slice(0, 20);
         const candidates = ['\t', ',', '|', ';', '__WS__'];
 
         const scores = candidates.map(sep => {
@@ -17918,7 +18105,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             const meanCols = colCounts.reduce((a,b) => a+b, 0) / colCounts.length;
             const validCols = colCounts.filter(c => c > 1).length;
             const consistency = new Set(colCounts.filter(c => c > 1)).size;
-            return { sep, meanCols, validCols, consistency };
+            // Spaces in prose are not sufficient evidence of a table.
+            const plausible = sep !== '__WS__' || (sampleRows.length >= 2 && validCols === sampleRows.length && consistency === 1);
+            return { sep, meanCols, validCols: plausible ? validCols : 0, consistency };
         });
 
         scores.sort((a,b) => {
@@ -17927,7 +18116,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             return a.consistency - b.consistency;
         });
 
-        return scores[0].validCols > 0 ? scores[0].sep : '\t';
+        return scores[0].validCols > 0 ? scores[0].sep : 'none';
     }
 
     function openFileViewer(fileName) {
@@ -17938,7 +18127,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
         const text = fileData.text || '';
         const isFastaFile = fileName.endsWith('.fasta') || fileName.endsWith('.fa');
-        const defaultSep = isFastaFile ? null : detectDefaultSeparator(text, fileName);
+        const defaultSep = detectDefaultSeparator(text, fileName);
         currentFileViewer = { fileName, separator: defaultSep, isFasta: isFastaFile };
         document.getElementById('file-viewer-title').textContent = `${fileName}`;
         const countEl = document.getElementById('file-viewer-debug-count');
@@ -17986,13 +18175,13 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 img.style.margin = '0 auto';
                 img.style.borderRadius = '10px';
                 target.appendChild(img);
+                appendFileViewerDownloadButton(ctrl);
                 return;
             }
 
             const text = embeddedItem.data || '';
             const isFasta = embeddedItem.name && (embeddedItem.name.endsWith('.fasta') || embeddedItem.name.endsWith('.fa'));
-            const detected = isFasta ? null : detectDefaultSeparator(text, embeddedItem.name);
-            const separator = detected ?? currentFileViewer.separator ?? '\t';
+            const separator = currentFileViewer.separator ?? detectDefaultSeparator(text, embeddedItem.name || '');
 
             const note = document.createElement('div');
             note.style.color = '#9ad0ff';
@@ -18002,7 +18191,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             target.appendChild(note);
 
             // Add separator buttons for embedded items
-            if (!isFasta) {
+            {
                 const ctrl = document.getElementById('file-viewer-controls');
                 if (ctrl) {
                     [['none','None'], ['\t','TSV'], [',','CSV'], ['|','Pipe (|)'], [';','SemiColon (;)'], ['__WS__','Space']].forEach(([sep, label]) => {
@@ -18023,6 +18212,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     });
                 }
             }
+
+            appendFileViewerDownloadButton(ctrl);
 
             if (separator && separator !== 'none') {
                 const lines = text.trim().split(/\r?\n/).filter(Boolean);
@@ -18077,80 +18268,6 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const ctrl = document.getElementById('file-viewer-controls');
         ctrl.innerHTML = '';
         
-        // Handle FASTA file display
-        if (currentFileViewer.isFasta) {
-            const text = data.text || '';
-            const records = parseFastaRecords(text);
-            
-            target.innerHTML = '';
-            
-            if (!records.length) {
-                target.textContent = 'No FASTA records found.';
-                return;
-            }
-            
-            const maxRecords = 100;
-            const recordsToRender = records.slice(0, maxRecords);
-            
-            if (records.length > maxRecords) {
-                const note = document.createElement('div');
-                note.style.color = '#4db8ff';
-                note.style.padding = '4px 0 12px 0';
-                note.textContent = `Showing first ${maxRecords} of ${records.length} sequences (large file).`;
-                target.appendChild(note);
-            }
-            
-            const table = document.createElement('table');
-            table.style.width = '100%';
-            table.style.borderCollapse = 'collapse';
-            
-            const headerRow = document.createElement('tr');
-            ['Header', 'Sequence Length', 'Sequence (first 100 chars)'].forEach(text => {
-                const th = document.createElement('th');
-                th.textContent = text;
-                th.style.border = '1px solid #444';
-                th.style.padding = '6px';
-                th.style.background = '#222';
-                th.style.color = '#4db8ff';
-                th.style.textAlign = 'left';
-                headerRow.appendChild(th);
-            });
-            table.appendChild(headerRow);
-            
-            recordsToRender.forEach((record, idx) => {
-                const tr = document.createElement('tr');
-                tr.style.background = idx % 2 ? '#121212' : '#1a1a1a';
-                
-                const headerCell = document.createElement('td');
-                headerCell.textContent = record.header;
-                headerCell.style.border = '1px solid #333';
-                headerCell.style.padding = '5px';
-                headerCell.style.wordBreak = 'break-word';
-                tr.appendChild(headerCell);
-                
-                const lengthCell = document.createElement('td');
-                lengthCell.textContent = record.sequence.length;
-                lengthCell.style.border = '1px solid #333';
-                lengthCell.style.padding = '5px';
-                lengthCell.style.textAlign = 'right';
-                tr.appendChild(lengthCell);
-                
-                const seqCell = document.createElement('td');
-                seqCell.textContent = record.sequence.substring(0, 100) + (record.sequence.length > 100 ? '...' : '');
-                seqCell.style.border = '1px solid #333';
-                seqCell.style.padding = '5px';
-                seqCell.style.fontFamily = 'monospace';
-                seqCell.style.fontSize = '12px';
-                seqCell.style.wordBreak = 'break-all';
-                tr.appendChild(seqCell);
-                
-                table.appendChild(tr);
-            });
-            
-            target.appendChild(table);
-            return;
-        }
-        
         // Handle delimited file display
         [['none','None'], ['\t','TSV'], [',','CSV'], ['|','Pipe (|)'], [';','SemiColon (;)'], ['__WS__','Space']].forEach(([sep, label]) => {
             const btn = document.createElement('button');
@@ -18166,10 +18283,6 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             ctrl.appendChild(btn);
         });
 
-        const spacer = document.createElement('div');
-        spacer.style.flex = '1';
-        ctrl.appendChild(spacer);
-
         const parsedCount = interactionParsedEdgeCounts[fileName];
         if (Number.isFinite(parsedCount)) {
             const debugCount = document.createElement('div');
@@ -18180,6 +18293,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             debugCount.style.alignSelf = 'center';
             ctrl.appendChild(debugCount);
         }
+
+        appendFileViewerDownloadButton(ctrl);
 
         if (!currentFileViewer.separator || currentFileViewer.separator === 'none') {
             target.textContent = data.text || '';
@@ -20342,7 +20457,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             const button = document.getElementById(id);
             if (!button) return;
             button.innerText = enabled ? `Pause ${label} Physics` : `Resume ${label} Physics`;
-            button.style.background = enabled ? '#3498db' : '#666';
+            button.style.background = enabled ? 'var(--button-bg-hover)' : '#666';
         };
         updateButton('fullNetworkPhysBtn', fullNetworkPhysicsEnabled, 'Full Network');
         updateButton('subnetworkPhysBtn', subnetworkPhysicsEnabled, 'Subnetwork');
@@ -20350,7 +20465,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const stopBtn = document.getElementById('stopPhysBtn');
         if (stopBtn) {
             stopBtn.innerText = isPhysicsStopped ? 'Enable Physics' : 'Stop Physics';
-            stopBtn.style.background = isPhysicsStopped ? '#f39c12' : '#3498db';
+            stopBtn.style.background = isPhysicsStopped ? '#f39c12' : 'var(--button-bg-hover)';
         }
     }
 
@@ -23985,18 +24100,15 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         if (!control || !menu || control.style.display === 'none') return;
 
         const isOpen = menu.classList.contains('open');
+        document.getElementById('shortest-path-toggle-btn')?.setAttribute('aria-expanded', String(!isOpen));
         if (isOpen) {
             menu.classList.remove('open', 'open-above', 'open-below');
             document.removeEventListener('click', closeShortestPathMenuOnClickOutside);
             return;
         }
 
-        const rect = control.getBoundingClientRect();
-        const spaceAbove = rect.top;
-        const spaceBelow = window.innerHeight - rect.bottom;
-        menu.classList.remove('open-above', 'open-below');
-        if (spaceBelow >= 220 || spaceBelow >= spaceAbove) menu.classList.add('open-below');
-        else menu.classList.add('open-above');
+        menu.classList.remove('open-below');
+        menu.classList.add('open-above');
         menu.classList.add('open');
         setTimeout(() => document.addEventListener('click', closeShortestPathMenuOnClickOutside), 50);
     }
@@ -24007,6 +24119,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         if (!control || !menu) return;
         if (control.contains(e.target)) return;
         menu.classList.remove('open', 'open-above', 'open-below');
+        document.getElementById('shortest-path-toggle-btn')?.setAttribute('aria-expanded', 'false');
         document.removeEventListener('click', closeShortestPathMenuOnClickOutside);
     }
 
@@ -24076,7 +24189,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const shouldShow = (selectedIds.length === 2 && currentViewId !== 'Mind Map') || shortestPathGroupsToolOpen;
 
         if (shortestPathControl) {
-            shortestPathControl.style.display = shouldShow ? 'block' : 'none';
+            shortestPathControl.style.display = 'flex';
+            const options = document.getElementById('shortest-path-options');
+            if (options) options.style.display = shouldShow ? 'block' : 'none';
         }
 
         if (shouldShow) {
@@ -24086,8 +24201,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             const groupsBox = document.getElementById('shortest-path-groups-box');
             if (groupsBox) groupsBox.style.display = shortestPathGroupsToolOpen ? 'block' : 'none';
         } else {
-            if (shortestPathMenu) shortestPathMenu.classList.remove('open', 'open-above', 'open-below');
-            document.removeEventListener('click', closeShortestPathMenuOnClickOutside);
+
             if (shortestPathDisplayMode !== 'groups') {
                 shortestPathDisplayMode = 'none';
                 pathNodes.clear();
@@ -26327,6 +26441,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     function rebuildAccessoryDataFromUploads() {
+        const pythonConfigs = variableConfigs.filter(cfg => cfg.fileName === 'Python-generated');
+        const pythonValues = accessoryVariableValues['Python-generated'];
+        sessionRestoreAppliedSignature = '';
         Object.keys(accessoryDataFiles).forEach(k => delete accessoryDataFiles[k]);
         Object.keys(accessoryVariableValues).forEach(k => delete accessoryVariableValues[k]);
         aliasData.clear();
@@ -26334,6 +26451,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         window.variableConfigs = variableConfigs;
 
         Object.entries(uploadedAccessoryFiles).forEach(([fileName, text]) => {
+            if (isPythonVariablesSessionFile(fileName)) return;
             const lowerName = fileName.toLowerCase();
             const isFasta = lowerName.endsWith('.fa') || lowerName.endsWith('.fasta') || lowerName.endsWith('.faa') || lowerName.endsWith('.fna');
             if (isFasta) {
@@ -26345,6 +26463,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             }
         });
 
+        variableConfigs.push(...pythonConfigs);
+        if (pythonValues) accessoryVariableValues['Python-generated'] = pythonValues;
+        buildVariableConfigs();
+        updateColorModeOptions();
         refreshVariableFileList();
         updateUploadedListsUI();
         updateNodeLabelFieldOptions();
@@ -26841,6 +26963,18 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     });
     const splitViewButton = document.getElementById('split-view-btn');
     const rightPanel = document.getElementById('right-panel');
+    const lowerStack = document.getElementById('right-lower-stack');
+    if (lowerStack && typeof ResizeObserver === 'function') {
+        const updateRightPanelClearance = () => {
+            const clearance = window.innerHeight - lowerStack.getBoundingClientRect().top + 10;
+            document.documentElement.style.setProperty('--right-lower-clearance', `${clearance}px`);
+            const menu = document.getElementById('shortest-path-menu');
+            document.getElementById('shortest-path-toggle-btn')?.setAttribute('aria-expanded', String(menu?.classList.contains('open') || false));
+        };
+        new ResizeObserver(updateRightPanelClearance).observe(lowerStack);
+        window.addEventListener('resize', updateRightPanelClearance);
+        updateRightPanelClearance();
+    }
     if (splitViewButton && rightPanel && splitViewButton.parentElement !== rightPanel) {
         rightPanel.appendChild(splitViewButton);
     }
@@ -27544,7 +27678,14 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     const pythonScriptEditor = document.getElementById('ai-python-script-editor');
     if (pythonScriptEditor) {
-        pythonScriptEditor.addEventListener('input', aiRenderPythonScriptEditorHighlight);
+        aiInstallPythonScriptEditorRefresh(pythonScriptEditor);
+        pythonScriptEditor._pythonUndoState = aiCapturePythonScriptEditorState();
+        pythonScriptEditor.addEventListener('beforeinput', () => {
+            pythonScriptEditor._pythonUndoState = aiCapturePythonScriptEditorState();
+        });
+        pythonScriptEditor.addEventListener('input', () => {
+            aiRecordPythonScriptEdit(pythonScriptEditor._pythonUndoState);
+        });
         pythonScriptEditor.addEventListener('scroll', aiRenderPythonScriptEditorHighlight);
         pythonScriptEditor.addEventListener('keyup', aiRenderPythonScriptEditorHighlight);
         pythonScriptEditor.addEventListener('mouseup', aiRenderPythonScriptEditorHighlight);
