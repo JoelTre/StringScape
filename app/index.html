@@ -20,6 +20,9 @@
             https://cdn.jsdelivr.net;
         connect-src 'self' data: blob: https://search.rcsb.org https://swissmodel.expasy.org https://models.rcsb.org https://www.ebi.ac.uk https://rest.uniprot.org
             http://127.0.0.1:1234
+            https://api.openai.com
+            https://api.anthropic.com
+            https://generativelanguage.googleapis.com
             https://joeltre.github.io
             https://api.github.com 
             https://data.rcsb.org
@@ -39,6 +42,8 @@
     ">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>StringScape app</title>
+    <!-- Shared icons for the main app; templates load their own document styles. -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="icon" type="image/jpeg" href="https://stringscape.net/images_for_website/StringScape_logo.jpg">
 
     <!-- Below are third party scripts that are imported into StringScape. The import uses a SHA-384 hash to ensure the scripts have not been tampered with, for security purposes -->
@@ -355,9 +360,38 @@
             opacity: 1;
             pointer-events: auto;
         }
+        /* Icon elements must retain the font supplied by Font Awesome. */
         #ai-side-panel,
-        #ai-side-panel * {
+        #ai-side-panel *:not(.fa-solid):not(.fa-regular):not(.fa-brands):not(.fas):not(.far):not(.fab):not(.fa) {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        #ai-panel-resize-handle {
+            position: absolute;
+            left: -5px;
+            top: 0;
+            bottom: 0;
+            width: 10px;
+            cursor: ew-resize;
+            touch-action: none;
+            z-index: 2;
+        }
+        #ai-panel-resize-handle::after {
+            content: "";
+            position: absolute;
+            left: 4px;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            pointer-events: none;
+        }
+        #ai-panel-resize-handle:hover::after,
+        #ai-panel-resize-handle:focus-visible::after,
+        body.ai-panel-resizing #ai-panel-resize-handle::after {
+            background: var(--accent-color);
+        }
+        body.ai-panel-resizing, body.ai-panel-resizing * {
+            cursor: ew-resize !important;
+            user-select: none !important;
         }
         #ai-panel-header {
             padding: 16px;
@@ -569,6 +603,13 @@
             font-size: 0.8rem;
             line-height: 1.45;
         }
+        #ai-media-list { max-height: 260px; overflow-y: auto; overflow-wrap: anywhere; }
+        .ai-media-sources, .ai-media-actions { display: flex; gap: 8px; margin-bottom: 8px; }
+        .ai-media-sources button, .ai-media-actions button { width: auto; margin: 0; padding: 6px 10px; border-radius: 8px; background: var(--surface-color-panel); color: var(--text-color); border: 1px solid var(--border-color-strong); cursor: pointer; }
+        .ai-media-sources button[aria-pressed="true"] { background: var(--accent-color); }
+        .ai-media-item { padding: 8px; margin-top: 6px; border: 1px solid var(--border-color-strong); border-radius: 8px; color: var(--text-color); }
+        .ai-media-item summary { cursor: pointer; }
+        .ai-media-actions { margin: 10px 0 0; }
         .ai-top-panel ol {
             margin: 6px 0 0 18px;
             padding: 0;
@@ -700,6 +741,64 @@
             color: var(--muted-text-color);
             font-size: 0.8rem;
         }
+        #ai-connection-dialog {
+            width: min(620px, calc(100vw - 32px));
+            max-height: calc(100vh - 48px);
+            box-sizing: border-box;
+            overflow-y: auto;
+            padding: 24px;
+            border: 1px solid var(--border-color-strong);
+            border-radius: 16px;
+            background: var(--surface-color-panel);
+            color: var(--text-color);
+        }
+        #ai-connection-mode-toggle { margin: 0 0 20px; }
+        #ai-connection-mode-toggle[data-mode="local"]::before { transform: translateX(100%); }
+        #ai-connection-mode-toggle .theme-mode-track > span { width: 50%; text-align: center; }
+        #ai-connection-dialog [hidden] { display: none; }
+        #ai-connection-dialog a { color: var(--accent-color-soft); }
+        .ai-cloud-fields { display: grid; gap: 6px; }
+        .ai-cloud-fields label { margin: 4px 0 0; font-weight: 600; }
+        .ai-cloud-fields input, .ai-cloud-fields select { min-width: 0; margin: 0; border-radius: 999px; }
+        .ai-api-url-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; }
+        .ai-provider-shortcuts { display: flex; align-items: center; gap: 6px; }
+        #ai-connection-dialog .ai-provider-shortcuts button { width: auto; margin: 0; padding: 4px 10px; border-radius: 999px; font-size: 0.75rem; background: var(--button-bg); color: var(--text-color); border: 1px solid var(--input-border); }
+        #ai-connection-dialog .ai-provider-shortcuts button:hover { background: var(--button-bg-hover); }
+        #ai-cloud-model-trigger {
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            width: 100%; margin: 0; padding: 8px 14px; border-radius: 999px;
+            border: 1px solid var(--input-border); background: var(--input-bg);
+            color: var(--text-color); font-size: 14px; font-weight: 700; line-height: 1.2;
+            transition: filter 0.2s ease, transform 0.2s ease;
+        }
+        #ai-cloud-model-trigger:hover:not(:disabled) { filter: brightness(1.1); }
+        #ai-cloud-model-trigger:disabled { background: var(--input-bg) !important; }
+        #ai-cloud-model-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #ai-cloud-model-menu { background: var(--input-bg); border-color: var(--input-border); max-height: min(480px, 65vh); overflow-y: auto; }
+        #ai-cloud-model-menu.opens-up { top: auto; bottom: calc(100% + 4px); }
+        #ai-cloud-model-menu button { color: var(--text-color); overflow-wrap: anywhere; font-weight: 400; }
+        #ai-cloud-model-menu button[aria-selected="true"], #ai-cloud-model-menu button:focus-visible { background: var(--button-bg-hover); outline: none; }
+        .ai-cloud-model-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+        #ai-connection-dialog .ai-connection-button { width: auto; margin: 0; border-radius: 999px; padding: 6px 12px; background: #4caf50; color: white; white-space: nowrap; }
+        #ai-connection-dialog .ai-connection-button:disabled { background: #4caf50 !important; color: white; opacity: 0.65; }
+        #ai-connection-dialog .ai-connection-button.ai-connected { background: #f39c12; color: #111; }
+        .ai-cloud-note { color: var(--muted-text-color); font-size: 0.78rem; margin-top: 12px; }
+        #ai-connection-dialog::backdrop { background: rgba(0, 0, 0, 0.65); }
+        .ai-connection-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+        #ai-connection-title { flex: 1; min-width: 0; margin: 0; font-size: 1.2rem; }
+        #ai-connection-close-btn { flex: 0 0 32px; width: 32px; height: 32px; margin: 0; padding: 0; align-self: flex-start; background: transparent; color: var(--text-color); border: 0; font-size: 24px; line-height: 1; cursor: pointer; }
+        .ai-connection-instructions { font-size: 0.85rem; line-height: 1.6; }
+        .ai-connection-instructions ol { padding-left: 20px; }
+        .ai-connection-instructions li { margin-bottom: 8px; }
+        #ai-connection-dialog .ai-url-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; }
+        #ai-connection-dialog .ai-url-row input { min-width: 0; width: 100%; margin: 0; }
+        #ai-connection-dialog #ai-connect-btn { width: auto; margin: 0; white-space: nowrap; }
+        @media (max-width: 480px) {
+            #ai-connection-dialog .ai-url-row { grid-template-columns: minmax(0, 1fr) auto; }
+            #ai-connection-dialog .ai-url-row-label { grid-column: 1 / -1; }
+        }
+        #ai-connection-status { font-size: 0.85rem; color: var(--accent-color-soft); }
+        #ai-connection-status.ai-connected { font-size: 1.1rem; font-weight: 700; color: #4caf50; }
         .ai-setup-subtitle {
             color: var(--accent-color-soft);
             font-weight: 700;
@@ -767,9 +866,8 @@
             cursor: pointer;
             white-space: nowrap;
         }
-        #ai-connect-btn.btn-green {
-            background-color: #4caf50 !important;
-        }
+        #ai-connect-btn { background-color: #4caf50; color: #fff; }
+        #ai-connect-btn.ai-connected { background-color: #f39c12; color: #111; }
         #ai-send-btn.ai-processing {
             background: #f39c12 !important;
         }
@@ -1575,6 +1673,21 @@
         .ai-python-approval-actions button:hover {
             filter: brightness(1.12);
         }
+
+        #ai-chatbox .ai-file-approval-actions { display: flex; flex-direction: row; flex-wrap: nowrap; gap: 8px; margin-top: 12px; }
+        #ai-chatbox .ai-file-approval-actions > button { flex: 1 1 0; width: auto; margin: 0; }
+        dialog.ai-file-diff-dialog { box-sizing: border-box; width: 94vw; max-width: 1600px; height: 88vh; max-height: 94vh; margin: auto; background: var(--surface-color-panel, #20252d); color: var(--text-color, #eee); border: 1px solid var(--border-color-strong, #777); border-radius: 12px; padding: 20px; overflow: hidden; }
+        .ai-file-diff-dialog::backdrop { background: #0009; }
+        .ai-file-diff-dialog > h3 { margin: 0 44px 18px 0; font-weight: 600; overflow-wrap: anywhere; }
+        .ai-file-diff-dialog > .ai-file-diff-close { position: absolute; top: 10px; right: 12px; display: grid; place-items: center; width: 32px; height: 32px; margin: 0; padding: 0; border: 0; border-radius: 6px; background: transparent; color: inherit; font-size: 26px; line-height: 1; cursor: pointer; }
+        .ai-file-diff-close:hover { background: #8883; }
+        .ai-file-diff-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; height: calc(100% - 64px); min-height: 0; }
+        .ai-file-diff-columns > section { display: flex; flex-direction: column; min-width: 0; min-height: 0; border: 1px solid var(--border-color-strong, #777); border-radius: 8px; overflow: hidden; }
+        .ai-file-diff-columns h4 { flex: none; margin: 0; padding: 10px 12px; font-weight: 600; border-bottom: 1px solid var(--border-color-strong, #777); }
+        .ai-file-diff-columns pre { flex: 1; min-height: 0; margin: 0; padding: 8px 0; overflow: auto; font-size: 12px; line-height: 1.6; white-space: pre; }
+        .ai-file-diff-columns pre > div { padding: 0 12px; min-width: max-content; min-height: 1.6em; }
+        .ai-file-diff-columns .ai-file-removed { background: #8d192b66; color: #ffb7bf; }
+        .ai-file-diff-columns .ai-file-added { background: #11773566; color: #b1ffc6; }
         @keyframes ai-log-pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.45; }
@@ -4599,12 +4712,12 @@
         <!-- <label style="font-size:14px;">Open Files</label> -->
         <input type="file" id="openFilesInput" accept=".gz,.txt,.csv,.tsv,.fa,.fasta,.faa,.fna,.h5" multiple style="display:none;">
         <div id="openFilesList" class="uploaded-file-list">
-            <button type="button" class="upload-inline-open-btn">Open ▾</button>
+            <button type="button" class="upload-inline-open-btn">Open <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button>
             <div class="uploaded-file-items"><span class="uploaded-file-list-empty">No files uploaded</span></div>
         </div>
         <div class="upload-progress" id="openFilesProgress"><div class="upload-progress-track"><div class="upload-progress-bar" id="openFilesProgressBar"></div></div><div class="upload-progress-text">Loading...</div></div>
 
-        <span id="more-toggle" class="dropdown-toggle" style="justify-self: center; background-color: transparent; border: none;">Advanced ▾</span>
+        <span id="more-toggle" class="dropdown-toggle" style="justify-self: center; background-color: transparent; border: none;">Advanced <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
         <div id="more-drop" class="dropdown-content">
             <!-- <button id="genomeInputBtn" type="button" style="background:#3498db; margin-bottom:10px;">Load Genome (fasta) (optional)</button> -->
             <!-- <input type="file" id="genomeInput" accept=".fa,.fasta,.fna" multiple style="display:none;"> -->
@@ -4632,7 +4745,7 @@
             </div>
         </div>
 
-        <span class="dropdown-toggle">Nodes ▾</span>
+        <span class="dropdown-toggle">Nodes <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
         <div id="nodes-drop" class="dropdown-content">
             <div id="network-merge-controls" style="display:none; margin-bottom:12px;">
                 <button type="button" id="mergeNetworksBtn" class="action-btn" style="width:100%; text-align:center; justify-content:center;">Merge Networks</button>
@@ -4722,7 +4835,7 @@
         </div>
 
         <hr class="dropdown-divider">
-        <span class="dropdown-toggle">Links (edges) ▾</span>
+        <span class="dropdown-toggle">Links (edges) <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
         <div id="links-drop" class="dropdown-content">
             <div id="mergedLinkFilterContainer" style="display:none; margin-bottom:12px;">
                 <label>Show Links From</label>
@@ -4781,13 +4894,13 @@
         </div>
 
         <hr class="dropdown-divider">
-        <span class="dropdown-toggle">Variables ▾</span>
+        <span class="dropdown-toggle">Variables <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
         <div id="variables-drop" class="dropdown-content">
             <button id="pill-blue-btn" style="width:100%;">Variable Settings</button>
         </div>
 
         <hr class="dropdown-divider">
-        <span class="dropdown-toggle">App style ▾</span>
+        <span class="dropdown-toggle">App style <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
         <div id="bg-drop" class="dropdown-content">
             <label>Colour Background By</label>
             <select id="bgMode">
@@ -4835,7 +4948,7 @@
         </div>
 
         <hr class="dropdown-divider">
-        <span class="dropdown-toggle">Physics ▾</span>
+        <span class="dropdown-toggle">Physics <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
         <div id="physics-drop" class="dropdown-content">
             <button id="fullNetworkPhysBtn" style="width:100%; margin-bottom:10px; background:#3498db; color:#fff; border:none; padding:8px 10px; border-radius:999px;">Pause Full Network Physics</button>
             <button id="subnetworkPhysBtn" style="width:100%; margin-bottom:10px; background:#3498db; color:#fff; border:none; padding:8px 10px; border-radius:999px;">Pause Subnetwork Physics</button>
@@ -4860,7 +4973,13 @@
         </div>
 
         <hr class="dropdown-divider">
-        <span class="dropdown-toggle">Download ▾</span>
+        <span class="dropdown-toggle">AI <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
+        <div id="ai-drop" class="dropdown-content">
+            <button id="ai-open-connection-btn" type="button" style="width:100%;">Connect an AI</button>
+        </div>
+
+        <hr class="dropdown-divider">
+        <span class="dropdown-toggle">Download <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
         <div id="download-drop" class="dropdown-content">
             <button id="pill-blue-btn" data-download-action="session" style="width:100%;">Save Session...</button>
             <button id="pill-blue-btn" data-download-action="svg" style="width:100%;">Full Canvas (SVG)</button>
@@ -5029,7 +5148,7 @@
             <input type="text" id="searchInput" placeholder="Search...">
             <button id="searchBtn">Search</button>
         </div>
-        <div id="moreToggle" class="Selection-tools-btn">Selection Tools ▾</div>
+        <div id="moreToggle" class="Selection-tools-btn">Selection Tools <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></div>
         <div id="search-more-drop" class="search-more-content">
             <div id="selection-target-toggle" class="selection-target-toggle" role="group" aria-label="Selection target">
                 <button type="button" class="selection-target-option active" data-selection-target="nodes">Nodes</button>
@@ -5056,6 +5175,7 @@
             <label>Restrict search to</label>
             <select id="searchScope">
                 <option value="all">All</option>
+                <option value="preferred_name">Preferred names only</option>
                 <option value="layer">Degrees of Separation</option>
                 <option value="centrality">Centrality</option>
                 <option value="annotation">Annotation length</option>
@@ -5063,7 +5183,7 @@
                 <option value="size">Protein size</option>
             </select>
         </div>
-            <h4 id="right-panel-key-toggle" style="cursor:pointer; margin:15px 0 5px 0; color: var(--text-color);">Key ▾</h4>
+            <h4 id="right-panel-key-toggle" style="cursor:pointer; margin:15px 0 5px 0; color: var(--text-color);">Key <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></h4>
             <div id="legend-controls"></div>
             </div>
             <div id="legend-content"></div>
@@ -5075,10 +5195,11 @@
 </div>
 
 <div id="ai-side-panel" aria-label="AI Panel">
+    <div id="ai-panel-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize AI panel" tabindex="0"></div>
     <div id="ai-panel-header">
         <button id="ai-new-chat-btn">+ New Chat</button>
         <div id="ai-header-center">
-            <h1 id="ai-header-title">AI Chat ▾</h1>
+            <h1 id="ai-header-title">AI Chat <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></h1>
             <div id="ai-mode-dropdown">
                 <button id="ai-mode-agent-option" class="active" type="button">AI Chat</button>
                 <button id="ai-mode-python-option" type="button">Python Scripts</button>
@@ -5114,26 +5235,16 @@
     <div id="ai-top-tools">
         <div id="ai-top-tool-buttons">
             <button id="ai-history-toggle-btn" class="ai-top-toggle-btn" type="button">Chat History</button>
-            <button id="ai-setup-toggle-btn" class="ai-top-toggle-btn" type="button">Set up Instructions</button>
+            <button id="ai-media-toggle-btn" class="ai-top-toggle-btn" type="button" aria-expanded="false" aria-controls="ai-media-panel">Media</button>
             <button id="ai-prompts-toggle-btn" class="ai-top-toggle-btn" type="button">Example Prompts</button>
         </div>
         <div id="ai-history-panel"></div>
-        <div id="ai-setup-panel" class="ai-top-panel">
-            <div class="ai-setup-subtitle">Connect a local LLM<br>It's easy and free!</div>
-            <ol>
-                <li>Install <a href="https://lmstudio.ai/" target="_blank" rel="noopener noreferrer" style="color:#9ad0ff;">LM Studio ↗</a></li>
-                <li>In LM Studio, download a model that can run locally on your hardware (such as Gemma-4-e2b)</li>
-                <li>In LM Studio, Load the model, then go to the developer tab in the left panel and under Server setting turn on CORS.</li>
-                <li>In LM Studio, toggle on the server (where it says "Status stopped" at the top). Then copy the server URL (where it says "reachable at:") and paste that here:
-                    <div class="ai-url-row">
-                        <span class="ai-url-row-label">Server URL:</span>
-                        <input id="ai-server-url" type="text" placeholder="http://127.0.0.1:1234"
-                               class="flex-1 bg-[#0b0e11] border border-[#30363d] rounded-full px-4 py-1 focus:outline-none focus:border-[#3498db] text-xs">
-                        <button id="ai-connect-btn" class="pill-btn bg-[#21262d] border border-[#30363d] text-white">CONNECT</button>
-                    </div>
-                </li>
-                <li>All Done! Now chat with the model below about your proteins :)</li>
-            </ol>
+        <div id="ai-media-panel" class="ai-top-panel">
+            <div class="ai-media-sources" role="group" aria-label="Media source">
+                <button id="ai-media-ai-btn" type="button" aria-pressed="true">AI-created</button>
+                <button id="ai-media-user-btn" type="button" aria-pressed="false">User-uploaded</button>
+            </div>
+            <div id="ai-media-list"></div>
         </div>
         <div id="ai-prompts-panel" class="ai-top-panel">
             <div id="ai-example-panel-content">
@@ -5218,12 +5329,76 @@
         <div id="ai-input-controls">
             <input type="file" id="ai-file-input" accept=".txt,.csv,.tsv,image/*">
             <button id="ai-file-btn" title="Upload files">+</button>
-            <textarea id="ai-user-input" rows="1" placeholder="Ask AI anything..."
+            <textarea id="ai-user-input" rows="1" placeholder="Connect an AI in the left panel"
                       class="flex-1 bg-[#0d1117] border border-[#30363d] px-4 focus:outline-none focus:border-[#3498db] resize-none text-sm"></textarea>
             <button id="ai-send-btn" class="pill-btn bg-[#3498db] text-white h-10 ai-btn-disabled">SEND</button>
         </div>
     </div>
 </div>
+
+<dialog id="ai-connection-dialog" aria-labelledby="ai-connection-title">
+    <div class="ai-connection-header">
+        <h2 id="ai-connection-title">Connect an AI</h2>
+        <button id="ai-connection-close-btn" type="button" aria-label="Close AI connection instructions">&times;</button>
+    </div>
+    <button id="ai-connection-mode-toggle" type="button" class="theme-mode-toggle" data-mode="cloud" aria-pressed="false" aria-label="Switch to Local AI" aria-controls="ai-cloud-instructions ai-local-instructions">
+        <span class="theme-mode-track"><span>Cloud AI</span><span>Local AI</span></span>
+    </button>
+    <div id="ai-cloud-instructions" class="ai-connection-instructions">
+        <div class="ai-setup-subtitle">Connect a cloud AI</div>
+        <ol>
+            <li>Create an API key with your AI provider, such as <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">OpenAI ↗</a>, <a href="https://platform.claude.com/settings/keys" target="_blank" rel="noopener noreferrer">Anthropic ↗</a>, or <a href="https://aistudio.google.com/api-keys" target="_blank" rel="noopener noreferrer">Google ↗</a>.</li>
+            <li>Choose your provider and enter your API key. Models load automatically. Select a chat model that supports tools.</li>
+            <li>Press Connect, then chat with the AI about your proteins.</li>
+        </ol>
+        <form id="ai-cloud-credentials-form" class="ai-cloud-fields" method="dialog" autocomplete="on">
+            <div class="ai-api-url-heading">
+                <label for="ai-cloud-api-url">API URL</label>
+                <div class="ai-provider-shortcuts" role="group" aria-label="API URL shortcuts">
+                    <button type="button" data-ai-provider="openai">OpenAI</button>
+                    <button type="button" data-ai-provider="anthropic">Anthropic</button>
+                    <button type="button" data-ai-provider="google">Google</button>
+                </div>
+            </div>
+            <input id="ai-cloud-api-url" name="username" type="url" value="https://api.openai.com/v1" spellcheck="false" autocomplete="username">
+            <label for="ai-cloud-api-key">API key</label>
+            <input id="ai-cloud-api-key" name="password" type="password" placeholder="Paste your API key" autocomplete="current-password" spellcheck="false">
+            <label id="ai-cloud-model-label" for="ai-cloud-model-trigger">Model</label>
+            <div class="ai-cloud-model-row">
+                <div id="ai-cloud-model-dropdown" class="open-files-trigger">
+                    <select id="ai-cloud-model" disabled hidden>
+                        <option value="">Enter your API key to load models</option>
+                    </select>
+                    <button id="ai-cloud-model-trigger" type="button" disabled aria-haspopup="listbox" aria-expanded="false" aria-controls="ai-cloud-model-menu" aria-describedby="ai-cloud-model-status">
+                        <span id="ai-cloud-model-text">Enter your API key to load models</span><span aria-hidden="true"><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
+                    </button>
+                    <div id="ai-cloud-model-menu" class="open-files-menu" role="listbox" aria-labelledby="ai-cloud-model-label"></div>
+                </div>
+                <button id="ai-cloud-connect-btn" type="submit" disabled class="pill-btn ai-connection-button">CONNECT</button>
+            </div>
+        </form>
+        <p id="ai-cloud-model-status" class="ai-cloud-note" role="status" aria-live="polite"></p>
+        <p class="ai-cloud-note">StringScape keeps your key only in this tab. After connecting, supported browsers may offer to save it in your password manager for future visits. Cloud requests send your messages and attached data to your provider and may incur API charges.</p>
+    </div>
+    <div id="ai-local-instructions" class="ai-connection-instructions" hidden>
+            <div class="ai-setup-subtitle">Connect a local LLM<br>It's easy and free!</div>
+            <ol>
+                <li>Install <a href="https://lmstudio.ai/" target="_blank" rel="noopener noreferrer" style="color:#9ad0ff;">LM Studio ↗</a></li>
+                <li>In LM Studio, download a model that can run locally on your hardware (such as Gemma-4-e2b)</li>
+                <li>In LM Studio, Load the model, then go to the developer tab in the left panel and under Server setting turn on CORS.</li>
+                <li>In LM Studio, toggle on the server (where it says "Status stopped" at the top). Then copy the server URL (where it says "reachable at:") and paste that here:
+                    <div class="ai-url-row">
+                        <span class="ai-url-row-label">Server URL:</span>
+                        <input id="ai-server-url" type="text" placeholder="http://127.0.0.1:1234"
+                               class="flex-1 bg-[#0b0e11] border border-[#30363d] rounded-full px-4 py-1 focus:outline-none focus:border-[#3498db] text-xs">
+                        <button id="ai-connect-btn" class="pill-btn ai-connection-button">CONNECT</button>
+                    </div>
+                </li>
+                <li>All Done! Now chat with the model below about your proteins :)</li>
+            </ol>
+        </div>
+    <p id="ai-connection-status" role="status" aria-live="polite"></p>
+</dialog>
 
 <div id="view-selector-container">
     <div id="view-selector-stack">
@@ -5248,7 +5423,7 @@
                     <button type="button" class="protein-info-mode-btn" data-protein-mode="sequence">Sequence</button>
                     <button type="button" class="protein-info-mode-btn" data-protein-mode="structure">Structure</button>
                     <button type="button" class="protein-info-mode-btn" data-protein-mode="links">Links</button>
-                    <button type="button" class="protein-info-mode-btn" data-protein-mode="guide">Guide</button>
+                    <button type="button" class="protein-info-mode-btn" data-protein-mode="guide">Guides</button>
                 </div>
                 <div id="protein-info-actions">
                     <button id="protein-info-explain-btn" type="button" class="protein-info-mode-btn">Explain in Simple English</button>
