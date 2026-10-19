@@ -4764,6 +4764,7 @@
             width: 100%;
             }
     </style>
+    <link rel="stylesheet" href="variable-menus.css">
 </head>
 <body>
 <div id="ui-layer">
@@ -4962,7 +4963,7 @@
             <input type="range" id="linkWidthSlider" min="0.2" max="5" step="0.1" value="1">
 
             <label>Link Width By</label>
-            <select id="linkWidthMode"><option value="none" selected>None</option></select>
+            <select id="linkWidthMode"><option value="score">Combined Score</option><option value="compare">Compare two variables</option><option value="mono" selected>Mono</option></select>
 
             <label>Link Opacity <span id="val-bri" class="slider-val">0.7</span></label>
             <input type="range" id="brightnessSlider" min="0" max="1" step="0.01" value="0.7">
@@ -7508,6 +7509,7 @@
 </template>
 <script src="homology_modeller.js"></script>
 <script id="main-script" src="script.js"></script>
+<script src="variable-menus.js"></script>
 
 </body>
 </html>
