@@ -889,6 +889,7 @@ function drawChevronCanvasLabel(context, label, x, y) {
         { type: 'function', function: { name: 'View_node_IDs', description: 'Views IDs of selected nodes.' } },
         { type: 'function', function: { name: 'View_preferred_name', description: 'Views preferred names of selected nodes.' } },
         { type: 'function', function: { name: 'View_annotation_data', description: 'Views annotation data of selected nodes. This is the more important protein information to view.' } },
+        { type: 'function', function: { name: 'View_KEGG_Product', description: 'Views KEGG products for the selected nodes.' } },
         { type: 'function', function: { name: 'View_description_data', description: 'Views description data of selected nodes.' } },
         { type: 'function', function: { name: 'View_protein_size', description: 'Views size of selected proteins/nodes.' } },
         { type: 'function', function: { name: 'View_sequence_data', description: 'Views a page of complete amino acid sequences for selected nodes. Defaults to 5 nodes; use next_offset to retrieve subsequent pages.', parameters: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: 20, default: 5 }, offset: { type: 'integer', minimum: 0, default: 0 } } } } },
@@ -983,7 +984,8 @@ function drawChevronCanvasLabel(context, label, x, y) {
         {"type": "function", "function": {"name": "Close_guide", "description": "Closes the current guide and displays the guide menu.", "parameters": {"type": "object", "properties": {}}}},
         {"type": "function", "function": {"name": "View_visual_override_summary", "description": "Returns counts and paginated node/link custom visual overrides. Opacity overrides are rendered alpha multipliers.", "parameters": {"type": "object", "properties": {"target": {"type": "string", "enum": ["nodes", "links"], "default": "nodes"}, "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20}, "offset": {"type": "integer", "minimum": 0, "default": 0}}}}},
         {"type": "function", "function": {"name": "Attach_file", "description": "Creates a text-based file (CSV, TSV, TXT, JSON, Markdown, etc.) and attaches it to an AI message. Supply literal file contents and an optional caption.", "parameters": {"type": "object", "properties": {"filename": {"type": "string"}, "content": {"type": "string"}, "message": {"type": "string"}}, "required": ["filename", "content"]}}},
-        {"type": "function", "function": {"name": "Attach_screenshot", "description": "Attaches the most recent screenshot from View_screenshot to an AI message. Set capture_new to take and attach a new screenshot.", "parameters": {"type": "object", "properties": {"capture_new": {"type": "boolean", "default": false}, "message": {"type": "string"}}}}}
+        {"type": "function", "function": {"name": "Attach_screenshot", "description": "Attaches the most recent screenshot from View_screenshot to an AI message. Set capture_new to take and attach a new screenshot.", "parameters": {"type": "object", "properties": {"capture_new": {"type": "boolean", "default": false}, "message": {"type": "string"}}}}},
+        { type: 'function', function: { name: 'Search_Pubmed', description: 'Search PubMed with query and/or protein_id. query supports native PubMed Boolean AND/OR/NOT, parentheses, phrases and field tags; pass it unchanged. Optional publication_date_from/to filter publication dates. When both query and protein_id are supplied, intersect their results. Returns titles, abstracts, journal, publication/article/history dates, indexed chemicals and enzymes, associated resource identifiers and publication relationships where supplied. Cite papers in replies using (cite: PMID1, PMID2) to show clickable paper previews. Missing fields remain empty. Uses gene links for known protein metadata, otherwise identifier text search. Supply query or protein_id.', parameters: { type: 'object', properties: { query: { type: 'string', description: 'General PubMed query, e.g. (TP53 OR BRCA1) AND apoptosis NOT review[pt].' }, protein_id: { type: 'string', description: 'Optional protein/node ID from the network; narrows query when also provided.' }, publication_date_from: { type: 'string', description: 'Inclusive publication date lower bound: YYYY, YYYY/MM, YYYY/MM/DD; hyphens accepted.' }, publication_date_to: { type: 'string', description: 'Inclusive publication date upper bound, same formats. A year or month includes its final day.' }, limit: { type: 'integer', minimum: 1, maximum: 20, default: 10 }, offset: { type: 'integer', minimum: 0, default: 0 } } } } },
     ];
     const aiSearchToolsDefinition = {
         type: 'function',
@@ -1001,7 +1003,7 @@ function drawChevronCanvasLabel(context, label, x, y) {
         'Search_and_select', 'Select_nodes', 'View_node_IDs',
         'View_annotation_data', 'View_Stringscape_app_info'
     ]);
-    const aiToolDiscoveryPrompt = '\n\nOnly core tools and Search_tools are initially loaded. Before calling any tool for the first time, use Search_tools with its exact name (or the exact ames of multiple tools comma-separated) to get its description and parameters and enable it for this turn. Available tool names: '
+    const aiToolDiscoveryPrompt = '\n\nOnly core tools and Search_tools are initially loaded. Before calling any tool for the first time, use Search_tools with its exact name (or the exact names of multiple tools comma-separated) to get its description and parameters and enable it for this turn. Available tool names: '
         + [...aiTools.map(tool => tool.function.name), 'Search_tools'].join(', ') + '.';
 
     function aiGetRequestTools(loadedToolNames) {
@@ -3242,6 +3244,7 @@ function drawChevronCanvasLabel(context, label, x, y) {
     function aiSetChatboxEmptyState() {
         const chatbox = document.getElementById('ai-chatbox');
         if (!chatbox) return;
+        if (typeof aiClosePubmedPreview === 'function') aiClosePubmedPreview();
         chatbox.innerHTML = '';
         const disclaimer = document.createElement('div');
         disclaimer.className = 'ai-chat-disclaimer';
@@ -3314,6 +3317,7 @@ function drawChevronCanvasLabel(context, label, x, y) {
     function aiRestoreChatFromRecord(record) {
         const chatbox = document.getElementById('ai-chatbox');
         if (!chatbox) return;
+        if (typeof aiClosePubmedPreview === 'function') aiClosePubmedPreview();
         chatbox.innerHTML = '';
         if (!record || (!Array.isArray(record.transcript) && !Array.isArray(record.messages))) {
             aiSetChatboxEmptyState();
@@ -3322,6 +3326,7 @@ function drawChevronCanvasLabel(context, label, x, y) {
 
         const transcript = Array.isArray(record.transcript) ? record.transcript : [];
         let pendingAttachments = [];
+        const pendingPubmedLogs = [];
         let hasRenderedContent = false;
 
         if (transcript.length > 0) {
@@ -3351,6 +3356,13 @@ function drawChevronCanvasLabel(context, label, x, y) {
                     return;
                 }
                 if (entry.kind === 'tool_call') {
+                    if (entry.name === 'Search_Pubmed') {
+                        let args = {};
+                        try { args = typeof entry.arguments === 'string' ? JSON.parse(entry.arguments) : entry.arguments || {}; } catch {}
+                        pendingPubmedLogs.push(aiAddPubmedLog(args));
+                        hasRenderedContent = true;
+                        return;
+                    }
                     if (entry.name === 'Run_python_logic') {
                         try {
                             const parsedArgs = typeof entry.arguments === 'string' ? JSON.parse(entry.arguments) : (entry.arguments || {});
@@ -3367,6 +3379,14 @@ function drawChevronCanvasLabel(context, label, x, y) {
                     return;
                 }
                 if (entry.kind === 'tool') {
+                    if (entry.name === 'Search_Pubmed') {
+                        let result;
+                        try { result = typeof entry.content === 'string' ? JSON.parse(entry.content) : entry.content; }
+                        catch { result = { message: String(entry.content || 'Search results unavailable.') }; }
+                        (pendingPubmedLogs.shift() || aiAddPubmedLog()).setResult(result);
+                        hasRenderedContent = true;
+                        return;
+                    }
                     const toolName = entry.name ? String(entry.name).replace(/_/g, ' ') : 'tool';
                     aiAddLog(`Tool response from ${toolName}`);
                     hasRenderedContent = true;
@@ -4344,6 +4364,15 @@ function drawChevronCanvasLabel(context, label, x, y) {
 
     window.displayStringScapeNotification = displayStringScapeNotification;
 
+    // Listen independently of control initialization and custom menu rendering.
+    document.addEventListener('change', function notifyLinkComparisonSelection(event) {
+        if (event.target?.id !== 'linkMode' || event.target.value !== 'compare' || selectionTargetMode !== 'nodes') return;
+        displayStringScapeNotification({
+            text: "To see what the colours mean, switch the toggle to 'Links' under Selection Tools.",
+            auto_close: true
+        });
+    }, true);
+
     // Direct, structured Python API bridge. State updates happen before a result is
     // returned; draw work is coalesced and awaited by the Python runner's flush().
     const stringScapePythonBridge = (() => {
@@ -5232,8 +5261,142 @@ function drawChevronCanvasLabel(context, label, x, y) {
         }
     }
 
+    // Read complete research API responses under a timeout.
+    async function aiFetchResearch(url, options = {}, format = 'json') {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 25000);
+        try {
+            const response = await fetch(url, { ...options, signal: controller.signal });
+            if (!response.ok) throw new Error(`Research service returned HTTP ${response.status}${response.status === 429 ? ' (rate limit reached; try again later)' : ''}.`);
+            const body = await response.text();
+            return { response, data: format === 'json' ? JSON.parse(body) : body };
+        } catch (error) {
+            if (error.name === 'AbortError') throw new Error('Research service timed out. Try again later.');
+            throw error;
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
+    // Serialize NCBI requests across searches to respect the unauthenticated three/second limit.
+    let aiNcbiRequestQueue = Promise.resolve();
+    function aiNcbiRequest(utility, params, format = 'json') {
+        const run = aiNcbiRequestQueue.then(async () => {
+            const url = new URL(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/${utility}.fcgi`);
+            url.search = new URLSearchParams({ tool: 'StringScape', ...params }).toString();
+            try { return (await aiFetchResearch(url.href, {}, format)).data; }
+            finally { await new Promise(resolve => setTimeout(resolve, 350)); }
+        });
+        aiNcbiRequestQueue = run.catch(() => {});
+        return run;
+    }
+
+    function aiParsePubmedPapers(xml) {
+        const doc = new DOMParser().parseFromString(xml, 'application/xml');
+        if (doc.querySelector('parsererror')) throw new Error('PubMed returned invalid XML.');
+        const error = doc.querySelector('ERROR');
+        if (error) throw new Error(`PubMed: ${error.textContent}`);
+        const text = (node, selector) => node?.querySelector(selector)?.textContent?.trim() || '';
+        const all = (node, selector) => Array.from(node?.querySelectorAll(selector) || []);
+        const date = node => ({ year: text(node, 'Year'), month: text(node, 'Month'), day: text(node, 'Day'), text: text(node, 'MedlineDate') });
+        return all(doc, 'PubmedArticle, PubmedBookArticle').map(record => {
+            // Scope metadata to the citation: reference lists also contain titles, journals and IDs.
+            const citation = record.querySelector('MedlineCitation, BookDocument');
+            const article = citation?.querySelector('Article') || citation;
+            const pmid = text(citation, 'PMID');
+            const journal = article?.querySelector('Journal');
+            return {
+                pmid,
+                title: text(article, 'ArticleTitle'),
+                abstract: all(article, 'Abstract > AbstractText').map(part => {
+                    const label = part.getAttribute('Label');
+                    return `${label ? label + ': ' : ''}${part.textContent.trim()}`;
+                }).join('\n'),
+                url: `https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(pmid)}/`,
+                journal: {
+                    title: text(journal, 'Title'), abbreviation: text(journal, 'ISOAbbreviation'),
+                    issn: all(journal, 'ISSN').map(item => ({ value: item.textContent.trim(), type: item.getAttribute('IssnType') || '' })),
+                    volume: text(journal, 'JournalIssue > Volume'), issue: text(journal, 'JournalIssue > Issue'),
+                    pages: text(article, 'Pagination > MedlinePgn'),
+                    electronic_locations: all(article, 'ELocationID').map(item => ({ type: item.getAttribute('EIdType') || '', value: item.textContent.trim() }))
+                },
+                dates: {
+                    publication: date(journal?.querySelector('JournalIssue > PubDate') || article?.querySelector('Book > PubDate')),
+                    article: all(article, 'ArticleDate').map(item => ({ type: item.getAttribute('DateType') || '', ...date(item) })),
+                    history: all(record, 'PubmedData > History > PubMedPubDate, PubmedBookData > History > PubMedPubDate').map(item => ({ status: item.getAttribute('PubStatus') || '', ...date(item), hour: text(item, 'Hour'), minute: text(item, 'Minute') })),
+                    completed: date(citation?.querySelector('DateCompleted')), revised: date(citation?.querySelector('DateRevised'))
+                },
+                chemicals_and_enzymes: all(citation, 'ChemicalList > Chemical').map(item => ({
+                    name: text(item, 'NameOfSubstance'), mesh_id: item.querySelector('NameOfSubstance')?.getAttribute('UI') || '',
+                    registry_number: text(item, 'RegistryNumber')
+                })),
+                associated_resources: {
+                    databanks: all(article, 'DataBankList > DataBank').map(item => ({ name: text(item, 'DataBankName'), accession_numbers: all(item, 'AccessionNumberList > AccessionNumber').map(id => id.textContent.trim()) })),
+                    article_identifiers: all(record, 'PubmedData > ArticleIdList > ArticleId, PubmedBookData > ArticleIdList > ArticleId').map(item => ({ type: item.getAttribute('IdType') || '', value: item.textContent.trim() })),
+                    objects: all(record, 'PubmedData > ObjectList > Object, PubmedBookData > ObjectList > Object').map(item => ({ type: item.getAttribute('Type') || '', parameters: all(item, 'Param').map(param => ({ name: param.getAttribute('Name') || '', value: param.textContent.trim() })) }))
+                },
+                publication_relationships: all(citation, 'CommentsCorrectionsList > CommentsCorrections').map(item => ({
+                    type: item.getAttribute('RefType') || '', pmid: text(item, 'PMID'), citation: text(item, 'RefSource'), note: text(item, 'Note')
+                }))
+            };
+        });
+    }
+
+    function aiPubmedDateBound(value, end = false) {
+        const input = String(value || '').trim().replace(/-/g, '/');
+        if (!input) return '';
+        if (!/^\d{4}(?:\/\d{2})?(?:\/\d{2})?$/.test(input)) throw new Error('Publication dates must use YYYY, YYYY/MM or YYYY/MM/DD (hyphens also accepted).');
+        const parts = input.split('/').map(Number);
+        const year = parts[0], month = parts[1] ?? (end ? 12 : 1);
+        const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+        const day = parts[2] ?? (end ? daysInMonth : 1);
+        if (year < 1000 || month < 1 || month > 12 || day < 1 || day > daysInMonth) throw new Error('Invalid publication date.');
+        return `${year}/${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}`;
+    }
+
+    async function aiSearchPubmed(args = {}) {
+        const proteinId = String(args.protein_id || '').trim();
+        const inputQuery = String(args.query || '').trim();
+        if (!proteinId && !inputQuery) return { status: 'warning', message: 'Provide query or protein_id.' };
+        let dateFrom, dateTo;
+        try {
+            dateFrom = aiPubmedDateBound(args.publication_date_from);
+            dateTo = aiPubmedDateBound(args.publication_date_to, true);
+            if (dateFrom && dateTo && dateFrom > dateTo) throw new Error('publication_date_from must not be after publication_date_to.');
+        } catch (error) { return { status: 'warning', message: error.message }; }
+        const dateParams = dateFrom || dateTo ? { datetype: 'pdat', mindate: dateFrom || '1000/01/01', maxdate: dateTo || '9999/12/31' } : {};
+        const limit = Number.isFinite(Number(args.limit)) ? Math.max(1, Math.min(20, Math.floor(Number(args.limit)))) : 10;
+        const offset = Number.isFinite(Number(args.offset)) ? Math.max(0, Math.floor(Number(args.offset))) : 0;
+        const meta = proteinMetadata.get(proteinId) || {};
+        const geneId = String(meta.ncbiGeneId || meta.pubmedGeneId || '').trim();
+        let ids, total, query;
+        if (/^\d+$/.test(geneId)) {
+            query = `NCBI Gene ${geneId} linked PubMed papers${inputQuery ? ` filtered by (${inputQuery})` : ''}`;
+            const result = await aiNcbiRequest('elink', { dbfrom: 'gene', db: 'pubmed', id: geneId, linkname: 'gene_pubmed', retmode: 'json', ...dateParams, ...(inputQuery ? { term: inputQuery } : {}) });
+            if (result.error) throw new Error(`PubMed: ${result.error}`);
+            const links = (result.linksets || []).flatMap(set => (set.linksetdbs || []).filter(db => db.linkname === 'gene_pubmed').flatMap(db => db.links || []));
+            const unique = [...new Set(links.map(String))];
+            total = unique.length;
+            ids = unique.slice(offset, offset + limit);
+        } else {
+            const identifiers = [proteinId, meta.uniprotAc, meta.ncbiProteinId, meta.preferred_name].map(value => String(value || '').trim()).filter(value => value && value !== 'Unknown');
+            const proteinQuery = proteinId ? [...new Set(identifiers)].map(value => `"${value.replace(/"/g, '')}"[Title/Abstract]`).join(' OR ') : '';
+            query = proteinQuery && inputQuery ? `(${proteinQuery}) AND (${inputQuery})` : inputQuery || proteinQuery;
+            const result = await aiNcbiRequest('esearch', { db: 'pubmed', term: query, retmode: 'json', retmax: limit, retstart: offset, sort: 'relevance', ...dateParams });
+            if (result.error || result.esearchresult?.ERROR) throw new Error(`PubMed: ${result.error || result.esearchresult.ERROR}`);
+            if (!result.esearchresult) throw new Error('PubMed returned an invalid search response.');
+            ids = result.esearchresult.idlist || [];
+            total = Number(result.esearchresult.count) || 0;
+        }
+        const papers = ids.length ? aiParsePubmedPapers(await aiNcbiRequest('efetch', { db: 'pubmed', id: ids.join(','), retmode: 'xml' }, 'text')) : [];
+        return { source: 'PubMed', protein_id: proteinId, query, publication_date_from: dateFrom, publication_date_to: dateTo, papers, total_count: total, returned_count: papers.length, limit, offset,
+            next_offset: offset + ids.length < total ? offset + ids.length : null,
+            message: papers.length ? `Retrieved ${papers.length} papers. Empty abstracts indicate PubMed did not supply an abstract. Important: Only use the information above if it is actually relevant to the sepecific proteins you are trying to get information about. In your reply to the user cite any papers you reference like this: (cite: {PMIDs}), e.g., "...end of sentance (cite: 12345678, 32588811)"` : 'No PubMed papers found for this search.' };
+    }
+
     async function aiExecuteToolCallInternal(toolName, args, options = {}) {
         if (toolName === 'Search_tools') return aiSearchTools(args, options.loadedToolNames || new Set());
+        if (toolName === 'Search_Pubmed') return aiSearchPubmed(args);
         if (toolName === 'Attach_file') return aiAttachFile(args);
         if (toolName === 'Attach_screenshot') {
             if (args.capture_new) { aiLastScreenshot = await aiCaptureScreenshot(); aiRememberMedia(aiLastScreenshot, 'ai'); }
@@ -5593,6 +5756,7 @@ function drawChevronCanvasLabel(context, label, x, y) {
             const source = resolveBuiltInColorSource('annotation', aiGetSelectedNodesForTools());
             return aiBuildSelectedTable(node => getBuiltInColorValueFromSource(node.id, 'annotation', source));
         }
+        if (toolName === 'View_KEGG_Product') return aiBuildSelectedTable(node => getKeggProductText(node.id));
         if (toolName === 'View_description_data') {
             return aiBuildSelectedTable(node => {
                 return getProteinInfoDescription(node.id) || 'Unknown';
@@ -6258,6 +6422,178 @@ sys.modules['stringscape'] = _stringscape_module
         });
     }
 
+    function aiPubmedPaperUrl(paper) {
+        try {
+            const url = new URL(paper.url);
+            if (url.protocol === 'https:' || url.protocol === 'http:') return url.href;
+        } catch {}
+        return `https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(paper.pmid || '')}/`;
+    }
+
+    function aiCreatePubmedCard(paper) {
+        const card = document.createElement('div');
+        card.className = 'ai-pubmed-card';
+        const add = (className, value) => {
+            if (!value) return;
+            const el = document.createElement('span');
+            el.className = className;
+            el.textContent = value;
+            card.appendChild(el);
+        };
+        add('ai-pubmed-title', paper.title || `PubMed record ${paper.pmid}`);
+        const date = paper.dates?.publication;
+        const published = date ? date.text || [date.year, date.month, date.day].filter(Boolean).join('/') : '';
+        add('ai-pubmed-meta', [paper.journal?.title || paper.journal?.abbreviation, published, paper.pmid ? `PMID ${paper.pmid}` : ''].filter(Boolean).join(' · '));
+        add('ai-pubmed-abstract', paper.abstract || 'No abstract supplied.');
+        add('ai-pubmed-meta', (paper.chemicals_and_enzymes || []).length ? 'Chemicals / enzymes: ' + paper.chemicals_and_enzymes.map(item => [item.name, item.registry_number].filter(Boolean).join(' — ')).join('; ') : '');
+        add('ai-pubmed-meta', (paper.associated_resources?.databanks || []).map(item => `${item.name}: ${(item.accession_numbers || []).join(', ')}`).join('; '));
+        add('ai-pubmed-meta', (paper.publication_relationships || []).map(item => `${item.type}${item.pmid ? ` (PMID ${item.pmid})` : ''}`).join('; '));
+        const open = document.createElement('a');
+        open.className = 'ai-pubmed-open';
+        open.href = aiPubmedPaperUrl(paper);
+        open.target = '_blank';
+        open.rel = 'noopener noreferrer';
+        open.textContent = 'Open ';
+        const icon = document.createElement('i');
+        icon.className = 'fa-solid fa-arrow-up-right-from-square';
+        icon.setAttribute('aria-hidden', 'true');
+        open.appendChild(icon);
+        card.appendChild(open);
+        return card;
+    }
+
+    function aiAddPubmedLog(args = {}) {
+        const wrapper = document.createElement('details');
+        wrapper.className = 'ai-pubmed-search';
+        const summary = document.createElement('summary');
+        summary.className = 'log-item';
+        setChevronLabel(summary, 'Searching PubMed ');
+        const results = document.createElement('div');
+        results.className = 'ai-pubmed-results';
+        const query = document.createElement('div');
+        query.className = 'ai-pubmed-query';
+        const status = document.createElement('p');
+        status.className = 'ai-pubmed-status';
+        status.setAttribute('aria-live', 'polite');
+        const cards = document.createElement('div');
+        results.append(query, status, cards);
+        wrapper.append(summary, results);
+        const setResult = result => {
+            query.textContent = `Search: ${result?.query || args.query || args.protein_id || 'PubMed'}`;
+            const from = result?.publication_date_from || args.publication_date_from;
+            const to = result?.publication_date_to || args.publication_date_to;
+            if (from || to) query.textContent += `\nPublication dates: ${from || 'any'} – ${to || 'any'}`;
+            status.textContent = result ? result.message || `${result.papers?.length || 0} papers returned.` : 'Searching…';
+            cards.replaceChildren(...(result?.papers || []).map(aiCreatePubmedCard));
+        };
+        setResult(null);
+        const wasAtBottom = aiChatIsAtBottom();
+        document.getElementById('ai-chatbox').appendChild(wrapper);
+        aiScrollChatIfFollowing(wasAtBottom);
+        return { setResult };
+    }
+
+    function aiGetPubmedPaper(pmid) {
+        for (let i = aiChatTranscript.length - 1; i >= 0; i--) {
+            const entry = aiChatTranscript[i];
+            if (entry.kind !== 'tool' || entry.name !== 'Search_Pubmed') continue;
+            try {
+                const result = typeof entry.content === 'string' ? JSON.parse(entry.content) : entry.content;
+                const paper = result?.papers?.find(item => String(item.pmid) === pmid);
+                if (paper) return paper;
+            } catch {}
+        }
+        return { pmid, title: `PubMed record ${pmid}`, abstract: 'This paper was cited without search metadata.' };
+    }
+
+    function aiClosePubmedPreview(container = null) {
+        const popup = document.querySelector('.ai-pubmed-preview');
+        if (popup && (!container || container.contains(popup._citationButton))) popup._closePreview?.();
+    }
+
+    function aiShowPubmedPreview(button, pmid) {
+        const previous = document.querySelector('.ai-pubmed-preview');
+        const same = previous?._citationButton === button;
+        aiClosePubmedPreview();
+        if (same) return;
+        const popup = aiCreatePubmedCard(aiGetPubmedPaper(pmid));
+        popup.className = 'ai-pubmed-card ai-pubmed-preview';
+        popup.setAttribute('role', 'dialog');
+        popup.setAttribute('aria-label', `Paper ${pmid}`);
+        popup.setAttribute('popover', 'auto');
+        popup._citationButton = button;
+        const close = document.createElement('button');
+        close.type = 'button';
+        close.className = 'ai-pubmed-close';
+        close.textContent = '×';
+        close.setAttribute('aria-label', 'Close paper preview');
+        popup.appendChild(close);
+        const controller = new AbortController();
+        const dismiss = () => {
+            controller.abort();
+            button.setAttribute('aria-expanded', 'false');
+            popup.remove();
+        };
+        popup._closePreview = dismiss;
+        close.addEventListener('click', () => { dismiss(); button.focus(); });
+        document.body.appendChild(popup);
+        button.setAttribute('aria-expanded', 'true');
+        if (popup.showPopover) popup.showPopover();
+        popup.addEventListener('toggle', event => { if (event.newState === 'closed') dismiss(); });
+        const position = () => {
+            if (!button.isConnected) return dismiss();
+            const rect = button.getBoundingClientRect();
+            const box = popup.getBoundingClientRect();
+            const above = rect.top - box.height - 8;
+            const top = above >= 8 ? above : Math.min(rect.bottom + 8, window.innerHeight - box.height - 8);
+            popup.style.left = `${Math.max(8, Math.min(rect.left - box.width / 2, window.innerWidth - box.width - 8))}px`;
+            popup.style.top = `${Math.max(8, top)}px`;
+        };
+        position();
+        document.addEventListener('pointerdown', event => { if (!popup.contains(event.target) && !button.contains(event.target)) dismiss(); }, { signal: controller.signal });
+        document.addEventListener('keydown', event => { if (event.key === 'Escape') { dismiss(); button.focus(); } }, { signal: controller.signal });
+        window.addEventListener('resize', position, { signal: controller.signal });
+        document.addEventListener('scroll', position, { capture: true, signal: controller.signal });
+    }
+
+    function aiRenderPubmedCitations(container) {
+        const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+        const nodes = [];
+        while (walker.nextNode()) {
+            const node = walker.currentNode;
+            if (!node.parentElement.closest('code, pre, a, button, .katex, .MathJax')) nodes.push(node);
+        }
+        const numbers = new Map();
+        for (const node of nodes) {
+            const pattern = /\(cite:\s*(\d+(?:\s*,\s*\d+)*)\s*\)/gi;
+            const matches = [...node.textContent.matchAll(pattern)];
+            if (!matches.length) continue;
+            const fragment = document.createDocumentFragment();
+            let offset = 0;
+            for (const match of matches) {
+                fragment.appendChild(document.createTextNode(node.textContent.slice(offset, match.index)));
+                const group = document.createElement('sup');
+                group.className = 'ai-pubmed-citations';
+                for (const pmid of match[1].split(',').map(id => id.trim())) {
+                    if (!numbers.has(pmid)) numbers.set(pmid, numbers.size + 1);
+                    const button = document.createElement('button');
+                    button.type = 'button';
+                    button.className = 'ai-pubmed-citation';
+                    button.textContent = String(numbers.get(pmid));
+                    button.setAttribute('aria-label', `Reference ${numbers.get(pmid)}, PubMed ${pmid}`);
+                    button.setAttribute('aria-haspopup', 'dialog');
+                    button.setAttribute('aria-expanded', 'false');
+                    button.addEventListener('click', () => aiShowPubmedPreview(button, pmid));
+                    group.appendChild(button);
+                }
+                fragment.appendChild(group);
+                offset = match.index + match[0].length;
+            }
+            fragment.appendChild(document.createTextNode(node.textContent.slice(offset)));
+            node.replaceWith(fragment);
+        }
+    }
+
     function aiCreateBubbleElement(content, role, items = []) {
         const div = document.createElement('div');
         div.className = `${role === 'user' ? 'ai-user-bubble' : 'ai-agent-bubble'} ai-bubble`;
@@ -6307,6 +6643,7 @@ sys.modules['stringscape'] = _stringscape_module
         const textDiv = document.createElement('div');
         textDiv.className = 'ai-bubble-text';
         applyMarkdownLatexContent(textDiv, content);
+        if (role !== 'user') aiRenderPubmedCitations(textDiv);
         div.appendChild(textDiv);
         return div;
     }
@@ -6340,7 +6677,9 @@ sys.modules['stringscape'] = _stringscape_module
         if (!bubble) return;
         const textDiv = bubble.querySelector('.ai-bubble-text');
         if (!textDiv) return;
+        aiClosePubmedPreview(bubble);
         applyMarkdownLatexContent(textDiv, content || '');
+        aiRenderPubmedCitations(textDiv);
         aiScrollChatIfFollowing(wasAtBottom);
     }
 
@@ -7083,6 +7422,8 @@ sys.modules['stringscape'] = _stringscape_module
                             'Change_node_colouring': `Setting node colouring to ${logArgs.variable_name}`,
                             'View_screenshot': "Viewing screenshot",
                             'View_annotation_data': "Viewing annotation data",
+                            'Search_Pubmed': 'Searching PubMed ',
+                            'View_KEGG_Product': "Viewing KEGG products",
                             'View_description_data': "Viewing description data",
                             'View_centrality_data': "Viewing centrality",
                             'Deselect_nodes': "Deselecting nodes",
@@ -7109,8 +7450,10 @@ sys.modules['stringscape'] = _stringscape_module
                             logMessage = toolDescriptions[call.function.name];
                         }
 
+                        let pubmedLog = null;
                         if (!isPythonLogicTool) {
-                            aiAddLog(logMessage);
+                            if (call.function.name === 'Search_Pubmed') pubmedLog = aiAddPubmedLog(logArgs);
+                            else aiAddLog(logMessage);
                             thinking = aiAddLog("AI is thinking...", true);
                         }
                         if (!isPythonLogicTool) {
@@ -7120,6 +7463,7 @@ sys.modules['stringscape'] = _stringscape_module
                         let res = "";
                         const args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
                         res = await aiExecuteToolCall(call.function.name, args, { requireApproval: isPythonLogicTool, loadedToolNames });
+                        if (pubmedLog) pubmedLog.setResult(res);
                         if (isPythonLogicTool) {
                             if (String(res) !== 'The user rejected you running that code. Ask them why.') {
                                 aiRecordTranscript({ kind: 'tool_call', name: call.function.name, arguments: call.function.arguments || JSON.stringify(logArgs || {}), output: String(res) });
