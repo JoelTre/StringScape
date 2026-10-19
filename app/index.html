@@ -20,6 +20,7 @@
             https://cdn.jsdelivr.net;
         connect-src 'self' data: blob: https://search.rcsb.org https://swissmodel.expasy.org https://models.rcsb.org https://www.ebi.ac.uk https://rest.uniprot.org
             http://127.0.0.1:1234
+            https://eutils.ncbi.nlm.nih.gov
             https://api.openai.com
             https://api.anthropic.com
             https://generativelanguage.googleapis.com
@@ -1590,6 +1591,26 @@
         .log-item.animate-pulse {
             animation: ai-log-pulse 3s ease-in-out infinite;
         }
+        .ai-pubmed-search { margin: 5px 0; min-width: 0; }
+        .ai-pubmed-search > summary { cursor: pointer; list-style: none; }
+        .ai-pubmed-search > summary::-webkit-details-marker { display: none; }
+        .ai-pubmed-search[open] > summary .fa-chevron-down { transform: rotate(180deg); }
+        .ai-pubmed-results { margin: 8px 0 12px 14px; padding: 12px; border: 1px solid var(--border-color-strong); border-radius: 12px; background: var(--surface-color-panel-alt); }
+        .ai-pubmed-query { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; font-weight: 600; color: var(--text-color); }
+        .ai-pubmed-status { font-size: 11px; color: var(--muted-text-color); margin: 8px 0; }
+        .ai-pubmed-card { display: flex; flex-direction: column; gap: 8px; padding: 14px; margin: 8px 0; border: 1px solid var(--border-color-strong); border-radius: 10px; background: var(--surface-color-panel-alt); color: var(--text-color); text-decoration: none; overflow-wrap: anywhere; transition: border-color .15s, background .15s; }
+        .ai-pubmed-title { font-size: 13px; font-weight: 700; line-height: 1.45; }
+        .ai-pubmed-meta { font-size: 11px; line-height: 1.5; color: var(--muted-text-color); }
+        .ai-pubmed-abstract { font-size: 12px; line-height: 1.6; white-space: pre-wrap; max-height: 200px; overflow-y: auto; }
+        .ai-pubmed-open { color: inherit; text-decoration: none; align-self: flex-end; display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--border-color-strong); font-size: 11px; font-weight: 600; }
+        .ai-pubmed-open:hover { border-color: var(--accent-color, #3498db); background: rgba(52, 152, 219, .18); text-decoration: none; }
+        sup.ai-pubmed-citations { display: inline-flex; gap: 3px; vertical-align: super; line-height: 1; margin: 0 2px; }
+        button.ai-pubmed-citation { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; width: auto; margin: 0; padding: 0 3px; border: 1px solid currentColor; border-radius: 999px; background: transparent; color: var(--accent-color, #3498db); font-size: 10px; font-weight: 800; cursor: pointer; line-height: 1; }
+        .ai-pubmed-citation:hover, .ai-pubmed-citation[aria-expanded="true"] { background: rgba(52, 152, 219, .18); }
+        .ai-pubmed-citation:focus-visible, .ai-pubmed-open:focus-visible, .ai-pubmed-close:focus-visible, .ai-pubmed-search > summary:focus-visible { outline: 2px solid var(--accent-color, #3498db); outline-offset: 3px; }
+        .ai-pubmed-card.ai-pubmed-preview { box-sizing: border-box; position: fixed; inset: auto; margin: 0; width: min(400px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow-y: auto; padding: 14px; border: 1px solid var(--border-color-strong); border-radius: 14px; background: var(--surface-color-panel-alt, #171c24); color: var(--text-color); box-shadow: 0 12px 40px rgba(0, 0, 0, .35); z-index: 100000; }
+        .ai-pubmed-preview .ai-pubmed-title { padding-right: 30px; }
+        button.ai-pubmed-close { position: absolute; top: 11px; right: 10px; width: 24px; height: 24px; margin: 0; padding: 0; background: transparent; border: 0; color: var(--muted-text-color); font-size: 20px; cursor: pointer; }
         .ai-thought-log {
             cursor: pointer;
             user-select: none;
@@ -1729,6 +1750,9 @@
             display: flex;
             gap: 8px;
             flex-wrap: wrap;
+        }
+        #ai-preview-area:not(:empty) {
+            margin-bottom: 6px;
         }
         #ai-input-controls {
             display: flex;
@@ -3489,6 +3513,7 @@
             border-radius: 8px;
             border: 1px solid var(--button-bg); }
         .dropdown-toggle:hover { background-color: var(--button-bg-hover); }
+        .dropdown-toggle.panel-section-heading { font-size: 22px; }
         #progress-wrapper { margin-top: 15px; }
         #progress-container { width: 100%; height: 8px; background: var(--surface-color-panel); border-radius: 4px; overflow: hidden; }
         #progress-bar { width: 0%; height: 100%; background: var(--accent-color); transition: width 0.2s; }
@@ -4824,7 +4849,7 @@
             </div>
         </div>
 
-        <span class="dropdown-toggle">Nodes <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
+        <span class="dropdown-toggle panel-section-heading">Nodes <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
         <div id="nodes-drop" class="dropdown-content">
             <div id="network-merge-controls" style="display:none; margin-bottom:12px;">
                 <button type="button" id="mergeNetworksBtn" class="action-btn" style="width:100%; text-align:center; justify-content:center;">Merge Networks</button>
@@ -4914,7 +4939,7 @@
         </div>
 
         <hr class="dropdown-divider">
-        <span class="dropdown-toggle">Links (edges) <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
+        <span class="dropdown-toggle panel-section-heading">Links (edges) <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
         <div id="links-drop" class="dropdown-content">
             <div id="mergedLinkFilterContainer" style="display:none; margin-bottom:12px;">
                 <label>Show Links From</label>
@@ -4973,13 +4998,13 @@
         </div>
 
         <hr class="dropdown-divider">
-        <span class="dropdown-toggle">Variables <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
+        <span class="dropdown-toggle panel-section-heading">Variables <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
         <div id="variables-drop" class="dropdown-content">
             <button id="pill-blue-btn" style="width:100%;">Variable Settings</button>
         </div>
 
         <hr class="dropdown-divider">
-        <span class="dropdown-toggle">App style <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
+        <span class="dropdown-toggle panel-section-heading">App style <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
         <div id="bg-drop" class="dropdown-content">
             <label>Colour Background By</label>
             <select id="bgMode">
@@ -5027,7 +5052,7 @@
         </div>
 
         <hr class="dropdown-divider">
-        <span class="dropdown-toggle">Physics <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
+        <span class="dropdown-toggle panel-section-heading">Physics <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
         <div id="physics-drop" class="dropdown-content">
             <button id="fullNetworkPhysBtn" style="width:100%; margin-bottom:10px; background:var(--button-bg-hover); color:var(--text-color); border:none; padding:8px 10px; border-radius:999px;">Pause Full Network Physics</button>
             <button id="subnetworkPhysBtn" style="width:100%; margin-bottom:10px; background:var(--button-bg-hover); color:var(--text-color); border:none; padding:8px 10px; border-radius:999px;">Pause Subnetwork Physics</button>
@@ -5052,13 +5077,13 @@
         </div>
 
         <hr class="dropdown-divider">
-        <span class="dropdown-toggle">AI <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
+        <span class="dropdown-toggle panel-section-heading">AI <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
         <div id="ai-drop" class="dropdown-content">
             <button id="ai-open-connection-btn" type="button" style="width:100%;">Connect an AI</button>
         </div>
 
         <hr class="dropdown-divider">
-        <span class="dropdown-toggle">Download <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
+        <span class="dropdown-toggle panel-section-heading">Download <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
         <div id="download-drop" class="dropdown-content">
             <button id="pill-blue-btn" data-download-action="session" style="width:100%;">Save Session...</button>
             <button id="pill-blue-btn" data-download-action="svg" style="width:100%;">Full Canvas (SVG)</button>
