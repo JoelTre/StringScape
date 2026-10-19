@@ -9793,10 +9793,24 @@ self.onmessage = async (event) => {
         } else if (linkWidthMode.startsWith('linkvar::')) {
             const variable = linkWidthMode.slice('linkvar::'.length);
             const stats = getLinkVariableStats(variable);
-            const value = Number(getLinkVariableValue(link, variable));
-            const normalized = Number.isFinite(value) ? clamp01((value - stats.min) / ((stats.max - stats.min) || 1)) : 0;
+            const rawValue = getLinkVariableValue(link, variable);
+            const value = Number(rawValue);
+            const normalized = stats.continuous
+                ? (Number.isFinite(value) ? clamp01((value - stats.min) / ((stats.max - stats.min) || 1)) : 0)
+                : Math.max(0, stats.categories.indexOf(String(rawValue ?? '').trim() || 'N/A')) / Math.max(1, stats.categories.length - 1);
             width = (1 + normalized * 3) * (isHigh ? 2 : 1);
-        } else if (linkMode === 'score') {
+        } else if (linkWidthMode === 'compare') {
+            const context = getActiveLinkComparisonContext();
+            let magnitude = 0;
+            if (context.valid) {
+                magnitude = context.continuous
+                    ? Math.abs(context.differenceFor(link)) / context.maxAbs
+                    : Number(String(context.valueFor(link, context.a) ?? 'N/A') !== String(context.valueFor(link, context.b) ?? 'N/A'));
+            }
+            width = (1 + (Number.isFinite(magnitude) ? clamp01(magnitude) : 0) * 3) * (isHigh ? 2 : 1);
+        } else if (linkWidthMode === 'species' && mergedNetworkState.active) {
+            width = (link._speciesPresence === 'both' ? 4 : 2) * (isHigh ? 2 : 1);
+        } else if (linkWidthMode === 'mono' || linkMode === 'score') {
             width = 2 * (isHigh ? 2 : 1);
         }
 
@@ -14646,17 +14660,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     function updateLinkWidthModeOptions() {
         const select = document.getElementById('linkWidthMode');
         if (!select) return;
-        const currentValue = select.value || 'none';
-        select.innerHTML = '<option value="none">None</option><option value="score">Combined Score</option>';
-        interactionLinkLabelHeaders.forEach(header => {
-            if (header !== 'combined_score' && header !== 'score' && getLinkVariableStats(header).continuous) {
-                const option = document.createElement('option');
-                option.value = `linkvar::${header}`;
-                option.textContent = header;
-                select.appendChild(option);
-            }
-        });
-        select.value = Array.from(select.options).some(option => option.value === currentValue) ? currentValue : 'none';
+        const currentValue = select.value || 'mono';
+        cloneSelectOptions(document.getElementById('linkMode'), select);
+        select.value = Array.from(select.options).some(option => option.value === currentValue) ? currentValue : 'mono';
     }
 
     function getComparisonOptionData(target) {
@@ -14794,10 +14800,13 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             const labelEl = document.createElement('label');
             labelEl.textContent = label;
             const select = document.createElement('select');
+            const location = container.id || (container.closest('#legend-controls') ? 'key' : 'legend');
+            select.id = `${location}-${target}-comparison-${key}`;
             choices.forEach(option => {
                 const element = document.createElement('option');
                 element.value = option.value;
                 element.textContent = option.label;
+                element.dataset.variableType = option.type;
                 select.appendChild(element);
             });
             select.value = state[key];
@@ -14809,6 +14818,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 onChange();
             };
             container.append(labelEl, select);
+            window.enhanceVariableMenu?.(select);
         });
     }
 
@@ -14822,8 +14832,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             if (nodeMode === 'compare') renderComparisonControls(nodeContainer, 'nodes', () => { syncComparisonControls(); updateSizesAndColors(); });
         }
         if (linkContainer) {
-            linkContainer.style.display = linkMode === 'compare' ? '' : 'none';
-            if (linkMode === 'compare') renderComparisonControls(linkContainer, 'links', () => { syncComparisonControls(); refreshLegendForCurrentViewOnly(); draw(); });
+            linkContainer.style.display = linkMode === 'compare' || document.getElementById('linkWidthMode')?.value === 'compare' ? '' : 'none';
+            if (linkContainer.style.display !== 'none') renderComparisonControls(linkContainer, 'links', () => { syncComparisonControls(); refreshLegendForCurrentViewOnly(); draw(); });
         }
     }
 
@@ -24756,6 +24766,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             };
         }
 
+        window.enhanceVariableMenu?.(keyColorSelect);
+
         const comparisonTarget = selectionTargetMode === 'links' ? 'links' : 'nodes';
         const comparisonModeActive = comparisonTarget === 'links'
             ? document.getElementById('linkMode')?.value === 'compare'
@@ -27526,7 +27538,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     };
     document.getElementById('linkWidthSlider').onchange = (e) => aiRecordSetLinkWidthHistory(e.target.value, 'Human');
     const linkWidthModeEl = document.getElementById('linkWidthMode');
-    if (linkWidthModeEl) linkWidthModeEl.onchange = () => draw();
+    if (linkWidthModeEl) linkWidthModeEl.onchange = () => { syncComparisonControls(); draw(); };
     document.getElementById('brightnessSlider').oninput = e => setLinkBrightness(+e.target.value);
     document.getElementById('brightnessSlider').onchange = (e) => aiRecordSetLinkOpacityHistory(e.target.value, 'Human');
     const geneBrightnessSlider = document.getElementById('geneBrightnessSlider');
