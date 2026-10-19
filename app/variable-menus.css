@@ -1,0 +1,50 @@
+.app-variable-trigger {
+    display: flex; align-items: center; justify-content: space-between;
+    width: 100%; padding: .55rem .7rem; border: 1px solid var(--border-color);
+    border-radius: .5rem; background: var(--button-bg-hover); color: var(--text-color);
+    font: inherit; font-size: 13px; text-align: left; cursor: pointer;
+}
+.app-variable-menu {
+    position: fixed; z-index: 10000; box-sizing: border-box;
+    width: min(50rem, calc(100vw - 16px)); max-height: calc(100dvh - 16px);
+    overflow: auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(10rem, 100%), 1fr));
+    gap: .9rem; padding: .75rem; border: 1px solid var(--border-color);
+    border-radius: .75rem; background: var(--surface-color-panel);
+    color: var(--text-color); box-shadow: 0 16px 38px var(--shadow-color);
+}
+.app-variable-menu[hidden] { display: none; }
+.app-variable-menu section { display: flex; flex-direction: column; gap: .35rem; min-width: 0; }
+.app-variable-menu h3 {
+    margin: 0 0 .15rem; color: var(--accent-color-soft); font-size: .78rem;
+    font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+}
+.app-variable-menu button {
+    min-width: 0; padding: .55rem .7rem; border: 0; border-radius: .5rem;
+    background: #334155; color: #e2e8f0; text-align: left;
+    font: inherit; font-size: .8125rem; line-height: 1.25; white-space: normal;
+    overflow-wrap: anywhere; cursor: pointer;
+}
+.app-variable-menu button[aria-pressed="true"] { background: var(--button-bg-hover); color: var(--text-color); }
+.app-variable-menu button:focus-visible, .app-variable-trigger:focus-visible { outline: 2px solid var(--accent-color-soft); outline-offset: 2px; }
+.app-variable-menu button:disabled, .app-variable-trigger:disabled { opacity: .5; cursor: default; }
+.app-variable-menu button { margin: 0; width: 100%; }
+.app-variable-trigger { margin-top: 6px; }
+
+/* Only the selected option uses the Start Guide button colour. */
+.app-variable-menu button:hover { background: #475569; }
+.app-variable-menu button[aria-pressed="true"]:hover,
+.app-variable-trigger:hover { background: color-mix(in srgb, var(--button-bg-hover), white 12%); }
+body.light-mode .app-variable-menu button,
+body.light-mode .app-variable-trigger { background: #e2e8f0; color: #334155; }
+body.light-mode .app-variable-menu button:hover,
+body.light-mode .app-variable-trigger:hover { background: #cbd5e1; }
+body.light-mode .app-variable-menu button[aria-pressed="true"] {
+    background: var(--button-bg-hover); color: var(--text-color);
+}
+body.light-mode .app-variable-menu button[aria-pressed="true"]:hover {
+    background: color-mix(in srgb, var(--button-bg-hover), black 12%);
+}
+.app-variable-menu-compact {
+    width: min(20rem, calc(100vw - 16px));
+    grid-template-columns: minmax(0, 1fr);
+}
