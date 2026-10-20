@@ -224,7 +224,8 @@
             transition: right 0.4s cubic-bezier(0.4, 0, 0.2, 1);
             align-items: flex-end;
         }
-        #pill-blue-btn {
+        #pill-blue-btn,
+        #protein-info-box .protein-nav-btn {
             width: auto;
             padding: 8px 18px;
             /* Change border color to transparent to reveal the gradient underneath */
@@ -244,7 +245,8 @@
             cursor: pointer;
             transition: filter 0.2s ease, transform 0.2s ease;
         }
-        #pill-blue-btn:hover {
+        #pill-blue-btn:hover,
+        #protein-info-box .protein-nav-btn:hover {
             filter: brightness(1.12);
             transform: translateY(-2px); /* Subtle lift on hover for better interactivity feedback */
         }
@@ -1952,12 +1954,13 @@
         }
 
         #protein-info-header {
+            flex: 0 0 auto;
             display: flex;
-            align-items: flex-start;
+            align-items: center;
             justify-content: flex-start;
             gap: 8px;
             flex-wrap: nowrap;
-            overflow: hidden;
+            overflow: visible;
             position: relative;
             z-index: 2;
         }
@@ -1974,16 +1977,38 @@
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
-            flex: 0 0 auto;
+            flex: 0 1 auto;
+            max-width: 25%;
         }
 
         #protein-info-toggle-group {
             display: flex;
-            flex-wrap: wrap; /* Allows buttons to move to the next line */
-            flex: 1;
-            gap: 8px; /* Adds space between the buttons horizontally and vertically */
-            /* Remove overflow-x: auto; and white-space: nowrap; */
+            flex-wrap: nowrap;
+            flex: 1 1 0;
+            min-width: 80px;
+            gap: 8px;
+            position: relative;
         }
+        #protein-info-toggle-group > button { flex: 0 0 auto; }
+        #protein-info-toggle-group > button[hidden], #protein-info-overflow-menu[hidden] { display: none; }
+        #protein-info-overflow-menu {
+            position: absolute;
+            top: calc(100% + 8px);
+            right: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            padding: 8px;
+            min-width: 170px;
+            max-height: 240px;
+            overflow-y: auto;
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            background: var(--surface-color-panel);
+            box-shadow: 0 8px 24px var(--shadow-color);
+            z-index: 5;
+        }
+        #protein-info-overflow-menu button { text-align: left; width: 100%; }
 
         /* Used for the options Annotation, Description, etc.*/
         .protein-info-mode-btn {
@@ -2072,7 +2097,7 @@
 
         #protein-info-body {
             margin-top: 14px;
-            flex: 1 1 auto;
+            flex: 1 1 0;
             min-height: 0;
             overflow: auto;
             padding-right: 6px;
@@ -2099,6 +2124,60 @@
             color: #9ad0ff;
             font-size: 13px;
             margin-bottom: 8px;
+        }
+
+        .protein-enrichment-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+            gap: 12px;
+        }
+        .protein-enrichment-card {
+            padding: 14px 16px;
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            background: var(--surface-color-panel);
+            overflow-wrap: anywhere;
+        }
+        .protein-enrichment-card h4 {
+            margin: 0 0 8px;
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--text-color);
+        }
+        #protein-info-box .protein-enrichment-control {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            width: auto;
+            margin: 0;
+            padding: 6px 10px;
+            border: none;
+            border-radius: 15px;
+            background: var(--button-bg-hover);
+            color: var(--text-color);
+            font-size: 12px;
+            font-weight: bold;
+            line-height: 1.4;
+            text-align: left;
+            text-decoration: none;
+            white-space: normal;
+            cursor: pointer;
+            transition: filter 0.2s ease;
+        }
+        #protein-info-box .protein-enrichment-control:hover { filter: brightness(1.12); }
+        #protein-info-box .protein-enrichment-external { background: var(--button-bg); color: var(--text-color); }
+        #protein-info-box .protein-enrichment-download { margin-bottom: 12px; }
+        .protein-enrichment-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+        .protein-enrichment-toolbar span { font-size: 12px; color: var(--muted-text-color); }
+        #protein-info-box .protein-enrichment-toolbar .protein-enrichment-download { flex: 0 0 auto; margin-bottom: 0; }
+        .protein-enrichment-tags, .protein-enrichment-footer { display: flex; flex-wrap: wrap; gap: 8px; }
+        .protein-enrichment-tag { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; }
+        .protein-enrichment-footer { margin-top: 14px; }
+        .protein-enrichment-card p {
+            margin: 0;
+            line-height: 1.6;
+            color: var(--muted-text-color);
         }
 
         #protein-structure-viewer-host {
@@ -2131,17 +2210,12 @@
             transform: translateY(-50%);
             width: 34px;
             height: 92px;
-            border-radius: 999px;
-            border: 1px solid var(--border-color-strong);
-            background: linear-gradient(180deg, var(--accent-color), var(--accent-color-strong));
-            color: var(--accent-contrast);
-            font-size: 24px;
-            font-weight: 700;
+            border-radius: 15px;
+            padding: 0;
             cursor: pointer;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            box-shadow: 0 6px 16px var(--shadow-color);
         }
 
         #protein-info-box #protein-info-prev-btn {
@@ -2391,6 +2465,37 @@
             font-size: 12px;
             cursor: pointer;
             pointer-events: auto;
+        }
+
+        .chart-plot-controls {
+            position: fixed; transform: translateX(-50%); z-index: 8;
+            box-sizing: border-box; background: var(--surface-color);
+            border: 1px solid var(--border-color); border-radius: 14px;
+            padding: 10px 12px; box-shadow: 0 8px 18px var(--shadow-color);
+        }
+        .chart-plot-controls label {
+            display: block; font-size: 12px; color: var(--muted-text-color);
+            margin-bottom: 4px; text-align: center;
+        }
+
+        .chart-plot-controls { align-items: flex-end; gap: 8px; }
+        .chart-plot-source .app-variable-trigger { box-sizing: border-box; height: 36px; margin: 6px 0 0; }
+        .chart-plot-source { flex: 1; min-width: 0; }
+        .chart-plot-icon-button {
+            width: 36px; height: 36px; flex: 0 0 36px; margin: 0;
+            border: 1px solid var(--border-color); border-radius: 8px;
+            background: var(--button-bg-hover); color: var(--text-color); cursor: pointer;
+        }
+        .chart-plot-icon-button:hover { background: var(--accent-color); }
+        .chart-setting-field { display: grid; gap: 6px; }
+        .chart-setting-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        .chart-setting-label label { font-size: 13px; }
+        .chart-settings-menu .chart-setting-reset { width: auto; padding: 3px 6px; flex: 0 0 auto; }
+        .chart-setting-reset[hidden] { display: none; }
+        .chart-settings-menu input {
+            box-sizing: border-box; width: 100%; padding: 8px 10px;
+            border: 1px solid var(--input-border); border-radius: 8px;
+            background: var(--input-bg); color: var(--text-color);
         }
 
         #scatter-controls {
@@ -3224,7 +3329,9 @@
             max-width: 100%;
             cursor: pointer;
         }
-        #analytics-toggle {
+        #analytics-toggle,
+        #includeStringScapeLogo,
+        .settings-switch {
             appearance: none;
             -webkit-appearance: none;
             position: relative;
@@ -3239,7 +3346,9 @@
             cursor: pointer;
             transition: background-color 180ms ease, border-color 180ms ease;
         }
-        #analytics-toggle::before {
+        #analytics-toggle::before,
+        #includeStringScapeLogo::before,
+        .settings-switch::before {
             content: '';
             position: absolute;
             top: 3px;
@@ -3251,20 +3360,28 @@
             box-shadow: 0 1px 3px var(--shadow-color);
             transition: transform 180ms ease, background-color 180ms ease;
         }
-        #analytics-toggle:checked {
-            background: var(--accent-color);
-            border-color: var(--accent-color);
+        #analytics-toggle:checked,
+        #includeStringScapeLogo:checked,
+        .settings-switch:checked {
+            background: var(--button-bg-hover);
+            border-color: var(--button-bg-hover);
         }
-        #analytics-toggle:checked::before {
+        #analytics-toggle:checked::before,
+        #includeStringScapeLogo:checked::before,
+        .settings-switch:checked::before {
             transform: translateX(18px);
-            background: var(--accent-contrast);
+            background: var(--text-color);
         }
-        #analytics-toggle:focus-visible {
+        #analytics-toggle:focus-visible,
+        #includeStringScapeLogo:focus-visible,
+        .settings-switch:focus-visible {
             outline: 2px solid var(--accent-color-soft);
             outline-offset: 3px;
         }
         @media (prefers-reduced-motion: reduce) {
-            #analytics-toggle, #analytics-toggle::before { transition: none; }
+            #analytics-toggle, #analytics-toggle::before,
+            #includeStringScapeLogo, #includeStringScapeLogo::before,
+            .settings-switch, .settings-switch::before { transition: none; }
         }
 
         input[type="range"] { padding: 0; cursor: pointer; }
@@ -3392,7 +3509,13 @@
 
         .search-container { display: flex; gap: 5px; margin-bottom: 5px; height: 36px; align-items: stretch; }
         .search-container input, .search-container button { margin: 0; height: 100%; vertical-align: middle; }
-        #searchInput { flex: 1; }
+        #search-input-wrap { position: relative; flex: 1; min-width: 0; }
+        #searchInput { width: 100%; box-sizing: border-box; }
+        #searchInput, #searchBtn { border-radius: 15px; }
+        #search-input-wrap.search-improving #searchInput { color: transparent; caret-color: transparent; }
+        #smart-search-loading { position: absolute; inset: 0; display: flex; align-items: center; gap: 7px; padding: 0 10px; color: color-mix(in srgb, var(--muted-text-color) 60%, white); font-size: 13px; pointer-events: none; }
+        #smart-search-loading[hidden] { display: none; }
+        #smart-search-label { font-size: 15px; color: var(--accent-color-soft); font-weight: 600; }
         #searchBtn { width: 80px; padding: 0 5px; color: white; transition: filter 0.2s ease;  }
         #searchBtn:hover { background-color: var(--accent-color-soft); }
 
@@ -3920,6 +4043,11 @@
             overflow: visible;
             text-overflow: clip;
             word-break: break-word;
+        }
+        #node-info-table-wrap .node-info-search-match {
+            background: #ffe082;
+            color: #1a1a1a;
+            border-radius: 2px;
         }
         #node-info-table-wrap th {
             position: sticky;
@@ -4555,6 +4683,8 @@
         }
         /* Main controls share the theme's button highlight colour. */
         #pill-blue-btn,
+        #protein-info-box:not(.nav-disabled) .protein-nav-btn,
+        #loadExampleBtn,
         .upload-inline-open-btn,
         .upload-inline-open-btn:hover,
         #ai-open-connection-btn,
@@ -4921,17 +5051,15 @@
             <label>Node Glow <span id="val-glw" class="slider-val">0</span></label>
             <input type="range" id="glowSlider" min="0" max="500" step="1" value="0">
 
-            <label>Nodes</label>
-            <div id="nodeVisibilityToggle" class="link-direction-toggle" role="group" aria-label="Node Visibility Toggle" style="margin-bottom:8px;">
-                <button type="button" id="nodeHide" class="link-direction-option">Hide</button>
-                <button type="button" id="nodeShow" class="link-direction-option active">Show</button>
-            </div>
+            <label id="nodeVisibilityToggle" class="analytics-toggle-row" style="width:100%; justify-content:space-between; margin-bottom:8px;">
+                <span>Show Nodes</span>
+                <input id="nodeShow" class="settings-switch" type="checkbox" role="switch" checked>
+            </label>
 
-            <label>Node Labels</label>
-            <div id="nodeLabelToggle" class="link-direction-toggle" role="group" aria-label="Node Label Toggle" style="margin-bottom:8px;">
-                <button type="button" id="nodeLabelHide" class="link-direction-option active">Hide</button>
-                <button type="button" id="nodeLabelShow" class="link-direction-option">Show</button>
-            </div>
+            <label id="nodeLabelToggle" class="analytics-toggle-row" style="width:100%; justify-content:space-between; margin-bottom:8px;">
+                <span>Show Node Labels</span>
+                <input id="nodeLabelShow" class="settings-switch" type="checkbox" role="switch" checked>
+            </label>
             <div id="nodeLabelFieldContainer" style="display:none; margin-top:8px;">
                 <label>Node Labels</label>
                 <select id="nodeLabelField"></select>
@@ -4968,21 +5096,19 @@
                 <option value="between_selected">Links between selected nodes</option>
             </select>
 
-            <label>Link Labels</label>
-            <div id="linkLabelToggle" class="link-direction-toggle" role="group" aria-label="Link Label Toggle" style="margin-bottom:8px;">
-                <button type="button" id="linkLabelHide" class="link-direction-option active">Hide</button>
-                <button type="button" id="linkLabelShow" class="link-direction-option">Show</button>
-            </div>
+            <label id="linkLabelToggle" class="analytics-toggle-row" style="width:100%; justify-content:space-between; margin-bottom:8px;">
+                <span>Show Link Labels</span>
+                <input id="linkLabelShow" class="settings-switch" type="checkbox" role="switch">
+            </label>
             <div id="linkLabelFieldContainer" style="display:none; margin-top:8px;">
                 <label>Link Label Column</label>
                 <select id="linkLabelField"></select>
             </div>
 
-            <label>Link Direction Arrows</label>
-            <div id="linkDirectionToggle" class="link-direction-toggle" role="group" aria-label="Link Direction Toggle">
-                <button type="button" id="linkDirectionOff" class="link-direction-option active">Off</button>
-                <button type="button" id="linkDirectionOn" class="link-direction-option">On</button>
-            </div>
+            <label id="linkDirectionToggle" class="analytics-toggle-row" style="width:100%; justify-content:space-between; margin-bottom:8px;">
+                <span>Show Link Direction Arrows</span>
+                <input id="linkDirectionOn" class="settings-switch" type="checkbox" role="switch">
+            </label>
 
             <label>Link Width <span id="val-linkw" class="slider-val">1</span></label>
             <input type="range" id="linkWidthSlider" min="0.2" max="5" step="0.1" value="1">
@@ -5088,10 +5214,10 @@
             <button id="pill-blue-btn" data-download-action="session" style="width:100%;">Save Session...</button>
             <button id="pill-blue-btn" data-download-action="svg" style="width:100%;">Full Canvas (SVG)</button>
             <button id="pill-blue-btn" data-download-action="png-8k" style="width:100%;">Full Canvas (PNG 8k)</button>
-            <div style="display:flex; align-items:center; gap:8px; margin:10px 0 8px 0; color:#ddd; font-size:0.92em;">
-                <input type="checkbox" id="includeStringScapeLogo" checked style="width:auto; margin:0;">
-                <label for="includeStringScapeLogo" style="margin:0; cursor:pointer;">Include StringScape Logo</label>
-            </div>
+            <label class="analytics-toggle-row" style="width:100%; justify-content:space-between; margin:10px 0 8px 0; font-size:0.92em;">
+                <span>Include StringScape Logo</span>
+                <input type="checkbox" id="includeStringScapeLogo" role="switch" checked>
+            </label>
             <button id="drawFrameBtn" class="drawFrame-btn">Draw Frame</button>
 
             <div id="frame-controls" style="display:none; margin-top:10px; border-top: 1px solid #444; padding-top: 10px;">
@@ -5149,7 +5275,7 @@
         <span class="close-modal">&times;</span>
         <h3>Start Guide</h3>
         <div style="margin-top: 10px;">
-            <button id="loadExampleBtn" class="pill-blue-btn" style="background-color: var(--accent-color); color: var(--accent-contrast); cursor: pointer;">
+            <button id="loadExampleBtn" class="pill-blue-btn" style="cursor: pointer;">
                 Load Example Dataset (<i>E. coli</i> K-12)
             </button>
         </div>
@@ -5253,9 +5379,11 @@
     <div id="right-panel-toggle-tab" class="toggle-tab"><span>▸</span></div>
     <div id="right-panel-content">
             <div id="right-panel-static">
-        <label>Search Protein IDs or Terms</label>
         <div class="search-container">
-            <input type="text" id="searchInput" placeholder="Search...">
+            <div id="search-input-wrap">
+                <input type="text" id="searchInput" placeholder="Search..." aria-label="Search proteins">
+                <span id="smart-search-loading" role="status" hidden><i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Improving search...</span>
+            </div>
             <button id="searchBtn">Search</button>
         </div>
         <div id="moreToggle" class="Selection-tools-btn">Selection Tools <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></div>
@@ -5282,8 +5410,15 @@
                 <button id="lassoBtn">Lasso Select</button>
                 <button id="brushBtn">Brush Select</button>
             </div>
+            <label class="analytics-toggle-row" style="width:100%; justify-content:space-between; margin-top:12px;">
+                <span id="smart-search-label">Smart search</span>
+                <input id="smart-search-toggle" class="settings-switch" type="checkbox" role="switch" aria-describedby="smart-search-description smart-search-status">
+            </label>
+            <p id="smart-search-description" style="font-size:0.85em; color:var(--muted-text-color);">Smart search uses AI to convert your general search term(s) into a smarter search string.</p>
+            <p id="smart-search-status" role="status" hidden style="font-size:0.85em; color:var(--muted-text-color);"></p>
             <label>Restrict search to</label>
             <select id="searchScope">
+                <option value="all_minus_sequences" selected>All minus sequences</option>
                 <option value="all">All</option>
                 <option value="preferred_name">Preferred names only</option>
                 <option value="layer">Degrees of Separation</option>
@@ -5521,8 +5656,8 @@
         </div>
         <div id="protein-info-box" aria-label="Protein information panel">
             <div id="protein-info-resize-handle"></div>
-            <button id="protein-info-prev-btn" class="protein-nav-btn" type="button" aria-label="Previous protein">&lt;</button>
-            <button id="protein-info-next-btn" class="protein-nav-btn" type="button" aria-label="Next protein">&gt;</button>
+            <button id="protein-info-prev-btn" class="protein-nav-btn" type="button" aria-label="Previous protein"><i class="fa-solid fa-chevron-left" aria-hidden="true"></i></button>
+            <button id="protein-info-next-btn" class="protein-nav-btn" type="button" aria-label="Next protein"><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>
             <div id="protein-info-header">
                 <div id="protein-info-heading-wrap">
                     <h4 id="protein-info-heading"></h4>
@@ -5533,7 +5668,10 @@
                     <button type="button" class="protein-info-mode-btn" data-protein-mode="sequence">Sequence</button>
                     <button type="button" class="protein-info-mode-btn" data-protein-mode="structure">Structure</button>
                     <button type="button" class="protein-info-mode-btn" data-protein-mode="links">Links</button>
+                    <button type="button" class="protein-info-mode-btn" data-protein-mode="enrichment">Enrichment</button>
                     <button type="button" class="protein-info-mode-btn" data-protein-mode="guide">Guides</button>
+                    <button id="protein-info-overflow-btn" type="button" class="protein-info-mode-btn" aria-expanded="false" aria-controls="protein-info-overflow-menu" hidden>More <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button>
+                    <div id="protein-info-overflow-menu" aria-label="More protein info options" hidden></div>
                 </div>
                 <div id="protein-info-actions">
                     <button id="protein-info-explain-btn" type="button" class="protein-info-mode-btn">Explain in Simple English</button>
