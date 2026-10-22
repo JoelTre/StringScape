@@ -1906,7 +1906,7 @@
             width: calc(100vw - 680px - var(--ai-panel-offset)); 
             margin-right: calc(var(--ai-panel-offset));
             margin-left: 0px;
-            transition: width 0.3s ease-in-out, margin-right 0.3s ease-in-out;
+            transition: width 0.3s ease-in-out, margin-right 0.3s ease-in-out, transform 0.3s ease-in-out;
             box-sizing: border-box;
             display: none;
             border: 1px solid var(--border-color);
@@ -1914,7 +1914,13 @@
             padding: 16px 64px 16px 64px;
             box-shadow: 0 12px 36px var(--shadow-color);
             color: var(--text-color);
-            background: var(--surface-color-soft);
+            background: var(--surface-color);
+        }
+
+        /* Reclaim the 310px released by the collapsed left panel, keeping the right edge fixed. */
+        #ui-layer.minimized ~ #view-selector-container #protein-info-box {
+            width: calc(100vw - 370px - var(--ai-panel-offset));
+            transform: translateX(-155px);
         }
 
         #protein-info-box.open {
@@ -1942,15 +1948,15 @@
             width: 72px;
             height: 4px;
             border-radius: 999px;
-            background: var(--accent-color-soft);
+            background: var(--button-bg-hover);
         }
 
         #protein-info-resize-handle:hover::after {
-            background: var(--accent-color);
+            background: var(--button-bg-hover);
         }
 
         #protein-info-box.resizing #protein-info-resize-handle::after {
-            background: var(--accent-color);
+            background: var(--button-bg-hover);
         }
 
         #protein-info-header {
@@ -2203,6 +2209,57 @@
             background-color: inherit !important;
         }
 
+        .markdown-table-scroll { max-width:100%; overflow-x:auto; margin:12px 0; border:1px solid var(--border-color); border-radius:10px; }
+        .markdown-table { width:100%; border-collapse:collapse; font-size:13px; line-height:1.5; }
+        .markdown-table th, .markdown-table td { padding:9px 12px; border-bottom:1px solid var(--border-color); vertical-align:top; min-width:90px; }
+        .markdown-table th { font-weight:700; background:var(--button-bg); }
+        .markdown-table tbody tr:last-child td { border-bottom:0; }
+        .markdown-table tbody tr:nth-child(even) { background:#64748b0b; }
+        .markdown-url-link { color:#38bdf8; text-decoration:underline; text-underline-offset:3px; overflow-wrap:anywhere; }
+        .markdown-url-link:hover { color:#7dd3fc; }
+        .markdown-url-link:focus-visible { outline:2px solid currentColor; outline-offset:3px; border-radius:2px; }
+        .protein-orthology-view { padding:4px; }
+        .protein-orthology-intro { padding:8px 18px; border-radius:16px; background:linear-gradient(120deg,#38bdf815,#a78bfa10); border:1px solid #64748b44; line-height:1.65; }
+        .protein-orthology-intro > strong { font-size:16px; }
+        .protein-orthology-intro p { margin:5px 0; font-size:13px; }
+        .protein-orthology-intro a { font-size:12px; }
+        .protein-orthology-summary { margin:18px 0 8px; font-weight:600; }
+        .protein-orthology-scope { display:grid; grid-template-columns:minmax(130px, .7fr) minmax(0,2fr); gap:18px; padding:18px 0; border-top:1px solid #64748b33; }
+        .protein-orthology-scope-heading { display:flex; flex-direction:column; gap:6px; overflow-wrap:anywhere; }
+        .protein-orthology-scope-heading span { font-size:11px; opacity:.65; }
+        .protein-orthology-assignments { display:grid; gap:10px; }
+        .protein-orthology-assignment { padding:12px; border:1px solid #64748b44; border-radius:12px; }
+        .protein-orthology-assignment.shared { border-color:#2dd4bf77; background:#14b8a60b; }
+        .protein-orthology-group-heading { display:flex; flex-wrap:wrap; align-items:center; gap:10px; justify-content:space-between; }
+        .protein-orthology-group-id { color:var(--text-color); font-size:14px; font-weight:700; overflow-wrap:anywhere; }
+        .protein-orthology-count { font-size:11px; opacity:.75; }
+        .protein-orthology-members { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+        .protein-orthology-members button.protein-homology-identity { width:auto; flex:0 0 auto; max-width:100%; margin:0; overflow-wrap:anywhere; text-align:left; }
+        .protein-orthology-empty { opacity:.75; line-height:1.6; margin:16px 0; }
+        @media (max-width:600px) { .protein-orthology-scope { grid-template-columns:1fr; gap:12px; } }
+        .protein-homology-view { padding: 4px; }
+        .protein-homology-toolbar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; }
+        .protein-homology-toolbar button:disabled { opacity:.45; cursor:default; }
+        .protein-homology-note { opacity:.7; font-size:12px; line-height:1.6; margin:14px 0; }
+        .protein-homology-pair { margin:24px 0; }
+        .protein-homology-score { position:absolute; top:68px; left:50%; transform:translate(-50%,-50%); color:var(--text-color); opacity:.9; font-size:12px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+        .protein-homology-ancestor { position:relative; padding-right:72px; height:128px; }
+        .protein-homology-ancestor-title { position:relative; display:block; top:68px; transform:translateY(-50%); font-size:13px; line-height:20px; }
+        .protein-homology-ancestor::after { content:""; position:absolute; right:36px; top:68px; width:24px; border-top:1px solid #94a3b888; }
+        .protein-homology-branches { position:absolute; top:38px; right:0; height:60px; width:36px; border:1px solid #94a3b888; border-right:0; border-radius:4px 0 0 4px; }
+        .protein-homology-alignment { display:grid; grid-template-columns:max-content max-content minmax(280px,1fr); column-gap:12px; overflow-x:auto; }
+        .protein-homology-labels { position:relative; display:grid; grid-template-rows:60px 60px; padding-top:8px; height:128px; }
+        .protein-homology-row { display:flex; align-items:center; gap:10px; white-space:nowrap; }
+        .protein-homology-identity { display:inline-flex; align-items:center; font:inherit; padding:5px 12px; border-radius:14px; }
+        .protein-homology-id { font-size:12px; }
+        .protein-homology-species { font-size:12px; opacity:.85; }
+        button.protein-homology-identity { color:inherit; background:#38bdf815; border:1px solid #38bdf855; cursor:pointer; }
+        button.protein-homology-identity:hover:not(:disabled) { background:#38bdf82b; border-color:#38bdf8; }
+        button.protein-homology-identity:disabled { opacity:.65; cursor:default; }
+        .protein-homology-selection-note { flex:1; font-size:12px; opacity:.8; }
+        .protein-homology-diagram { position:relative; height:128px; margin:0 16px; min-width:280px; }
+        .protein-homology-diagram svg { display:block; width:100%; height:128px; overflow:visible; }
+        .protein-homology-coordinates { position:absolute; transform:translateX(-50%); white-space:nowrap; font-size:12px; opacity:.75; font-variant-numeric:tabular-nums; }
         /* Navigation buttons on the sides of the protein info box for switching between proteins in a list */
         #protein-info-box .protein-nav-btn {
             position: absolute !important;
@@ -2229,6 +2286,7 @@
         }
 
         #protein-info-box.nav-disabled .protein-nav-btn {
+            display: none;
             background: linear-gradient(180deg, var(--button-bg), var(--button-bg-hover));
             color: var(--muted-text-color);
             opacity: 0.5;
@@ -2255,39 +2313,77 @@
             padding: 0 42px;
         }
 
-        #view-selector-box.locked-open { height: auto !important; }
+        /* Anchor the button below its popup, with curved shoulders joining them. */
+        #view-selector-box { overflow: visible; }
 
-        #view-selector-box:hover {
-            border-radius: 20px;
-            min-width: 260px;
-            height: auto;
-            width: auto;
-            padding: 5px 10px 10px 10px; 
+        #view-selector-box:hover,
+        #view-selector-box.locked-open {
+            border-top-color: transparent;
+            border-radius: 0 0 20px 20px;
+        }
+
+        #view-selector-box::before,
+        #view-selector-box::after {
+            content: "";
+            display: none;
+            position: absolute;
+            top: -9px;
+            width: 21px;
+            height: 21px;
+            pointer-events: none;
+            z-index: 13;
+        }
+
+        #view-selector-box::before {
+            right: 100%;
+            background: radial-gradient(circle at 0 100%, transparent 19px, var(--border-color) 19px 20px, var(--surface-color) 20px);
+        }
+
+        #view-selector-box::after {
+            left: 100%;
+            background: radial-gradient(circle at 100% 100%, transparent 19px, var(--border-color) 19px 20px, var(--surface-color) 20px);
+        }
+
+        #view-selector-box:hover::before,
+        #view-selector-box:hover::after,
+        #view-selector-box.locked-open::before,
+        #view-selector-box.locked-open::after { display: block; }
+
+        /* Fill the raised menu's neck and keep the hover path continuous. */
+        #view-selector-box:hover > span::before,
+        #view-selector-box.locked-open > span::before {
+            content: "";
+            position: absolute;
+            top: -9px;
+            left: -1px;
+            right: -1px;
+            height: 9px;
+            box-sizing: border-box;
             background: var(--surface-color);
-        }
-
-        #view-selector-box:hover #current-view-label {
-            display: none;
-        }
-
-        #view-selector-box:hover #current-view-label {
-            display: none;
+            border-inline: 1px solid var(--border-color);
         }
 
         #view-options {
             display: none;
-            gap: 8px; /* Increased slightly for better spacing */
+            gap: 8px;
             grid-template-columns: 1fr 1fr;
             grid-auto-flow: row;
-            width: 100%;
-            background: transparent;
-            border: none;
-            padding: 0;
-            position: static;
+            box-sizing: border-box;
+            width: max(386px, calc(100% + 44px));
+            max-width: calc(100vw - 40px);
+            background: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            padding: 10px 10px 24px;
+            position: absolute;
+            bottom: calc(100% + 7px);
+            left: 50%;
+            transform: translateX(-50%);
             margin: 0;
-            z-index: 12;
-            max-height: 660px;
+            z-index: 14; /* Keep the full bottom border above both curved joins. */
+            max-height: min(660px, calc(100dvh - 100px));
             overflow-y: auto;
+            cursor: default;
         }
 
         #view-options.three-col-grid {
@@ -2757,20 +2853,15 @@
         #view-selector-box:hover #view-options,
         #view-selector-box.locked-open #view-options {
             display: grid !important;
-            margin-top: 8px;
-        }
-
-        #view-selector-box.form-mode {
-            min-width: 230px !important;
-            width: 230px !important;
-            padding: 15px !important;
+            margin-top: 0;
         }
 
         #view-selector-box.form-mode #view-options {
             display: flex !important;
             flex-direction: column !important;
             align-items: center !important;
-            width: 100% !important;
+            width: max(260px, calc(100% + 44px)) !important;
+            padding: 15px 15px 24px;
         }
 
         #view-selector-box.form-mode input {
@@ -4683,6 +4774,7 @@
         }
         /* Main controls share the theme's button highlight colour. */
         #pill-blue-btn,
+        #protein-info-toggle-btn,
         #protein-info-box:not(.nav-disabled) .protein-nav-btn,
         #loadExampleBtn,
         .upload-inline-open-btn,
@@ -4981,6 +5073,18 @@
 
         <span class="dropdown-toggle panel-section-heading">Nodes <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
         <div id="nodes-drop" class="dropdown-content">
+            <label class="analytics-toggle-row" style="width:100%; justify-content:space-between; margin-bottom:8px;">
+                <span>Network labels</span>
+                <input id="networkLabelShow" class="settings-switch" type="checkbox" role="switch" checked>
+            </label>
+            <div id="networkLabelControls">
+                <label for="networkLabelPriority">Priority: node count <span id="networkLabelPriorityValue" class="slider-val">50%</span></label>
+                <input type="range" id="networkLabelPriority" min="0" max="1" step="0.01" value="0.5" title="0%: compactness only; 100%: node count only">
+                <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:8px;"><span>Compactness</span><span>Node count</span></div>
+                <label for="networkLabelSize">Network label size <span id="networkLabelSizeValue" class="slider-val">10px</span></label>
+                <input type="range" id="networkLabelSize" min="8" max="20" step="1" value="10">
+            </div>
+
             <div id="network-merge-controls" style="display:none; margin-bottom:12px;">
                 <button type="button" id="mergeNetworksBtn" class="action-btn" style="width:100%; text-align:center; justify-content:center;">Merge Networks</button>
                 <div id="mergeNetworksHelp" style="font-size:11px; color:#aaa; margin-top:5px;"></div>
@@ -5003,7 +5107,6 @@
                 <option value="collection">Collection</option>
                 <option value="annotation">Annotation length</option>
                 <option value="characterization">Characterization</option>
-                <option value="localization">Protein localisation</option>
                 <option value="size">Protein size</option>
                 <option value="pdb_structure_count">PDB structure count</option>
                 <option value="random">Random</option>
@@ -5652,7 +5755,7 @@
                 <span id="current-view-label">Full Network</span>
                 <div id="view-options"></div>
             </div>
-            <button id="protein-info-toggle-btn" type="button" class="hidden">View Protein Info</button>
+            <button id="protein-info-toggle-btn" type="button" class="hidden"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> Protein info</button>
         </div>
         <div id="protein-info-box" aria-label="Protein information panel">
             <div id="protein-info-resize-handle"></div>
@@ -5669,6 +5772,8 @@
                     <button type="button" class="protein-info-mode-btn" data-protein-mode="structure">Structure</button>
                     <button type="button" class="protein-info-mode-btn" data-protein-mode="links">Links</button>
                     <button type="button" class="protein-info-mode-btn" data-protein-mode="enrichment">Enrichment</button>
+                    <button type="button" class="protein-info-mode-btn" data-protein-mode="homology">Homology</button>
+                    <button type="button" class="protein-info-mode-btn" data-protein-mode="orthology">Orthology</button>
                     <button type="button" class="protein-info-mode-btn" data-protein-mode="guide">Guides</button>
                     <button id="protein-info-overflow-btn" type="button" class="protein-info-mode-btn" aria-expanded="false" aria-controls="protein-info-overflow-menu" hidden>More <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button>
                     <div id="protein-info-overflow-menu" aria-label="More protein info options" hidden></div>
@@ -6056,7 +6161,7 @@
     <!-- FontAwesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Google Fonts Inter -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;700&family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
         
         body {
