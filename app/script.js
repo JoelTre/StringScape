@@ -757,12 +757,12 @@ function drawChevronCanvasLabel(context, label, x, y) {
                     { key: 'local_clustering_coefficient', label: 'Local Clustering Coefficient', type: 'Numerical - Continuous' },
                     { key: 'eigen', label: 'Eigenvector centrality', type: 'Numerical - Continuous' },
                     { key: 'pdb_structure_count', label: 'PDB structure count', type: 'Numerical - Continuous' },
-                    { key: 'complex_pdbs', label: 'Complex PDBs', type: 'Categorical - Nominal' },
+                    { key: 'complex_pdbs', label: 'Complexes (from PDBs)', type: 'Categorical - Nominal' },
                     { key: 'embeddings', label: 'Embeddings', type: 'Numerical - Continuous' },
                     { key: 'collection', label: 'Collection', type: 'Categorical - Nominal' },
                     { key: 'annotation', label: 'Annotation length', type: 'Numerical - Discrete' },
                     { key: 'characterization', label: 'Characterization', type: 'Categorical - Nominal' },
-                    { key: 'localization', label: 'Protein localisation', type: 'Categorical - Nominal' },
+                    { key: 'paralogues', label: 'Paralogoues', type: 'Categorical - Nominal' },
                     { key: 'biological_process', label: 'Biological process (mind-map most specific)', type: 'Categorical - Nominal' },
                     { key: 'size', label: 'Protein size', type: 'Numerical - Continuous' },
                     { key: 'random', label: 'Random', type: 'Categorical - Nominal' },
@@ -844,7 +844,7 @@ function drawChevronCanvasLabel(context, label, x, y) {
         {"type": "function", "function": {"name": "create_folder", "description": "Create a folder inside a connected local directory. Requires safety review and human approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "explanation": {"type": "string"}}, "required": ["path"]}}},
         { type: 'function', function: { name: 'get_current_time', description: 'Get system time.' } },
         { type: 'function', function: { name: 'calculate_math', description: 'Solve math.', parameters: { type: 'object', properties: { eq: { type: 'string' } } } } },
-        { type: 'function', function: { name: 'Search_and_select', description: 'Recommended: set smart_search=true for biological concepts to expand synonyms and related machinery into a Boolean query. Set false for literal names/IDs. Searches for and selects nodes using case-insensitive substring matching. Unquoted terms separated by spaces or commas match any term (OR). Double quotes group a contiguous phrase: lipid synthesis matches either word; "lipid synthesis" matches that phrase within a field. Quotes are delimiters, not literal search characters.', parameters: { type: 'object', properties: { smart_search: { type: 'boolean', default: false, description: 'Recommended for biological searches. Expands the query using Smart Search and applies Boolean operators and wildcards. Requires an AI connection.' }, query: { type: 'string' }, scope: { type: 'string', description: 'Use preferred_name to search only preferred names; otherwise all|layer|centrality|annotation|localization|size or var::<file>::<variable>' } , limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 }, offset: { type: 'integer', minimum: 0, default: 0 } }, required: ['query'] } } },
+        { type: 'function', function: { name: 'Search_and_select', description: 'Recommended: set smart_search=true for biological concepts to expand synonyms and related machinery into a Boolean query. Set false for literal names/IDs. Searches for and selects nodes using case-insensitive substring matching. Unquoted terms separated by spaces or commas match any term (OR). Double quotes group a contiguous phrase: lipid synthesis matches either word; "lipid synthesis" matches that phrase within a field. Quotes are delimiters, not literal search characters.', parameters: { type: 'object', properties: { smart_search: { type: 'boolean', default: false, description: 'Recommended for biological searches. Expands the query using Smart Search and applies Boolean operators and wildcards.' }, query: { type: 'string' }, scope: { type: 'string', description: 'Use preferred_name to search only preferred names; otherwise all|layer|centrality|annotation|localization|size or var::<file>::<variable>' } , limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 }, offset: { type: 'integer', minimum: 0, default: 0 } }, required: ['query'] } } },
         { type: 'function', function: { name: 'Select_nodes', description: 'Selects nodes by exact STRING ID or case-insensitive preferred name. A preferred name may select multiple nodes if it is shared. Response includes resolved STRING IDs.', parameters: { type: 'object', properties: { node_ids: { type: 'array', items: { type: 'string' }, description: 'STRING node IDs or preferred names to select.' }, mode: { type: 'string', description: 'replace selects the supplied nodes directly; add adds them; subtract removes them; intersect keeps only supplied nodes that are already selected (an empty previous selection stays empty); invert selects the complement of the current selection.' }, animate: { type: 'boolean' } }, required: ['node_ids'] } } },
         { type: 'function', function: { name: 'Set_selection_target', description: 'Sets whether nodes or links are selected. If nodes are selected, switching the target to "links" causes the links between the selected nodes to become selected and the nodes to be deselected. If links are selected, switching the toggle to "nodes" causes the nodes at the ends of selected links to become selected and the links to become deselected. ', parameters: { type: 'object', properties: { target: { type: 'string', enum: ['nodes', 'links'] }, animate: { type: 'boolean' } }, required: ['target'] } } },
         { type: 'function', function: { name: 'Select_links', description: 'Selects links using link_id from Get_link_IDs, e.g. 511145.b0002||511145.b3091. Endpoints are STRING IDs, not preferred names. Either endpoint order is accepted; hyphen-separated IDs remain accepted as legacy aliases.', parameters: { type: 'object', properties: { link_ids: { type: 'array', items: { type: 'string' } }, mode: { type: 'string', enum: ['replace', 'add', 'subtract', 'intersect'] }, animate: { type: 'boolean' } }, required: ['link_ids'] } } },
@@ -894,12 +894,11 @@ function drawChevronCanvasLabel(context, label, x, y) {
         { type: 'function', function: { name: 'List_collections', description: 'Lists all collections and their node counts.' } },
         { type: 'function', function: { name: 'View_node_IDs', description: 'Views IDs of selected nodes.' } },
         { type: 'function', function: { name: 'View_preferred_name', description: 'Views preferred names of selected nodes.' } },
-        { type: 'function', function: { name: 'View_annotation_data', description: 'Views annotation data of selected nodes. This is the more important protein information to view.' } },
+        { type: 'function', function: { name: 'View_protein_info', description: 'Returns paginated JSON for selected proteins: IDs, preferred names, gene IDs, annotation, description, KEGG product, enrichment, homology and paralogues, PDB complex partners, sourced aliases excluding PDB, sequence length, centrality, eigenvector centrality, PDB IDs and collections. Omit information_types for all fields or request specific fields (e.g. sequence_length). I recommend only getting info for the fields you need to know since you can always use the tool again to get the other info. Complex partners use the same shared PDB memberships as Complexes (from PDBs). Homologues include their highest BLAST bitscore.', parameters: { type: 'object', properties: { information_types: { type: 'array', items: { type: 'string', enum: ['gene_id', 'annotation', 'description', 'kegg_product', 'enrichment_terms', 'homology', 'complexes', 'aliases', 'sequence_length', 'centrality', 'eigenvector_centrality', 'pdb_ids', 'collections'] }, description: 'Optional fields to return; protein_id and preferred_name are always included.' }, limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 }, offset: { type: 'integer', minimum: 0, default: 0 } } } } },
+        { type: 'function', function: { name: 'View_orthology_info', description: 'Returns a paginated page of selected proteins with protein_id, preferred_name and orthology assignments (taxonomy_level and orthologous_group_or_ortholog) from uploaded STRING protein.orthology files. Proteins without assignments return an empty array.', parameters: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 }, offset: { type: 'integer', minimum: 0, default: 0 } } } } },
+        { type: 'function', function: { name: 'View_URL_links', description: 'Returns paginated JSON containing every available URL on the Links page for each selected protein, including individual PDB structure links. Unavailable links are omitted.', parameters: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 }, offset: { type: 'integer', minimum: 0, default: 0 } } } } },
         { type: 'function', function: { name: 'View_enrichment_terms', description: 'Views enrichment records for the currently selected proteins. Optionally filter by exact enrichment category (case insensitive), e.g. Biological Process (Gene Ontology). Paginated; returns available categories, total, offset and next_offset. Includes protein IDs, term IDs, descriptions and URLs.', parameters: { type: 'object', properties: { category: { type: 'string', description: 'Exact enrichment category; omit for all categories.' }, limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 }, offset: { type: 'integer', minimum: 0, default: 0 } } } } },
         { type: 'function', function: { name: 'Select_using_an_enrichment_term', description: 'Selects proteins in the current view associated with an exact enrichment term ID or description (case insensitive). Optionally filter by exact category. Returns a count and up to 10 protein IDs, rather than a large selection list. Use View_enrichment_terms to find term IDs and categories.', parameters: { type: 'object', properties: { term: { type: 'string', description: 'Exact enrichment term ID or description.' }, category: { type: 'string', description: 'Optional exact enrichment category.' } }, required: ['term'] } } },
-        { type: 'function', function: { name: 'View_KEGG_Product', description: 'Views KEGG products for the selected nodes.' } },
-        { type: 'function', function: { name: 'View_description_data', description: 'Views description data of selected nodes.' } },
-        { type: 'function', function: { name: 'View_protein_size', description: 'Views size of selected proteins/nodes.' } },
         { type: 'function', function: { name: 'View_sequence_data', description: 'Views a page of complete amino acid sequences for selected nodes. Defaults to 5 nodes; use next_offset to retrieve subsequent pages.', parameters: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: 20, default: 5 }, offset: { type: 'integer', minimum: 0, default: 0 } } } } },
         { type: 'function', function: { name: 'View_centrality_data', description: 'Views centrality of selected nodes.' } },
         { type: 'function', function: { name: 'View_eigenvector_data', description: 'Views eigenvector centrality of selected nodes.' } },
@@ -1009,7 +1008,7 @@ function drawChevronCanvasLabel(context, label, x, y) {
     };
     const aiCoreToolNames = new Set([
         'Search_and_select', 'Select_nodes', 'View_node_IDs',
-        'View_annotation_data', 'View_Stringscape_app_info'
+        'View_protein_info', 'View_Stringscape_app_info'
     ]);
     const aiToolDiscoveryPrompt = '\n\nOnly core tools and Search_tools are initially loaded. Before calling any tool for the first time, use Search_tools with its exact name (or the exact names of multiple tools comma-separated) to get its description and parameters and enable it for this turn. Available tool names: '
         + [...aiTools.map(tool => tool.function.name), 'Search_tools'].join(', ') + '.';
@@ -4465,6 +4464,7 @@ function drawChevronCanvasLabel(context, label, x, y) {
             if (key === 'pdb_structure_count') return getPdbStructureCount(id);
             if (key === 'size') return getProteinSizeValue?.(id, resolveBuiltInColorSource?.('size')) ?? proteinMetadata.get(id)?.size;
             if (key === 'annotation') return (getProteinInfoAnnotation?.(id) || '').length;
+            if (key === 'paralogues') return getParalogueGroup(id);
             if (key === 'characterization') return getCharacterizationValue(id);
             if (key === 'localization') return proteinMetadata.get(id)?.localization;
             if (key === 'biological_process') return proteinMetadata.get(id)?.biological_process;
@@ -5818,20 +5818,9 @@ function drawChevronCanvasLabel(context, label, x, y) {
         if (toolName === 'View_preferred_name') return aiBuildSelectedTable(node => {
             return getPreferredProteinName(node.id) || 'Unknown';
         });
-        if (toolName === 'View_annotation_data') {
-            const source = resolveBuiltInColorSource('annotation', aiGetSelectedNodesForTools());
-            return aiBuildSelectedTable(node => getBuiltInColorValueFromSource(node.id, 'annotation', source));
-        }
-        if (toolName === 'View_KEGG_Product') return aiBuildSelectedTable(node => getKeggProductText(node.id));
-        if (toolName === 'View_description_data') {
-            return aiBuildSelectedTable(node => {
-                return getProteinInfoDescription(node.id) || 'Unknown';
-            });
-        }
-        if (toolName === 'View_protein_size') {
-            const source = resolveProteinSizeSource(aiGetSelectedNodesForTools());
-            return aiBuildSelectedTable(node => getProteinSizeValue(node.id, source));
-        }
+        if (toolName === 'View_protein_info') return aiViewProteinInfo(args);
+        if (toolName === 'View_orthology_info') return aiViewOrthologyInfo(args);
+        if (toolName === 'View_URL_links') return aiViewUrlLinks(args);
         if (toolName === 'View_sequence_data') {
             const selected = aiGetSelectedNodesForTools();
             const limit = Number.isFinite(Number(args?.limit)) ? Math.max(1, Math.min(20, Math.floor(Number(args.limit)))) : 5;
@@ -7487,12 +7476,12 @@ sys.modules['stringscape'] = _stringscape_module
                             'Save_to_collection': `Adding to a collection named "${logArgs.collection_name || logArgs.name || 'new collection'}"`,
                             'Change_node_colouring': `Setting node colouring to ${logArgs.variable_name}`,
                             'View_screenshot': "Viewing screenshot",
-                            'View_annotation_data': "Viewing annotation data",
+                            'View_protein_info': 'Viewing protein information',
+                            'View_orthology_info': 'Viewing orthology information',
+                            'View_URL_links': 'Viewing protein links',
                             'Search_Pubmed': 'Searching PubMed ',
-                            'View_KEGG_Product': "Viewing KEGG products",
                             'View_enrichment_terms': 'Viewing enrichment terms',
                             'Select_using_an_enrichment_term': 'Selecting proteins by enrichment term',
-                            'View_description_data': "Viewing description data",
                             'View_centrality_data': "Viewing centrality",
                             'Deselect_nodes': "Deselecting nodes",
                             'Expand_to_connected': "Expanding selection to connected nodes",
@@ -9864,6 +9853,7 @@ self.onmessage = async (event) => {
         complexPdbColorState = {
             complexPdbIds,
             nodeToComplexPdbIds,
+            pdbToNodeIds,
             colorScale: d3.scaleOrdinal(d3.schemeTableau10).domain(complexPdbIds)
         };
         complexPdbColorStateDirty = false;
@@ -9872,6 +9862,57 @@ self.onmessage = async (event) => {
 
     function getComplexPdbMemberships(nodeId) {
         return ensureComplexPdbColorState().nodeToComplexPdbIds.get(nodeId) || [];
+    }
+
+    function getEnrichmentColorVariableDefinitions() {
+        if (getEnrichmentColorVariableDefinitions.definitions) return getEnrichmentColorVariableDefinitions.definitions;
+        const cellularComponent = 'Cellular Component (Gene Ontology)';
+        const molecularFunction = 'Molecular Function (Gene Ontology)';
+        const localCluster = 'Local Network Cluster (STRING)';
+        return getEnrichmentColorVariableDefinitions.definitions = {
+            'Complexes (Gene Ontology)': { category: cellularComponent, filter: description => /\bcomplex$/i.test(description) },
+            'Non-complex Cellular Component (Gene Ontology)': { category: cellularComponent, filter: description => !/\bcomplex$/i.test(description) },
+            'Local Network Cluster (STRING)': { category: localCluster },
+            'Specific Local Network Cluster (STRING)': { category: localCluster, filter: description => !description.includes(', and') },
+            'Annotated Keywords (UniProt)': { category: 'Annotated Keywords (UniProt)' },
+            'Protein Domains (Pfam)': { category: 'Protein Domains (Pfam)' },
+            'Protein Domains (SMART)': { category: 'Protein Domains (SMART)' },
+            'Protein Domains and Features (InterPro)': { category: 'Protein Domains and Features (InterPro)' },
+            'Reactome Pathways': { category: 'Reactome Pathways' },
+            'Subcellular localization (COMPARTMENTS)': { category: 'Subcellular localization (COMPARTMENTS)', aliases: ['COMPARTMENTS'] },
+            'Binds to...': { category: molecularFunction, filter: description => /\S+\s+binding$/i.test(description),
+                label: description => description.replace(/\s+binding$/i, '').trim() },
+            'Activity': { category: molecularFunction, filter: description => /\S+\s+activity$/i.test(description),
+                label: description => description.replace(/\s+activity$/i, '').trim() }
+        };
+    }
+
+    const enrichmentCategoryColorScales = new Map();
+
+    function getEnrichmentCategoryDefaultColor(mode, term) {
+        if (term === 'N/A') return '#444';
+        if (!enrichmentCategoryColorScales.has(mode)) {
+            const selection = getCustomVariableSelection(mode);
+            const values = accessoryVariableValues[selection.cfg.fileName]?.[selection.cfg.variable];
+            const terms = Array.from(new Set(Array.from(values?.values() || []).flatMap(value => String(value).split('; ')))).sort();
+            enrichmentCategoryColorScales.set(mode, d3.scaleOrdinal(d3.schemeTableau10).domain([...terms, 'N/A']));
+        }
+        return enrichmentCategoryColorScales.get(mode)(term);
+    }
+
+    function isEnrichmentCategoryColorMode(mode) {
+        return Object.hasOwn(getEnrichmentColorVariableDefinitions(), getCustomVariableSelection(mode)?.cfg.variable);
+    }
+
+    function getEnrichmentCategoryColorForNode(nodeId, mode, timestampMs = Date.now()) {
+        const terms = String(getCustomVariableValue({ id: nodeId }, mode) || 'N/A').split('; ')
+            .filter(term => !isCategoryLegendItemHidden(mode, term));
+        if (!terms.length) return '#444';
+        const time = collectionColorCyclePaused && Number.isFinite(collectionColorCyclePausedAtMs)
+            ? collectionColorCyclePausedAtMs : timestampMs;
+        const term = terms[Math.floor(time / 500) % terms.length];
+        if (term === 'N/A') return '#444';
+        return getCategoricalNodeColor(mode, term, getEnrichmentCategoryDefaultColor(mode, term));
     }
 
     function getComplexPdbColorForNode(nodeId, timestampMs = Date.now()) {
@@ -9901,26 +9942,87 @@ self.onmessage = async (event) => {
     // This function takes a string containing simple markdown syntax and converts it into HTML for rendering in the info box or other UI elements. It supports headers, bold text, inline code, bullet points, and line breaks.
     // Convert only already-escaped text into a tiny, known-safe markdown subset so untrusted input cannot create executable HTML.
     function buildSimpleMarkdownHtml(value) {
+        const emphasis = text => text
+            .replace(/\*\*(.+?)\*\*/gs, '<strong>$1</strong>')
+            .replace(/(?<!\*)\*(?!\*)([^*\n]+?)\*(?!\*)/g, '<em>$1</em>');
+        const inline = text => {
+            const links = [];
+            const protect = html => `\u0000${links.push(html) - 1}\u0000`;
+            const anchor = (label, url) => `<a class="markdown-url-link" href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+            text = text.replace(/\[([^\]\n]+)\]\((https?:\/\/(?:[^\s()]|\([^\s()]*\))+)\)/g,
+                (_, label, url) => protect(anchor(emphasis(label), url)));
+            text = text.replace(/https?:\/\/(?:(?!&(?:lt|gt|quot|#39);)[^\s<>*\u0000])+/g, url => {
+                let tail = '';
+                while (/[.,;:!?\]\}]$/.test(url) || url.endsWith(')') && (url.match(/\)/g) || []).length > (url.match(/\(/g) || []).length) {
+                    tail = url.slice(-1) + tail;
+                    url = url.slice(0, -1);
+                }
+                return protect(anchor(url, url)) + tail;
+            });
+            return emphasis(text).replace(/\u0000(\d+)\u0000/g, (_, index) => links[Number(index)] || '');
+        };
         const renderProse = text => escapeHtml(text).split(/(`+)([\s\S]*?)\1/g).map((part, index) => {
             if (index % 3 === 1) return '';
             if (index % 3 === 2) return `<code>${part}</code>`;
-            return part
+            return inline(part)
             .replace(/^##### (.+)$/gm, '<h5>$1</h5>')    
             .replace(/^#### (.+)$/gm, '<h4>$1</h4>')
             .replace(/^### (.+)$/gm, '<h3>$1</h3>')
             .replace(/^## (.+)$/gm, '<h2>$1</h2>')
             .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-            .replace(/\*\*(.+?)\*\*/gs, '<strong>$1</strong>')
             .replace(/^\* (.+)$/gm, '<li>$1</li>')
             .replace(/(<li>.+<\/li>)(\n<li>.+<\/li>)*/gm, '<ul>$&</ul>')
             .replace(/\n/g, '<br>');
         }).join('');
+        const tableCells = line => {
+            const cells = [];
+            let cell = '', codeFence = '', hasPipe = false;
+            const trimmed = line.trim();
+            for (let i = 0; i < trimmed.length; i++) {
+                const char = trimmed[i];
+                if (char === '\\' && trimmed[i + 1] === '|') { cell += '|'; i++; continue; }
+                if (char === '`') {
+                    let run = '`';
+                    while (trimmed[i + 1] === '`') { run += '`'; i++; }
+                    if (!codeFence) codeFence = run;
+                    else if (codeFence === run) codeFence = '';
+                    cell += run;
+                } else if (char === '|' && !codeFence) {
+                    hasPipe = true;
+                    cells.push(cell.trim()); cell = '';
+                } else cell += char;
+            }
+            cells.push(cell.trim());
+            if (!hasPipe) return null;
+            if (trimmed.startsWith('|')) cells.shift();
+            if (trimmed.endsWith('|') && !trimmed.endsWith('\\|')) cells.pop();
+            return cells;
+        };
         const lines = String(value ?? '').replace(/\r\n?/g, '\n').split('\n');
         const output = [];
         let prose = [];
         for (let i = 0; i < lines.length; i++) {
             const fence = lines[i].match(/^ {0,3}(`{3,}|~{3,})\s*([^\s`~]*)[^`~]*$/);
             if (!fence) {
+                const header = tableCells(lines[i]);
+                const separators = i + 1 < lines.length ? tableCells(lines[i + 1]) : null;
+                if (header?.length && separators?.length === header.length && separators.every(cell => /^:?-{3,}:?$/.test(cell))) {
+                    output.push(renderProse(prose.join('\n')));
+                    prose = [];
+                    const alignments = separators.map(cell => cell.startsWith(':') && cell.endsWith(':') ? 'center' : cell.endsWith(':') ? 'right' : 'left');
+                    const rowHtml = (cells, tag) => `<tr>${header.map((_, index) => `<${tag}${tag === 'th' ? ' scope="col"' : ''} style="text-align:${alignments[index]}">${renderProse(cells[index] || '')}</${tag}>`).join('')}</tr>`;
+                    const rows = [];
+                    i += 2;
+                    while (i < lines.length && !/^ {0,3}(`{3,}|~{3,})/.test(lines[i])) {
+                        const cells = tableCells(lines[i]);
+                        if (!cells) break;
+                        rows.push(rowHtml(cells, 'td'));
+                        i++;
+                    }
+                    i--;
+                    output.push(`<div class="markdown-table-scroll"><table class="markdown-table"><thead>${rowHtml(header, 'th')}</thead><tbody>${rows.join('')}</tbody></table></div>`);
+                    continue;
+                }
                 prose.push(lines[i]);
                 continue;
             }
@@ -9982,7 +10084,7 @@ self.onmessage = async (event) => {
         console.log("function updateCollectionColorCycleTimer()");
         
         const mode = document.getElementById('colorMode')?.value;
-        const shouldCycle = !collectionColorCyclePaused && (mode === 'collection' || mode === 'complex_pdbs');
+        const shouldCycle = !collectionColorCyclePaused && (mode === 'collection' || mode === 'complex_pdbs' || isEnrichmentCategoryColorMode(mode));
         if (shouldCycle) {
             if (!collectionColorCycleTimer) {
                 collectionColorCycleTimer = setInterval(() => draw(), 500);
@@ -9998,11 +10100,11 @@ self.onmessage = async (event) => {
         const button = document.getElementById('collection-cycle-toggle-btn');
         if (!button) return;
         const mode = document.getElementById('colorMode')?.value;
-        const isCyclingMode = mode === 'collection' || mode === 'complex_pdbs';
+        const isCyclingMode = mode === 'collection' || mode === 'complex_pdbs' || isEnrichmentCategoryColorMode(mode);
         button.style.display = isCyclingMode ? 'block' : 'none';
         if (!isCyclingMode) return;
         button.textContent = collectionColorCyclePaused ? 'Play cycle' : 'Pause cycle';
-        button.title = 'Pause or resume the 0.5-second color cycle for collection and complex PDB modes.';
+        button.title = 'Pause or resume the 0.5-second color cycle for collection and complex modes.';
         button.setAttribute('aria-pressed', String(collectionColorCyclePaused));
     }
 
@@ -10135,6 +10237,122 @@ self.onmessage = async (event) => {
         renderCtx.closePath();
         renderCtx.fillStyle = color;
         renderCtx.fill();
+    }
+
+    const networkLabelHitRegions = new Map();
+    let networkLabelBuildStartedAt = null;
+    let networkLabelFadeTimer = null;
+    let networkLabelFadeFrame = null;
+
+    function getNetworkLabelBuildAlpha(now = performance.now()) {
+        if (networkLabelBuildStartedAt === null) return 1;
+        return Math.max(0, Math.min(1, (now - networkLabelBuildStartedAt - 2000) / 1000));
+    }
+
+    function startNetworkLabelBuildFade() {
+        clearTimeout(networkLabelFadeTimer);
+        if (networkLabelFadeFrame !== null) cancelAnimationFrame(networkLabelFadeFrame);
+        networkLabelBuildStartedAt = performance.now();
+        networkLabelHitRegions.clear();
+        networkLabelFadeFrame = null;
+        networkLabelFadeTimer = setTimeout(() => {
+            networkLabelFadeTimer = null;
+            const tick = () => {
+                networkLabelFadeFrame = null;
+                draw();
+                if (getNetworkLabelBuildAlpha() < 1) networkLabelFadeFrame = requestAnimationFrame(tick);
+            };
+            tick();
+        }, 2000);
+    }
+
+
+    // Layout in screen pixels so zoom changes spacing, never label size.
+    function layoutNetworkLabels(renderCtx, targetNodes, project, viewport, options) {
+        const groups = new Map();
+        targetNodes.forEach(node => {
+            if (node._ssVisible === 'hide' || !Number.isFinite(node.x) || !Number.isFinite(node.y)) return;
+            const terms = new Set(options.memberships(node));
+            terms.forEach(term => {
+                if (!term || term === 'N/A' || term.trim().toLowerCase() === 'uncharacterized') return;
+                if (!groups.has(term)) groups.set(term, []);
+                groups.get(term).push(node);
+            });
+        });
+        const categories = Array.from(groups, ([text, members]) => {
+            const x = members.reduce((sum, n) => sum + n.x, 0) / members.length;
+            const y = members.reduce((sum, n) => sum + n.y, 0) / members.length;
+            let anchor = members[0], nearest = Infinity, distance = 0;
+            members.forEach(node => {
+                const d = Math.hypot(node.x - x, node.y - y);
+                distance += d;
+                if (d < nearest) { nearest = d; anchor = node; }
+            });
+            return { text, count: members.length, distance: distance / members.length, anchor, members };
+        });
+        const maxCount = Math.max(1, ...categories.map(c => c.count));
+        const maxDistance = Math.max(1, ...categories.map(c => c.distance));
+        categories.forEach(c => {
+            c.priority = options.balance * c.count / maxCount
+                + (1 - options.balance) * (1 - c.distance / maxDistance);
+        });
+        categories.sort((a, b) => b.priority - a.priority || a.text.localeCompare(b.text));
+        const placed = [];
+        categories.forEach(category => {
+            const [x, y] = project(category.anchor);
+            const size = options.size * (1 + options.countSize * Math.log2(category.count) / Math.log2(Math.max(2, maxCount)));
+            renderCtx.font = `bold ${size}px Ubuntu, sans-serif`;
+            const metrics = renderCtx.measureText(category.text);
+            const halfWidth = Math.max(metrics.width, (metrics.actualBoundingBoxLeft || 0) + (metrics.actualBoundingBoxRight || 0)) / 2 + 12;
+            const halfHeight = Math.max(size, (metrics.actualBoundingBoxAscent || 0) + (metrics.actualBoundingBoxDescent || 0)) / 2 + 9;
+            const box = { left: x - halfWidth, right: x + halfWidth, top: y - halfHeight, bottom: y + halfHeight };
+            if (box.right < 0 || box.left > viewport.width || box.bottom < 0 || box.top > viewport.height) return;
+            if (placed.some(other => box.left < other.box.right && box.right > other.box.left && box.top < other.box.bottom && box.bottom > other.box.top)) return;
+            placed.push({ ...category, x, y, size, box });
+        });
+        return placed;
+    }
+
+    function drawNetworkLabels(renderCtx, targetNodes) {
+        if (!document.getElementById('networkLabelShow')?.checked || nodeVisibilityToggle !== 'show') return;
+        const nodeLabelsEnabled = nodeLabelToggle === 'show' || targetNodes.some(n => n._ssLabelVisible === 'show');
+        const k = transform?.k || 1;
+        const fade = nodeLabelsEnabled ? 1 - Math.max(0, Math.min(1, (k - 1) / 0.3)) : 1;
+        const alpha = fade * getNetworkLabelBuildAlpha() * 0.8;
+        if (alpha <= 0) return;
+        const variable = 'Specific Local Network Cluster (STRING)';
+        const sources = Object.values(accessoryVariableValues).map(values => values[variable]).filter(Boolean);
+        if (!sources.length) return;
+        const matrix = renderCtx.getTransform();
+        renderCtx.save();
+        renderCtx.setTransform(1, 0, 0, 1, 0, 0);
+        const labels = layoutNetworkLabels(renderCtx, targetNodes,
+            n => [matrix.a * n.x + matrix.c * n.y + matrix.e, matrix.b * n.x + matrix.d * n.y + matrix.f],
+            renderCtx.canvas, {
+                memberships: n => sources.flatMap(values => String(values.get(n.id) || '').split('; ').map(term => term.trim())),
+                balance: Number(document.getElementById('networkLabelPriority').value),
+                size: Number(document.getElementById('networkLabelSize').value),
+                countSize: 1
+            });
+        if (renderCtx === ctx) networkLabelHitRegions.set(currentViewId, labels);
+        renderCtx.textAlign = 'center';
+        renderCtx.textBaseline = 'middle';
+        renderCtx.globalAlpha = alpha;
+        const light = currentUiMode === 'light';
+        renderCtx.fillStyle = light ? '#172033' : '#ffffff';
+        renderCtx.strokeStyle = light ? '#ffffff' : '#000000';
+        renderCtx.lineWidth = 0.75;
+        renderCtx.shadowColor = light ? '#ffffff' : '#000000';
+        renderCtx.shadowBlur = 5;
+        renderCtx.shadowOffsetX = 0;
+        renderCtx.shadowOffsetY = 0;
+        renderCtx.lineJoin = 'round';
+        labels.forEach(label => {
+            renderCtx.font = `bold ${label.size}px Ubuntu, sans-serif`;
+            renderCtx.strokeText(label.text, label.x, label.y);
+            renderCtx.fillText(label.text, label.x, label.y);
+        });
+        renderCtx.restore();
     }
 
     function getCurrentNodeLabelZoomAlpha() {
@@ -10348,6 +10566,8 @@ self.onmessage = async (event) => {
             octx.lineWidth = isPath ? 4 : (n.borderWidth ?? 1); 
             octx.stroke();
         });
+
+        drawNetworkLabels(octx, drawNodes);
 
         const labelZoomAlpha = getCurrentNodeLabelZoomAlpha();
         if (labelZoomAlpha > 0 && nodeVisibilityToggle === 'show') {
@@ -10567,6 +10787,10 @@ self.onmessage = async (event) => {
             const proteinSizeVal = getProteinSizeValue(n.id, proteinSizeSource);
             let colorValue = 0.5;
             if (mode === 'compare') n.col = getComparisonColor(n, comparisonContext);
+            else if (mode === 'paralogues') {
+                n.col = getParalogueColor(n.id);
+                colorValue = hashStringToUnit(n.col);
+            }
             else if (mode === 'species') n.col = getMergedSpeciesColor(getSpeciesPresenceForNode(n, speciesPresenceMap));
             else if (mode === 'layer') {
                 const layerLabel = n.layer === 99 ? 'Disconnected' : `Layer ${n.layer}`;
@@ -11680,6 +11904,7 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         else if (key === 'annotation') color = d3.interpolatePlasma(normalized);
         else if (key === 'random') color = node.randColor || '#ffffff';
         else if (key === 'collection') color = getCollectionColorForNode(node.id);
+        else if (key === 'paralogues') color = getParalogueColor(node.id);
         else if (key === 'characterization') color = getCategoricalNodeColor('characterization', getCharacterizationValue(node.id), d3.schemeTableau10[0]);
         else if (key === 'localization') color = getCategoricalNodeColor('localization', getBuiltInColorValueFromSource(node.id, key), d3.schemeTableau10[0]);
         else if (key === 'biological_process') color = getCategoricalNodeColor('biological_process', getBiologicalProcessKey(node.id), d3.schemeTableau10[0]);
@@ -14793,6 +15018,15 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 }
             });
         });
+        Object.keys(accessoryDataFiles).forEach(fileName => {
+            if (!/\.protein\.enrichment\.terms\./i.test(fileName)) return;
+            Object.keys(getEnrichmentColorVariableDefinitions()).forEach(variable => {
+                if (!variableConfigs.some(cfg => cfg.fileName === fileName && cfg.variable === variable)) {
+                    variableConfigs.push({ fileName, variable, label: variable, type: 'Categorical - Nominal',
+                        split: false, splitBase: null, splitChildren: {}, hidden: false });
+                }
+            });
+        });
         // no removal; keep old file configs in table even if accessory file unloaded
         // variableConfigs = variableConfigs.filter(c => accessoryDataFiles[c.fileName]);
 
@@ -14826,12 +15060,12 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             { key: 'centrality', label: 'Centrality', type: 'Numerical - Continuous' },
             { key: 'eigen', label: 'Eigenvector centrality', type: 'Numerical - Continuous' },
             { key: 'pdb_structure_count', label: 'PDB structure count', type: 'Numerical - Continuous' },
-            { key: 'complex_pdbs', label: 'Complex PDBs', type: 'Categorical - Nominal' },
+            { key: 'complex_pdbs', label: 'Complexes (from PDBs)', type: 'Categorical - Nominal' },
             { key: 'embeddings', label: 'Embeddings', type: 'Numerical - Continuous' },
             { key: 'collection', label: 'Collection', type: 'Categorical - Nominal' },
             { key: 'annotation', label: 'Annotation length', type: 'Numerical - Discrete' },
             { key: 'characterization', label: 'Characterization', type: 'Categorical - Nominal' },
-            { key: 'localization', label: 'Protein localisation', type: 'Categorical - Nominal' },
+            { key: 'paralogues', label: 'Paralogoues', type: 'Categorical - Nominal' },
             { key: 'biological_process', label: 'Biological process (mind-map most specific)', type: 'Categorical - Nominal' },
             { key: 'size', label: 'Protein size', type: 'Numerical - Continuous' },
             { key: 'random', label: 'Random', type: 'Categorical - Nominal' },
@@ -15155,6 +15389,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     function rebuildAccessoryVariableValueIndexes() {
+        enrichmentCategoryColorScales.clear();
         const resolveNodeId = buildAccessoryNodeIdResolver();
         Object.entries(accessoryDataFiles).forEach(([fileName, data]) => {
             const valuesByVariable = {};
@@ -15168,6 +15403,27 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     valuesByVariable[header].set(nodeId, row[header]);
                 });
             });
+            if (/\.protein\.enrichment\.terms\./i.test(fileName)) {
+                const headerByName = new Map(data.headers.map(header => [String(header).trim().toLowerCase(), header]));
+                Object.keys(getEnrichmentColorVariableDefinitions()).forEach(variable => {
+                    const memberships = new Map();
+                    (data.rows || []).forEach(row => {
+                        const category = String(row[headerByName.get('category')] || '').trim();
+                        const description = String(row[headerByName.get('description')] || '').trim();
+                        if (!description) return;
+                        const definition = getEnrichmentColorVariableDefinitions()[variable];
+                        if (![definition.category, ...(definition.aliases || [])].some(name => name.toLowerCase() === category.toLowerCase())) return;
+                        if (definition.filter && !definition.filter(description)) return;
+                        const label = definition.label ? definition.label(description) : description;
+                        const nodeId = idHeader ? resolveNodeId(row[idHeader]) : null;
+                        if (!nodeId) return;
+                        if (!memberships.has(nodeId)) memberships.set(nodeId, new Set());
+                        memberships.get(nodeId).add(label);
+                    });
+                    valuesByVariable[variable] = new Map(Array.from(memberships,
+                        ([nodeId, terms]) => [nodeId, Array.from(terms).sort().join('; ')]));
+                });
+            }
             accessoryVariableValues[fileName] = valuesByVariable;
         });
         customVariableSelectionCache.clear();
@@ -15186,12 +15442,12 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             {value:'local_clustering_coefficient', text:'Local Clustering Coefficient', color:'#93c5fd'},
             {value:'eigen', text:'Eigenvector centrality', color:'#93c5fd'},
             {value:'pdb_structure_count', text:'PDB structure count', color:'#93c5fd'},
-            {value:'complex_pdbs', text:'Complex PDBs', color:'#ccc'},
+            {value:'complex_pdbs', text:'Complexes (from PDBs)', color:'#ccc'},
             {value:'embeddings', text:'Embeddings', color:'#93c5fd'},
             {value:'collection', text:'Collection', color:'#ccc'},
             {value:'annotation', text:'Annotation length', color:'#93c5fd'},
             {value:'characterization', text:'Characterization', color:'#ccc'},
-            {value:'localization', text:'Protein localisation', color:'#ccc'},
+            {value:'paralogues', text:'Paralogoues', color:'#ccc'},
             {value:'biological_process', text:'Biological process (mind-map most specific)', color:'#ccc'},
             {value:'size', text:'Protein size', color:'#93c5fd'},
             {value:'random', text:'Random', color:'#ffffff'},
@@ -15222,6 +15478,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 if (!isSplitParent) {
                     const o = document.createElement('option');
                     o.value = getVariableModeKey(cfg);
+                    if (isEnrichmentCategoryColorMode(o.value)) o.dataset.menuGroup = 'Categorical';
                     o.textContent = cfg.label;
                     o.style.color = getVariableTypeColor(cfg.type);
                     group.appendChild(o);
@@ -15367,6 +15624,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         if (variable === 'annotation') return getAnnotationLengthFromSource(node.id, resolveBuiltInColorSource('annotation'));
         if (variable === 'pdb_structure_count') return getPdbStructureCount(node.id);
         if (variable === 'collection') return getNodeCollectionMemberships(node.id).sort().join('|') || 'None';
+        if (variable === 'paralogues') return getParalogueGroup(node.id);
         if (variable === 'characterization') return getCharacterizationValue(node.id);
         if (variable === 'localization') return getBuiltInColorValueFromSource(node.id, 'localization', resolveBuiltInColorSource('localization'));
         if (variable === 'biological_process') return getBiologicalProcessKey(node.id);
@@ -15614,6 +15872,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             return memberships.length ? `collection::${memberships.join('|')}` : 'collection::__none__';
         }
 
+        if (mode === 'paralogues') return `paralogues::${getParalogueGroup(node.id)}`;
         if (mode === 'characterization') {
             return `characterization::${getCharacterizationValue(node.id)}`;
         }
@@ -16710,6 +16969,17 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     function parseAccessoryFile(fileName, text) {
         console.log("function parseAccessoryFile(fileName, text)")
+        if (/protein\.homology\./i.test(fileName)) {
+            paralogueColourState = null;
+            const { headers, rows } = parseDelimitedRows(text, '__WS__', fileName);
+            accessoryDataFiles[fileName] = { headers, rows, text };
+            return;
+        }
+        if (/protein\.orthology\./i.test(fileName)) {
+            const { headers, rows } = parseDelimitedRows(text, '__WS__', fileName);
+            accessoryDataFiles[fileName] = { headers, rows, text };
+            return;
+        }
         const delim = text.includes('\t') ? '\t' : ',';
         const records = parseDelimitedRecords(text, delim);
         if (!records.length) return;
@@ -17383,11 +17653,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     function renderProteinInfoLinksView(body, nodeId) {
         const linkData = getNodeInfoLinkData(nodeId);
-        const links = [
-            { label: 'UniProt', url: linkData.uniprotUrl },
-            { label: 'NCBI protein', url: linkData.ncbiProteinUrl },
-            { label: 'NCBI Gene', url: linkData.ncbiGeneUrl },
-            { label: 'PubMed', url: linkData.pubmedUrl },
+        const links = getProteinInfoUrlLinks(nodeId, true).filter(link => !link.label.startsWith('PDB '));
+        links.splice(4, 0,
             {
                 label: 'PDB',
                 onclick: () => {
@@ -17399,10 +17666,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     openNodeInfoPdbOverlay(0);
                 },
                 disabled: !Array.isArray(linkData.pdbLinks) || linkData.pdbLinks.length === 0
-            },
-            { label: 'IntAct', url: linkData.intactUrl },
-            { label: 'STRING', url: linkData.stringUrl }
-        ];
+            }
+        );
 
         const wrap = document.createElement('div');
         wrap.id = 'protein-info-links-grid';
@@ -17589,7 +17854,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     function getProteinInfoDefaultHeightPx() {
         const viewportHeight = Math.max(480, window.innerHeight || 0);
-        return Math.round(viewportHeight * (proteinInfoMode === 'structure' ? 0.48 : (proteinInfoMode === 'enrichment' ? 0.44 : 0.34)));
+        return Math.round(viewportHeight * (['structure', 'homology', 'orthology'].includes(proteinInfoMode) ? 0.48 : (proteinInfoMode === 'enrichment' ? 0.44 : 0.34)));
     }
 
     function applyProteinInfoPanelHeight(heightPx = null) {
@@ -17940,6 +18205,438 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         body.appendChild(cards);
     }
 
+    let paralogueColourState = null;
+
+    function ensureParalogueColourState() {
+        if (paralogueColourState) return paralogueColourState;
+        const parents = new Map();
+        const find = id => {
+            if (!parents.has(id)) parents.set(id, id);
+            let root = id;
+            while (parents.get(root) !== root) root = parents.get(root);
+            while (parents.get(id) !== id) {
+                const next = parents.get(id);
+                parents.set(id, root);
+                id = next;
+            }
+            return root;
+        };
+        Object.entries(accessoryDataFiles).forEach(([name, data]) => {
+            if (!/protein\.homology\./i.test(name)) return;
+            (data.rows || []).forEach(row => {
+                const a = row['#string_protein_1'] || row.string_protein_1;
+                const b = row.string_protein_id_2;
+                if (!a || !b || a === b || a.split('.')[0] !== b.split('.')[0] ||
+                    (row.species_2 && row.species_2 !== a.split('.')[0])) return;
+                const first = find(a), second = find(b);
+                if (first !== second) parents.set(second, first);
+            });
+        });
+        const groups = new Map();
+        parents.forEach((_, id) => {
+            const root = find(id);
+            if (!groups.has(root)) groups.set(root, []);
+            groups.get(root).push(id);
+        });
+        const labelsById = new Map();
+        const labels = [];
+        const used = new Set();
+        Array.from(groups.values()).sort((a, b) => a.slice().sort()[0].localeCompare(b.slice().sort()[0])).forEach(ids => {
+            const names = ids.map(id => getPreferredProteinName(id) || id).sort((a, b) => a.localeCompare(b));
+            const base = names.join('-');
+            // Distinct groups may contain the same preferred names in different taxa.
+            const label = used.has(base) ? `${base} (${ids.slice().sort()[0]})` : base;
+            used.add(label);
+            labels.push(label);
+            ids.forEach(id => labelsById.set(id, label));
+        });
+        const palette = labels.length > 10
+            ? labels.map((_, index) => d3.interpolateRainbow(index / labels.length))
+            : d3.schemeTableau10;
+        const colorScale = d3.scaleOrdinal(palette).domain(labels.sort());
+        paralogueColourState = { labelsById, colorScale };
+        return paralogueColourState;
+    }
+
+    function getParalogueGroup(nodeId) {
+        const state = ensureParalogueColourState();
+        const ids = nodeMap.get(nodeId)?._speciesIds || [nodeId];
+        return ids.map(id => state.labelsById.get(id)).filter(Boolean).sort()[0] || 'No paralogues';
+    }
+
+    function getParalogueColor(nodeId) {
+        const label = getParalogueGroup(nodeId);
+        const color = label === 'No paralogues' ? '#888888' : ensureParalogueColourState().colorScale(label);
+        return getCategoricalNodeColor('paralogues', label, color);
+    }
+
+    const homologySpeciesNames = new Map();
+
+    function loadHomologySpeciesName(taxonId) {
+        const taxon = String(taxonId || '');
+        if (!/^\d+$/.test(taxon)) return Promise.resolve('Unknown species');
+        if (!homologySpeciesNames.has(taxon)) {
+            homologySpeciesNames.set(taxon, (async () => {
+                try {
+                    const response = await fetch(`https://rest.uniprot.org/taxonomy/${encodeURIComponent(taxon)}`, {
+                        signal: AbortSignal.timeout(10000)
+                    });
+                    if (!response.ok) throw new Error('Taxonomy lookup failed');
+                    const data = await response.json();
+                    return data.scientificName || `Taxon ${taxon}`;
+                } catch (_) {
+                    return `Taxon ${taxon}`;
+                }
+            })());
+        }
+        return homologySpeciesNames.get(taxon);
+    }
+
+    function getProteinHomologyPairs(nodeId) {
+        const selected = Array.isArray(nodeId) ? nodeId : [nodeId];
+        const ids = new Set(selected.flatMap(id => nodeMap.get(id)?._speciesIds || [id]));
+        const pairs = new Map();
+        Object.entries(accessoryDataFiles).forEach(([name, data]) => {
+            if (!/protein\.homology\./i.test(name)) return;
+            (data.rows || []).forEach(row => {
+                const a = row['#string_protein_1'] || row.string_protein_1;
+                const b = row.string_protein_id_2;
+                if (!a || !b || (!ids.has(a) && !ids.has(b))) return;
+                const reverse = !ids.has(a);
+                const pair = { query: reverse ? b : a, target: reverse ? a : b,
+                    species: reverse ? a.split('.')[0] : (row.species_2 || b.split('.')[0]),
+                    bitscore: Number(row.bitscore),
+                    start1: Number(reverse ? row.start_2 : row.start_1),
+                    end1: Number(reverse ? row.end_2 : row.end_1),
+                    start2: Number(reverse ? row.start_1 : row.start_2),
+                    end2: Number(reverse ? row.end_1 : row.end_2),
+                    size2: reverse ? Number(proteinMetadata.get(a)?.size) : Number(row.size_2) };
+                if (![pair.bitscore, pair.start1, pair.end1, pair.start2, pair.end2].every(Number.isFinite) ||
+                    pair.start1 < 1 || pair.start2 < 1 || pair.end1 < pair.start1 || pair.end2 < pair.start2) return;
+                const key = pair.query <= pair.target
+                    ? [pair.query, pair.target, pair.start1, pair.end1, pair.start2, pair.end2].join('|')
+                    : [pair.target, pair.query, pair.start2, pair.end2, pair.start1, pair.end1].join('|');
+                if (!pairs.has(key) || pairs.get(key).bitscore < pair.bitscore) pairs.set(key, pair);
+            });
+        });
+        return Array.from(pairs.values()).sort((a, b) => b.bitscore - a.bitscore);
+    }
+
+    function getHomologyNetworkTargets(ids) {
+        const wanted = new Set(ids);
+        const candidates = currentViewId === 'base' ? nodes : (activeSubData?.nodes || []);
+        return candidates.filter(node => wanted.has(node.id) || node._speciesIds?.some(id => wanted.has(id)));
+    }
+
+    function selectHomologyProteins(ids, zoom = false) {
+        const targets = getHomologyNetworkTargets(ids);
+        if (!targets.length) return;
+        stringScapePythonBridge.call_json('select', {
+            node_ids: targets.map(node => node.id), mode: 'replace', animate: false
+        });
+        if (zoom) {
+            if (proteinInfoZoomHotkeyState) proteinInfoZoomHotkeyState.invalidated = true;
+            toggleProteinZoomHotkey();
+        }
+    }
+
+    function renderProteinInfoHomologyView(body, nodeId) {
+        body.replaceChildren();
+        const selected = Array.isArray(nodeId) ? nodeId : [nodeId];
+        const selectedSources = new Set(selected.flatMap(id => nodeMap.get(id)?._speciesIds || [id]));
+        const multiple = selected.length > 1;
+        const allPairs = getProteinHomologyPairs(selected);
+        const pairs = allPairs.filter(pair => pair.query !== pair.target &&
+            (!multiple || selectedSources.has(pair.query) && selectedSources.has(pair.target)));
+        const add = (parent, tag, cls, text) => {
+            const el = document.createElement(tag);
+            el.className = cls;
+            if (text !== undefined) el.textContent = text;
+            parent.appendChild(el);
+            return el;
+        };
+        const view = add(body, 'div', 'protein-homology-view');
+        const toolbar = add(view, 'div', 'protein-homology-toolbar');
+        const paralogs = [...new Set(allPairs.filter(p => p.query !== p.target && p.query.split('.')[0] === p.species).flatMap(p => [p.query, p.target]))].filter(id => !selectedSources.has(id));
+        const select = add(toolbar, 'button', 'protein-enrichment-control', 'Select all paralogues');
+        select.type = 'button';
+        const available = getHomologyNetworkTargets(paralogs);
+        select.disabled = !available.length;
+        select.onclick = () => selectHomologyProteins([...selected, ...paralogs], true);
+        if (multiple) add(toolbar, 'span', 'protein-homology-selection-note', 'Pairs below are only those where both protein in the pair are selected');
+        add(toolbar, 'span', '', `${pairs.length} alignments · ${paralogs.length} paralogs · ${available.length} in this view`);
+        if (!pairs.length) {
+            add(view, 'p', '', multiple ? 'No homology pairs connect the selected proteins.' : 'No homology pairs available. Upload a STRING protein.homology file (.txt or .txt.gz), then select a protein.');
+            return;
+        }
+        add(view, 'p', 'protein-homology-note', 'Aligned regions are coloured; coordinates are inclusive residue positions. Each pair uses the same residue scale. Self matches are omitted.');
+        const querySizes = new Map();
+        allPairs.forEach(pair => {
+            const known = Number(proteinMetadata.get(pair.query)?.size) || 0;
+            querySizes.set(pair.query, Math.max(querySizes.get(pair.query) || 0, known,
+                pair.query === pair.target ? pair.size2 || pair.end1 : 0));
+        });
+        pairs.forEach(pair => {
+            const pairSection = add(view, 'div', 'protein-homology-pair');
+            const same = pair.query.split('.')[0] === pair.species;
+            const querySize = querySizes.get(pair.query) || 0;
+            const size1 = Math.max(querySize, pair.end1);
+            const size2 = Math.max(pair.size2 || 0, pair.end2);
+            const scale = Math.max(size1, size2);
+            const alignment = add(pairSection, 'div', 'protein-homology-alignment');
+            const ancestor = add(alignment, 'div', 'protein-homology-ancestor');
+            add(ancestor, 'strong', 'protein-homology-ancestor-title', same ? 'Paralogue' : 'Homolog');
+            const branches = add(ancestor, 'span', 'protein-homology-branches');
+            branches.setAttribute('aria-hidden', 'true');
+            const labels = add(alignment, 'div', 'protein-homology-labels');
+            const diagram = add(alignment, 'div', 'protein-homology-diagram');
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.setAttribute('viewBox', '0 0 1000 128');
+            svg.setAttribute('preserveAspectRatio', 'none');
+            svg.setAttribute('aria-hidden', 'true');
+            diagram.appendChild(svg);
+            const shape = (tag, attrs) => {
+                const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+                Object.entries(attrs).forEach(([key, value]) => el.setAttribute(key, value));
+                svg.appendChild(el);
+                return el;
+            };
+            const x = residue => 1000 * residue / scale;
+            const score = add(diagram, 'span', 'protein-homology-score', `BLAST bitscore: ${pair.bitscore.toLocaleString()}`);
+            score.style.left = `${100 * (pair.start1 - 1 + pair.end1 + pair.start2 - 1 + pair.end2) / (4 * scale)}%`;
+            shape('polygon', { points: `${x(pair.start1 - 1)},44 ${x(pair.end1)},44 ${x(pair.end2)},92 ${x(pair.start2 - 1)},92`,
+                fill: '#38bdf8', 'fill-opacity': '.12', stroke: '#38bdf8', 'stroke-opacity': '.15' });
+            [[pair.query, pair.query.split('.')[0], pair.start1, pair.end1, size1, false],
+             [pair.target, pair.species, pair.start2, pair.end2, size2, true]].forEach(([id, species, start, end, size, target]) => {
+                const row = add(labels, 'div', 'protein-homology-row');
+                const clickable = getHomologyNetworkTargets([id]).length > 0;
+                const identity = add(row, 'button', 'protein-homology-identity');
+                identity.type = 'button';
+                identity.disabled = !clickable;
+                add(identity, 'strong', '', `${getPreferredProteinName(id)} (${id})`);
+                if (clickable) { identity.type = 'button'; identity.title = `Select ${id} in the network`; identity.onclick = () => selectHomologyProteins([id], true); }
+                const meta = proteinMetadata.get(id) || {};
+                const speciesName = meta.species_name || meta.scientific_name || meta.species || '';
+                add(row, 'span', '', '—');
+                const speciesLabel = add(row, 'em', 'protein-homology-species', speciesName || `Taxon ${species}`);
+                speciesLabel.title = `NCBI taxonomy ID: ${species}`;
+                loadHomologySpeciesName(species).then(name => { speciesLabel.textContent = name; });
+                const y = target ? 92 : 32;
+                shape('rect', { x: 0, y, width: x(size), height: 12, rx: 6, fill: '#64748b', 'fill-opacity': '.27' });
+                shape('rect', { x: x(start - 1), y, width: x(end - start + 1), height: 12, rx: 6, fill: target ? '#14b8a6' : '#38bdf8' });
+                const coordinates = add(diagram, 'span', 'protein-homology-coordinates', `${start}–${end} aligned · ${size} aa${!target && !querySize || target && !pair.size2 ? ' (minimum length)' : ''}`);
+                coordinates.style.left = `${100 * ((start - 1 + end) / 2) / scale}%`;
+                coordinates.style.top = `${target ? 108 : 8}px`;
+                coordinates.title = `${id}: aligned residues ${start} to ${end}`;
+            });
+        });
+    }
+
+    function getProteinOrthologyData(nodeIds) {
+        const selected = Array.isArray(nodeIds) ? nodeIds : [nodeIds];
+        const ids = new Set(selected.filter(Boolean).flatMap(id => nodeMap.get(id)?._speciesIds || [id]));
+        const levels = new Map();
+        const assigned = new Set();
+        Object.entries(accessoryDataFiles).forEach(([name, data]) => {
+            if (!/protein\.orthology\./i.test(name)) return;
+            (data.rows || []).forEach(row => {
+                const id = String(row['#protein'] || row.protein || '').trim();
+                const taxon = String(row.taxonomy_level || '').trim();
+                const group = String(row.orthologous_group_or_ortholog || '').trim();
+                if (!ids.has(id) || !/^\d+$/.test(taxon) || !group) return;
+                if (!levels.has(taxon)) levels.set(taxon, new Map());
+                const groups = levels.get(taxon);
+                if (!groups.has(group)) groups.set(group, new Set());
+                groups.get(group).add(id);
+                assigned.add(id);
+            });
+        });
+        return { ids, levels, missing: Array.from(ids).filter(id => !assigned.has(id)) };
+    }
+
+    function renderProteinInfoOrthologyView(body, nodeIds) {
+        body.replaceChildren();
+        const add = (parent, tag, cls, text) => {
+            const el = document.createElement(tag);
+            el.className = cls;
+            if (text !== undefined) el.textContent = text;
+            parent.appendChild(el);
+            return el;
+        };
+        const view = add(body, 'div', 'protein-orthology-view');
+        const intro = add(view, 'div', 'protein-orthology-intro');
+        add(intro, 'p', '', 'Orthologues are genes in different species that diverged when their ancestral species split. This page shows the orthologous groups or orthologues assigned to your selected proteins in the uploaded STRING file (derived from eggNOG), at different taxonomic scopes.');
+        add(intro, 'p', '', 'Each scope defines the organisms considered for an assignment. Matching group IDs within the same scope indicate shared group membership. Groups can also contain paralogues, so shared membership alone does not establish a one-to-one orthologue relationship or identical function.');
+        const data = getProteinOrthologyData(nodeIds);
+        if (!data.ids.size) {
+            add(view, 'p', 'protein-orthology-empty', 'Select one or more proteins to explore their orthology assignments.');
+            return;
+        }
+        if (!data.levels.size) {
+            add(view, 'p', 'protein-orthology-empty', 'No orthology assignments found for the selected proteins. Upload a STRING protein.orthology file (.txt or .txt.gz).');
+            return;
+        }
+        const multiple = data.ids.size > 1;
+        const shared = Array.from(data.levels.values()).reduce((count, groups) => count + Array.from(groups.values()).filter(ids => ids.size > 1).length, 0);
+        add(view, 'div', 'protein-orthology-summary', `${data.ids.size} protein${multiple ? 's' : ''} · ${data.levels.size} taxonomic scopes${multiple ? ` · ${shared} shared assignments` : ''}`);
+        add(view, 'p', 'protein-homology-note', multiple
+            ? 'Compare assignments within each scope. Highlighted groups are shared by two or more selected proteins; counts refer only to your selection. Click a protein to select it.'
+            : 'Explore the selected protein’s assignments at each taxonomic scope. COG and NOG identifiers name groups; taxon IDs identify the scope.');
+        if (data.missing.length) {
+            add(view, 'p', 'protein-orthology-empty', `No assignments in the uploaded data for: ${data.missing.map(id => `${getPreferredProteinName(id)} (${id})`).join(', ')}.`);
+        }
+        const scopes = add(view, 'div', 'protein-orthology-scopes');
+        // Keep file order: taxonomy IDs are identifiers, not measures of evolutionary depth.
+        data.levels.forEach((groups, taxon) => {
+            const scope = add(scopes, 'section', 'protein-orthology-scope');
+            const heading = add(scope, 'div', 'protein-orthology-scope-heading');
+            const name = add(heading, 'strong', '', taxon === '1' ? 'All life (root)' : `Taxon ${taxon}`);
+            add(heading, 'span', '', `Taxonomic scope · ${taxon}`);
+            if (taxon !== '1') loadHomologySpeciesName(taxon).then(value => { name.textContent = value; });
+            const assignments = add(scope, 'div', 'protein-orthology-assignments');
+            Array.from(groups.entries()).sort((a, b) => b[1].size - a[1].size || a[0].localeCompare(b[0])).forEach(([group, members]) => {
+                const sharedGroup = members.size > 1;
+                const assignment = add(assignments, 'div', `protein-orthology-assignment${sharedGroup ? ' shared' : ''}`);
+                const title = add(assignment, 'div', 'protein-orthology-group-heading');
+                add(title, 'code', 'protein-orthology-group-id', group);
+                if (multiple) add(title, 'span', 'protein-orthology-count', `${sharedGroup ? 'Shared by' : 'Assigned to'} ${members.size} of ${data.ids.size}`);
+                const proteins = add(assignment, 'div', 'protein-orthology-members');
+                members.forEach(id => {
+                    const button = add(proteins, 'button', 'protein-homology-identity', `${getPreferredProteinName(id)} (${id})`);
+                    button.type = 'button';
+                    button.disabled = !getHomologyNetworkTargets([id]).length;
+                    button.title = `Select ${id} and zoom`;
+                    button.onclick = () => selectHomologyProteins([id], true);
+                });
+            });
+        });
+    }
+
+    function aiSelectedProteinPage(args = {}) {
+        const selected = aiGetSelectedNodesForTools();
+        const byId = new Map();
+        selected.forEach(node => (node._speciesIds || [node.id]).forEach(id => {
+            if (!byId.has(id)) byId.set(id, nodeMap.get(id) || { ...node, id });
+        }));
+        const proteins = Array.from(byId.values());
+        const limit = Number.isFinite(Number(args.limit)) ? Math.max(1, Math.min(100, Math.floor(Number(args.limit)))) : 20;
+        const offset = Number.isFinite(Number(args.offset)) ? Math.max(0, Math.floor(Number(args.offset))) : 0;
+        return { status: proteins.length ? 'success' : 'warning', selected_count: proteins.length,
+            total: proteins.length, limit, offset,
+            next_offset: offset + limit < proteins.length ? offset + limit : null,
+            proteins: proteins.slice(offset, offset + limit) };
+    }
+
+    function getProteinInfoUrlLinks(nodeId, includeUnavailable = false) {
+        const data = getNodeInfoLinkData(nodeId);
+        return [
+            { label: 'UniProt', url: data.uniprotUrl },
+            { label: 'NCBI protein', url: data.ncbiProteinUrl },
+            { label: 'NCBI Gene', url: data.ncbiGeneUrl },
+            { label: 'PubMed', url: data.pubmedUrl },
+            ...(data.pdbLinks || []).map(link => ({ label: `PDB ${link.id}`, url: link.url })),
+            { label: 'IntAct', url: data.intactUrl },
+            { label: 'STRING', url: data.stringUrl }
+        ].filter(link => includeUnavailable || link.url);
+    }
+
+    function aiViewOrthologyInfo(args = {}) {
+        const page = aiSelectedProteinPage(args);
+        const data = getProteinOrthologyData(page.proteins.map(node => node.id));
+        const assignments = new Map(page.proteins.map(node => [node.id, []]));
+        data.levels.forEach((groups, taxonomyLevel) => groups.forEach((members, group) => members.forEach(id => {
+            assignments.get(id)?.push({ taxonomy_level: taxonomyLevel, orthologous_group_or_ortholog: group });
+        })));
+        return { ...page, proteins: page.proteins.map(node => ({
+            protein_id: node.id, preferred_name: getPreferredProteinName(node.id), orthology: assignments.get(node.id) || []
+        })), ...(!page.total ? { message: 'No nodes are currently selected.' } : {}) };
+    }
+
+    function aiViewUrlLinks(args = {}) {
+        const page = aiSelectedProteinPage(args);
+        return { ...page, proteins: page.proteins.map(node => ({
+            protein_id: node.id, preferred_name: getPreferredProteinName(node.id), links: getProteinInfoUrlLinks(node.id)
+        })), ...(!page.total ? { message: 'No nodes are currently selected.' } : {}) };
+    }
+
+    function aiViewProteinInfo(args = {}) {
+        const fields = new Set(['gene_id', 'annotation', 'description', 'kegg_product', 'enrichment_terms',
+            'homology', 'complexes', 'aliases', 'sequence_length', 'centrality', 'eigenvector_centrality', 'pdb_ids', 'collections']);
+        const requested = args.information_types;
+        if (requested !== undefined && (!Array.isArray(requested) || requested.some(field => !fields.has(field)))) {
+            return { status: 'error', message: 'information_types must be an array of supported field names.', available_information_types: Array.from(fields) };
+        }
+        const wants = field => !requested?.length || requested.includes(field);
+        const page = aiSelectedProteinPage(args);
+        const enrichment = page.proteins.length && wants('enrichment_terms') ? getProteinEnrichmentRecords() : [];
+        const recordsById = new Map();
+        const pdbState = wants('complexes') && page.proteins.length ? ensureComplexPdbColorState() : null;
+        enrichment.forEach(record => {
+            // Keep source protein IDs even when the current network merges species.
+            const id = record.proteinId || record.nodeId;
+            if (!recordsById.has(id)) recordsById.set(id, []);
+            recordsById.get(id).push(record);
+
+        });
+        const homologyById = new Map();
+        if (wants('homology') && page.proteins.length) {
+            getProteinHomologyPairs(page.proteins.map(node => node.id)).forEach(pair => {
+                if (pair.query === pair.target) return;
+                [[pair.query, pair.target], [pair.target, pair.query]].forEach(([id, other]) => {
+                    if (!homologyById.has(id)) homologyById.set(id, new Map());
+                    const hits = homologyById.get(id);
+                    const bitscore = Number.isFinite(pair.bitscore) ? pair.bitscore : null;
+                    if (!hits.has(other) || bitscore !== null && (hits.get(other).bitscore === null || bitscore > hits.get(other).bitscore)) {
+                        hits.set(other, { protein_id: other, preferred_name: getPreferredProteinName(other), taxon_id: other.split('.')[0], bitscore });
+                    }
+                });
+            });
+        }
+        const sizeSource = wants('sequence_length') && page.proteins.length ? resolveProteinSizeSource(page.proteins) : null;
+        const proteins = page.proteins.map(node => {
+            const id = node.id, meta = proteinMetadata.get(id) || {};
+            const result = { protein_id: id, preferred_name: getPreferredProteinName(id) };
+            if (wants('gene_id')) result.gene_id = meta.ncbiGeneId || meta.pubmedGeneId || meta.geneId || null;
+            if (wants('annotation')) result.annotation = getProteinInfoAnnotation(id);
+            if (wants('description')) result.description = getProteinInfoDescription(id);
+            if (wants('kegg_product')) result.kegg_product = getKeggProductText(id) || null;
+            const records = recordsById.get(id) || [];
+            if (wants('enrichment_terms')) result.enrichment_terms = records.map(record => ({
+                category: record.category, term: record.term, description: record.description, url: getProteinEnrichmentUrl(record)
+            }));
+            if (wants('homology')) {
+                const homologues = Array.from(homologyById.get(id)?.values() || []);
+                const paralogues = homologues.filter(other => other.taxon_id === id.split('.')[0]);
+                result.homology = { homologue_count: homologues.length, paralogue_count: paralogues.length, homologues, paralogues };
+            }
+            if (wants('complexes')) {
+                result.complexes = (pdbState?.nodeToComplexPdbIds.get(id) || []).map(pdbId => {
+                    const partners = Array.from(pdbState.pdbToNodeIds.get(pdbId) || []).filter(other => other !== id)
+                        .map(other => ({ protein_id: other, preferred_name: getPreferredProteinName(other) }));
+                    return { pdb_id: pdbId, url: `https://www.rcsb.org/structure/${encodeURIComponent(pdbId)}`, partners,
+                        evidence: 'Shared PDB structure membership (Complexes from PDBs); partners are limited to loaded data.',
+                        summary: `Forms a complex with ${partners.map(p => p.preferred_name).join(', ')} (PDB ${pdbId})` };
+                });
+            }
+            if (wants('aliases')) {
+                const seen = new Set();
+                result.aliases = (aliasData.get(id) || []).filter(entry => {
+                    if (getPdbAliasSourceFlags(entry.source).loose) return false;
+                    const key = `${entry.source}|${entry.alias}`;
+                    if (seen.has(key)) return false;
+                    seen.add(key); return true;
+                }).map(entry => ({ alias: entry.alias, source: entry.source }));
+            }
+            if (wants('sequence_length')) result.sequence_length = getProteinSizeValue(id, sizeSource) || meta.sequence?.replace(/\s/g, '').length || null;
+            if (wants('centrality')) result.centrality = Number.isFinite(node.centrality) ? node.centrality : null;
+            if (wants('eigenvector_centrality')) result.eigenvector_centrality = Number.isFinite(node.eigen) ? node.eigen : null;
+            if (wants('pdb_ids')) result.pdb_ids = getNodeInfoLinkData(id).pdbLinks.map(link => link.id);
+            if (wants('collections')) result.collections = getNodeCollectionMemberships(id);
+            return result;
+        });
+        return { ...page, proteins, message: `${!page.total ? 'No nodes are currently selected. ' : ''}Use Search_Pubmed to find extra information on these proteins from the literature if needed.` };
+    }
+
     function aiViewEnrichmentTerms(args = {}) {
         const selected = Array.from(getEffectiveSelectedNodesSet() || []);
         const ids = new Set(selected.flatMap(id => nodeMap.get(id)?._speciesIds || [id]));
@@ -17986,6 +18683,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     function getProteinInfoText(nodeId, mode) {
         const meta = proteinMetadata.get(nodeId) || {};
+        if (mode === 'orthology') {
+            const data = getProteinOrthologyData(nodeId);
+            return Array.from(data.levels, ([taxon, groups]) => `Taxon ${taxon}: ${Array.from(groups.keys()).join(', ')}`).join('\n') || 'No orthology assignments available.';
+        }
         if (mode === 'enrichment') return getProteinEnrichmentText(nodeId) || 'No enrichment terms available for this protein.';
         if (mode === 'description') return getProteinInfoDescription(nodeId);
         if (mode === 'sequence') return meta.sequence || 'Unknown';
@@ -17993,6 +18694,23 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         if (mode === 'structure') return '';
         if (mode === 'guide') return 'Feature coming soon!';
         return getProteinInfoAnnotation(nodeId);
+    }
+
+    function renderProteinInfoTextCards(body, selectedIds, mode) {
+        body.replaceChildren();
+        const cards = document.createElement('div');
+        cards.className = 'protein-enrichment-cards';
+        selectedIds.forEach(nodeId => {
+            const card = document.createElement('section');
+            card.className = 'protein-enrichment-card';
+            const title = document.createElement('h4');
+            title.textContent = `${getPreferredProteinName(nodeId)} (${nodeId})`;
+            const content = document.createElement('div');
+            applyMarkdownLatexContent(content, getProteinInfoText(nodeId, mode));
+            card.append(title, content);
+            cards.appendChild(card);
+        });
+        body.appendChild(cards);
     }
 
     function clearProteinInfoHistory() {
@@ -18194,12 +18912,23 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             return;
         }
 
-        const enrichmentSelection = Array.from(getEffectiveSelectedNodesSet() || []);
-        if (proteinInfoMode === 'enrichment' && enrichmentSelection.length > 1) {
-            heading.textContent = `${enrichmentSelection.length} proteins`;
+        const selectedIds = Array.from(getEffectiveSelectedNodesSet() || []);
+        if (proteinInfoMode === 'orthology') {
+            heading.textContent = selectedIds.length === 1 ? `${getPreferredProteinName(selectedIds[0])} (${selectedIds[0]})` : selectedIds.length ? `${selectedIds.length} proteins` : 'Orthology';
             proteinInfoStructureRenderToken++;
             disposeProteinInfoMolstarViewer();
-            renderProteinInfoEnrichmentView(body, enrichmentSelection);
+            renderProteinInfoOrthologyView(body, selectedIds);
+        } else if (selectedIds.length > 1 && ['annotation', 'description', 'enrichment', 'homology'].includes(proteinInfoMode)) {
+            heading.textContent = `${selectedIds.length} proteins`;
+            proteinInfoStructureRenderToken++;
+            disposeProteinInfoMolstarViewer();
+            if (proteinInfoMode === 'homology') {
+                renderProteinInfoHomologyView(body, selectedIds);
+            } else if (proteinInfoMode === 'enrichment') {
+                renderProteinInfoEnrichmentView(body, selectedIds);
+            } else {
+                renderProteinInfoTextCards(body, selectedIds, proteinInfoMode);
+            }
         } else if (selectedId !== null && selectedId !== undefined) {
             heading.textContent = `${getPreferredProteinName(selectedId)} (${selectedId})`;
             if (proteinInfoMode === 'links') {
@@ -18210,6 +18939,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 proteinInfoStructureRenderToken++;
                 disposeProteinInfoMolstarViewer();
                 renderProteinInfoEnrichmentView(body, selectedId);
+            } else if (proteinInfoMode === 'homology') {
+                proteinInfoStructureRenderToken++;
+                disposeProteinInfoMolstarViewer();
+                renderProteinInfoHomologyView(body, selectedId);
             } else if (proteinInfoMode === 'structure') {
                 renderProteinInfoStructureView(body, selectedId);
             } else {
@@ -18226,7 +18959,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     ? 'Sequence'
                     : (proteinInfoMode === 'structure'
                         ? 'Structure'
-                        : (proteinInfoMode === 'links' ? 'Links' : (proteinInfoMode === 'enrichment' ? 'Enrichment' : 'Annotation'))));
+                        : (proteinInfoMode === 'links' ? 'Links' : (proteinInfoMode === 'enrichment' ? 'Enrichment' : proteinInfoMode === 'homology' ? 'Homology' : 'Annotation'))));
             heading.textContent = 'Protein Info';
             applyMarkdownLatexContent(body, `Select only one node to view the proteins ${label}.`);
         }
@@ -19171,6 +19904,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         if (lowerFileName.includes('protein.enrichment.terms')) {
             return '\t';
         }
+        if (lowerFileName.includes('protein.homology.') || lowerFileName.includes('protein.orthology.')) return '__WS__';
         if (lowerFileName.includes('protein.info')) {
             return '\t';
         }
@@ -22390,6 +23124,18 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             return;
         }
 
+        if (!overSecondary && !draggedNode && !isLassoMode && !isBrushMode) {
+            const rect = canvas.getBoundingClientRect();
+            const x = (e.clientX - rect.left) * canvas.width / rect.width;
+            const y = (e.clientY - rect.top) * canvas.height / rect.height;
+            const overLabel = (networkLabelHitRegions.get(currentViewId) || []).some(({ box }) =>
+                x >= box.left && x <= box.right && y >= box.top && y <= box.bottom);
+            if (overLabel) {
+                canvas.style.cursor = 'pointer';
+                return;
+            }
+        }
+
         // --- 3. EXISTING NODE/DRAG LOGIC ---
         const drawNodes = currentViewId === 'base' ? nodes : activeSubData?.nodes || [];
         if (selectionTargetMode === 'links' && !draggedNode && !isLassoMode && !isBrushMode) {
@@ -22772,6 +23518,22 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             return;
         }
         
+        const labelRect = canvas.getBoundingClientRect();
+        const labelX = (e.clientX - labelRect.left) * canvas.width / labelRect.width;
+        const labelY = (e.clientY - labelRect.top) * canvas.height / labelRect.height;
+        const clickedNetworkLabel = (networkLabelHitRegions.get(currentViewId) || []).find(({ box }) =>
+            labelX >= box.left && labelX <= box.right && labelY >= box.top && labelY <= box.bottom);
+        if (clickedNetworkLabel) {
+            const sources = Object.values(accessoryVariableValues)
+                .map(values => values['Specific Local Network Cluster (STRING)']).filter(Boolean);
+            const members = nodes.filter(node => sources.some(values =>
+                String(values.get(node.id) || '').split('; ').some(term => term.trim() === clickedNetworkLabel.text)));
+            selectNodes(members, false, `Network label: ${clickedNetworkLabel.text}`);
+            toggleProteinZoomHotkey();
+            draw();
+            return;
+        }
+
         const rect = canvas.getBoundingClientRect(); const [mx, my] = transform.invert([e.clientX - rect.left, e.clientY - rect.top]);
         const drawNodes = currentViewId === 'base' ? nodes : activeSubData?.nodes || [];
         const zoomK = Math.max(transform.k || 1, 1e-6);
@@ -23004,7 +23766,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         
         // Determine what data to display
         let displayMode = currentColorMode;
-        let isSupportedMode = displayMode === 'layer' || displayMode === 'collection' || displayMode === 'complex_pdbs' || ['annotation', 'characterization', 'localization'].includes(displayMode);
+        let isSupportedMode = displayMode === 'layer' || displayMode === 'collection' || displayMode === 'complex_pdbs' || displayMode === 'paralogues' || ['annotation', 'characterization', 'localization'].includes(displayMode);
         if (currentColorMode.startsWith('var::')) {
             const parts = currentColorMode.split('::');
             const file = parts[1], variable = parts[2];
@@ -23021,6 +23783,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             activeNodes.forEach(d => {
                 const key = d.layer === 99 ? 'Disconnected' : `Layer ${d.layer}`;
                 dataCounts.set(key, (dataCounts.get(key) || 0) + 1);
+            });
+        } else if (isSupportedMode && displayMode === 'paralogues') {
+            activeNodes.forEach(node => {
+                const label = getParalogueGroup(node.id);
+                dataCounts.set(label, (dataCounts.get(label) || 0) + 1);
             });
         } else if (isSupportedMode && displayMode === 'collection') {
             activeNodes.forEach(d => {
@@ -23066,7 +23833,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         // Draw heading and category count
         const modeLabel = displayMode === 'layer' ? 'Layer' 
             : displayMode === 'collection' ? 'Collection'
-            : displayMode === 'complex_pdbs' ? 'Complex PDBs'
+            : displayMode === 'complex_pdbs' ? 'Complexes (from PDBs)'
             : displayMode === 'annotation' ? 'Annotation'
             : displayMode === 'characterization' ? 'Characterization'
             : displayMode === 'localization' ? 'Localization'
@@ -23087,6 +23854,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             currentCatScale = (label) => label === 'Disconnected' ? '#888' : d3.interpolateViridis(1 - ((parseInt(label.split(' ')[1]) - 1) / 10));
         } else if (displayMode === 'collection') {
             currentCatScale = (label) => label === 'No Collection' ? '#444' : getCollectionColorByName(label);
+        } else if (displayMode === 'paralogues') {
+            currentCatScale = label => getCategoricalLegendFillColor('paralogues', label,
+                label === 'No paralogues' ? '#888888' : ensureParalogueColourState().colorScale(label));
         } else if (displayMode === 'complex_pdbs') {
             currentCatScale = ensureComplexPdbColorState().colorScale;
         } else {
@@ -23642,7 +24412,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
             const nodeColor = currentNodeColorMode === 'collection'
                 ? getCollectionColorForNode(node.id, nowMs)
-                : (currentNodeColorMode === 'complex_pdbs' ? getComplexPdbColorForNode(node.id, nowMs) : (node.col || '#4caf50'));
+                : (isEnrichmentCategoryColorMode(currentNodeColorMode) ? getEnrichmentCategoryColorForNode(node.id, currentNodeColorMode, nowMs) : currentNodeColorMode === 'complex_pdbs' ? getComplexPdbColorForNode(node.id, nowMs) : (node.col || '#4caf50'));
 
             ctx.beginPath();
             ctx.arc(screen.x, screen.y, isHover ? radius * 1.06 : radius, 0, Math.PI * 2);
@@ -23979,7 +24749,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 ? getLinkVariableColor(node, document.getElementById('linkMode')?.value || 'score', '#999999')
                 : currentNodeColorMode === 'collection'
                 ? getCollectionColorForNode(node.id, nowMs)
-                : (currentNodeColorMode === 'complex_pdbs' ? getComplexPdbColorForNode(node.id, nowMs) : (node.col || '#4caf50'));
+                : (isEnrichmentCategoryColorMode(currentNodeColorMode) ? getEnrichmentCategoryColorForNode(node.id, currentNodeColorMode, nowMs) : currentNodeColorMode === 'complex_pdbs' ? getComplexPdbColorForNode(node.id, nowMs) : (node.col || '#4caf50'));
 
             const rBase = Math.max(1.5, node.r || 4);
             const r = Math.max(1.25, rBase * tk);
@@ -24166,6 +24936,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     function drawCurrentView() {
+        networkLabelHitRegions.set(currentViewId, []);
         updateChartPlotControls();
         //console.log("function draw()");
         updatePhysicsRuntimeLabel();
@@ -24354,7 +25125,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             if ((nodeVisibilityToggle !== 'show' && n._ssVisible !== 'show') || n._ssVisible === 'hide') return;
             const nodeColor = currentNodeColorMode === 'collection'
                 ? getCollectionColorForNode(n.id, nowMs)
-                : (currentNodeColorMode === 'complex_pdbs' ? getComplexPdbColorForNode(n.id, nowMs) : (n.col || "#4caf50"));
+                : (isEnrichmentCategoryColorMode(currentNodeColorMode) ? getEnrichmentCategoryColorForNode(n.id, currentNodeColorMode, nowMs) : currentNodeColorMode === 'complex_pdbs' ? getComplexPdbColorForNode(n.id, nowMs) : (n.col || "#4caf50"));
             ctx.globalAlpha = nodeAlpha;
             const nodeRadius = n._ssSize ?? n.r ?? 5;
             ctx.beginPath(); ctx.arc(n.x, n.y, nodeRadius, 0, 2 * Math.PI); ctx.fillStyle = nodeColor;
@@ -24391,6 +25162,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 ctx.stroke();
             });
         }
+
+        drawNetworkLabels(ctx, drawNodes);
 
         if ((nodeVisibilityToggle === 'show' || drawNodes.some(n => n._ssVisible === 'show')) && (nodeLabelToggle === 'show' || drawNodes.some(n => n._ssLabelVisible === 'show'))) {
             const screenBg = document.getElementById('bgColor')?.value || '#1a1a1a';
@@ -24589,7 +25362,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     const isPath = pathNodes.has(n.id), isHigh = isSearching && effectiveSelection.has(n.id);
                     const nodeColor = currentNodeColorMode === 'collection'
                         ? getCollectionColorForNode(n.id, nowMs)
-                        : (currentNodeColorMode === 'complex_pdbs' ? getComplexPdbColorForNode(n.id, nowMs) : n.col);
+                        : (isEnrichmentCategoryColorMode(currentNodeColorMode) ? getEnrichmentCategoryColorForNode(n.id, currentNodeColorMode, nowMs) : currentNodeColorMode === 'complex_pdbs' ? getComplexPdbColorForNode(n.id, nowMs) : n.col);
                     octx.globalAlpha = (isHigh || isPath) ? 1 : (isSearching ? 0.08 : 1);
                     octx.beginPath(); octx.arc(n.x, n.y, n.r, 0, 2 * Math.PI); octx.fillStyle = nodeColor; octx.fill();
                     octx.strokeStyle = isPath ? "#ff4444" : (n.borderCol || d3.color(nodeColor).brighter(1)); octx.lineWidth = isPath ? 4 : (n.borderWidth ?? 1); octx.stroke();
@@ -24678,7 +25451,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 drawNodes.forEach(n => {
                     const nodeColor = currentNodeColorMode === 'collection'
                         ? getCollectionColorForNode(n.id, nowMs)
-                        : (currentNodeColorMode === 'complex_pdbs' ? getComplexPdbColorForNode(n.id, nowMs) : n.col);
+                        : (isEnrichmentCategoryColorMode(currentNodeColorMode) ? getEnrichmentCategoryColorForNode(n.id, currentNodeColorMode, nowMs) : currentNodeColorMode === 'complex_pdbs' ? getComplexPdbColorForNode(n.id, nowMs) : n.col);
                     const isPath = pathNodes.has(n.id), isHigh = isSearching && effectiveSelection.has(n.id);
                     const alpha = (isHigh || isPath) ? 1 : (isSearching ? 0.08 : 1);
                     const border = isPath ? '#ff4444' : (n.borderCol || d3.color(nodeColor).brighter(1));
@@ -25407,6 +26180,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             const clusterSupported = mode === 'collection'
                 || mode === 'layer'
                 || mode === 'annotation'
+                || mode === 'paralogues'
                 || mode === 'characterization'
                 || mode === 'localization'
                 || (mode.startsWith('var::') && !!targetNodes.find(n => getClusterVariableKey(n, mode) !== null));
@@ -25505,7 +26279,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const customColourTimer = startCustomColourDebug(mode, targetNodes.length);
         calculateLocalClusteringCoefficients(targetNodes, targetLinks);
         
-        if (mode === 'collection' || mode === 'complex_pdbs') {
+        if (mode === 'collection' || mode === 'complex_pdbs' || isEnrichmentCategoryColorMode(mode)) {
             updateCollectionColorCycleTimer();
         }
 
@@ -25595,6 +26369,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             n.r = (6 * nSizeBase) + (sizeNormalized * 60 * sizeByMagnitude);
             n.borderWidth = borderWidth * (1 + (borderWidthMode === 'none' ? 0 : borderNormalized * borderWidthByMagnitude));
             if (mode === 'compare') n.col = getComparisonColor(n, comparisonContext);
+            else if (mode === 'paralogues') n.col = getParalogueColor(n.id);
             else if (mode === 'species') n.col = getMergedSpeciesColor(getSpeciesPresenceForNode(n, speciesPresenceMap));
             else if (mode === 'layer') {
                 const layerLabel = n.layer === 99 ? 'Disconnected' : `Layer ${n.layer}`;
@@ -25657,6 +26432,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 const processKey = getBiologicalProcessKey(n.id);
                 n.col = getCategoricalNodeColor('biological_process', processKey, catScale(processKey));
             }
+            else if (isEnrichmentCategoryColorMode(mode)) n.col = getEnrichmentCategoryColorForNode(n.id, mode, nowMs);
             else if (mode && mode.startsWith('var::')) {
                 const selection = getCustomVariableSelection(mode);
                 const cfg = selection?.cfg;
@@ -25854,6 +26630,20 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         }
 
         const footerNotes = [];
+        if (isEnrichmentCategoryColorMode(mode)) {
+            const variable = getCustomVariableSelection(mode).cfg.variable;
+            if (variable === 'Binds to...' || variable === 'Activity') {
+                footerNotes.push('This uses data from the enrichment Molecular Function (Gene Ontology).');
+            }
+            if (variable === 'Specific Local Network Cluster (STRING)') {
+                footerNotes.push('This is just the same as "Local Network Cluster (STRING)", but filters out any terms that have descriptions containing ", and".');
+            }
+            footerNotes.push(variable.includes('Local Network Cluster (STRING)')
+                ? 'Nodes in multiple local network clusters cycle every 0.5s.'
+                : variable === 'Complexes (Gene Ontology)'
+                    ? 'Nodes with multiple complexes cycle every 0.5s.'
+                    : 'Nodes with multiple annotations cycle every 0.5s.');
+        }
         if (mode === 'local_clustering_coefficient') {
             footerNotes.push('Highly clustered nodes often signify tightly knit protein complexes.');
         }
@@ -26470,7 +27260,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 const counts = new Map();
                 activeNodes.forEach(d => {
                     const k = String(getCustomVariableValue(d, mode) ?? '').trim() || 'N/A';
-                    counts.set(k, (counts.get(k) || 0) + 1);
+                    const categories = isEnrichmentCategoryColorMode(mode) ? k.split('; ') : [k];
+                    categories.forEach(category => counts.set(category, (counts.get(category) || 0) + 1));
                 });
                 const orderedValues = (effectiveType === 'Categorical - Ordinal' || effectiveType === 'Numerical - Discrete')
                     ? sortedValues
@@ -26482,7 +27273,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 const valueScale = d3.scaleOrdinal(d3.schemeTableau10).domain(orderVals);
                 orderVals.slice(0,50).forEach(lbl => {
                     const cnt = counts.get(lbl) || 0;
-                    const color = (effectiveType === 'Categorical - Nominal') ? catScale(lbl) : valueScale(lbl);
+                    const color = isEnrichmentCategoryColorMode(mode) ? getEnrichmentCategoryDefaultColor(mode, lbl) : (effectiveType === 'Categorical - Nominal') ? catScale(lbl) : valueScale(lbl);
                     appendCategoricalLegendItem(legend, {
                         mode,
                         label: lbl,
@@ -26521,7 +27312,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     onActivate: () => handleLegendHighlight(mode, category.label)
                 });
             });
-        } else if (['characterization', 'localization', 'biological_process', 'layer', 'collection', 'complex_pdbs'].includes(mode)) {
+        } else if (['paralogues', 'characterization', 'localization', 'biological_process', 'layer', 'collection', 'complex_pdbs'].includes(mode)) {
             const builtInSource = (mode === 'annotation' || mode === 'localization')
                 ? resolveBuiltInColorSource(mode, activeNodes)
                 : null;
@@ -26538,6 +27329,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                             : (mode === 'complex_pdbs'
                                 ? getComplexPdbMemberships(d.id)
                                 : (proteinMetadata.get(d.id)?.[mode] || 'Unknown')))));
+                if (mode === 'paralogues') key = getParalogueGroup(d.id);
                 counts.set(key, (counts.get(key) || 0) + 1);
             });
             if (mode === 'collection') {
@@ -26556,11 +27348,13 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     });
                 });
             }
-            createPieChartToggle(counts, mode, mode === 'complex_pdbs' ? 'Complex PDBs' : mode);
+            createPieChartToggle(counts, mode, mode === 'complex_pdbs' ? 'Complexes (from PDBs)' : mode);
             const sortedCounts = Array.from(counts.entries()).sort((a,b) => { if (a[0] === "Disconnected") return 1; if (b[0] === "Disconnected") return -1; if (mode === 'layer') return parseInt(a[0].split(' ')[1]) - parseInt(b[0].split(' ')[1]); return b[1] - a[1]; });
-            const visibleCounts = mode === 'complex_pdbs' ? sortedCounts : sortedCounts.slice(0, 30);
+            const visibleCounts = ['complex_pdbs', 'paralogues'].includes(mode) ? sortedCounts : sortedCounts.slice(0, 30);
             visibleCounts.forEach(([lbl, cnt]) => {
-                const color = mode === 'layer'
+                const color = mode === 'paralogues'
+                    ? (lbl === 'No paralogues' ? '#888888' : ensureParalogueColourState().colorScale(lbl))
+                    : mode === 'layer'
                     ? (lbl === "Disconnected" ? "#888" : d3.interpolateViridis(1 - ((parseInt(lbl.split(' ')[1])-1)/10)))
                     : (mode === 'collection'
                         ? (lbl === 'No Collection' ? '#444' : getCollectionColorByName(lbl))
@@ -26766,13 +27560,14 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             if (mode === 'annotation' || mode === 'localization') {
                 return getBuiltInColorValueFromSource(n.id, mode, builtInSource) === value;
             }
+            if (mode === 'paralogues') return getParalogueGroup(n.id) === value;
             if (mode === 'biological_process') {
                 return getBiologicalProcessKey(n.id) === value;
             }
             if (mode?.startsWith('var::')) {
                 const raw = getCustomVariableValue(n, mode);
                 const normalized = (raw === undefined || raw === null || String(raw).trim() === '') ? 'N/A' : String(raw).trim();
-                return normalized === value;
+                return isEnrichmentCategoryColorMode(mode) ? normalized.split('; ').includes(value) : normalized === value;
             }
             return proteinMetadata.get(n.id)?.[mode] === value;
         });
@@ -26818,13 +27613,14 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             if (mode === 'complex_pdbs') {
                 return getComplexPdbMemberships(n.id).includes(value);
             }
+            if (mode === 'paralogues') return getParalogueGroup(n.id) === value;
             if (mode === 'biological_process') {
                 return getBiologicalProcessKey(n.id) === value;
             }
             if (mode?.startsWith('var::')) {
                 const raw = getCustomVariableValue(n, mode);
                 const normalized = (raw === undefined || raw === null || String(raw).trim() === '') ? 'N/A' : String(raw).trim();
-                return normalized === value;
+                return isEnrichmentCategoryColorMode(mode) ? normalized.split('; ').includes(value) : normalized === value;
             }
             return false;
         });
@@ -27586,6 +28382,7 @@ Motility without chemotaxis => (flagell* OR cili* OR motility OR motile) AND NOT
     }
 
     function rebuildAccessoryDataFromUploads() {
+        paralogueColourState = null;
         const pythonConfigs = variableConfigs.filter(cfg => cfg.fileName === 'Python-generated');
         const pythonValues = accessoryVariableValues['Python-generated'];
         sessionRestoreAppliedSignature = '';
@@ -27987,7 +28784,7 @@ Motility without chemotaxis => (flagell* OR cili* OR motility OR motile) AND NOT
             window.__stringscapeSuppressNextBuildHistory = false;
             scatterEigenCacheKey = null;
             nodes = []; links = []; window.nodes = nodes; window.links = links; nodeMap.clear(); document.getElementById('startBtn').style.display = 'none'; document.getElementById('progress-wrapper').style.display = 'block'; document.getElementById('pauseBtn').style.display = 'block';
-            let processedLinks = new Set(), startTime = Date.now(); isBuilding = true; isSettling = false; updateViewMenu();
+            let processedLinks = new Set(), startTime = Date.now(); isBuilding = true; startNetworkLabelBuildFade(); isSettling = false; updateViewMenu();
             let lastBuildRefreshAt = startTime;
             let lastBuildStyleRefreshAt = startTime;
             const buildFromQueue = async (initialQueue, startLayer) => {
@@ -28570,6 +29367,21 @@ Motility without chemotaxis => (flagell* OR cili* OR motility OR motile) AND NOT
         };
         nodeMonoColorEl.onchange = (e) => aiRecordSetMonoNodeColorHistory(e.target.value, 'Human');
     }
+
+    // Redraw with final glyph metrics after the web font becomes available.
+    document.fonts?.load('bold 10px Ubuntu').then(() => draw()).catch(() => {});
+
+    document.getElementById('networkLabelShow').onchange = (event) => {
+        document.getElementById('networkLabelControls').hidden = !event.target.checked;
+        draw();
+    };
+    ['networkLabelPriority', 'networkLabelSize'].forEach(id => {
+        document.getElementById(id).oninput = event => {
+            const value = Number(event.target.value);
+            document.getElementById(`${id}Value`).textContent = id === 'networkLabelSize' ? `${value}px` : `${Math.round(value * 100)}%`;
+            draw();
+        };
+    });
 
     const nodeLabelShowBtn = document.getElementById('nodeLabelShow');
     const nodeLabelFieldEl = document.getElementById('nodeLabelField');
