@@ -692,6 +692,8 @@ function drawChevronCanvasLabel(context, label, x, y) {
     let proteinInfoMolstarLoadPromise = null;
     let proteinInfoMolstarViewer = null;
     let proteinInfoMolstarBackgroundObserver = null;
+    let proteinInfoMolstarResizeObserver = null;
+    const proteinInfoEsmModelCache = new Map();
     let proteinComplexStructureOverlayRenderToken = 0;
     let proteinComplexStructureOverlayMolstarViewer = null;
     let proteinComplexStructureOverlayBackgroundObserver = null;
@@ -708,6 +710,11 @@ function drawChevronCanvasLabel(context, label, x, y) {
     let guideSequence = 0;
     let currentGuide = null; // { title, pages: [{ pageNumber, selectNodes, circleNodes, setView, text }] }
     let currentGuidePage = 1;
+    let proteinMentionIndex = null;
+    let proteinMentionSignature = '';
+    const proteinMentionHoverIds = new Set();
+    const annotationMentionFile = 'Annotation protein mentions';
+
     let guideCircleOverlays = new Map(); // { nodeId: { color } }
 
     // Global log storage for AI to use
@@ -762,6 +769,11 @@ function drawChevronCanvasLabel(context, label, x, y) {
                     { key: 'collection', label: 'Collection', type: 'Categorical - Nominal' },
                     { key: 'annotation', label: 'Annotation length', type: 'Numerical - Discrete' },
                     { key: 'characterization', label: 'Characterization', type: 'Categorical - Nominal' },
+                    { key: 'chromosome', label: 'Chromosome', type: 'Categorical - Nominal' },
+                    { key: 'strand', label: 'Gene Strand', type: 'Categorical - Nominal' },
+                    { key: 'gene_exon_count', label: 'Gene exon count', type: 'Numerical - Discrete' },
+                    { key: 'gc_content', label: 'GC content', type: 'Numerical - Continuous' },
+                    { key: 'genomic_position', label: 'Genomic position', type: 'Numerical - Continuous' },
                     { key: 'paralogues', label: 'Paralogoues', type: 'Categorical - Nominal' },
                     { key: 'biological_process', label: 'Biological process (mind-map most specific)', type: 'Categorical - Nominal' },
                     { key: 'size', label: 'Protein size', type: 'Numerical - Continuous' },
@@ -894,10 +906,13 @@ function drawChevronCanvasLabel(context, label, x, y) {
         { type: 'function', function: { name: 'List_collections', description: 'Lists all collections and their node counts.' } },
         { type: 'function', function: { name: 'View_node_IDs', description: 'Views IDs of selected nodes.' } },
         { type: 'function', function: { name: 'View_preferred_name', description: 'Views preferred names of selected nodes.' } },
-        { type: 'function', function: { name: 'View_protein_info', description: 'Returns paginated JSON for selected proteins: IDs, preferred names, gene IDs, annotation, description, KEGG product, enrichment, homology and paralogues, PDB complex partners, sourced aliases excluding PDB, sequence length, centrality, eigenvector centrality, PDB IDs and collections. Omit information_types for all fields or request specific fields (e.g. sequence_length). I recommend only getting info for the fields you need to know since you can always use the tool again to get the other info. Complex partners use the same shared PDB memberships as Complexes (from PDBs). Homologues include their highest BLAST bitscore.', parameters: { type: 'object', properties: { information_types: { type: 'array', items: { type: 'string', enum: ['gene_id', 'annotation', 'description', 'kegg_product', 'enrichment_terms', 'homology', 'complexes', 'aliases', 'sequence_length', 'centrality', 'eigenvector_centrality', 'pdb_ids', 'collections'] }, description: 'Optional fields to return; protein_id and preferred_name are always included.' }, limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 }, offset: { type: 'integer', minimum: 0, default: 0 } } } } },
+        { type:'function',function:{name:'Fetch_genome',description:'Downloads and processes an NCBI genome ZIP with genomic FASTA and GFF3, and adds it to uploaded files. Waits until import completes and returns genome status and a summary. By default detects the assembly from app taxon and NCBI Gene IDs, respecting the Genome panel settings. Optionally specify an assembly accession, taxonomy ID or chromosome subset. Uses the same fetch and processing path as the Genome buttons.',parameters:{type:'object',properties:{assembly_accession:{type:'string',description:'Optional versioned assembly accession, e.g. GCF_000005845.2.'},tax_id:{type:'string',description:'Optional NCBI taxonomy ID to resolve an assembly for. Omit to use app data.'},chromosomes:{type:'array',items:{type:'string'},maxItems:64,description:'Optional chromosome names, e.g. X,Y,MT. An empty array requests all chromosomes; omission uses the panel setting.'}}}}},
+        { type:'function',function:{name:'View_genome_summary',description:'Returns genome loaded/fetched and download-in-progress status, imported files, assembly and organism metadata, gene counts, sequence lengths, annotation availability, and a paginated chromosome list. Raw sequences are not included. Manually uploaded genomes count as loaded/fetched; file source distinguishes NCBI downloads.',parameters:{type:'object',properties:{limit:{type:'integer',minimum:1,maximum:100,default:30},offset:{type:'integer',minimum:0,default:0}}}}},
+        { type: 'function', function: { name: 'View_protein_info', description: 'Returns paginated JSON for selected proteins: IDs, preferred names, gene IDs, GC content, exon count, gene length, genomic position, chromosome, strand, annotation, description, KEGG product, enrichment, homology and paralogues, PDB complex partners, sourced aliases excluding PDB, sequence length, centrality, eigenvector centrality, PDB IDs, collections, and preferred names of proteins mentioned in annotations or mentioning each protein in their annotations. Omit information_types for all fields or request specific fields (e.g. sequence_length). I recommend only getting info for the fields you need to know since you can always use the tool again to get the other info. Genome fields use loaded annotations; unavailable or ambiguous numeric values are null. Requests for gene fields include genome_status and a genome_message when no genome has been loaded. GC content is percent G/C among canonical bases across the whole gene, gene_length is in nucleotides, genomic_position is the 1-based gene start, and exon_count is the maximum annotated transcript exon count (CDS segments if exons are absent). Complex partners use the same shared PDB memberships as Complexes (from PDBs). Homologues include their highest BLAST bitscore.', parameters: { type: 'object', properties: { information_types: { type: 'array', items: { type: 'string', enum: ['gene_id', 'gc_content', 'exon_count', 'gene_length', 'genomic_position', 'chromosome', 'strand', 'annotation', 'description', 'kegg_product', 'enrichment_terms', 'homology', 'complexes', 'aliases', 'sequence_length', 'centrality', 'eigenvector_centrality', 'pdb_ids', 'collections', 'mentions_other_proteins', 'mentioned_by_other_proteins'] }, description: 'Optional fields to return; protein_id and preferred_name are always included.' }, limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 }, offset: { type: 'integer', minimum: 0, default: 0 } } } } },
         { type: 'function', function: { name: 'View_orthology_info', description: 'Returns a paginated page of selected proteins with protein_id, preferred_name and orthology assignments (taxonomy_level and orthologous_group_or_ortholog) from uploaded STRING protein.orthology files. Proteins without assignments return an empty array.', parameters: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 }, offset: { type: 'integer', minimum: 0, default: 0 } } } } },
         { type: 'function', function: { name: 'View_URL_links', description: 'Returns paginated JSON containing every available URL on the Links page for each selected protein, including individual PDB structure links. Unavailable links are omitted.', parameters: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 }, offset: { type: 'integer', minimum: 0, default: 0 } } } } },
-        { type: 'function', function: { name: 'View_enrichment_terms', description: 'Views enrichment records for the currently selected proteins. Optionally filter by exact enrichment category (case insensitive), e.g. Biological Process (Gene Ontology). Paginated; returns available categories, total, offset and next_offset. Includes protein IDs, term IDs, descriptions and URLs.', parameters: { type: 'object', properties: { category: { type: 'string', description: 'Exact enrichment category; omit for all categories.' }, limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 }, offset: { type: 'integer', minimum: 0, default: 0 } } } } },
+        { type: 'function', function: { name: 'View_RCSB_PDB_info', description: 'Fetch PDB IDs, entry titles and all protein entities in each structure from RCSB PDB, including protein names, chain IDs and available UniProt accessions. By default uses PDB IDs associated with selected proteins; optionally provide pdb_ids. Paginated; failed or incomplete entries are reported explicitly.', parameters: { type: 'object', properties: { pdb_ids: { type: 'array', items: { type: 'string' }, description: 'Optional explicit PDB IDs; omit to use selected proteins.' }, limit: { type: 'integer', minimum: 1, maximum: 20, default: 5 }, offset: { type: 'integer', minimum: 0, default: 0 } } } } },
+        { type: 'function', function: { name: 'View_enrichment_terms', description: 'Views enrichment terms for the currently selected proteins. With multiple proteins, returns unique terms associated with more than 30% of selected proteins, with percentage of the selected proteins that have that term (0-100), protein_count and protein_ids. Set include_all_terms to true to include every term regardless of percentage. With one protein, returns all its terms. Optionally filter by exact enrichment category (case insensitive), e.g. Biological Process (Gene Ontology). Paginated; returns available categories, total, offset and next_offset. Includes protein IDs, term IDs and descriptions.', parameters: { type: 'object', properties: { include_all_terms: { type: 'boolean', default: false, description: 'Return all terms for selected proteins, including those associated with 30% or fewer. Multiple-protein results still include percentages.' }, category: { type: 'string', description: 'Exact enrichment category; omit for all categories.' }, limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 }, offset: { type: 'integer', minimum: 0, default: 0 } } } } },
         { type: 'function', function: { name: 'Select_using_an_enrichment_term', description: 'Selects proteins in the current view associated with an exact enrichment term ID or description (case insensitive). Optionally filter by exact category. Returns a count and up to 10 protein IDs, rather than a large selection list. Use View_enrichment_terms to find term IDs and categories.', parameters: { type: 'object', properties: { term: { type: 'string', description: 'Exact enrichment term ID or description.' }, category: { type: 'string', description: 'Optional exact enrichment category.' } }, required: ['term'] } } },
         { type: 'function', function: { name: 'View_sequence_data', description: 'Views a page of complete amino acid sequences for selected nodes. Defaults to 5 nodes; use next_offset to retrieve subsequent pages.', parameters: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: 20, default: 5 }, offset: { type: 'integer', minimum: 0, default: 0 } } } } },
         { type: 'function', function: { name: 'View_centrality_data', description: 'Views centrality of selected nodes.' } },
@@ -976,7 +991,7 @@ function drawChevronCanvasLabel(context, label, x, y) {
                 }
             } 
         },
-        {"type": "function", "function": {"name": "Get_network_summary", "description": "Returns network size, selection, view, colouring, collections, loaded taxa, score scale and build/merge status.", "parameters": {"type": "object", "properties": {}}}},
+        {"type": "function", "function": {"name": "Get_network_summary", "description": "Returns network size, selection, view, colouring, collections, loaded taxa, score scale, build/merge status and whether genome data has been fetched or loaded.", "parameters": {"type": "object", "properties": {}}}},
         {"type": "function", "function": {"name": "Get_selection_summary", "description": "Returns selected node/link counts, first N IDs and preferred names, and selection target.", "parameters": {"type": "object", "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20}}}}},
         {"type": "function", "function": {"name": "Get_link_IDs", "description": "Returns paginated undirected link IDs with endpoints, scores and evidence. visible means links in the active view passing threshold and species filters, rather than viewport clipping.", "parameters": {"type": "object", "properties": {"scope": {"type": "string", "enum": ["selected", "visible", "all"], "default": "selected"}, "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20}, "offset": {"type": "integer", "minimum": 0, "default": 0}}}}},
         {"type": "function", "function": {"name": "View_selected_links", "description": "Returns paginated selected links with endpoints, scores and uploaded evidence channels.", "parameters": {"type": "object", "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20}, "offset": {"type": "integer", "minimum": 0, "default": 0}}}}},
@@ -1296,8 +1311,11 @@ function drawChevronCanvasLabel(context, label, x, y) {
         return { status: 'success', message: 'Selected node table exported.', filename: anchor.download, exported_count: rows.length, columns, format };
     }
 
+    function aiGenomeAvailability(){
+        return (typeof window!=='undefined'?window.StringScapeGenome?.availability?.():null)||{genome_loaded:false,genome_fetched:false,genome_status:'not_loaded',genome_fetch_in_progress:false,genome_package_count:0,genome_assembly_count:0,genome_chromosome_count:0,genome_gene_count:0,genome_message:'Genome has not been fetched or loaded. Use Fetch_genome to download it.'};
+    }
     function aiExecuteOverviewTool(toolName, args) {
-        if (toolName === 'Get_network_summary') return { node_count: nodes.length, link_count: links.length,
+        if (toolName === 'Get_network_summary') return { ...aiGenomeAvailability(), node_count: nodes.length, link_count: links.length,
             selected_count: getEffectiveSelectedNodesSet().size, selected_link_count: selectedLinks.size,
             current_view: currentViewId, current_colouring: document.getElementById('colorMode')?.value,
             collection_count: collections.size, loaded_taxa: [...new Set(allIDs.map(id => String(id).match(/^(\d+)\./)?.[1]).filter(Boolean))],
@@ -4465,6 +4483,8 @@ function drawChevronCanvasLabel(context, label, x, y) {
             if (key === 'size') return getProteinSizeValue?.(id, resolveBuiltInColorSource?.('size')) ?? proteinMetadata.get(id)?.size;
             if (key === 'annotation') return (getProteinInfoAnnotation?.(id) || '').length;
             if (key === 'paralogues') return getParalogueGroup(id);
+            if(isGenomeNumericMode(key)||key==='strand')return getGenomeGeneValue(node,key);
+            if (key === 'chromosome') return getGenomeChromosomeValue(node);
             if (key === 'characterization') return getCharacterizationValue(id);
             if (key === 'localization') return proteinMetadata.get(id)?.localization;
             if (key === 'biological_process') return proteinMetadata.get(id)?.biological_process;
@@ -5494,6 +5514,7 @@ function drawChevronCanvasLabel(context, label, x, y) {
             }
         }
         if (toolName === 'Search_and_select') return aiSearchAndSelect(args.query, args.scope || 'all', { actor: 'AI' }, args);
+        if (toolName === 'View_RCSB_PDB_info') return aiViewRcsbPdbInfo(args);
         if (toolName === 'View_enrichment_terms') return aiViewEnrichmentTerms(args);
         if (toolName === 'Select_using_an_enrichment_term') return aiSelectUsingEnrichmentTerm(args);
         if (toolName === 'Select_nodes') {
@@ -5818,6 +5839,8 @@ function drawChevronCanvasLabel(context, label, x, y) {
         if (toolName === 'View_preferred_name') return aiBuildSelectedTable(node => {
             return getPreferredProteinName(node.id) || 'Unknown';
         });
+        if(toolName==='Fetch_genome')return window.StringScapeGenome?.fetchGenome?await window.StringScapeGenome.fetchGenome({...args,actor:'AI'}):{status:'error',message:'The genome loader is unavailable.'};
+        if(toolName==='View_genome_summary')return window.StringScapeGenome?.summary?.(args)||{status:'warning',...aiGenomeAvailability(),message:'The genome loader is unavailable.'};
         if (toolName === 'View_protein_info') return aiViewProteinInfo(args);
         if (toolName === 'View_orthology_info') return aiViewOrthologyInfo(args);
         if (toolName === 'View_URL_links') return aiViewUrlLinks(args);
@@ -5963,7 +5986,7 @@ Basic workflow:
 2. Set the interaction score threshold (or leave it at the default, zero), and build the network.
 3. Click nodes to select them. Use Shift/Ctrl or the selection controls to add, subtract, or intersect selections. Press A to select all and I to invert the selection.
 4. Use the search box to find proteins by ID, name, annotation, localisation, size, centrality, or uploaded variables.
-5. Use the view selector to switch between the full network, selected nodes, collections, scatter plot, Venn diagram, histogram, pie chart, mind map, embeddings views, and protein complex structures dashboard. Homology models of proteins complexes can be generated in the protein complex structures view.
+5. Use the view selector to switch between the full network, selected nodes, collections, scatter plot, Venn diagram, histogram, pie chart, mind map, embeddings views, and Structures dashboard. Homology models of proteins complexes can be generated in the Structures view.
 6. Use Colour Nodes By to colour nodes by a variable. Use node and link controls to adjust size, glow, visibility, labels, link colour, width, opacity, and direction arrows.
 7. Save selections to collections to compare or revisit groups of proteins. Collections can also be viewed in the Venn, histogram, pie, and network views.
 8. Select nodes to inspect their preferred name, annotation, localisation, description, sequence, protein size, centrality, eigenvector data, links to information of the protein on other websites, links to relevant pubmed paprts, and more in the information box at the bottom, or in the Node info table.
@@ -6115,6 +6138,10 @@ def clean_numeric(values):
                         } else if (key === 'size') {
                             const source = resolveProteinSizeSource(safeNodes);
                             values = safeNodes.map(n => getProteinSizeValue(n?.id, source));
+                        } else if (isGenomeNumericMode(key)||key==='strand') {
+                            values=safeNodes.map(n=>getGenomeGeneValue(n,key));
+                        } else if (key === 'chromosome') {
+                            values=safeNodes.map(n=>getGenomeChromosomeValue(n));
                         } else if (key === 'random') {
                             values = safeNodes.map(() => Math.random());
                         } else if (key === 'mono') {
@@ -7477,9 +7504,12 @@ sys.modules['stringscape'] = _stringscape_module
                             'Change_node_colouring': `Setting node colouring to ${logArgs.variable_name}`,
                             'View_screenshot': "Viewing screenshot",
                             'View_protein_info': 'Viewing protein information',
+                            'Fetch_genome': 'Fetching and processing the genome',
+                            'View_genome_summary': 'Viewing genome summary',
                             'View_orthology_info': 'Viewing orthology information',
                             'View_URL_links': 'Viewing protein links',
                             'Search_Pubmed': 'Searching PubMed ',
+                            'View_RCSB_PDB_info': 'Viewing RCSB PDB information',
                             'View_enrichment_terms': 'Viewing enrichment terms',
                             'Select_using_an_enrichment_term': 'Selecting proteins by enrichment term',
                             'View_centrality_data': "Viewing centrality",
@@ -8388,7 +8418,7 @@ self.onmessage = async (event) => {
     function applyEmbeddingColorsOnly() {
         if ((document.getElementById('colorMode')?.value || '') !== 'embeddings') return;
         const vectorsByNode = getEmbeddingVectorsByNodeForType(embeddingColorSimilarityType);
-        const useGlobalNodesForStyle = currentViewId === 'base' || currentViewId === 'Venn Diagram' || currentViewId === 'Scatter Plot' || currentViewId === 'Embeddings';
+        const useGlobalNodesForStyle = currentViewId === 'base' || currentViewId === 'Venn Diagram' || currentViewId === 'Scatter Plot' || currentViewId === 'Embeddings' || currentViewId === 'Genome';
         const targetNodes = useGlobalNodesForStyle ? nodes : (activeSubData?.nodes || []);
 
         targetNodes.forEach(n => {
@@ -9901,7 +9931,7 @@ self.onmessage = async (event) => {
     }
 
     function isEnrichmentCategoryColorMode(mode) {
-        return Object.hasOwn(getEnrichmentColorVariableDefinitions(), getCustomVariableSelection(mode)?.cfg.variable);
+        return getCustomVariableSelection(mode)?.cfg.variable === 'Associations from annotations' || Object.hasOwn(getEnrichmentColorVariableDefinitions(), getCustomVariableSelection(mode)?.cfg.variable);
     }
 
     function getEnrichmentCategoryColorForNode(nodeId, mode, timestampMs = Date.now()) {
@@ -10076,6 +10106,7 @@ self.onmessage = async (event) => {
         if (!el) return;
         el.innerHTML = buildSimpleMarkdownHtml(value);
         renderLatexInElement(el);
+        if (typeof decorateProteinMentions === 'function') decorateProteinMentions(el);
     }
 
     // The function below runs even when node coloring is not set to 'collection', which is inefficient. We should check the color mode before calling this function.
@@ -10840,6 +10871,10 @@ self.onmessage = async (event) => {
                 const normalized = clamp01((annLen - annotationMin) / annotationSpan);
                 n.col = d3.interpolatePlasma(normalized);
                 colorValue = normalized;
+            } else if (isGenomeNumericMode(mode)||mode==='strand') {
+                n.col=mode==='strand'?getGenomeStrandColor(getGenomeGeneValue(n,mode)):getGenomeNumericColor(n,mode);colorValue=hashStringToUnit(n.col);
+            } else if (mode === 'chromosome') {
+                n.col=getGenomeChromosomeColor(n);colorValue=hashStringToUnit(n.col);
             } else if (mode === 'characterization') {
                 const characterization = getCharacterizationValue(n.id);
                 n.col = getCategoricalNodeColor('characterization', characterization, catScale(characterization));
@@ -10877,6 +10912,10 @@ self.onmessage = async (event) => {
                     if (!matches) {
                         n.col = monoCol;
                         colorValue = 0.5;
+                    } else if (customVariableColourContext.isMentionCount) {
+                        const defaultColor = customVariableColourContext.mentionCountColor(normalizedRawValue);
+                        n.col = effectiveType === 'Numerical - Continuous' ? defaultColor : getCategoricalNodeColor(mode, normalizedRawValue, defaultColor);
+                        colorValue = hashStringToUnit(n.col);
                     } else if (effectiveType === 'Numerical - Continuous') {
                         const minv = d3.min(numericValues) || 0;
                         const maxv = d3.max(numericValues) || 1;
@@ -11571,7 +11610,7 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         ];
 
         // Built-in continuous options
-        opts.push({ value: 'annotation', label: 'Annotation length' });
+        opts.push({ value: 'annotation', label: 'Annotation length' },{value:'gene_exon_count',label:'Gene exon count'},{value:'gc_content',label:'GC content'},{value:'genomic_position',label:'Genomic position'});
         
         // Add embedding cosine similarity options if embeddings are available
         if (embeddingDataByType?.sequence) {
@@ -11634,6 +11673,7 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
                 : getLinkVariableValue(node, variable);
             return Number(rawValue);
         }
+        if(isGenomeNumericMode(key))return getGenomeGeneValue(node,key);
         if (key === 'centrality') return Number.isFinite(node.centrality) ? node.centrality : 0;
         if (key === 'size') {
             // Use the source passed in from outside the loop
@@ -11832,6 +11872,7 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         if (key === 'pdb_structure_count') return getPdbStructureCount(node.id);
         if (key === 'annotation') return getAnnotationLengthFromSource(node.id);
         if (key === 'layer') return Number.isFinite(+node.layer) ? +node.layer : 0;
+        if (isGenomeNumericMode(key)) return getGenomeGeneValue(node,key)??0;
         if (key === 'random') return hashStringToUnit(String(node.id));
         if (key.startsWith('var::')) {
             const value = +getCustomVariableValue(node, key);
@@ -11905,6 +11946,8 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         else if (key === 'random') color = node.randColor || '#ffffff';
         else if (key === 'collection') color = getCollectionColorForNode(node.id);
         else if (key === 'paralogues') color = getParalogueColor(node.id);
+        else if (isGenomeNumericMode(key)||key==='strand')color=key==='strand'?getGenomeStrandColor(getGenomeGeneValue(node,key)):getGenomeNumericColor(node,key);
+        else if (key === 'chromosome') color = getGenomeChromosomeColor(node);
         else if (key === 'characterization') color = getCategoricalNodeColor('characterization', getCharacterizationValue(node.id), d3.schemeTableau10[0]);
         else if (key === 'localization') color = getCategoricalNodeColor('localization', getBuiltInColorValueFromSource(node.id, key), d3.schemeTableau10[0]);
         else if (key === 'biological_process') color = getCategoricalNodeColor('biological_process', getBiologicalProcessKey(node.id), d3.schemeTableau10[0]);
@@ -12948,6 +12991,7 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 
     function getHistogramNodeValue(node, displayMode) {
+        if(isGenomeNumericMode(displayMode))return getGenomeGeneValue(node,displayMode);
         if (displayMode === 'centrality') return node.centrality || 0;
         if (displayMode === 'local_clustering_coefficient') return node.local_clustering_coefficient || 0;
         if (displayMode === 'size') {
@@ -13392,6 +13436,8 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
             : null;
 
         const matches = activeNodes.filter(node => {
+            if(displayMode==='strand')return selectedWedges.has(getGenomeGeneValue(node,'strand'));
+            if (displayMode === 'chromosome') return selectedWedges.has(getGenomeChromosomeValue(node));
             if (displayMode === 'layer') {
                 const key = node.layer === 99 ? 'Disconnected' : `Layer ${node.layer}`;
                 return selectedWedges.has(key);
@@ -13911,6 +13957,7 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         if (currentViewId !== 'base') switchView('base');
 
         Object.keys(uploadedInteractionFiles).forEach(name => delete uploadedInteractionFiles[name]);
+        window.StringScapeGenome?.clear();
         Object.keys(uploadedAccessoryFiles).forEach(name => delete uploadedAccessoryFiles[name]);
         Object.keys(uploadedEmbeddingFiles).forEach(name => delete uploadedEmbeddingFiles[name]);
         Object.keys(uploadedFileViewerData).forEach(name => delete uploadedFileViewerData[name]);
@@ -14410,7 +14457,7 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         const files = [];
         if (choices.uploadedFiles) {
             Object.entries(uploadedInteractionFiles || {}).forEach(([name, text]) => files.push([name, text, 'text/plain;charset=utf-8;']));
-            Object.entries(uploadedAccessoryFiles || {}).filter(([name]) => !isPythonVariablesSessionFile(name)).forEach(([name, text]) => files.push([name, text, 'text/plain;charset=utf-8;']));
+            Object.entries(uploadedAccessoryFiles || {}).filter(([name]) => !isPythonVariablesSessionFile(name)).forEach(([name, text]) => files.push([name, window.StringScapeGenome?.file(name) || text, window.StringScapeGenome?.has(name) ? 'application/octet-stream' : 'text/plain;charset=utf-8;']));
         }
         if (choices.pythonVariables) {
             files.push(['python_variables.json', JSON.stringify(collectPythonVariablesForSession(), null, 2), 'application/json;charset=utf-8;']);
@@ -14572,6 +14619,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     function updateUploadedListsUI() {
+        window.StringScapeGenome?.updateContext();
         loadedInteractionFileNames = Object.keys(uploadedInteractionFiles);
         loadedAccessoryFileNames = [
             ...Object.keys(uploadedAccessoryFiles),
@@ -14995,6 +15043,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     function buildVariableConfigs() {
         console.log("function buildVariableConfigs()");
+        if (typeof rebuildProteinMentions === 'function') rebuildProteinMentions();
         customVariableSelectionCache.clear();
         variableConfigs = variableConfigs.filter(cfg => !isAccessoryNodeIdHeader(cfg?.variable));
         window.variableConfigs = variableConfigs;
@@ -15065,6 +15114,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             { key: 'collection', label: 'Collection', type: 'Categorical - Nominal' },
             { key: 'annotation', label: 'Annotation length', type: 'Numerical - Discrete' },
             { key: 'characterization', label: 'Characterization', type: 'Categorical - Nominal' },
+            { key: 'chromosome', label: 'Chromosome', type: 'Categorical - Nominal' },
+            { key: 'strand', label: 'Gene Strand', type: 'Categorical - Nominal' },
+            { key: 'gene_exon_count', label: 'Gene exon count', type: 'Numerical - Discrete' },
+            { key: 'gc_content', label: 'GC content', type: 'Numerical - Continuous' },
+            { key: 'genomic_position', label: 'Genomic position', type: 'Numerical - Continuous' },
             { key: 'paralogues', label: 'Paralogoues', type: 'Categorical - Nominal' },
             { key: 'biological_process', label: 'Biological process (mind-map most specific)', type: 'Categorical - Nominal' },
             { key: 'size', label: 'Protein size', type: 'Numerical - Continuous' },
@@ -15286,17 +15340,28 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             if (!isNaN(na) && !isNaN(nb)) return na - nb;
             return String(a).localeCompare(String(b), undefined, { numeric: true });
         });
+        const isMentionCount = selection.cfg.fileName === 'Annotation protein mentions'
+            && ['Mentions other proteins', 'Mentioned by other proteins'].includes(selection.cfg.variable);
+        const defaultType = isMentionCount ? 'Numerical - Continuous'
+            : (selection.childMode ? (selection.cfg.splitChildren?.[selection.childMode]?.type || selection.cfg.type) : selection.cfg.type);
+        const mentionMaximum = numericValues.reduce((maximum, value) => Math.max(maximum, value), 1);
+        const mentionCountColor = value => {
+            const count = Number(value);
+            return !Number.isFinite(count) || count <= 0 ? '#888' : d3.interpolateViridis(Math.max(0, Math.min(1, count / mentionMaximum)));
+        };
         return {
             ...selection,
             valuesByNode,
             allValues,
             numericValues,
             numericOnly,
+            isMentionCount,
+            mentionCountColor,
             displayType: numericOnly && customVariableDisplayModeByKey.get(selection.key) === 'continuous'
                 ? 'Numerical - Continuous'
                 : (numericOnly && customVariableDisplayModeByKey.get(selection.key) === 'categorical'
                     ? 'Categorical - Nominal'
-                    : (selection.childMode ? (selection.cfg.splitChildren?.[selection.childMode]?.type || selection.cfg.type) : selection.cfg.type)),
+                    : defaultType),
             valueScale: d3.scaleOrdinal(d3.schemeTableau10).domain([...sortedValues, 'N/A'])
         };
     }
@@ -15447,6 +15512,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             {value:'collection', text:'Collection', color:'#ccc'},
             {value:'annotation', text:'Annotation length', color:'#93c5fd'},
             {value:'characterization', text:'Characterization', color:'#ccc'},
+            {value:'chromosome', text:'Chromosome', color:'#ccc'},
+            {value:'strand', text:'Gene Strand', color:'#ccc'},
+            {value:'gene_exon_count', text:'Gene exon count', color:'#93c5fd'},
+            {value:'gc_content', text:'GC content', color:'#93c5fd'},
+            {value:'genomic_position', text:'Genomic position', color:'#93c5fd'},
             {value:'paralogues', text:'Paralogoues', color:'#ccc'},
             {value:'biological_process', text:'Biological process (mind-map most specific)', color:'#ccc'},
             {value:'size', text:'Protein size', color:'#93c5fd'},
@@ -15478,6 +15548,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 if (!isSplitParent) {
                     const o = document.createElement('option');
                     o.value = getVariableModeKey(cfg);
+                    if (cfg.fileName === annotationMentionFile) {
+                        o.dataset.menuGroup = cfg.type.startsWith('Numerical') ? 'Numeric' : 'Categorical';
+                        o.dataset.variableType = cfg.type.startsWith('Numerical') ? 'continuous' : 'categorical';
+                    }
                     if (isEnrichmentCategoryColorMode(o.value)) o.dataset.menuGroup = 'Categorical';
                     o.textContent = cfg.label;
                     o.style.color = getVariableTypeColor(cfg.type);
@@ -15608,6 +15682,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     function getNodeComparisonVariableType(variable) {
+        if (isGenomeNumericMode(variable))return 'continuous';
         if (['layer', 'centrality', 'local_clustering_coefficient', 'eigen', 'annotation', 'size', 'pdb_structure_count'].includes(variable)) return 'continuous';
         if (variable?.startsWith('var::')) {
             const type = getCustomVariableSelection(variable)?.cfg?.type || '';
@@ -15625,6 +15700,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         if (variable === 'pdb_structure_count') return getPdbStructureCount(node.id);
         if (variable === 'collection') return getNodeCollectionMemberships(node.id).sort().join('|') || 'None';
         if (variable === 'paralogues') return getParalogueGroup(node.id);
+        if (isGenomeNumericMode(variable)||variable==='strand')return getGenomeGeneValue(node,variable);
+        if (variable === 'chromosome') return getGenomeChromosomeValue(node);
         if (variable === 'characterization') return getCharacterizationValue(node.id);
         if (variable === 'localization') return getBuiltInColorValueFromSource(node.id, 'localization', resolveBuiltInColorSource('localization'));
         if (variable === 'biological_process') return getBiologicalProcessKey(node.id);
@@ -15872,6 +15949,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             return memberships.length ? `collection::${memberships.join('|')}` : 'collection::__none__';
         }
 
+        if(mode==='strand')return `strand::${getGenomeGeneValue(node,'strand')}`;
+        if (mode === 'chromosome') return `chromosome::${getGenomeChromosomeValue(node)}`;
         if (mode === 'paralogues') return `paralogues::${getParalogueGroup(node.id)}`;
         if (mode === 'characterization') {
             return `characterization::${getCharacterizationValue(node.id)}`;
@@ -16332,6 +16411,13 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         commitSecondaryGraphSelection();
         secondaryPreviousViewId = secondaryViewId;
         secondaryViewId = viewId;
+        window.StringScapeGenome?.setVisible(viewId === 'Genome', 'secondary');
+        if (viewId === 'Genome') {
+            setProteinComplexStructuresVisibility(currentViewId === 'Protein Complex Structures');
+            syncSecondaryViewMenu();
+            updateSecondaryViewControls();
+            return;
+        }
         if (openChartSettings?.secondary) closeChartSettings();
         document.getElementById('secondary-chart-plot-controls')?.style.setProperty('display', 'none');
         setProteinComplexStructuresVisibility(currentViewId === 'Protein Complex Structures');
@@ -16390,6 +16476,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             secondaryViewId = 'Protein Complex Structures';
         }
         splitViewOpen = !!open;
+        globalThis.StringScapeGenome?.setVisible(splitViewOpen && secondaryViewId === 'Genome', 'secondary');
         document.body.classList.toggle('split-view-active', splitViewOpen);
         if (moveStructuresRight) switchView(previousViewId && previousViewId !== 'Protein Complex Structures' ? previousViewId : 'base');
         setProteinComplexStructuresVisibility(currentViewId === 'Protein Complex Structures');
@@ -16415,6 +16502,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             canvas.style.removeProperty('transform');
             canvas.style.removeProperty('transition');
             document.getElementById('split-view-divider')?.style.removeProperty('left');
+            globalThis.StringScapeGenome?.setVisible(false, 'secondary');
             document.body.style.removeProperty('--split-primary-width');
             document.body.style.removeProperty('--split-secondary-width');
             const primaryMenu = document.getElementById('view-selector-container');
@@ -16575,6 +16663,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             else linkCounts.second++;
         });
         mergedNetworkState.linkCounts = linkCounts;
+        rebuildProteinMentions();
         setMergedNetworkPhysicsAfterMerge();
         aiRecordMergeNetworksHistory(actor);
         updateMergeControls();
@@ -16592,6 +16681,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         simulation.nodes(nodes).force('link').links(links);
         if (document.getElementById('colorMode')?.value === 'species') document.getElementById('colorMode').value = 'layer';
         if (document.getElementById('linkMode')?.value === 'species') document.getElementById('linkMode').value = 'score';
+        rebuildProteinMentions();
         if (actor) aiRecordMergeNetworksHistory(actor);
         updateMergeControls(); updateSizesAndColors(); updatePhysicsForce(); draw();
     }
@@ -17282,6 +17372,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         // Metadata may have supplied preferred names after a custom variable
         // file was parsed, so resolve all custom-file IDs again now.
         rebuildAccessoryVariableValueIndexes();
+        buildVariableConfigs();
+        updateColorModeOptions();
     }
 
     function isSequenceVariable(variable) {
@@ -17293,6 +17385,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const excluded = new Set(['description', 'preferredname', 'preferred_name', 'proteinsize', 'protein_size', 'alias', 'source', 'category', 'term', 'annotation']);
         Object.entries(accessoryVariableValues).forEach(([fileName, vars]) => {
             Object.keys(vars || {}).forEach(variable => {
+                if (fileName === 'Annotation protein mentions') return;
                 if (variable.toLowerCase() === '#string_protein_id') return;
                 if (isSequenceVariable(variable) || excluded.has(normalizeVariableKey(variable))) return;
                 columns.push({ key: `${fileName}::${variable}`, fileName, variable, label: `${variable} (${fileName})` });
@@ -17319,6 +17412,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     row[`Description${suffix}`] = sourceId ? getProteinInfoDescription(sourceId) : '';
                     row[`Enrichment terms${suffix}`] = sourceId ? getProteinEnrichmentText(sourceId, enrichmentIndex) : '';
                 });
+                row['Other proteins that mention this protein in their annotation data'] = proteinMentionNames(id, 'incoming');
+                row['This protein mentions these other proteins in its annotation data'] = proteinMentionNames(id, 'outgoing');
                 return row;
             });
             return { rows, extraColumns, merged: true };
@@ -17334,6 +17429,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 'Gene ID': meta.geneId || '',
                 'Description': getProteinInfoDescription(id) || '',
                 'Annotation': getProteinInfoAnnotation(id) || '',
+                'Other proteins that mention this protein in their annotation data': proteinMentionNames(id, 'incoming'),
+                'This protein mentions these other proteins in its annotation data': proteinMentionNames(id, 'outgoing'),
                 'Enrichment terms': getProteinEnrichmentText(id, enrichmentIndex),
                 'KEGG Product': getKeggProductText(id) || '',
                 'Collection(s)': getNodeCollectionMemberships(id).join('; '),
@@ -17342,6 +17439,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 'NCBI': [linkData.ncbiProteinUrl, linkData.ncbiGeneUrl].filter(Boolean).join(' '),
                 'Pubmed': linkData.pubmedUrl || '',
                 'IntAct': linkData.intactUrl || '',
+                'SeqHub': linkData.seqhubUrl || '',
+                'Pharos': linkData.pharosUrl || '',
+                'GeneWiki': linkData.geneWikiUrl || '',
+                'Ensembl': linkData.ensemblUrl || '',
+                'GeneCards': linkData.geneCardsUrl || '',
                 'STRING': linkData.stringUrl || '',
                 'Protein Data Bank': linkData.pdbLinks.map(link => link.url).join(' '),
                 'Aliases': Array.isArray(meta.aliases) ? meta.aliases.join('; ') : (meta.alias || ''),
@@ -17525,8 +17627,22 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const uniprotAc = getPreferredUniProtAliasForProtein(nodeId);
         const ncbiProteinId = String(meta.ncbiProteinId || '').trim();
         const geneId = String(meta.ncbiGeneId || meta.pubmedGeneId || '').trim();
+        const proteinId = String(nodeId || '').replace(/^\d+\./, '');
+        const isHuman = String(nodeId || '').split('.')[0] === '9606';
+        const aliases = aliasData.get(nodeId) || [];
+        const ensemblGeneId = [meta.geneId, ...aliases.map(entry => entry.alias)]
+            .map(value => String(value || '').trim()).find(value => /^ENS[A-Z]*G\d+(?:\.\d+)?$/.test(value));
+        const preferredName = getPreferredProteinName(nodeId);
+        const sequence = String(meta.sequence || '').replace(/\s+/g, '');
         const pdbIds = Array.isArray(meta.pdbIds) ? Array.from(new Set(meta.pdbIds.map(id => normalizePdbAliasId(id)))).filter(Boolean) : [];
         return {
+            seqhubUrl: sequence ? `https://seqhub.org/search?q=${encodeURIComponent(sequence)}` : '',
+            pharosUrl: proteinId ? `https://pharos.nih.gov/targets/${encodeURIComponent(proteinId)}` : '',
+            geneWikiUrl: preferredName ? `https://en.wikipedia.org/wiki/${encodeURIComponent(preferredName)}` : '',
+            ensemblUrl: ensemblGeneId ? (isHuman
+                ? `https://www.ensembl.org/feature-explorer/GCA_000001405.29/gene:${encodeURIComponent(ensemblGeneId)}?view=transcripts`
+                : `https://www.ensembl.org/id/${encodeURIComponent(ensemblGeneId)}`) : '',
+            geneCardsUrl: isHuman && proteinId ? `https://www.genecards.org/card/${encodeURIComponent(proteinId)}` : '',
             uniprotAc,
             uniprotUrl: uniprotAc ? `https://www.uniprot.org/uniprotkb/${encodeURIComponent(uniprotAc)}/entry` : '',
             ncbiProteinId,
@@ -17575,6 +17691,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     function disposeProteinInfoMolstarViewer() {
+        proteinInfoMolstarResizeObserver?.disconnect();
+        proteinInfoMolstarResizeObserver = null;
         if (proteinInfoMolstarBackgroundObserver) {
             proteinInfoMolstarBackgroundObserver.disconnect();
             proteinInfoMolstarBackgroundObserver = null;
@@ -17651,6 +17769,84 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         return { notAvailable: false, modelUrl, format };
     }
 
+    function getProteinAliasUrl(nodeId, source, alias) {
+        const value = String(alias || '').trim();
+        const key = String(source || '').toLowerCase();
+        const encoded = encodeURIComponent(value);
+        const taxon = String(nodeId || '').split('.')[0];
+        const ncbiSearch = (database) => `https://www.ncbi.nlm.nih.gov/${database}/?term=${encodeURIComponent(value + (/^\d+$/.test(taxon) ? ` AND txid${taxon}[Organism:exp]` : ''))}`;
+        if (key === 'kegg_keggid') return `https://www.kegg.jp/entry/${encoded}`;
+        if (key === 'kegg_keggid_short') {
+            const full = (aliasData.get(nodeId) || []).find(entry =>
+                String(entry.source || '').split(/\s+/).includes('KEGG_KEGGID') && String(entry.alias || '').endsWith(`:${value}`));
+            return full ? `https://www.kegg.jp/entry/${encodeURIComponent(full.alias)}` : ncbiSearch('gene');
+        }
+        if (key === 'uniprot_ac' || key === 'uniprot_id' || key.includes('swiss_prot')) {
+            return `https://www.uniprot.org/uniprotkb/${encoded}/entry`;
+        }
+        if (key.includes('geneid') || key === 'kegg_geneid') {
+            return /^\d+$/.test(value) ? `https://www.ncbi.nlm.nih.gov/gene/${encoded}` : ncbiSearch('gene');
+        }
+        if (key.includes('refseq') || key === 'kegg_ncbi') {
+            // RefSeq sources also contain locus names and descriptions: search those rather than treating them as accessions.
+            if (/^(?:[A-Z]{3}\d{5,}|(?:AC|AP|NC|NG|NM|NR|NT|NW|NZ|XM|XR|NP|XP|YP|WP|ZP)_\d+)(?:\.\d+)?$/.test(value)) {
+                const nucleotide = /^(?:AC|AP|NC|NG|NM|NR|NT|NW|NZ|XM|XR)_/.test(value);
+                return `https://www.ncbi.nlm.nih.gov/${nucleotide ? 'nuccore' : 'protein'}/${encoded}`;
+            }
+            return ncbiSearch(key.includes('locus') ? 'gene' : 'protein');
+        }
+        if (/pdb/i.test(key) && /^[0-9][a-z0-9]{3}(?:[_.:][a-z0-9]+)?$/i.test(value)) return `https://www.rcsb.org/structure/${encodeURIComponent(value.slice(0, 4).toUpperCase())}`;
+        if (key.startsWith('uniprot_')) {
+            const query = key.endsWith('_ec') ? `ec:${value}` : `"${value}"`;
+            return `https://www.uniprot.org/uniprotkb?query=${encodeURIComponent(query + (/^\d+$/.test(taxon) ? ` AND organism_id:${taxon}` : ''))}`;
+        }
+        if (/^ENS[A-Z]*[GPT]\d+(?:\.\d+)?$/.test(value)) return `https://www.ensembl.org/id/${encoded}`;
+        return ncbiSearch('protein');
+    }
+
+    function renderProteinInfoAliasView(body, nodeId) {
+        const groups = new Map();
+        for (const entry of aliasData.get(nodeId) || []) {
+            const alias = String(entry.alias || '').trim();
+            if (!alias) continue;
+            for (const source of String(entry.source || 'Other').split(/\s+/).filter(Boolean)) {
+                if (!groups.has(source)) groups.set(source, new Set());
+                groups.get(source).add(alias);
+            }
+        }
+        body.replaceChildren();
+        if (!groups.size) {
+            body.textContent = 'No aliases available. Load a protein.aliases file in Accessory Data.';
+            return;
+        }
+        const grid = document.createElement('div');
+        grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;';
+        for (const [source, aliases] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
+            const card = document.createElement('section');
+            card.className = 'protein-enrichment-card';
+            card.style.cssText = 'padding:14px;border:1px solid #475569;border-radius:10px;background:rgba(148,163,184,0.08);overflow-wrap:anywhere;';
+            const title = document.createElement('h4');
+            title.textContent = source;
+            const values = document.createElement('div');
+            values.className = 'protein-enrichment-tags';
+            for (const alias of aliases) {
+                const link = document.createElement('a');
+                link.className = 'protein-enrichment-control';
+                link.href = getProteinAliasUrl(nodeId, source, alias);
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                link.textContent = alias;
+                link.title = `Open ${alias} in a new tab`;
+                link.setAttribute('aria-label', `Open ${alias} in a new tab`);
+                link.appendChild(createProteinEnrichmentIcon('fa-arrow-up-right-from-square'));
+                values.appendChild(link);
+            }
+            card.append(title, values);
+            grid.appendChild(card);
+        }
+        body.appendChild(grid);
+    }
+
     function renderProteinInfoLinksView(body, nodeId) {
         const linkData = getNodeInfoLinkData(nodeId);
         const links = getProteinInfoUrlLinks(nodeId, true).filter(link => !link.label.startsWith('PDB '));
@@ -17699,115 +17895,339 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         body.appendChild(wrap);
     }
 
+    // Atlas content keys are MD5(sequence.upper()), not cryptographic authentication tokens.
+    function getProteinSequenceMd5(sequence) {
+        const size = Math.ceil((sequence.length + 9) / 64) * 64;
+        const bytes = new Uint8Array(size);
+        for (let i = 0; i < sequence.length; i++) bytes[i] = sequence.charCodeAt(i);
+        bytes[sequence.length] = 128;
+        const view = new DataView(bytes.buffer);
+        view.setUint32(size - 8, (sequence.length * 8) >>> 0, true);
+        view.setUint32(size - 4, Math.floor(sequence.length / 536870912), true);
+        const shifts = [7,12,17,22,5,9,14,20,4,11,16,23,6,10,15,21];
+        const constants = Array.from({ length:64 }, (_, i) => Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296) | 0);
+        let state = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476];
+        for (let offset = 0; offset < size; offset += 64) {
+            let [a,b,c,d] = state;
+            for (let i = 0; i < 64; i++) {
+                const round = Math.floor(i / 16);
+                const f = round === 0 ? (b & c) | (~b & d) : round === 1 ? (d & b) | (~d & c) : round === 2 ? b ^ c ^ d : c ^ (b | ~d);
+                const g = round === 0 ? i : round === 1 ? (5 * i + 1) % 16 : round === 2 ? (3 * i + 5) % 16 : (7 * i) % 16;
+                const sum = (a + f + constants[i] + view.getUint32(offset + g * 4, true)) | 0;
+                const shift = shifts[round * 4 + i % 4];
+                [a,b,c,d] = [d, (b + ((sum << shift) | (sum >>> (32 - shift)))) | 0, b, c];
+            }
+            state = state.map((value,i) => (value + [a,b,c,d][i]) | 0);
+        }
+        return state.map(value => Array.from({ length:4 }, (_, i) => ((value >>> (8 * i)) & 255).toString(16).padStart(2,'0')).join('')).join('');
+    }
+
+    async function getEsmProteinModel(sequence, { signal, onStatus = () => {} } = {}) {
+        const normalized = String(sequence).replace(/\s/g, '').toUpperCase();
+        if (!normalized || !/^[A-Z*]+$/.test(normalized)) throw new Error('No valid amino-acid sequence available.');
+        signal?.throwIfAborted();
+        const hash = getProteinSequenceMd5(normalized);
+        if (proteinInfoEsmModelCache.has(hash)) return proteinInfoEsmModelCache.get(hash);
+        const lookup = new AbortController();
+        const cancelLookup = () => lookup.abort();
+        signal?.addEventListener('abort', cancelLookup, { once:true });
+        const timer = setTimeout(cancelLookup, 12000);
+        let model = null;
+        onStatus('Looking for an existing ESM Atlas structure…');
+        try {
+            const endpoints = [
+                `/api/esm-atlas/proteins/${hash}`,
+                `https://biohub.ai/esm/protein/api/v1alpha1/proteins/${hash}?fold_on_miss=false&topk_features=1`
+            ];
+            for (const endpoint of endpoints) {
+                if (lookup.signal.aborted) break;
+                try {
+                    const response = await fetch(endpoint, { signal:lookup.signal });
+                    if (!response.ok) continue;
+                    const payload = await response.json();
+                    const matches = (!payload.protein_hash || payload.protein_hash === hash) &&
+                        (!payload.sequence || String(payload.sequence).replace(/\s/g,'').toUpperCase() === normalized);
+                    if (matches && payload.folded_on_demand !== true && typeof payload.pdb === 'string' && payload.pdb.trim()) {
+                        model = { text:proteinPdbToMmcif(payload.pdb), source:'atlas', hash, modelName:'ESM Atlas (ESMFold2)' };
+                    }
+                    // A valid record with no structure is a miss; do not fetch the same record twice.
+                    break;
+                } catch {
+                    // Static hosts lack the bridge; attempt direct access where CORS permits it.
+                }
+            }
+        } catch {
+            // A missing model, timeout, CORS failure or unavailable alpha API falls back to sequence folding.
+        } finally {
+            clearTimeout(timer);
+            signal?.removeEventListener('abort', cancelLookup);
+        }
+        signal?.throwIfAborted();
+        if (!model) {
+            onStatus('No stored Atlas structure available. Predicting with ESMFold… This may take several minutes.');
+            const response = await fetch('https://api.esmatlas.com/foldSequence/v1/pdb/', { method:'POST', body:normalized, signal });
+            if (!response.ok) throw new Error(response.status === 413
+                ? 'ESMFold prediction service returned 413, meaning the sequence is too long to predict via the ESMFold API.'
+                : `ESMFold prediction service returned ${response.status}.`);
+            model = { text:proteinPdbToMmcif(await response.text()), source:'prediction', hash, modelName:'ESMFold prediction' };
+        }
+        signal?.throwIfAborted();
+        if (proteinInfoEsmModelCache.size >= 20) proteinInfoEsmModelCache.delete(proteinInfoEsmModelCache.keys().next().value);
+        proteinInfoEsmModelCache.set(hash, model);
+        return model;
+    }
+
+    function getProteinSignedProfileAreas(values, x, y) {
+        const areas = { positive:'', negative:'' };
+        let run = [];
+        const finish = () => {
+            if (run.length > 1) for (const [name, clamp] of [['positive', v => Math.max(0,v)], ['negative', v => Math.min(0,v)]]) {
+                areas[name] += `M${run[0][0]},${y(0)} ` + run.map(([px,v]) => `L${px},${y(clamp(v))}`).join(' ') + ` L${run[run.length - 1][0]},${y(0)}Z `;
+            }
+            run = [];
+        };
+        values.forEach((value,i) => {
+            if (!Number.isFinite(value)) { finish(); return; }
+            if (run.length) {
+                const [px,prev] = run[run.length - 1];
+                if (prev * value < 0) run.push([px + (x(i) - px) * (-prev / (value - prev)), 0]);
+            }
+            run.push([x(i), value]);
+        });
+        finish();
+        return areas;
+    }
+
+    function getProteinSequence(nodeId) {
+        return String(proteinMetadata.get(nodeId)?.sequence || '').replace(/\s/g, '').toUpperCase();
+    }
+
+    function getProteinSequenceProfiles(sequence, windowSize = 19) {
+        const hydropathy = { I:4.5,V:4.2,L:3.8,F:2.8,C:2.5,M:1.9,A:1.8,G:-0.4,T:-0.7,S:-0.8,W:-0.9,Y:-1.3,P:-1.6,H:-3.2,E:-3.5,Q:-3.5,D:-3.5,N:-3.5,K:-3.9,R:-4.5 };
+        const scales = [
+            { title: 'Hydropathy', signed:true, detail: 'Kyte–Doolittle scale; positive values indicate hydrophobic regions.', value: aa => hydropathy[aa] },
+            { title: 'Charge tendency', signed:true, detail: 'K/R = +1, D/E = −1; other standard residues = 0. Histidine is treated as neutral.', value: aa => 'KR'.includes(aa) ? 1 : 'DE'.includes(aa) ? -1 : 0 },
+            { title: 'Aromatic residue fraction', detail: 'Fraction of F, W and Y residues.', value: aa => 'FWY'.includes(aa) ? 1 : 0 }
+        ];
+        return scales.map(scale => ({ ...scale, values: Array.from(sequence, (_, i) => {
+            const residues = sequence.slice(Math.max(0, i - Math.floor(windowSize / 2)), i + Math.floor(windowSize / 2) + 1);
+            const values = Array.from(residues).filter(aa => hydropathy[aa] !== undefined).map(scale.value);
+            return values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
+        }) }));
+    }
+
+    function renderProteinInfoSequenceView(body, nodeId) {
+        body.style.display = 'block';
+        body.replaceChildren();
+        const sequence = getProteinSequence(nodeId);
+        if (!sequence) { body.textContent = 'No sequence available for this protein.'; return; }
+        const toolbar = document.createElement('div');
+        toolbar.className = 'protein-sequence-toolbar';
+        const summary = document.createElement('span');
+        summary.textContent = `${sequence.length.toLocaleString()} residues`;
+        const copy = document.createElement('button');
+        copy.type = 'button'; copy.className = 'btn-secondary protein-sequence-copy';
+        const icon = document.createElement('i'); icon.className = 'fas fa-copy';
+        icon.setAttribute('aria-hidden', 'true');
+        copy.append(icon, ' Copy Sequence');
+        const feedback = document.createElement('span'); feedback.setAttribute('role', 'status');
+        copy.onclick = async () => {
+            try { await navigator.clipboard.writeText(sequence); feedback.textContent = 'Sequence copied'; }
+            catch { feedback.textContent = 'Could not copy. Select the sequence and copy it manually.'; }
+        };
+        toolbar.append(summary, feedback, copy); body.append(toolbar);
+        const residues = document.createElement('div'); residues.className = 'protein-sequence-residues';
+        for (let i = 0; i < sequence.length; i += 50) {
+            const line = document.createElement('div');
+            const position = document.createElement('span'); position.className = 'protein-sequence-position'; position.textContent = String(i + 1);
+            const text = document.createElement('span'); text.textContent = sequence.slice(i, i + 50).match(/.{1,10}/g).join(' ');
+            line.append(position, text); residues.append(line);
+        }
+        body.append(residues);
+        getProteinSequenceProfiles(sequence).forEach(profile => {
+            const card = document.createElement('section'); card.className = 'protein-sequence-plot';
+            const heading = document.createElement('h4'); heading.textContent = profile.title;
+            const detail = document.createElement('p'); detail.textContent = `${profile.detail} Centred 19-residue moving average; shorter windows at the ends; unknown residues excluded.`;
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.setAttribute('viewBox', '0 0 600 124'); svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', `${profile.title} across residue positions 1 to ${sequence.length}`);
+            const valid = profile.values.filter(Number.isFinite);
+            const min = valid.reduce((a, b) => Math.min(a, b), 0), max = valid.reduce((a, b) => Math.max(a, b), 0.1);
+            const y = v => 94 - (v - min) / (max - min) * 78;
+            const x = i => 42 + i / Math.max(1, sequence.length - 1) * 540;
+            const add = (tag, attrs, text) => {
+                const el = document.createElementNS(svg.namespaceURI, tag);
+                Object.entries(attrs).forEach(([k,v]) => el.setAttribute(k,v));
+                if (text !== undefined) el.textContent = text;
+                if (tag === 'text') el.style.fontSize = '8px';
+                svg.append(el);
+            };
+            if (profile.signed) {
+                const areas = getProteinSignedProfileAreas(profile.values, x, y);
+                add('path', { d:areas.positive, fill:'#ef5350', 'fill-opacity':0.38, stroke:'none' });
+                add('path', { d:areas.negative, fill:'#4285f4', 'fill-opacity':0.42, stroke:'none' });
+            }
+            for (let tick = 0; tick <= 4; tick++) {
+                const value = min + (max - min) * tick / 4, py = y(value);
+                add('path', { d: `M39 ${py}H582`, stroke: '#52677c', 'stroke-opacity': 0.24, 'stroke-width': 0.6 });
+                add('text', { x:35, y:py + 2.5, 'text-anchor':'end', fill:'#94a6b8' }, value.toFixed(2));
+            }
+            const ticks = Array.from(new Set(Array.from({ length: Math.min(7, sequence.length) }, (_, i) => Math.round(i * (sequence.length - 1) / Math.max(1, Math.min(7, sequence.length) - 1)))));
+            ticks.forEach(i => {
+                const px = x(i);
+                add('path', { d:`M${px} 16V97`, stroke:'#52677c', 'stroke-opacity':0.18, 'stroke-width':0.6 });
+                add('text', { x:px, y:107, 'text-anchor':'middle', fill:'#94a6b8' }, String(i + 1));
+            });
+            add('path', { d:`M42 16V94H582 M42 ${y(0)}H582`, stroke:'#647d95', 'stroke-opacity':0.65, 'stroke-width':0.7, fill:'none' });
+            const points = profile.values.map((v,i) => v === null ? null : `${x(i)},${y(v)}`);
+            let path = ''; let connected = false;
+            points.forEach(point => { if (point === null) connected = false; else { path += `${connected ? 'L' : 'M'}${point} `; connected = true; } });
+            add('path', { d:path, stroke:'#6cc9ee', 'stroke-width':1.5, 'stroke-linejoin':'round', 'stroke-linecap':'round', fill:'none' });
+            add('text', { x:312, y:121, 'text-anchor':'middle', fill:'#94a6b8' }, 'Residue position');
+            card.append(heading, detail, svg); body.append(card);
+        });
+    }
+
+    // ESMFold returns PDB coordinates. Preserve atom identifiers and coordinates in an mmCIF atom_site loop.
+    function proteinPdbToMmcif(pdb) {
+        const columns = ['group_PDB','id','type_symbol','label_atom_id','label_alt_id','label_comp_id','label_asym_id','label_entity_id','label_seq_id','pdbx_PDB_ins_code','Cartn_x','Cartn_y','Cartn_z','occupancy','B_iso_or_equiv','auth_seq_id','auth_asym_id','pdbx_PDB_model_num'];
+        const lines = ['data_ESMFold', '#', 'loop_', ...columns.map(c => `_atom_site.${c}`)];
+        let count = 0, model = '1';
+        for (const line of pdb.split(/\r?\n/)) {
+            if (line.startsWith('MODEL ')) model = line.slice(10,14).trim() || '1';
+            if (!/^(ATOM  |HETATM)/.test(line)) continue;
+            const atom = line.slice(12,16).trim();
+            const values = [line.slice(0,6).trim(), ++count, line.slice(76,78).trim() || atom.replace(/[^A-Za-z]/g,'')[0], atom,
+                line.slice(16,17).trim() || '.', line.slice(17,20).trim(), line.slice(21,22).trim() || 'A', '1', line.slice(22,26).trim(),
+                line.slice(26,27).trim() || '?', line.slice(30,38).trim(), line.slice(38,46).trim(), line.slice(46,54).trim(),
+                line.slice(54,60).trim() || '1.00', line.slice(60,66).trim() || '0.00', line.slice(22,26).trim(), line.slice(21,22).trim() || 'A', model];
+            lines.push(values.map(v => v === '.' || v === '?' ? v : String(v).includes("'") ? `"${v}"` : `'${v}'`).join(' '));
+        }
+        if (!count) throw new Error('The folding service returned no atom coordinates.');
+        return lines.join('\n') + '\n#\n';
+    }
+
+    function getProteinStructurePageLinks(id, uniprot) {
+        if (id === 'alphafold') return { name:'AlphaFold', about:'https://alphafold.ebi.ac.uk/about', page:`https://alphafold.ebi.ac.uk/entry/${encodeURIComponent(uniprot)}` };
+        if (id === 'alphafill') return { name:'AlphaFill', about:'https://alphafill.eu/about', page:`https://alphafill.eu/model?id=${encodeURIComponent(uniprot)}` };
+        if (id === 'esmfold') return { name:'ESMFold', about:'https://esmatlas.com/about', page:'https://esmatlas.com/resources?action=fold', pageLabel:'Open ESMFold page', pageTitle:'On-demand predictions have no permanent entry page. Open the ESMFold web interface.' };
+        if (id) return { name:'RCSB PDB', about:'https://www.rcsb.org/pages/about-us/index', page:`https://www.rcsb.org/structure/${encodeURIComponent(id)}` };
+        return null;
+    }
+
     async function renderProteinInfoStructureView(body, nodeId) {
         const renderToken = ++proteinInfoStructureRenderToken;
-        const uniprotAc = getPreferredUniProtAliasForProtein(nodeId);
-
-        body.innerHTML = '';
-        body.style.display = 'flex';
-        body.style.flexDirection = 'column';
-        body.style.gap = '8px';
-        const status = document.createElement('div');
-        status.className = 'protein-structure-status';
-        status.textContent = 'Fetching AlphaFold Model...';
-        body.appendChild(status);
-
-        if (!uniprotAc) {
-            status.textContent = 'No UniProt_AC found for this protein.';
-            return;
-        }
-
-        let modelInfo;
-        try {
-            modelInfo = await getAlphaFoldModelInfo(uniprotAc);
-        } catch (err) {
-            if (renderToken !== proteinInfoStructureRenderToken) return;
-            status.textContent = `Could not fetch AlphaFold model: ${err?.message || 'Unknown error'}`;
-            return;
-        }
-
-        if (renderToken !== proteinInfoStructureRenderToken) return;
-
-        if (modelInfo.notAvailable) {
-            status.textContent = 'Structure not available in AlphaFold DB for this ID';
-            return;
-        }
-
-        try {
-            await ensureMolstarLoadedForProteinInfo();
-        } catch (err) {
-            if (renderToken !== proteinInfoStructureRenderToken) return;
-            status.textContent = `Could not initialize Mol*: ${err?.message || 'Unknown error'}`;
-            return;
-        }
-
-        if (renderToken !== proteinInfoStructureRenderToken) return;
-
-        const host = document.createElement('div');
-        host.id = 'protein-structure-viewer-host';
-        const canvasBg = getComputedStyle(canvas).backgroundColor || '#0f1115';
-        host.style.background = canvasBg;
-        body.innerHTML = '';
-        body.appendChild(host);
-
-        const applyViewerBackground = () => {
-            host.querySelectorAll('canvas').forEach(canvasEl => {
-                canvasEl.style.backgroundColor = canvasBg;
-                canvasEl.style.background = canvasBg;
-            });
-            host.querySelectorAll('.msp-layout, .msp-plugin, .msp-plugin > div').forEach(el => {
-                el.style.backgroundColor = canvasBg;
-                el.style.background = canvasBg;
-            });
-        };
-
-        proteinInfoMolstarBackgroundObserver = new MutationObserver(() => applyViewerBackground());
-        proteinInfoMolstarBackgroundObserver.observe(host, { childList: true, subtree: true });
-
         disposeProteinInfoMolstarViewer();
-
-        try {
-            proteinInfoMolstarViewer = await window.molstar.Viewer.create(host, {
-                layoutShowControls: false,
-                layoutIsExpanded: false,
-                collapseLeftPanel: true,
-                layoutShowRemoteState: false,
-                layoutShowSequence: false,
-                layoutShowLog: false,
-                viewportShowExpand: false,
-                viewportShowSelectionMode: false
-            });
-
-            const colorHex = parseCssColorToHex(canvasBg);
-            const plugin = proteinInfoMolstarViewer?.plugin;
-            const setCanvasProps = plugin?.canvas3d?.setProps;
-            const Color = window.molstar?.Color;
-            if (setCanvasProps && Color) {
-                try {
-                    plugin.canvas3d.setProps({ renderer: { backgroundColor: Color(colorHex) } });
-                } catch {}
+        body.replaceChildren();
+        body.style.display = 'flex'; body.style.flexDirection = 'column'; body.style.gap = '8px';
+        const uniprot = getPreferredUniProtAliasForProtein(nodeId);
+        const sequence = getProteinSequence(nodeId);
+        const label = document.createElement('label'); label.textContent = 'Structure to view'; label.htmlFor = 'proteinStructureSelect';
+        const select = document.createElement('select'); select.id = 'proteinStructureSelect'; select.dataset.menuGroups = 'structure';
+        const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = 'Choose a structure'; placeholder.disabled = true; select.append(placeholder);
+        const ai = document.createElement('optgroup'); ai.label = 'AI';
+        for (const [value, title, enabled] of [['alphafold','AlphaFold model',uniprot],['alphafill','AlphaFill model',uniprot],['esmfold','ESMFold model',sequence]]) {
+            const option = document.createElement('option'); option.value = value; option.textContent = title; option.disabled = !enabled; ai.append(option);
+        }
+        const pdb = document.createElement('optgroup'); pdb.label = 'Protein Data Bank';
+        const pdbIds = Array.from(new Set((getNodeInfoLinkData(nodeId).pdbLinks || []).map(link => link.id.toUpperCase())));
+        pdbIds.forEach(id => { const option = document.createElement('option'); option.value = id; option.textContent = id; pdb.append(option); });
+        select.append(ai, pdb);
+        const download = document.createElement('button'); download.type = 'button'; download.className = 'btn-secondary'; download.textContent = 'Download .mmCIF'; download.disabled = true;
+        const status = document.createElement('div'); status.className = 'protein-structure-status'; status.setAttribute('role','status');
+        const host = document.createElement('div'); host.id = 'protein-structure-viewer-host';
+        const makeExternalButton = () => {
+            const button = document.createElement('button'); button.type = 'button'; button.className = 'btn-secondary';
+            return button;
+        };
+        let request = 0, loaded = null, abort = null;
+        const about = makeExternalButton(), openPage = makeExternalButton();
+        const updatePageLinks = () => {
+            const links = getProteinStructurePageLinks(select.value, uniprot);
+            if (links && select.value === 'esmfold' && loaded?.source === 'atlas') {
+                links.about = 'https://biohub.ai/esm/protein/atlas/api-docs/';
+                links.page = `https://biohub.ai/esm/protein/api/v1alpha1/proteins/${loaded.hash}?fold_on_miss=false&topk_features=1`;
+                links.pageLabel = 'Open Atlas record';
+                links.pageTitle = 'Open this exact-sequence ESM Atlas record';
             }
-            applyViewerBackground();
-
+            for (const [button, text, url] of [[about, links ? `About ${links.name}` : 'About structure', links?.about], [openPage, links?.pageLabel || 'Open structure page', links?.page]]) {
+                const icon = document.createElement('i'); icon.className = 'fas fa-external-link-alt'; icon.setAttribute('aria-hidden','true');
+                button.replaceChildren(text + ' ', icon); button.disabled = !url;
+                button.onclick = () => { if (url) window.open(url, '_blank', 'noopener,noreferrer'); };
+            }
+            openPage.title = links?.pageTitle || 'Open this structure entry in a new tab';
+        };
+        const toolbar = document.createElement('div'); toolbar.className = 'protein-structure-toolbar';
+        toolbar.append(select, about, openPage, download);
+        body.append(label, toolbar, status, host);
+        window.enhanceVariableMenu?.(select);
+        const current = token => renderToken === proteinInfoStructureRenderToken && token === request;
+        download.onclick = () => {
+            if (!loaded) return;
+            const url = URL.createObjectURL(new Blob([loaded.text], { type:'chemical/x-mmcif' }));
+            const anchor = document.createElement('a'); anchor.href = url;
+            anchor.download = `${getPreferredProteinName(nodeId)}_${nodeId}_${loaded.id}`.replace(/[^a-zA-Z0-9._-]+/g,'_') + '.mmcif';
+            anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+        };
+        select.onchange = async () => {
+            const token = ++request, id = select.value;
+            abort?.abort(); abort = new AbortController();
+            loaded = null; download.disabled = true; status.textContent = `Loading ${select.selectedOptions[0]?.textContent}…`;
+            updatePageLinks();
             try {
-                await proteinInfoMolstarViewer.loadStructureFromUrl(modelInfo.modelUrl, modelInfo.format, false, {
-                    representationParams: {
-                        type: 'cartoon',
-                        theme: { globalName: 'plddt-confidence' }
-                    }
-                });
-            } catch {
-                // Fallback for Mol* builds with different representation option signatures.
-                await proteinInfoMolstarViewer.loadStructureFromUrl(modelInfo.modelUrl, modelInfo.format, false);
+                let url, text, esmModel;
+                if (id === 'alphafold') {
+                    const info = await getAlphaFoldModelInfo(uniprot);
+                    if (info.notAvailable || !info.modelUrl.endsWith('.cif')) throw new Error('No mmCIF AlphaFold model available for this protein.');
+                    url = info.modelUrl;
+                } else if (id === 'alphafill') url = `https://alphafill.eu/v1/aff/${encodeURIComponent(uniprot)}`;
+                else if (id !== 'esmfold') url = `https://files.rcsb.org/download/${encodeURIComponent(id)}.cif`;
+                if (id === 'esmfold') {
+                    esmModel = await getEsmProteinModel(sequence, { signal:abort.signal, onStatus:message => { if (current(token)) status.textContent = message; } });
+                    text = esmModel.text;
+                } else {
+                    const response = await fetch(url, { signal:abort.signal });
+                    if (!response.ok) throw new Error(`Structure service returned ${response.status}. The model may be unavailable.`);
+                    text = await response.text();
+                }
+                if (!/\bdata_/i.test(text) || !text.includes('_atom_site.')) throw new Error('The service did not return an mmCIF structure.');
+                await ensureMolstarLoadedForProteinInfo();
+                if (!current(token)) return;
+                disposeProteinInfoMolstarViewer(); host.replaceChildren();
+                const viewer = await window.molstar.Viewer.create(host, { layoutShowControls:false, layoutIsExpanded:false, layoutShowRemoteState:false, layoutShowSequence:false, layoutShowLog:false, viewportShowExpand:false, viewportShowSelectionMode:false });
+                if (!current(token)) { viewer.plugin?.dispose(); return; }
+                proteinInfoMolstarViewer = viewer;
+                if (typeof ResizeObserver !== 'undefined') {
+                    proteinInfoMolstarResizeObserver = new ResizeObserver(() => {
+                        if (current(token)) viewer.plugin?.handleResize?.();
+                    });
+                    proteinInfoMolstarResizeObserver.observe(host);
+                }
+                viewer.plugin?.handleResize?.();
+                const modelUrl = URL.createObjectURL(new Blob([text], { type:'chemical/x-mmcif' }));
+                try { await viewer.loadStructureFromUrl(modelUrl, 'mmcif', false); }
+                finally { URL.revokeObjectURL(modelUrl); }
+                if (!current(token)) return;
+                loaded = { text, id:esmModel ? `ESMFold_${esmModel.source}_${esmModel.hash}` : id, ...esmModel };
+                updatePageLinks(); download.disabled = false; status.textContent = esmModel ? `Showing ${esmModel.modelName}.` : '';
+            } catch (error) {
+                if (current(token)) { disposeProteinInfoMolstarViewer(); host.replaceChildren(); status.textContent = `Could not load structure: ${error.message}`; }
             }
-            applyViewerBackground();
-        } catch (err) {
-            if (renderToken !== proteinInfoStructureRenderToken) return;
-            body.innerHTML = '';
-            const fail = document.createElement('div');
-            fail.className = 'protein-structure-status';
-            fail.textContent = `Could not render structure: ${err?.message || 'Unknown error'}`;
-            body.appendChild(fail);
+        };
+        select.value = uniprot ? 'alphafold' : pdbIds[0] || '';
+        updatePageLinks();
+        // Predictions require an explicit ESMFold selection; opening the page never submits a sequence for folding.
+        if (select.value && select.value !== 'esmfold') select.onchange();
+        else status.textContent = sequence ? 'Choose ESMFold model to predict this sequence.' : 'No structures or sequence are available for this protein.';
+        if (pdbIds.length) {
+            try {
+                await fetchProteinComplexStructuresMetadata(pdbIds);
+                if (pdbIds.some(id => !proteinComplexStructuresMetadataById.has(id))) await fetchProteinComplexStructuresMetadata(pdbIds);
+                if (renderToken !== proteinInfoStructureRenderToken) return;
+                for (const option of pdb.children) {
+                    const title = proteinComplexStructuresMetadataById.get(option.value)?.title;
+                    option.textContent = title ? `${option.value}—${title}` : `${option.value}—Title unavailable`;
+                }
+            } catch { if (renderToken === proteinInfoStructureRenderToken) for (const option of pdb.children) option.textContent = `${option.value}—Title unavailable`; }
         }
     }
 
@@ -17876,6 +18296,108 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     function getProteinInfoSelectedId() {
         const selectedIds = Array.from(getEffectiveSelectedNodesSet());
         return selectedIds.length === 1 ? selectedIds[0] : null;
+    }
+
+    function rebuildProteinMentions() {
+        if (typeof ProteinMentions === 'undefined') return;
+        const sourceNodes = mergedNetworkState.active ? mergedNetworkState.originalNodes : nodes;
+        const records = sourceNodes.map(node => {
+            const annotations = new Set([getProteinInfoAnnotation(node.id)]);
+            Object.entries(accessoryVariableValues).forEach(([file, variables]) => {
+                if (file === annotationMentionFile) return;
+                Object.entries(variables).forEach(([name, values]) => {
+                    if (/annotation|description/i.test(name) && values instanceof Map && values.has(node.id)) annotations.add(String(values.get(node.id)));
+                });
+            });
+            return { id: node.id, name: getPreferredProteinName(node.id), annotation: [...annotations].join('\n') };
+        });
+        const signature = JSON.stringify([records, nodes.map(node => node.id)]);
+        if (signature === proteinMentionSignature && proteinMentionIndex) return;
+        proteinMentionSignature = signature;
+        proteinMentionIndex = ProteinMentions.create(records);
+        const values = {};
+        for (const [label, field, numeric] of [
+            ['Associations from annotations', 'complexes', false],
+            ['Mentions other proteins', 'outgoing', true],
+            ['Mentioned by other proteins', 'incoming', true]
+        ]) {
+            values[label] = new Map(records.map(record => [record.id, numeric
+                ? proteinMentionIndex[field].get(record.id).size
+                : [...proteinMentionIndex[field].get(record.id)].sort().join('; ')]));
+            if (!variableConfigs.some(cfg => cfg.fileName === annotationMentionFile && cfg.variable === label)) {
+                variableConfigs.push({fileName: annotationMentionFile, variable: label, label,
+                    type: numeric ? 'Numerical - Continuous' : 'Categorical - Nominal', hidden: false, split: false, splitChildren: {}});
+            }
+        }
+        if (mergedNetworkState.active) for (const node of nodes) {
+            const sources = node._speciesIds || [node.id];
+            for (const [label, field, numeric] of [
+                ['Associations from annotations', 'complexes', false],
+                ['Mentions other proteins', 'outgoing', true],
+                ['Mentioned by other proteins', 'incoming', true]
+            ]) {
+                const memberships = new Set(sources.flatMap(id => [...(proteinMentionIndex[field].get(id) || [])]));
+                if (numeric) sources.forEach(id => memberships.delete(id));
+                values[label].set(node.id, numeric ? memberships.size : [...memberships].sort().join('; '));
+            }
+        }
+        accessoryVariableValues[annotationMentionFile] = values;
+        customVariableSelectionCache.clear();
+        enrichmentCategoryColorScales.clear();
+        proteinMentionHoverIds.clear();
+        // Rebind existing chat text when a network or its annotations change.
+        document.querySelectorAll('#ai-chatbox .ai-bubble-text').forEach(element => {
+            element.querySelectorAll('.protein-mention').forEach(button => button.replaceWith(document.createTextNode(button.textContent)));
+            element.normalize();
+            decorateProteinMentions(element);
+        });
+    }
+
+    function proteinMentionNames(nodeId, direction) {
+        const sources = nodeMap.get(nodeId)?._speciesIds || [nodeId];
+        const ids = new Set(sources.flatMap(id => [...(proteinMentionIndex?.[direction].get(id) || [])]));
+        sources.forEach(id => ids.delete(id));
+        return [...ids].map(id => getPreferredProteinName(id)).sort().join('; ');
+    }
+
+    function decorateProteinMentions(element) {
+        if (!proteinMentionIndex || !element) return;
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        const texts = [];
+        while (walker.nextNode()) {
+            if (!walker.currentNode.parentElement.closest('a, button, pre, .katex, .protein-mention')) texts.push(walker.currentNode);
+        }
+        for (const textNode of texts) {
+            const hits = proteinMentionIndex.find(textNode.nodeValue);
+            if (!hits.length) continue;
+            const fragment = document.createDocumentFragment();
+            let offset = 0;
+            for (const hit of hits) {
+                fragment.append(document.createTextNode(textNode.nodeValue.slice(offset, hit.start)));
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'protein-mention';
+                button.textContent = textNode.nodeValue.slice(hit.start, hit.end);
+                button.title = `Select ${hit.ids.map(getPreferredProteinName).join(', ')}`;
+                const highlight = () => { proteinMentionHoverIds.clear(); hit.ids.forEach(id => proteinMentionHoverIds.add(id)); draw(); };
+                const clear = () => { proteinMentionHoverIds.clear(); draw(); };
+                button.addEventListener('mouseenter', highlight);
+                button.addEventListener('mouseleave', clear);
+                button.addEventListener('focus', highlight);
+                button.addEventListener('blur', clear);
+                button.addEventListener('click', event => {
+                    proteinMentionHoverIds.clear();
+                    const ids = new Set(hit.ids);
+                    if (event?.shiftKey) getEffectiveSelectedNodesSet().forEach(id => ids.add(id));
+                    selectNodes([...ids].map(id => nodeMap.get(id) || mergedNetworkState.nodeById.get(id) || nodes.find(n => n.id === id)).filter(Boolean), false, 'Protein mention', null, true);
+                    if (!event?.shiftKey) toggleProteinZoomHotkey();
+                });
+                fragment.append(button);
+                offset = hit.end;
+            }
+            fragment.append(document.createTextNode(textNode.nodeValue.slice(offset)));
+            textNode.replaceWith(fragment);
+        }
     }
 
     function getPreferredProteinName(nodeId) {
@@ -18116,10 +18638,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             if (!terms.has(key)) terms.set(key, { ...record, proteins: new Set() });
             owners.get(record.nodeId).forEach(id => terms.get(key).proteins.add(id));
         });
-        const common = Array.from(terms.values()).map(record => ({ ...record,
+        const all = Array.from(terms.values()).map(record => ({ ...record,
             abundance: record.proteins.size / selectedIds.length
-        })).filter(record => selectedIds.length === 1 || record.abundance > 0.3);
-        return { records, common };
+        }));
+        const common = all.filter(record => selectedIds.length === 1 || record.abundance > 0.3);
+        return { records, common, all };
     }
 
     function renderProteinInfoEnrichmentView(body, nodeId) {
@@ -18536,6 +19059,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             { label: 'PubMed', url: data.pubmedUrl },
             ...(data.pdbLinks || []).map(link => ({ label: `PDB ${link.id}`, url: link.url })),
             { label: 'IntAct', url: data.intactUrl },
+            { label: 'SeqHub', url: data.seqhubUrl },
+            { label: 'Pharos', url: data.pharosUrl },
+            { label: 'GeneWiki', url: data.geneWikiUrl },
+            { label: 'Ensembl', url: data.ensemblUrl },
+            ...(data.geneCardsUrl ? [{ label: 'GeneCards', url: data.geneCardsUrl }] : []),
             { label: 'STRING', url: data.stringUrl }
         ].filter(link => includeUnavailable || link.url);
     }
@@ -18560,13 +19088,16 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     function aiViewProteinInfo(args = {}) {
-        const fields = new Set(['gene_id', 'annotation', 'description', 'kegg_product', 'enrichment_terms',
-            'homology', 'complexes', 'aliases', 'sequence_length', 'centrality', 'eigenvector_centrality', 'pdb_ids', 'collections']);
+        const fields = new Set(['gene_id', 'gc_content', 'exon_count', 'gene_length', 'genomic_position', 'chromosome', 'strand', 'annotation', 'description', 'kegg_product', 'enrichment_terms',
+            'homology', 'complexes', 'aliases', 'sequence_length', 'centrality', 'eigenvector_centrality', 'pdb_ids', 'collections', 'mentions_other_proteins', 'mentioned_by_other_proteins']);
         const requested = args.information_types;
         if (requested !== undefined && (!Array.isArray(requested) || requested.some(field => !fields.has(field)))) {
             return { status: 'error', message: 'information_types must be an array of supported field names.', available_information_types: Array.from(fields) };
         }
         const wants = field => !requested?.length || requested.includes(field);
+        const geneFields=['gene_id','gc_content','exon_count','gene_length','genomic_position','chromosome','strand'];
+        const wantsGeneData=geneFields.some(wants),genomeApi=typeof window!=='undefined'?window.StringScapeGenome:null;
+        const genomeLoaded=wantsGeneData&&!!genomeApi?.chromosomeState?.().loaded;
         const page = aiSelectedProteinPage(args);
         const enrichment = page.proteins.length && wants('enrichment_terms') ? getProteinEnrichmentRecords() : [];
         const recordsById = new Map();
@@ -18596,8 +19127,22 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const proteins = page.proteins.map(node => {
             const id = node.id, meta = proteinMetadata.get(id) || {};
             const result = { protein_id: id, preferred_name: getPreferredProteinName(id) };
-            if (wants('gene_id')) result.gene_id = meta.ncbiGeneId || meta.pubmedGeneId || meta.geneId || null;
+            const knownGeneId=meta.ncbiGeneId||meta.pubmedGeneId||meta.geneId||null;
+            const needsGenome=['gc_content','exon_count','gene_length','genomic_position','chromosome','strand'].some(wants)||(wants('gene_id')&&!knownGeneId);
+            const genome=needsGenome&&genomeLoaded?genomeApi:null;
+            const gene=genome?.geneMetrics?.(id);
+            if(wants('gene_id'))result.gene_id=knownGeneId||gene?.gene_id||null;
+            if(wants('gc_content'))result.gc_content=gene?.gc_content??null;
+            if(wants('exon_count'))result.exon_count=gene?.gene_exon_count??null;
+            if(wants('gene_length'))result.gene_length=gene?.gene_length??null;
+            if(wants('genomic_position'))result.genomic_position=gene?.genomic_position??null;
+            if(wants('chromosome'))result.chromosome=genome?.chromosomeState?.().assignments.get(id)||gene?.chromosome||null;
+            if(wants('strand'))result.strand=gene?.strand&&gene.strand!=='Unmapped'?gene.strand:null;
             if (wants('annotation')) result.annotation = getProteinInfoAnnotation(id);
+            if (wants('mentions_other_proteins')) result.mentions_other_proteins =
+                [...new Set(Array.from(proteinMentionIndex?.outgoing.get(id) || [], getPreferredProteinName))].sort();
+            if (wants('mentioned_by_other_proteins')) result.mentioned_by_other_proteins =
+                [...new Set(Array.from(proteinMentionIndex?.incoming.get(id) || [], getPreferredProteinName))].sort();
             if (wants('description')) result.description = getProteinInfoDescription(id);
             if (wants('kegg_product')) result.kegg_product = getKeggProductText(id) || null;
             const records = recordsById.get(id) || [];
@@ -18634,21 +19179,73 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             if (wants('collections')) result.collections = getNodeCollectionMemberships(id);
             return result;
         });
-        return { ...page, proteins, message: `${!page.total ? 'No nodes are currently selected. ' : ''}Use Search_Pubmed to find extra information on these proteins from the literature if needed.` };
+        const genomeNotice=wantsGeneData?{genome_status:genomeLoaded?'loaded':'not_loaded',...(!genomeLoaded?{genome_message:"Genome data has not been loaded. First fetch the genome in the left panel 'Genome' section or call Fetch_genome. Gene IDs already present in protein metadata are still returned."}:{})}:{};
+        return { ...page, ...genomeNotice, proteins, message: `${!page.total ? 'No nodes are currently selected. ' : ''}Use View_orthology_info, View_URL_links, View_RCSB_PDB_info, View_enrichment_terms, and View_sequence_data to get more info on these proteins if needed. Use Search_Pubmed to find extra information on these proteins from the literature if needed.` };
+    }
+
+    async function aiViewRcsbPdbInfo(args = {}) {
+        const selected = Array.from(getEffectiveSelectedNodesSet() || []);
+        const requested = args.pdb_ids === undefined
+            ? selected.flatMap(id => (getNodeInfoLinkData(id).pdbLinks || []).map(link => link.id))
+            : args.pdb_ids;
+        if (!Array.isArray(requested)) return { status:'error', message:'pdb_ids must be an array of PDB IDs.' };
+        const ids = Array.from(new Set(requested.map(id => String(id).trim().toUpperCase()).filter(Boolean)));
+        if (ids.some(id => !/^[A-Z0-9]+$/.test(id))) return { status:'error', message:'PDB IDs must contain only letters and numbers.' };
+        const limit = Number.isFinite(Number(args.limit)) ? Math.max(1, Math.min(20, Math.floor(Number(args.limit)))) : 5;
+        const offset = Number.isFinite(Number(args.offset)) ? Math.max(0, Math.floor(Number(args.offset))) : 0;
+        const pageIds = ids.slice(offset, offset + limit);
+        const page = { total:ids.length, limit, offset, next_offset:offset + pageIds.length < ids.length ? offset + pageIds.length : null };
+        if (!pageIds.length) return { status:ids.length ? 'success' : 'warning', ...page, entries:[], message:ids.length ? 'No entries at this offset.' : 'No PDB IDs available. Select proteins with PDB annotations or provide pdb_ids.' };
+        const entries = await Promise.all(pageIds.map(async pdbId => {
+            try {
+                const get = async path => {
+                    const response = await fetch(`https://data.rcsb.org/rest/v1/core/${path}`);
+                    if (!response.ok) throw new Error(`RCSB returned HTTP ${response.status}`);
+                    return response.json();
+                };
+                const entry = await get(`entry/${encodeURIComponent(pdbId)}`);
+                const entityIds = entry.rcsb_entry_container_identifiers?.polymer_entity_ids || [];
+                const entities = await Promise.all(entityIds.map(async entityId => {
+                    try { return { entityId, data:await get(`polymer_entity/${encodeURIComponent(pdbId)}/${encodeURIComponent(entityId)}`) }; }
+                    catch (error) { return { entityId, error:error.message }; }
+                }));
+                const proteins = entities.filter(entity => entity.data && (
+                    entity.data.entity_poly?.rcsb_entity_polymer_type === 'Protein' ||
+                    /^polypeptide/i.test(entity.data.entity_poly?.type || '')
+                )).map(({ entityId, data }) => {
+                    const identifiers = data.rcsb_polymer_entity_container_identifiers || {};
+                    return { entity_id:String(entityId), name:data.rcsb_polymer_entity?.pdbx_description || null,
+                        chain_ids:identifiers.auth_asym_ids || identifiers.asym_ids || [],
+                        uniprot_ids:Array.from(new Set([...(identifiers.uniprot_ids || []),
+                            ...(identifiers.reference_sequence_identifiers || []).filter(ref => ref.database_name === 'UniProt').map(ref => ref.database_accession)])) };
+                });
+                const errors = entities.filter(entity => entity.error).map(entity => ({ entity_id:String(entity.entityId), message:entity.error }));
+                return { pdb_id:pdbId, title:entry.struct?.title || null, proteins,
+                    ...(errors.length ? { incomplete:true, errors } : {}) };
+            } catch (error) { return { pdb_id:pdbId, error:error.message }; }
+        }));
+        return { status:entries.some(entry => entry.error || entry.incomplete) ? 'warning' : 'success', ...page, entries,
+            source:'RCSB PDB protein polymer entities; chain IDs use author identifiers when available.' };
     }
 
     function aiViewEnrichmentTerms(args = {}) {
         const selected = Array.from(getEffectiveSelectedNodesSet() || []);
-        const ids = new Set(selected.flatMap(id => nodeMap.get(id)?._speciesIds || [id]));
-        const records = getProteinEnrichmentRecords().filter(row => ids.has(row.nodeId));
+        const multiple = selected.length > 1;
+        const enrichment = getCommonProteinEnrichment(selected);
+        const records = multiple
+            ? (args.include_all_terms === true ? enrichment.all : enrichment.common)
+                .sort((a, b) => b.abundance - a.abundance)
+            : enrichment.records;
         const categories = Array.from(new Set(records.map(row => row.category))).sort();
         const category = String(args.category || '').trim().toLowerCase();
         const filtered = records.filter(row => !category || row.category.toLowerCase() === category);
         const limit = Number.isFinite(Number(args.limit)) ? Math.max(1, Math.min(100, Math.floor(Number(args.limit)))) : 20;
         const offset = Number.isFinite(Number(args.offset)) ? Math.max(0, Math.floor(Number(args.offset))) : 0;
         const terms = filtered.slice(offset, offset + limit).map(row => ({
-            protein_id: row.proteinId, category: row.category, term: row.term,
-            description: row.description, url: getProteinEnrichmentUrl(row)
+            ...(multiple ? { protein_ids: Array.from(row.proteins), protein_count: row.proteins.size,
+                percentage: Math.round(row.abundance * 100) } : { protein_id: row.proteinId }),
+            category: row.category, term: row.term,
+            description: row.description
         }));
         return { status: selected.length ? 'success' : 'warning', selected_protein_count: selected.length,
             categories, total: filtered.length, limit, offset,
@@ -18706,7 +19303,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             const title = document.createElement('h4');
             title.textContent = `${getPreferredProteinName(nodeId)} (${nodeId})`;
             const content = document.createElement('div');
-            applyMarkdownLatexContent(content, getProteinInfoText(nodeId, mode));
+            if (mode === 'sequence') renderProteinInfoSequenceView(content, nodeId);
+            else applyMarkdownLatexContent(content, getProteinInfoText(nodeId, mode));
             card.append(title, content);
             cards.appendChild(card);
         });
@@ -18881,6 +19479,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             applyProteinInfoPanelHeight(proteinInfoCustomHeightPx);
         }
 
+        body.style.display = '';
+        body.style.flexDirection = '';
+        body.style.gap = '';
         modeButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.proteinMode === proteinInfoMode));
         updateProteinInfoTabOverflow();
 
@@ -18948,7 +19549,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             } else {
                 proteinInfoStructureRenderToken++;
                 disposeProteinInfoMolstarViewer();
-                applyMarkdownLatexContent(body, getProteinInfoText(selectedId, proteinInfoMode));
+                if (proteinInfoMode === 'alias') renderProteinInfoAliasView(body, selectedId);
+                else if (proteinInfoMode === 'sequence') renderProteinInfoSequenceView(body, selectedId);
+                else applyMarkdownLatexContent(body, getProteinInfoText(selectedId, proteinInfoMode));
             }
         } else {
             proteinInfoStructureRenderToken++;
@@ -18959,7 +19562,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     ? 'Sequence'
                     : (proteinInfoMode === 'structure'
                         ? 'Structure'
-                        : (proteinInfoMode === 'links' ? 'Links' : (proteinInfoMode === 'enrichment' ? 'Enrichment' : proteinInfoMode === 'homology' ? 'Homology' : 'Annotation'))));
+                        : (proteinInfoMode === 'alias' ? 'Aliases' : proteinInfoMode === 'links' ? 'Links' : (proteinInfoMode === 'enrichment' ? 'Enrichment' : proteinInfoMode === 'homology' ? 'Homology' : 'Annotation'))));
             heading.textContent = 'Protein Info';
             applyMarkdownLatexContent(body, `Select only one node to view the proteins ${label}.`);
         }
@@ -19142,6 +19745,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     function refreshInfoBoxFromSelection(query = '', searchSummary = null) {
         syncHomologyModellerSelection();
+        window.StringScapeGenome?.updateContext();
+        window.StringScapeGenome?.render();
         const infoId = document.getElementById('info-id');
         const infoContent = document.getElementById('info-content');
         const infoControls = document.getElementById('info-controls');
@@ -19304,10 +19909,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         updateNodeInfoTableModalChrome('Node Info Table', false);
         calculateEigenvectorCentrality();
         const { rows, extraColumns, merged } = getSelectedNodeInfoRows();
-        const baseColumns = ['Protein ID', 'Preferred Name', 'Gene ID', 'Description', 'Annotation', 'Enrichment terms', 'KEGG Product', 'Collection(s)', 'Localisation', 'Protein Size (aa)', 'UniProt', 'NCBI', 'Pubmed', 'IntAct', 'STRING', 'Protein Data Bank', 'Aliases',  'Layer', 'Centrality', 'Eigen', 'Sequence'];
+        const baseColumns = ['Protein ID', 'Preferred Name', 'Gene ID', 'Description', 'Annotation', 'Other proteins that mention this protein in their annotation data', 'This protein mentions these other proteins in its annotation data', 'Enrichment terms', 'KEGG Product', 'Collection(s)', 'Localisation', 'Protein Size (aa)', 'UniProt', 'NCBI', 'Pubmed', 'IntAct', 'SeqHub', 'Pharos', 'GeneWiki', 'Ensembl', 'GeneCards', 'STRING', 'Protein Data Bank', 'Aliases',  'Layer', 'Centrality', 'Eigen', 'Sequence'];
         const columns = merged
             ? ['Protein ID', 'Preferred Name', 'Gene ID', 'Description', 'Enrichment terms'].flatMap(label => mergedNetworkState.taxa.map(taxon => `${label} ${taxon}`))
             : [...baseColumns, ...extraColumns.map(c => c.label)];
+        if (merged) columns.push('Other proteins that mention this protein in their annotation data', 'This protein mentions these other proteins in its annotation data');
         nodeInfoTableState = { columns, rows, filteredRows: rows, searchQuery: '', mode: 'protein' };
         renderNodeInfoTable();
         openModal('nodeInfoTableModal');
@@ -19504,6 +20110,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     function renderNodeInfoTableCell(row, column, rowIndex) {
         const textValue = (row[column] ?? '').toString();
+        const resourceKeys = {"SeqHub": "seqhubUrl", "Pharos": "pharosUrl", "GeneWiki": "geneWikiUrl", "Ensembl": "ensemblUrl", "GeneCards": "geneCardsUrl"};
+        if (resourceKeys[column]) {
+            const url = row.__linkData?.[resourceKeys[column]] || '';
+            return url ? `<div class="node-info-link-group">${renderNodeInfoTableButton(column, url)}</div>` : '<span style="color:#888;">-</span>';
+        }
         if (column === 'UniProt') {
             const url = row.__linkData?.uniprotUrl || '';
             return url ? `<div class="node-info-link-group">${renderNodeInfoTableButton('UniProt', url)}</div>` : '<span style="color:#888;">-</span>';
@@ -20760,6 +21371,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             .attr('d', arc)
             .attr('fill', (d, i) => {
                 // Use the same color scale as the legend
+                if(mode==='strand')return getGenomeStrandColor(d.data.label);
+                if (mode === 'chromosome') return getCategoricalLegendFillColor(mode,d.data.label,getGenomeChromosomeDefaultColor(d.data.label));
                 if (mode === 'layer') {
                     return d.data.label === 'Disconnected' ? '#888' : d3.interpolateViridis(1 - ((parseInt(d.data.label.split(' ')[1]) - 1) / 10));
                 } else if (catScale) {
@@ -20891,7 +21504,6 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         });
 
         return Array.from(pdbToNodeIds.entries())
-            .filter(([, nodeIds]) => nodeIds.size > 1)
             .map(([pdbId, nodeIds]) => ({ pdbId, nodeIds: Array.from(nodeIds) }))
             .sort((a, b) => {
                 const countDiff = b.nodeIds.length - a.nodeIds.length;
@@ -21028,7 +21640,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             : target.querySelector('#protein-complex-structure-viewer-host');
         if (!title || !subtitle || !status || !host) return;
 
-        title.textContent = String(entry?.title || entry?.pdbId || 'Protein Complex Structures').trim();
+        title.textContent = String(entry?.title || entry?.pdbId || 'Structures').trim();
         subtitle.textContent = String(entry?.speciesLabel || 'Unknown species/origin').trim();
         status.style.display = 'block';
         status.textContent = 'Loading structure from RCSB PDB...';
@@ -21235,7 +21847,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const pinButton = document.createElement('button');
         pinButton.type = 'button';
         pinButton.className = 'protein-complex-pin-btn';
-        pinButton.textContent = '📌';
+        const pinIcon = document.createElement('i');
+        pinIcon.className = 'fa-solid fa-thumbtack';
+        pinIcon.setAttribute('aria-hidden', 'true');
+        pinButton.appendChild(pinIcon);
         pinButton.title = isPinned ? 'Unpin structure' : 'Pin structure';
         pinButton.setAttribute('aria-label', isPinned ? 'Unpin structure' : 'Pin structure');
         pinButton.setAttribute('aria-pressed', isPinned ? 'true' : 'false');
@@ -21463,7 +22078,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         heroCopy.className = 'structures-hero-copy';
         const title = document.createElement('h1');
         title.className = 'structures-title';
-        title.textContent = 'Protein Complex Structures';
+        title.textContent = 'Structures';
         const status = document.createElement('div');
         status.className = 'structures-status';
         status.textContent = 'Loading protein complex metadata from RCSB PDB...';
@@ -21520,7 +22135,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         thisSection.className = 'structures-section';
         const thisHeading = document.createElement('h2');
         thisHeading.className = 'structures-section-title';
-        thisHeading.textContent = 'Protein complex structures from this species';
+        thisHeading.textContent = 'Structures from this species';
         const pinnedSection = document.createElement('section');
         pinnedSection.className = 'structures-section';
         const pinnedHeading = document.createElement('h2');
@@ -21539,7 +22154,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         otherSection.className = 'structures-section';
         const otherHeading = document.createElement('h2');
         otherHeading.className = 'structures-section-title';
-        otherHeading.textContent = 'Other Protein Complex Structures';
+        otherHeading.textContent = 'Other Structures';
         const otherGrid = document.createElement('div');
         otherGrid.className = 'protein-complex-card-grid';
         otherSection.appendChild(otherHeading);
@@ -21653,7 +22268,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             else otherSpeciesCards.push(card);
         });
 
-        status.textContent = `${records.length} protein complex structure${records.length === 1 ? '' : 's'} loaded from RCSB PDB${dominantSpeciesLabel ? ` for ${dominantSpeciesLabel}` : ''}.`;
+        status.textContent = `${records.length} protein structure${records.length === 1 ? '' : 's'} loaded from RCSB PDB${dominantSpeciesLabel ? ` for ${dominantSpeciesLabel}` : ''}.`;
 
         if (!pinnedCards.length) {
             const empty = document.createElement('div');
@@ -21871,8 +22486,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             graphs.forEach(g => createBtn(g));
 
             // 3. Structures Section
-            container.append("div").attr("class", "view-menu-header").style("font-size", "14px").text("Structures");
-            createBtn({ id: 'Protein Complex Structures', name: 'Protein Complex Structures' }).classed('structures-full-width-btn', true);
+            container.append("div").attr("class", "view-menu-header").style("font-size", "14px").text("Structures and Genome");
+            createBtn({ id: 'Protein Complex Structures', name: 'Structures' });
+            createBtn({ id: 'Genome', name: 'Genome' });
 
             // 4. Collections Section
             container.append("div").attr("class", "view-menu-header").style("font-size", "14px").text("Collections");
@@ -21943,6 +22559,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const currentIsGraph = currentViewId === 'pie_chart' || currentViewId === 'histogram' || currentViewId === 'Venn Diagram' || currentViewId === 'Scatter Plot' || currentViewId === 'Mind Map' || currentViewId === 'Embeddings';
         const targetIsGraph = viewId === 'pie_chart' || viewId === 'histogram' || viewId === 'Venn Diagram' || viewId === 'Scatter Plot' || viewId === 'Mind Map' || viewId === 'Embeddings';
         const targetIsStructures = viewId === 'Protein Complex Structures';
+        window.StringScapeGenome?.setVisible(viewId === 'Genome');
 
         if (currentViewId === 'Venn Diagram' && viewId !== 'Venn Diagram') {
             commitGraphSelectionsToNodes();
@@ -21957,6 +22574,18 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
         hideChartCollectionMenu();
 
+        if (viewId === 'Genome') {
+            closeWelcomeOverlay();
+            currentViewId = viewId;
+            closeProteinComplexStructureOverlay();
+            setProteinComplexStructuresVisibility(false);
+            setRightPanelMinimized(false);
+            updateChartPlotControls();
+            d3.select('#current-view-label').text('Genome');
+            updateViewMenu();
+            window.StringScapeGenome?.render();
+            return;
+        }
         if (targetIsStructures) {
             currentViewId = viewId;
             updateChartPlotControls();
@@ -21966,7 +22595,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             hideNodeHoverTooltip();
             setRightPanelMinimized(true);
             setProteinComplexStructuresVisibility(true);
-            d3.select("#current-view-label").text('Protein Complex Structures');
+            d3.select("#current-view-label").text('Structures');
             updateViewMenu();
             renderProteinComplexStructuresView();
             return;
@@ -23766,7 +24395,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         
         // Determine what data to display
         let displayMode = currentColorMode;
-        let isSupportedMode = displayMode === 'layer' || displayMode === 'collection' || displayMode === 'complex_pdbs' || displayMode === 'paralogues' || ['annotation', 'characterization', 'localization'].includes(displayMode);
+        let isSupportedMode = displayMode === 'layer' || displayMode === 'collection' || displayMode === 'complex_pdbs' || displayMode === 'chromosome' || displayMode === 'strand' || displayMode === 'paralogues' || ['annotation', 'characterization', 'localization'].includes(displayMode);
         if (currentColorMode.startsWith('var::')) {
             const parts = currentColorMode.split('::');
             const file = parts[1], variable = parts[2];
@@ -23784,6 +24413,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 const key = d.layer === 99 ? 'Disconnected' : `Layer ${d.layer}`;
                 dataCounts.set(key, (dataCounts.get(key) || 0) + 1);
             });
+        } else if(isSupportedMode&&displayMode==='strand'){
+            activeNodes.forEach(d=>{const key=getGenomeGeneValue(d,'strand');dataCounts.set(key,(dataCounts.get(key)||0)+1);});
+        } else if (isSupportedMode && displayMode === 'chromosome') {
+            activeNodes.forEach(d=>{const key=getGenomeChromosomeValue(d);dataCounts.set(key,(dataCounts.get(key)||0)+1);});
         } else if (isSupportedMode && displayMode === 'paralogues') {
             activeNodes.forEach(node => {
                 const label = getParalogueGroup(node.id);
@@ -23876,7 +24509,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 ctx.beginPath();
                 ctx.arc(centerX, centerY, radius, currentAngle, currentAngle + sliceAngle);
                 ctx.lineTo(centerX, centerY);
-                let wedgeColor = currentCatScale(label);
+                let wedgeColor = displayMode==='strand'?getGenomeStrandColor(label):displayMode==='chromosome'?getCategoricalLegendFillColor('chromosome',label,getGenomeChromosomeDefaultColor(label)):currentCatScale(label);
                 // Darken unselected wedges when selection exists
                 if (hasSelection && !isSelectedWedge) {
                     wedgeColor = d3.color(wedgeColor).darker(1.5).toString();
@@ -23967,7 +24600,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             }
         }
 
-        const isSupportedMode = displayMode === 'centrality' || displayMode === 'local_clustering_coefficient' || displayMode === 'eigen' || displayMode === 'size' || displayMode === 'annotation' || displayMode.startsWith('var::');
+        const isSupportedMode = isGenomeNumericMode(displayMode) || displayMode === 'centrality' || displayMode === 'local_clustering_coefficient' || displayMode === 'eigen' || displayMode === 'size' || displayMode === 'annotation' || displayMode.startsWith('var::');
         const histogramSizeSource = displayMode === 'size' ? resolveProteinSizeSource(nodes) : null;
 
         let numericValues = [];
@@ -23986,6 +24619,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         } else if (displayMode === 'annotation') {
             numericValues = activeNodes.map(n => getAnnotationLengthFromSource(n.id, resolveBuiltInColorSource('annotation', activeNodes))).filter(v => Number.isFinite(v));
             variableName = 'Annotation';
+        } else if (isGenomeNumericMode(displayMode)) {
+            numericValues=activeNodes.map(n=>getGenomeGeneValue(n,displayMode)).filter(Number.isFinite);variableName={gene_exon_count:'Gene exon count',gc_content:'GC content (%)',genomic_position:'Genomic position (bp)'}[displayMode];
         } else if (displayMode.startsWith('var::')) {
             const displayParts = String(displayMode).split('::');
             const file = displayParts[1], variable = displayParts[2];
@@ -24008,6 +24643,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             fullNetworkNumericValues = nodes.map(n => getProteinSizeValue(n.id, histogramSizeSource));
         } else if (displayMode === 'annotation') {
             fullNetworkNumericValues = nodes.map(n => getAnnotationLengthFromSource(n.id, resolveBuiltInColorSource('annotation', nodes))).filter(v => Number.isFinite(v));
+        } else if (isGenomeNumericMode(displayMode)) {
+            fullNetworkNumericValues=nodes.map(n=>getGenomeGeneValue(n,displayMode)).filter(Number.isFinite);
         } else if (displayMode.startsWith('var::')) {
             const displayParts = String(displayMode).split('::');
             const file = displayParts[1], variable = displayParts[2];
@@ -24829,6 +25466,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     function draw() {
         syncHomologyModellerSelection();
+        if (currentViewId === 'Genome') { queueSecondaryRender(); return; }
         drawCurrentView();
         queueSecondaryRender();
     }
@@ -24842,7 +25480,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     function renderSecondaryView() {
         if (!splitViewOpen || !secondaryCanvas) return;
-        if (secondaryViewId === 'Protein Complex Structures') return;
+        if (secondaryViewId === 'Protein Complex Structures' || secondaryViewId === 'Genome') return;
         if (secondaryRenderInProgress) return;
         secondaryRenderQueued = false;
         secondaryRenderInProgress = true;
@@ -25119,6 +25757,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 }
             }
             if (selectionTargetMode === 'links') nodeAlpha = 0.5;
+            if (proteinMentionHoverIds.has(n.id) || n._speciesIds?.some(id => proteinMentionHoverIds.has(id))) nodeAlpha = 1;
             n.renderAlpha = nodeAlpha;
             n.gpuIsPath = isPath;
             n.gpuIsHigh = isHigh;
@@ -25145,6 +25784,16 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         ctx.globalAlpha = 1.0;
         ctx.shadowBlur = 0;
 
+        // Temporary mention rings are independent of persistent guide circles.
+        const mentionColor = getComputedStyle(document.documentElement).getPropertyValue('--accent-color').trim() || '#60a5fa';
+        for (const node of drawNodes) {
+            if (!proteinMentionHoverIds.has(node.id) && !node._speciesIds?.some(id => proteinMentionHoverIds.has(id))) continue;
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, (node._ssSize ?? node.r ?? 5) + 8, 0, 2 * Math.PI);
+            ctx.strokeStyle = mentionColor;
+            ctx.lineWidth = 3;
+            ctx.stroke();
+        }
         // Draw guide circles
         if (guideCircleOverlays && guideCircleOverlays.size > 0) {
             guideCircleOverlays.forEach((circleData, nodeId) => {
@@ -26182,6 +26831,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 || mode === 'annotation'
                 || mode === 'paralogues'
                 || mode === 'characterization'
+                || mode === 'chromosome'
+                || mode === 'strand'
                 || mode === 'localization'
                 || (mode.startsWith('var::') && !!targetNodes.find(n => getClusterVariableKey(n, mode) !== null));
             customPhysicsTimer?.mark('cluster support check');
@@ -26272,7 +26923,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         if (legendContent) {
             legendContent.innerHTML = '<div style="color:#aaa; font-size:12px; margin-bottom:6px;">Updating key ...</div>';
         }
-        const useGlobalNodesForStyle = currentViewId === 'base' || currentViewId === 'Venn Diagram' || currentViewId === 'Scatter Plot' || currentViewId === 'Embeddings';
+        const useGlobalNodesForStyle = currentViewId === 'base' || currentViewId === 'Venn Diagram' || currentViewId === 'Scatter Plot' || currentViewId === 'Embeddings' || currentViewId === 'Genome';
         const targetNodes = useGlobalNodesForStyle ? nodes : (activeSubData?.nodes || []);
         const targetLinks = useGlobalNodesForStyle ? links : (activeSubData?.links || []);
         const speciesPresenceMap = mode === 'species' ? getSpeciesPresenceMap(targetNodes) : null;
@@ -26420,6 +27071,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 const aMax = annotationLengthRange?.[1] || 1;
                 n.col = d3.interpolatePlasma((annLen - aMin) / ((aMax - aMin) || 1));
             }
+            else if (isGenomeNumericMode(mode)||mode==='strand') n.col=mode==='strand'?getGenomeStrandColor(getGenomeGeneValue(n,mode)):getGenomeNumericColor(n,mode);
+            else if (mode === 'chromosome') n.col=getGenomeChromosomeColor(n);
             else if (mode === 'characterization') {
                 const characterization = getCharacterizationValue(n.id);
                 n.col = getCategoricalNodeColor('characterization', characterization, catScale(characterization));
@@ -26450,6 +27103,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     const matches = !childMode || normalizedRawValue === childMode;
                     if (!matches) {
                         n.col = monoCol;
+                    } else if (customVariableColourContext.isMentionCount) {
+                        const defaultColor = customVariableColourContext.mentionCountColor(normalizedRawValue);
+                        n.col = effectiveType === 'Numerical - Continuous' ? defaultColor : getCategoricalNodeColor(mode, normalizedRawValue, defaultColor);
                     } else if (effectiveType === 'Numerical - Continuous') {
                         const minv = d3.min(numericValues) || 0;
                         const maxv = d3.max(numericValues) || 1;
@@ -26503,7 +27159,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     // This function determines the appropriate data to use for legend calculations based on the current view, then calls updateLegend with that data
     function refreshLegendForCurrentViewOnly() {
         const mode = document.getElementById('colorMode')?.value || currentColorMode || 'layer';
-        const useGlobalNodesForLegend = currentViewId === 'base' || currentViewId === 'Venn Diagram' || currentViewId === 'Scatter Plot' || currentViewId === 'Embeddings';
+        const useGlobalNodesForLegend = currentViewId === 'base' || currentViewId === 'Venn Diagram' || currentViewId === 'Scatter Plot' || (currentViewId === 'Embeddings' || currentViewId === 'Genome');
         const targetNodes = useGlobalNodesForLegend ? nodes : (activeSubData?.nodes || []);
         const sizeSource = resolveProteinSizeSource(targetNodes);
         const cRange = d3.extent(targetNodes, d => Number.isFinite(d.centrality) ? d.centrality : 0);
@@ -26518,6 +27174,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         console.log(`function updateLegend(mode: ${mode}, cRange: ${cRange}, sRange: ${sRange}, catScale: ${catScale}, eRange: ${eRange})`);
         const legendControls = d3.select("#legend-controls");
         const legend = d3.select("#legend-content");
+        const legendScrollTop=mode==='genomic_position'&&currentColorMode===mode?(legend.node()?.scrollTop||0):0;
         const footer = d3.select("#right-panel-footer");
         const footerTextEl = document.getElementById('right-panel-footer-text');
         const rangeUINode = document.getElementById('range-ui');
@@ -26527,8 +27184,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         legend.html("");
         footer.select('#layer0-update-selection-btn').remove();
         footer.select('#custom-variable-display-toggle').remove();
+        footer.selectAll('.protein-mention-count-description').remove();
         if (footerTextEl) footerTextEl.innerHTML = '';
-        const activeNodes = (currentViewId === 'base' || currentViewId === 'Venn Diagram' || currentViewId === 'Scatter Plot' || currentViewId === 'Embeddings')
+        const activeNodes = (currentViewId === 'base' || currentViewId === 'Venn Diagram' || currentViewId === 'Scatter Plot' || currentViewId === 'Embeddings' || currentViewId === 'Genome')
             ? nodes
             : (activeSubData?.nodes || []);
         const legendSizeSource = resolveProteinSizeSource(activeNodes);
@@ -26629,7 +27287,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             return;
         }
 
+        if(isGenomeNumericMode(mode)&&window.StringScapeGenome?.chromosomeState().loaded){appendGenomeNumericLegend(mode==='genomic_position'?legend:legendControls,mode,activeNodes);if(mode==='genomic_position')legend.property('scrollTop',legendScrollTop);return;}
         const footerNotes = [];
+        if((mode==='chromosome'||mode==='strand'||isGenomeNumericMode(mode))&&!window.StringScapeGenome?.chromosomeState().loaded){
+            legend.append('div').style('font-size','13px').style('line-height','1.5').style('padding','8px 0').text("First fetch the genome in the left panel 'Genome' section");return;
+        }
         if (isEnrichmentCategoryColorMode(mode)) {
             const variable = getCustomVariableSelection(mode).cfg.variable;
             if (variable === 'Binds to...' || variable === 'Activity') {
@@ -27113,8 +27775,16 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
             if (customVariableColourContext.numericOnly && !childMode) {
                 footer.select('#custom-variable-display-toggle').remove();
-                const selectedDisplayMode = customVariableDisplayModeByKey.get(selection.key)
-                    || (cfg.type === 'Numerical - Continuous' ? 'continuous' : 'categorical');
+                const selectedDisplayMode = effectiveType === 'Numerical - Continuous' ? 'continuous' : 'categorical';
+                if (customVariableColourContext.isMentionCount) {
+                    footer.append('div')
+                        .attr('class', 'protein-mention-count-description')
+                        .style('font-size', '12px')
+                        .style('margin-bottom', '8px')
+                        .text(cfg.variable === 'Mentions other proteins'
+                            ? 'How many times each protein mentions other proteins in their annotations'
+                            : 'How many times each protein is mentioned by other proteins in their annotations');
+                }
                 const toggleRow = footer.append('div')
                     .attr('id', 'custom-variable-display-toggle')
                     .style('display', 'flex')
@@ -27160,15 +27830,19 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     item.append('span').text(`${lbl} (${cnt})`);
                 });
             } else if (effectiveType === 'Numerical - Continuous') {
-                const minv = d3.min(numericValues) || 0;
+                const minv = customVariableColourContext.isMentionCount ? 0 : (d3.min(numericValues) || 0);
                 const maxv = d3.max(numericValues) || 1;
                 createHistogramToggle(numericValues, [minv, maxv], mode);
                 const container = legendControls.append('div').attr('class', 'gradient-container');
-                container.append('div').attr('class', 'gradient-bar').style('background', `linear-gradient(to right, ${d3.range(0, 1.1, 0.1).map(t => d3.interpolateCool(t)).join(', ')})`);
+                container.append('div').attr('class', 'gradient-bar').style('background', `linear-gradient(to right, ${d3.range(0, 1.1, 0.1).map(t => customVariableColourContext.isMentionCount ? d3.interpolateViridis(t) : d3.interpolateCool(t)).join(', ')})`);
                 const labels = legendControls.append('div').attr('class', 'grad-labels');
                 labels.append('span').text(Math.round(minv)); labels.append('span').text(Math.round(maxv));
-                legendControls.append('div').attr('style', 'color:#ccc; font-size:11px; margin-top:6px;').text(`Continuous values: ${numericValues.length} nodes`);
                 
+                if (customVariableColourContext.isMentionCount) {
+                    const zeroItem = legendControls.append('div').attr('class', 'legend-item');
+                    zeroItem.append('div').attr('class', 'color-box').style('background', customVariableColourContext.mentionCountColor(0));
+                    zeroItem.append('span').text('0 (no other proteins)');
+                }
                 // Add range selection UI for continuous variables in embeddings view
                 if (currentViewId === 'Embeddings') {
                     const rangeToggle = legendControls.append("div").attr("class", "select-range-toggle").style("color", "white").html('Select range <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>');
@@ -27263,7 +27937,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     const categories = isEnrichmentCategoryColorMode(mode) ? k.split('; ') : [k];
                     categories.forEach(category => counts.set(category, (counts.get(category) || 0) + 1));
                 });
-                const orderedValues = (effectiveType === 'Categorical - Ordinal' || effectiveType === 'Numerical - Discrete')
+                const orderedValues = customVariableColourContext.isMentionCount
+                    ? [...counts.keys()].sort((a, b) => Number(a) - Number(b))
+                    : (effectiveType === 'Categorical - Ordinal' || effectiveType === 'Numerical - Discrete')
                     ? sortedValues
                     : Array.from(counts.entries()).sort((a,b) => b[1]-a[1]).map(([v]) => v);
                 const orderVals = counts.has('N/A') && !orderedValues.includes('N/A')
@@ -27273,7 +27949,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 const valueScale = d3.scaleOrdinal(d3.schemeTableau10).domain(orderVals);
                 orderVals.slice(0,50).forEach(lbl => {
                     const cnt = counts.get(lbl) || 0;
-                    const color = isEnrichmentCategoryColorMode(mode) ? getEnrichmentCategoryDefaultColor(mode, lbl) : (effectiveType === 'Categorical - Nominal') ? catScale(lbl) : valueScale(lbl);
+                    const color = customVariableColourContext.isMentionCount ? customVariableColourContext.mentionCountColor(lbl) : isEnrichmentCategoryColorMode(mode) ? getEnrichmentCategoryDefaultColor(mode, lbl) : (effectiveType === 'Categorical - Nominal') ? catScale(lbl) : valueScale(lbl);
                     appendCategoricalLegendItem(legend, {
                         mode,
                         label: lbl,
@@ -27312,7 +27988,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     onActivate: () => handleLegendHighlight(mode, category.label)
                 });
             });
-        } else if (['paralogues', 'characterization', 'localization', 'biological_process', 'layer', 'collection', 'complex_pdbs'].includes(mode)) {
+        } else if (['paralogues', 'characterization', 'localization', 'biological_process', 'layer', 'collection', 'complex_pdbs', 'chromosome', 'strand'].includes(mode)) {
             const builtInSource = (mode === 'annotation' || mode === 'localization')
                 ? resolveBuiltInColorSource(mode, activeNodes)
                 : null;
@@ -27329,6 +28005,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                             : (mode === 'complex_pdbs'
                                 ? getComplexPdbMemberships(d.id)
                                 : (proteinMetadata.get(d.id)?.[mode] || 'Unknown')))));
+                if(mode==='strand')key=getGenomeGeneValue(d,'strand');
+                if (mode === 'chromosome') key=getGenomeChromosomeValue(d);
                 if (mode === 'paralogues') key = getParalogueGroup(d.id);
                 counts.set(key, (counts.get(key) || 0) + 1);
             });
@@ -27352,7 +28030,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             const sortedCounts = Array.from(counts.entries()).sort((a,b) => { if (a[0] === "Disconnected") return 1; if (b[0] === "Disconnected") return -1; if (mode === 'layer') return parseInt(a[0].split(' ')[1]) - parseInt(b[0].split(' ')[1]); return b[1] - a[1]; });
             const visibleCounts = ['complex_pdbs', 'paralogues'].includes(mode) ? sortedCounts : sortedCounts.slice(0, 30);
             visibleCounts.forEach(([lbl, cnt]) => {
-                const color = mode === 'paralogues'
+                const color = mode==='strand'?getGenomeStrandDefaultColor(lbl):mode === 'chromosome'?getGenomeChromosomeDefaultColor(lbl):mode === 'paralogues'
                     ? (lbl === 'No paralogues' ? '#888888' : ensureParalogueColourState().colorScale(lbl))
                     : mode === 'layer'
                     ? (lbl === "Disconnected" ? "#888" : d3.interpolateViridis(1 - ((parseInt(lbl.split(' ')[1])-1)/10)))
@@ -27470,7 +28148,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             else if (this.style.right === "0%" || this.style.right === "0px") el.style("width", Math.max(0, 100 - pMax) + "%");
         });
         if (shouldSelect) {
-            const activeNodes = (currentViewId === 'base' || currentViewId === 'Venn Diagram' || currentViewId === 'Scatter Plot' || currentViewId === 'Embeddings')
+            const activeNodes = (currentViewId === 'base' || currentViewId === 'Venn Diagram' || currentViewId === 'Scatter Plot' || currentViewId === 'Embeddings' || currentViewId === 'Genome')
                 ? nodes
                 : (activeSubData?.nodes || []);
             const sizeSource = resolveProteinSizeSource(activeNodes);
@@ -27531,7 +28209,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     function handleLegendHighlight(mode, value) {
         console.log(`function handleLegendHighlight(mode: ${mode}, value: ${value})`);
-        const activeNodes = (currentViewId === 'base' || currentViewId === 'Venn Diagram' || currentViewId === 'Scatter Plot' || currentViewId === 'Embeddings')
+        const activeNodes = (currentViewId === 'base' || currentViewId === 'Venn Diagram' || currentViewId === 'Scatter Plot' || (currentViewId === 'Embeddings' || currentViewId === 'Genome'))
             ? nodes
             : (activeSubData?.nodes || []);
         const builtInSource = (mode === 'annotation' || mode === 'localization')
@@ -27560,6 +28238,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             if (mode === 'annotation' || mode === 'localization') {
                 return getBuiltInColorValueFromSource(n.id, mode, builtInSource) === value;
             }
+            if(mode==='strand')return getGenomeGeneValue(n,'strand')===value;
+            if (mode === 'chromosome') return getGenomeChromosomeValue(n) === value;
             if (mode === 'paralogues') return getParalogueGroup(n.id) === value;
             if (mode === 'biological_process') {
                 return getBiologicalProcessKey(n.id) === value;
@@ -27613,6 +28293,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             if (mode === 'complex_pdbs') {
                 return getComplexPdbMemberships(n.id).includes(value);
             }
+            if(mode==='strand')return getGenomeGeneValue(n,'strand')===value;
+            if (mode === 'chromosome') return getGenomeChromosomeValue(n) === value;
             if (mode === 'paralogues') return getParalogueGroup(n.id) === value;
             if (mode === 'biological_process') {
                 return getBiologicalProcessKey(n.id) === value;
@@ -27750,7 +28432,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         } else {
             finalSet = matchIds;
         }
-        const useGlobalNodes = currentViewId === 'base' || currentViewId === 'Venn Diagram' || currentViewId === 'Scatter Plot';
+        const useGlobalNodes = currentViewId === 'base' || currentViewId === 'Venn Diagram' || currentViewId === 'Scatter Plot' || currentViewId === 'Genome';
         const activeNodes = useGlobalNodes ? nodes : (activeSubData?.nodes || []);
         const finalSummary = searchSummary ? { ...searchSummary, total: finalSet.size } : null;
         selectNodes(activeNodes.filter(n => finalSet.has(n.id)), false, queryStr, finalSummary, false, historyMeta);
@@ -27971,6 +28653,7 @@ Motility without chemotaxis => (flagell* OR cili* OR motility OR motile) AND NOT
         if (!skipSmartSearch && document.getElementById('searchInput').readOnly) return;
         const rawInput = document.getElementById('searchInput').value.trim();
         if (!rawInput) return;
+        if (currentViewId === 'Genome' && selectionTargetMode !== 'nodes') setSelectionTargetMode('nodes');
         if (!skipSmartSearch && document.getElementById('smart-search-toggle')?.checked) return runSmartSearch(rawInput, historyMeta?.actor ? historyMeta : { actor: 'Human' });
         const scope = document.getElementById('searchScope').value;
         const tokens = tokenizeSearchQuery(rawInput);
@@ -28005,7 +28688,7 @@ Motility without chemotaxis => (flagell* OR cili* OR motility OR motile) AND NOT
             return;
         }
 
-        const activeNodes = currentViewId === 'base' ? nodes : (activeSubData?.nodes || []);
+        const activeNodes = (currentViewId === 'base' || currentViewId === 'Genome') ? nodes : (activeSubData?.nodes || []);
         const boolExpr = booleanMode ? parseBooleanSearchQuery(tokens) : null;
         const matches = activeNodes.filter(node => {
             const metadata = proteinMetadata.get(node.id) || {};
@@ -28269,6 +28952,7 @@ Motility without chemotaxis => (flagell* OR cili* OR motility OR motile) AND NOT
             refreshEmbeddingsView(false);
             return;
         }
+        window.StringScapeGenome?.remove(fileName);
         delete uploadedAccessoryFiles[fileName];
         if (!uploadedInteractionFiles[fileName]) delete uploadedFileViewerData[fileName];
         rebuildAccessoryDataFromUploads();
@@ -28382,6 +29066,9 @@ Motility without chemotaxis => (flagell* OR cili* OR motility OR motile) AND NOT
     }
 
     function rebuildAccessoryDataFromUploads() {
+        genomeProteinVersion++;
+        genomeEnrichmentIndex = null;
+        window.StringScapeGenome?.invalidateProteins();
         paralogueColourState = null;
         const pythonConfigs = variableConfigs.filter(cfg => cfg.fileName === 'Python-generated');
         const pythonValues = accessoryVariableValues['Python-generated'];
@@ -28393,7 +29080,7 @@ Motility without chemotaxis => (flagell* OR cili* OR motility OR motile) AND NOT
         window.variableConfigs = variableConfigs;
 
         Object.entries(uploadedAccessoryFiles).forEach(([fileName, text]) => {
-            if (isPythonVariablesSessionFile(fileName)) return;
+            if (isPythonVariablesSessionFile(fileName) || window.StringScapeGenome?.has(fileName)) return;
             const lowerName = fileName.toLowerCase();
             const isFasta = lowerName.endsWith('.fa') || lowerName.endsWith('.fasta') || lowerName.endsWith('.faa') || lowerName.endsWith('.fna');
             if (isFasta) {
@@ -28432,7 +29119,7 @@ Motility without chemotaxis => (flagell* OR cili* OR motility OR motile) AND NOT
     }
 
     function classifyUploadedFile(file) {
-        return isInteractionFileName(file?.name) ? 'interaction' : 'accessory';
+        return !window.StringScapeGenome?.accepts(file?.name || '') && isInteractionFileName(file?.name) ? 'interaction' : 'accessory';
     }
 
     function stripGzipSuffix(fileName) {
@@ -28534,6 +29221,19 @@ Motility without chemotaxis => (flagell* OR cili* OR motility OR motile) AND NOT
         for (let file of targetFiles) {
             file = await normalizeUploadedFile(file);
             aiWorkspaceOriginalFiles.set(file.name, file);
+            if (window.StringScapeGenome?.accepts(file.name)) {
+                let summary;
+                try { summary = await window.StringScapeGenome.add(file); }
+                catch (error) { if (progressWrapper) progressWrapper.style.display = 'none'; throw error; }
+                aiAppendActionHistory(progressOptions.actor==='AI'?'AI':'Human', 'Uploaded genome file', [`# Uploaded file: ${file.name}`]);
+                uploadedAccessoryFiles[file.name] = summary;
+                uploadedFileViewerData[file.name] = { text: summary };
+                updateUploadedListsUI();
+                processed++;
+                if (progressBar) progressBar.style.width = `${Math.round(processed / targetFiles.length * 100)}%`;
+                progressOptions.onProgress?.(processed, targetFiles.length);
+                continue;
+            }
             const embeddingKind = getEmbeddingKindFromFileName(file.name);
             if (embeddingKind) {
                 const payload = await parseEmbeddingFileInWorker(file, embeddingKind);
@@ -28571,6 +29271,7 @@ Motility without chemotaxis => (flagell* OR cili* OR motility OR motile) AND NOT
             }
         }
         rebuildAccessoryDataFromUploads();
+        if (progressWrapper) progressWrapper.style.display = 'none';
         if (currentViewId === 'Embeddings') {
             markEmbeddingsDirty(true);
             refreshEmbeddingsView(true);
@@ -28821,6 +29522,9 @@ Motility without chemotaxis => (flagell* OR cili* OR motility OR motile) AND NOT
             isBuilding = false; isSettling = true; updateBuildStats(processedLinks.size, totalUniqueLinks, startTime, true); syncSimulation();
             try { await applyUploadedSessionFiles(); } catch (e) { console.warn('applyUploadedSessionFiles after build failed', e); }
             const sBtn = document.getElementById('startBtn'); sBtn.innerText = "Build complete"; sBtn.disabled = true; sBtn.style.display = 'block'; document.getElementById('pauseBtn').style.display = 'none';
+            buildVariableConfigs();
+            updateColorModeOptions();
+            updateSizesAndColors();
             scheduleFullNetworkPostBuildCooldown();
             if (!options.skipMergePrompt && getUploadedInteractionTaxa().length === 2) {
                 const mergePrompt = await displayStringScapeNotification({
@@ -29945,3 +30649,167 @@ Motility without chemotaxis => (flagell* OR cili* OR motility OR motile) AND NOT
     updateUploadedListsUI();
     loadConnectedSessionFolders();
     refreshInfoBoxFromSelection();
+
+    function getGenomeAppContext() {
+        const selectedIds = Array.from(getEffectiveSelectedNodesSet());
+        const expandedIds = ids => [...new Set(ids.flatMap(id => {
+            const node = nodeMap.get(id);
+            return node?._speciesIds?.length ? node._speciesIds : [id];
+        }))];
+        const selected = expandedIds(selectedIds);
+        const prefixes = ids => ids.map(id => String(id).match(/^(\d+)\./)?.[1]).filter(Boolean);
+        const selectedTaxa = [...new Set(prefixes(selected))];
+        const taxa = [...new Set([
+            ...selectedTaxa, ...prefixes(expandedIds(nodes.map(n => n.id))),
+            ...allIDs.map(id => String(id).match(/^(\d+)\./)?.[1]).filter(Boolean),
+            ...[...Object.keys(uploadedInteractionFiles), ...Object.keys(uploadedAccessoryFiles)].map(getTaxonIdFromFileName).filter(Boolean)
+        ])];
+        const records = [];
+        const ids = selected.length ? selected : [...proteinMetadata.keys()];
+        for (const id of ids) {
+            const meta = proteinMetadata.get(id) || {};
+            const geneId = String(meta.ncbiGeneId || meta.pubmedGeneId || '').trim();
+            if (/^\d+$/.test(geneId)) records.push({ geneId, taxId: String(id).match(/^(\d+)\./)?.[1] || '' });
+            // Bound representative lookups when no proteins are selected.
+            if (!selected.length && records.length >= 100) break;
+        }
+        return { taxa, selectedTaxa, genes: records };
+    }
+
+    let genomeProteinVersion = 0;
+    let genomeEnrichmentIndex = null;
+    function getGenomeChromosomeValue(nodeOrId) {
+        const id=typeof nodeOrId==='object'?nodeOrId?.id:nodeOrId;
+        return window.StringScapeGenome?.chromosomeState().assignments.get(id)||'Unmapped';
+    }
+    function getGenomeChromosomeDefaultColor(label) {
+        const index=window.StringScapeGenome?.chromosomeState().categoryIndexes.get(label);
+        return label==='Unmapped'||index==null?'#73808c':d3.schemeTableau10[index%d3.schemeTableau10.length];
+    }
+    function getGenomeChromosomeColor(nodeOrId) {
+        const label=getGenomeChromosomeValue(nodeOrId);
+        return getCategoricalNodeColor('chromosome',label,getGenomeChromosomeDefaultColor(label));
+    }
+    function isGenomeNumericMode(mode){return ['gene_exon_count','gc_content','genomic_position'].includes(mode);}
+    function getGenomeGeneValue(nodeOrId,mode){const id=typeof nodeOrId==='object'?nodeOrId?.id:nodeOrId;return window.StringScapeGenome?.geneMetrics(id)?.[mode]??(mode==='strand'?'Unmapped':null);}
+    function getGenomeStrandDefaultColor(label){return {'Positive (+)':'#55a8a2','Negative (−)':'#a58ac8','Mixed strands':'#d2a34e',Unmapped:'#73808c'}[label]||'#73808c';}
+    function getGenomeStrandColor(label){return getCategoricalNodeColor('strand',label,getGenomeStrandDefaultColor(label));}
+    var genomeNumericColorCache;
+    function getGenomeNumericState(mode){
+        const source=window.StringScapeGenome?.chromosomeState();genomeNumericColorCache ||= new Map();let state=genomeNumericColorCache.get(mode);
+        if(state?.source===source&&state.nodeArray===nodes&&state.nodeCount===nodes.length)return state;
+        const values=nodes.map(n=>getGenomeGeneValue(n,mode)).filter(Number.isFinite),range=d3.extent(values);
+        if(mode==='gc_content'&&Number.isFinite(range[0])){range[0]=Math.floor(range[0]*100)/100;range[1]=Math.ceil(range[1]*100)/100;}
+        state={source,nodeArray:nodes,nodeCount:nodes.length,range:Number.isFinite(range[0])?range:[0,1]};genomeNumericColorCache.set(mode,state);return state;
+    }
+    function getGenomePositionInterpolator(label){
+        const index=window.StringScapeGenome?.chromosomeState().categoryIndexes.get(label)||0,hue=(220+index*137.507764)%360;
+        return t=>{const v=clamp01(t);return d3.hcl(hue,24+34*v,88-51*v).formatHex();};
+    }
+    function getGenomeNumericColor(nodeOrId,mode){
+        const value=getGenomeGeneValue(nodeOrId,mode);if(!Number.isFinite(value))return '#73808c';
+        if(mode==='genomic_position'){
+            const chromosome=getGenomeGeneValue(nodeOrId,'chromosome'),region=window.StringScapeGenome.chromosomeState().regions.get(chromosome);
+            return region?getGenomePositionInterpolator(chromosome)((value-1)/Math.max(1,region.length-1)):'#73808c';
+        }
+        const [min,max]=getGenomeNumericState(mode).range,t=(value-min)/Math.max(1e-9,max-min);return mode==='gc_content'?d3.interpolateCool(clamp01(t)):d3.interpolateViridis(clamp01(t));
+    }
+    function appendGenomeNumericLegend(parent,mode,activeNodes){
+        const source=window.StringScapeGenome.chromosomeState(),groups=new Map();
+        const valid=activeNodes.filter(n=>Number.isFinite(getGenomeGeneValue(n,mode)));
+        if(mode==='genomic_position')for(const n of valid){const name=getGenomeGeneValue(n,'chromosome');if(!groups.has(name)){const region=source.regions.get(name);if(region)groups.set(name,{range:[1,region.length],interpolate:getGenomePositionInterpolator(name)});}}
+        else groups.set(mode,{range:getGenomeNumericState(mode).range,interpolate:mode==='gc_content'?d3.interpolateCool:d3.interpolateViridis});
+        const titles={gene_exon_count:'Gene exon count',gc_content:'GC content (%)',genomic_position:'Genomic position (bp)'};
+        for(const [name,group] of [...groups].sort(([a],[b])=>a.localeCompare(b,undefined,{numeric:true}))){
+            const section=parent.append('div').attr('class','genome-variable-key').attr('data-genome-variable',mode).attr('data-chromosome',mode==='genomic_position'?name:'');section.append('h4').text(mode==='genomic_position'?name:titles[mode]);
+            const [min,max]=group.range,step=mode==='gc_content'?.01:1,format=v=>mode==='gc_content'?Number(v.toFixed(2)):Math.round(v);
+            const onBar=isGenomeNumericMode(mode),spectrum=section.append('div').attr('class',onBar?'gradient-container '+(mode==='genomic_position'?'genome-position-range':mode==='gc_content'?'genome-gc-range':'genome-exon-range'):'');
+            const bar=spectrum.append('div').attr('class',onBar?'gradient-bar':'genome-variable-gradient').style('background',`linear-gradient(to right, ${d3.range(0,1.01,.1).map(group.interpolate).join(',')})`);
+            const bounds=section.append('div').attr('class','genome-variable-bounds');bounds.append('span').text(format(min).toLocaleString());bounds.append('span').text(format(max).toLocaleString());
+            const inputs=section.append('div').attr('class','genome-variable-inputs');
+            function numberInput(label,value){const wrap=inputs.append('label').text(label);return wrap.append('input').attr('type','number').attr('min',min).attr('max',max).attr('step',step).property('value',format(value)).attr('aria-label',name+' '+label);}
+            const lower=numberInput('From',min),upper=numberInput('To',max);
+            const slider=label=>section.append('input').attr('type','range').attr('min',min).attr('max',max).attr('step',step).attr('aria-label',name+' '+label);
+            const loSlider=onBar?null:slider('minimum').property('value',min),hiSlider=onBar?null:slider('maximum').property('value',max);
+            let hMin,hMax,leftShade,rightShade;
+            function sync(from){
+                let lo=Number((from==='lo'?loSlider:lower).property('value')),hi=Number((from==='hi'?hiSlider:upper).property('value'));
+                lo=Math.max(min,Math.min(max,Number.isFinite(lo)?lo:min));hi=Math.max(lo,Math.min(max,Number.isFinite(hi)?hi:max));
+                lower.property('value',format(lo));upper.property('value',format(hi));loSlider?.property('value',lo);hiSlider?.property('value',hi);
+                if(hMin){const lowPercent=(lo-min)/(max-min||1)*100,highPercent=max===min?100:(hi-min)/(max-min)*100;
+                    hMin.style('left',lowPercent+'%').attr('aria-valuenow',lo).attr('aria-valuemax',hi);
+                    hMax.style('right',(100-highPercent)+'%').attr('aria-valuenow',hi).attr('aria-valuemin',lo);
+                    leftShade.style('width',lowPercent+'%');rightShade.style('width',(100-highPercent)+'%');
+                }
+            }
+            if(onBar){
+                leftShade=spectrum.append('div').attr('class','range-overlay').style('left','0');rightShade=spectrum.append('div').attr('class','range-overlay').style('right','0');
+                const handle=label=>spectrum.append('div').attr('class','range-handle').attr('role','slider').attr('tabindex','0').attr('aria-orientation','horizontal').attr('aria-label',(mode==='genomic_position'?name+' genomic position':titles[mode])+' '+label).attr('aria-valuemin',min).attr('aria-valuemax',max);
+                hMin=handle('minimum');hMax=handle('maximum');
+                function setHandle(handle,value){value=format(value);if(handle===hMin.node())lower.property('value',Math.max(min,Math.min(Number(upper.property('value')),value)));else upper.property('value',Math.min(max,Math.max(Number(lower.property('value')),value)));sync();}
+                const drag=d3.drag().container(()=>spectrum.node()).on('start drag',function(event){const rect=bar.node().getBoundingClientRect(),clientX=event.sourceEvent.touches?.[0]?.clientX??event.sourceEvent.clientX;setHandle(this,min+clamp01((clientX-rect.left)/Math.max(1,rect.width))*(max-min));});
+                for(const h of [hMin,hMax]){h.call(drag);h.on('keydown',function(event){const current=Number(this.getAttribute('aria-valuenow'));let value;if(event.key==='ArrowLeft'||event.key==='ArrowDown')value=current-step;else if(event.key==='ArrowRight'||event.key==='ArrowUp')value=current+step;else if(event.key==='Home')value=min;else if(event.key==='End')value=max;else return;event.preventDefault();setHandle(this,value);});}
+            }
+            lower.on('change',()=>sync());upper.on('change',()=>sync());loSlider?.on('input',()=>sync('lo'));hiSlider?.on('input',()=>sync('hi'));sync();
+            section.append('button').attr('type','button').text('Select range').on('click',()=>{sync();if(selectionTargetMode!=='nodes')setSelectionTargetMode('nodes');const lo=Number(lower.property('value')),hi=Number(upper.property('value')),matches=activeNodes.filter(n=>{const v=getGenomeGeneValue(n,mode);return Number.isFinite(v)&&v>=lo&&v<=hi&&(mode!=='genomic_position'||getGenomeGeneValue(n,'chromosome')===name);});applySearchLogic(matches,`${titles[mode]}: ${mode==='genomic_position'?name+' ':''}${lo}–${hi}`);draw();});
+        }
+        if(valid.length<activeNodes.length)parent.append('p').style('font-size','12px').text(`${activeNodes.length-valid.length} ${activeNodes.length-valid.length===1?'protein has':'proteins have'} missing or ambiguous gene data.`);
+    }
+    function getGenomeProteinCatalog() {
+        const mergedIds = new Map();
+        nodes.forEach(node => (node._speciesIds || [node.id]).forEach(id => mergedIds.set(id, node.id)));
+        const ids = new Set([...proteinMetadata.keys(), ...aliasData.keys(), ...nodes.flatMap(n => n._speciesIds || [n.id])]);
+        return Array.from(ids, id => {
+            const meta = proteinMetadata.get(id) || {};
+            return { id, nodeId: mergedIds.get(id) || id, taxId: String(id).match(/^(\d+)\./)?.[1] || '',
+                preferred: meta.preferred_name || meta.preferredName || getPreferredProteinName(id),
+                identifiers: [id, meta.geneId, meta.ncbiGeneId, meta.pubmedGeneId, meta.ncbiProteinId, meta.uniprotAc,
+                    ...(aliasData.get(id) || []).filter(a => !/^pdb$/i.test(a.source)).map(a => a.alias)].filter(Boolean) };
+        });
+    }
+    function getGenomeProteinDetails(id) {
+        const meta = proteinMetadata.get(id) || {};
+        if (!genomeEnrichmentIndex) {
+            genomeEnrichmentIndex = new Map();
+            for (const record of getProteinEnrichmentRecords()) {
+                for (const key of new Set([record.proteinId, record.nodeId])) {
+                    if (!genomeEnrichmentIndex.has(key)) genomeEnrichmentIndex.set(key, []);
+                    genomeEnrichmentIndex.get(key).push(record);
+                }
+            }
+        }
+        const annotation = getProteinInfoAnnotation(id);
+        const product = meta.proteinName || meta.protein_name || (annotation !== 'Unknown' ? annotation.split(/;\s*/)[0] : '');
+        return { id, preferred: getPreferredProteinName(id), name: product || getPreferredProteinName(id), sequence: getProteinSequence(id),
+            length: getProteinSequence(id).length || Number(meta.size || meta.protein_size) || null,
+            annotation, enrichment: genomeEnrichmentIndex.get(id) || [] };
+    }
+    function selectGenomeProteins(ids, additive, geneName) {
+        if (selectionTargetMode !== 'nodes') setSelectionTargetMode('nodes');
+        const requested = new Set(ids);
+        const matched = nodes.filter(n => requested.has(n.id) || n._speciesIds?.some(id => requested.has(id)));
+        if (!matched.length) {
+            displayStringScapeNotification({text:'This gene has no matching node in the built network. Load its protein data and build the network to select it.',auto_close:true,auto_close_ms:5000});
+            return;
+        }
+        const next = additive ? new Set(getEffectiveSelectedNodesSet()) : new Set();
+        matched.forEach(n => next.add(n.id));
+        selectNodes(nodes.filter(n => next.has(n.id)), false, `Genome gene: ${geneName}`, null, false,
+            {actor:'Human',mode:additive?'add':'replace',nodeIds:Array.from(next)});
+        updateViewMenu(); draw();
+    }
+
+    window.StringScapeGenome?.init({
+        genomeChanged: () => { if(['chromosome','strand','gene_exon_count','gc_content','genomic_position'].includes(document.getElementById('colorMode')?.value))requestAnimationFrame(()=>updateSizesAndColors()); },
+        catalog: getGenomeProteinCatalog,
+        catalogStamp: () => `${genomeProteinVersion}:${proteinMetadata.size}:${aliasData.size}:${nodes.length}`,
+        protein: getGenomeProteinDetails,
+        select: selectGenomeProteins,
+        context: getGenomeAppContext,
+        upload: (files,options) => processAccessoryFiles(files,options),
+        selection: () => Array.from(getEffectiveSelectedNodesSet()).map(id => {
+            const meta = proteinMetadata.get(id) || {};
+            return [id, getPreferredProteinName(id), meta.geneId, meta.ncbiGeneId, meta.ncbiProteinId,
+                ...(aliasData.get(id) || []).map(a => a.alias)].filter(Boolean);
+        })
+    });
