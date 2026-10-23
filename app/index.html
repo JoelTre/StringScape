@@ -21,6 +21,7 @@
         connect-src 'self' data: blob: https://search.rcsb.org https://swissmodel.expasy.org https://models.rcsb.org https://www.ebi.ac.uk https://rest.uniprot.org
             http://127.0.0.1:1234
             https://eutils.ncbi.nlm.nih.gov
+            https://api.ncbi.nlm.nih.gov
             https://api.openai.com
             https://api.anthropic.com
             https://generativelanguage.googleapis.com
@@ -29,7 +30,7 @@
             https://data.rcsb.org
             https://files.rcsb.org
             https://raw.githubusercontent.com 
-            https://alphafold.ebi.ac.uk 
+            https://alphafold.ebi.ac.uk https://alphafill.eu https://api.esmatlas.com https://biohub.ai https://www.biohub.ai https://forge.biohub.ai 
             https://cdn.pyodide.org 
             https://*.jsdelivr.net 
             https://*.pypi.org 
@@ -145,16 +146,23 @@
             box-sizing: border-box;
         }
         #right-panel-content {
+            position: relative;
+            overflow: hidden;
+            min-width: 0;
+            border-radius: inherit;
             display: flex;
             flex-direction: column;
             min-height: 0;
             flex: 1 1 0;
         }
         #right-panel-static {
+            overflow-x: hidden;
+            overflow-y: auto;
+            max-height: 100%;
             display: flex;
             flex-direction: column;
             min-height: 0;
-            flex: 0 0 auto;
+            flex: 0 1 auto;
             gap: 0;
         }
         #legend-controls {
@@ -2105,6 +2113,7 @@
             margin-top: 14px;
             flex: 1 1 0;
             min-height: 0;
+            min-width: 0;
             overflow: auto;
             padding-right: 6px;
             font-size: 14px;
@@ -2186,11 +2195,31 @@
             color: var(--muted-text-color);
         }
 
+        .protein-sequence-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 12px; }
+        #protein-info-box .protein-sequence-copy { width: auto; flex: 0 0 auto; margin: 0 0 0 auto; white-space: nowrap; }
+        .protein-sequence-toolbar [role="status"]:empty { display: none; }
+        .protein-structure-toolbar { min-width: 0; max-width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+        #protein-info-box .protein-structure-toolbar > button { box-sizing: border-box; max-width: 100%; width: auto; flex: 0 0 auto; margin: 0; white-space: nowrap; }
+        #protein-info-box .protein-structure-toolbar > .app-variable-trigger { width: fit-content; max-width: min(320px, 100%); overflow: hidden; text-overflow: ellipsis; display: block; }
+        .protein-structure-toolbar, #protein-info-body > label, .protein-structure-status { flex: 0 0 auto; }
+        .protein-structure-status:empty { display: none; }
+        #protein-structure-viewer-host .msp-plugin { width: 100%; height: 100%; }
+        .protein-sequence-residues { flex: none; height: auto; max-height: none; font-family: monospace; line-height: 1.9; overflow-x: auto; padding: 12px; background: #141b24; border-radius: 8px; user-select: text; }
+        .protein-sequence-residues > div { white-space: pre; }
+        .protein-sequence-position { display: inline-block; min-width: 7ch; color: #8b9bad; user-select: none; }
+        .protein-sequence-plot { margin-top: 12px; padding: 10px 12px; background: #141b24; border: 1px solid #293646; border-radius: 10px; }
+        .protein-sequence-plot h4 { margin: 0 0 6px; }
+        .protein-sequence-plot p { margin: 4px 0 8px; font-size: 11px; color: #aebdce; }
+        .protein-sequence-plot svg { width: 100%; min-width: 260px; display: block; }
         #protein-structure-viewer-host {
+            box-sizing: border-box;
             width: 100%;
+            max-width: 100%;
+            min-width: 0;
             min-height: 220px;
-            height: clamp(220px, 30vh, 380px);
-            max-height: 380px;
+            flex: 1 0 220px;
+            height: auto;
+            max-height: none;
             border: 1px solid #3a4654;
             border-radius: 12px;
             overflow: hidden;
@@ -4568,9 +4597,10 @@
             width: 32px;
             height: 32px;
             border-radius: 999px;
-            border: 1px solid var(--input-border);
-            background: var(--button-bg);
-            color: var(--text-color);
+            border: 1px solid transparent;
+            background: transparent;
+            color: var(--muted-text-color);
+            opacity: 0.55;
             display: inline-flex;
             align-items: center;
             justify-content: center;
@@ -4578,14 +4608,19 @@
             line-height: 1;
             cursor: pointer;
             z-index: 2;
-            transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+            transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease, color 0.18s ease, opacity 0.18s ease;
         }
         .protein-complex-structures-view .protein-complex-pin-btn:hover {
+            opacity: 1;
+            color: var(--text-color);
             transform: translateY(-1px);
             border-color: var(--accent-color-soft);
             background: var(--button-bg-hover);
         }
         .protein-complex-structures-view .protein-complex-pin-btn[aria-pressed="true"] {
+            opacity: 1;
+            background: var(--button-bg-hover);
+            box-shadow: 0 0 0 1px var(--accent-color-soft);
             border-color: var(--accent-color);
             color: var(--accent-color-soft);
         }
@@ -5036,7 +5071,7 @@
         <input type="file" id="sessionFolderInput" webkitdirectory directory multiple style="display:none;">
 
         <!-- <label style="font-size:14px;">Open Files</label> -->
-        <input type="file" id="openFilesInput" accept=".gz,.txt,.csv,.tsv,.fa,.fasta,.faa,.fna,.h5" multiple style="display:none;">
+        <input type="file" id="openFilesInput" accept=".zip,.gff,.gff3,.gz,.txt,.csv,.tsv,.fa,.fasta,.faa,.fna,.h5" multiple style="display:none;">
         <div id="openFilesList" class="uploaded-file-list">
             <button type="button" class="upload-inline-open-btn">Open <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button>
             <div class="uploaded-file-items"><span class="uploaded-file-list-empty">No files uploaded</span></div>
@@ -5107,6 +5142,11 @@
                 <option value="collection">Collection</option>
                 <option value="annotation">Annotation length</option>
                 <option value="characterization">Characterization</option>
+                <option value="chromosome">Chromosome</option>
+                <option value="strand">Gene Strand</option>
+                <option value="gene_exon_count">Gene exon count</option>
+                <option value="gc_content">GC content</option>
+                <option value="genomic_position">Genomic position</option>
                 <option value="size">Protein size</option>
                 <option value="pdb_structure_count">PDB structure count</option>
                 <option value="random">Random</option>
@@ -5230,6 +5270,21 @@
         <span class="dropdown-toggle panel-section-heading">Variables <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
         <div id="variables-drop" class="dropdown-content">
             <button id="pill-blue-btn" style="width:100%;">Variable Settings</button>
+        </div>
+
+        <hr class="dropdown-divider">
+        <span class="dropdown-toggle panel-section-heading">Genome <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
+        <div class="dropdown-content" id="genome-drop">
+            <label for="genome-organism" id="genome-organism-label" hidden>Organism</label>
+            <select id="genome-organism" hidden aria-labelledby="genome-organism-label"></select>
+            <p id="genome-source" style="font-size:12px" aria-live="polite">Assembly will be detected from app data.</p>
+            <label for="genome-accession">Assembly accession (optional override)</label>
+            <input id="genome-accession" type="text" placeholder="Automatic from app data" aria-describedby="genome-source genome-status">
+            <label for="genome-chromosomes">Chromosomes (optional, comma separated)</label>
+            <input id="genome-chromosomes" type="text" placeholder="All, or e.g. X,Y,MT">
+            <button id="fetch-genome" type="button" style="width:100%">Fetch Genome</button>
+            <button id="cancel-genome" type="button" hidden>Cancel download</button>
+            <p id="genome-status" role="status" aria-live="polite" style="font-size:12px">Fetch the genome for the selected proteins or loaded organism, or upload an NCBI genome ZIP (up to 512 MiB expanded).</p>
         </div>
 
         <hr class="dropdown-divider">
@@ -5771,6 +5826,7 @@
                     <button type="button" class="protein-info-mode-btn" data-protein-mode="sequence">Sequence</button>
                     <button type="button" class="protein-info-mode-btn" data-protein-mode="structure">Structure</button>
                     <button type="button" class="protein-info-mode-btn" data-protein-mode="links">Links</button>
+                    <button type="button" class="protein-info-mode-btn" data-protein-mode="alias">Aliases</button>
                     <button type="button" class="protein-info-mode-btn" data-protein-mode="enrichment">Enrichment</button>
                     <button type="button" class="protein-info-mode-btn" data-protein-mode="homology">Homology</button>
                     <button type="button" class="protein-info-mode-btn" data-protein-mode="orthology">Orthology</button>
@@ -7776,6 +7832,15 @@
 
 </template>
 <script src="homology_modeller.js"></script>
+<script src="protein-mentions.js"></script>
+<link rel="stylesheet" href="genome.css">
+<script src="genome-data.js"></script>
+<script src="genome-resolver.js"></script>
+<script src="genetic-codes.js"></script>
+<script src="genome-sequence.js"></script>
+<script src="genome-annotations.js"></script>
+<script src="genome-sequence-view.js"></script>
+<script src="genome.js"></script>
 <script id="main-script" src="script.js"></script>
 <script src="variable-menus.js"></script>
 
