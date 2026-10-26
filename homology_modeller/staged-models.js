@@ -193,6 +193,7 @@ function renderStagedReferenceControls(){
 function renderStagedBuildControls(){
     const state=multiReferenceBuild,host=document.getElementById('stagedModelButtons');if(!host)return;
     host.classList.toggle('hidden',!state);if(!state)return;host.replaceChildren();
+    const buttons=document.createElement('div');buttons.style.cssText='display:flex;flex-wrap:wrap;gap:8px;flex:1;min-width:0';host.append(buttons);
     const choices=state.files.map((file,index)=>({id:`draft:${index}`,label:`Draft ${index+1} · ${file.pdbId}`,built:Boolean(state.drafts[index])}));
     choices.push({id:'aligned',label:'Aligned draft models',built:Boolean(state.assembly)},{id:'combined',label:'Combined model',built:state.done});
     for(const choice of choices){
@@ -201,14 +202,17 @@ function renderStagedBuildControls(){
         button.className=enabled?'px-3 py-2 rounded-lg text-xs text-white bg-violet-700 border border-violet-400':'px-3 py-2 rounded-lg text-xs text-slate-500 bg-slate-800 border border-slate-700 cursor-not-allowed';
         button.setAttribute('aria-pressed',String(state.view===choice.id));
         if(building){const icon=document.createElement('i');icon.className='fa-solid fa-circle-notch fa-spin mr-2';icon.setAttribute('aria-hidden','true');button.append(icon);}
-        button.append(document.createTextNode(choice.label));button.addEventListener('click',()=>{state.follow=choice.id===state.current;selectStagedModel(choice.id);});host.append(button);
+        button.append(document.createTextNode(choice.label));button.addEventListener('click',()=>{state.follow=choice.id===state.current;selectStagedModel(choice.id);});buttons.append(button);
     }
+    updateStagedBuildETC(performance.now(),true);
 }
 function stagedLiveView(){return !multiReferenceBuild||multiReferenceBuild.view===multiReferenceBuild.current&&multiReferenceBuild.current!=='aligned'&&!multiReferenceBuild.busy;}
 function selectStagedModel(id){
     const state=multiReferenceBuild;if(!state)return;
     state.view=id;renderStagedBuildControls();
     const select=document.getElementById('physicsColorSelect');
+    if(state.lastColourView!=='aligned'&&state.normalColorOptions)state.liveColorMode=physicsColorMode;
+    state.lastColourView=id;
     if(!state.normalColorOptions)state.normalColorOptions=[...select.options].map(option=>({value:option.value,label:option.textContent}));
     if(id==='aligned'){
         if(!state.normalColorMenuNodes)state.normalColorMenuNodes=[...document.getElementById('physicsColorMenu').childNodes];
@@ -223,13 +227,15 @@ function selectStagedModel(id){
     document.getElementById('physics3dCanvas').classList.toggle('hidden',!stagedLiveView());
     document.getElementById('stagedPreviewHost').classList.toggle('hidden',stagedLiveView());
     document.getElementById('stagedStructureToggles').classList.toggle('hidden',id!=='aligned');
-    if(stagedLiveView()){disposeStagedPreview();setPhysicsColorMode(state.done?'chain':'residue-speed');}
-    else renderStagedPreview();
+    if(stagedLiveView()){disposeStagedPreview();setPhysicsColorMode(state.liveColorMode??(state.done?'chain':'running-simulation'));}
+    else if(id==='aligned')renderStagedPreview();
+    else setPhysicsColorMode(physicsColorMode);
 }
 function failStagedBuild(error,state=multiReferenceBuild){
     if(!state||state.cancelled||error.name==='AbortError'||state!==multiReferenceBuild||state.generation!==modelBuildGeneration)return;
+    globalThis.BuildTimeline?.finish('Failed');
     state.failed=true;state.busy=false;physicsRunning=false;modelLoading=false;
-    document.getElementById('groupSimulationStatus').textContent=error.message;
+    document.getElementById('groupSimulationStatusText').textContent=error.message;
     document.getElementById('modelBuildTime').textContent='Combined model build stopped';renderStagedBuildControls();showError(error.message);
 }
 function buildStagedFullNetwork(input,state){
@@ -251,7 +257,7 @@ async function captureStagedDraft(state){
         chains[chain].push({...original,x:node.x,y:node.y,z:node.z,sourceAtoms:fullAtoms[index],draftNodeIndex:index,
             afResSeq:original.resSeq,afFileIndex:original.fileIndex,afSourcePdbId:original.sourcePdbId});
     });
-    const viewState={nodes:physicsNodes,blocks:morphMatrixBlocks,springs:physicsSprings,positions:physicsPositions,offset:{...physicsCenterOffset},
+    const viewState={groupSimulation,occlusion:physicsOcclusionFactors.slice(),residueSpeeds:residueSpeedState.speeds.slice(),residueSpeedScale:residueSpeedState.scale,nodes:physicsNodes,blocks:morphMatrixBlocks,springs:physicsSprings,positions:physicsPositions,offset:{...physicsCenterOffset},
         referenceFiles:referenceFiles.slice(),referenceInfluences:referenceInfluences.slice(),model1Influence,model2Influence,referenceAssembly,modelData1:{...modelData1,matrixCache:new Map()},modelData2:{...modelData2,matrixCache:new Map()}};
     const input=physicsSpringInputSnapshot();input.nodes.forEach(node=>{node.locked=false;});
     const packed=await buildStagedFullNetwork(input,state);
@@ -284,8 +290,9 @@ async function advanceStagedBuild(){
     const draft=await captureStagedDraft(state);state.drafts.push(draft);
     if(state!==multiReferenceBuild||state.generation!==modelBuildGeneration)return;
     if(state.index+1<state.files.length){await startStagedDraft(state.index+1,state);return;}
+    const alignTiming=globalThis.BuildTimeline?.start('Aligned draft models');
     state.kind='aligned';state.current='aligned';if(state.follow)state.view='aligned';renderStagedBuildControls();
-    document.getElementById('groupSimulationStatus').textContent='TM-aligning completed draft homology models…';
+    document.getElementById('groupSimulationStatusText').textContent='TM-aligning completed draft homology models…';
     const id=++modellingCalculationVersion;
     const output=await runModellingWorker({id,operation:'drafts',settings:{mode:alignmentMode,gapOpen:alignmentGapOpen,gapExtend:alignmentGapExtend},
         files:state.drafts.map(draft=>({pdbId:draft.id,parsed:{chains:draft.chains}}))});
@@ -293,6 +300,7 @@ async function advanceStagedBuild(){
     state.assembly=output.assembly;renderStagedComparisonTables();selectStagedModel(state.view);
     await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
     state.merged=mergeDraftModels(state.assembly,state.drafts,state.weights);
+    globalThis.BuildTimeline?.end(alignTiming);
     await startCombinedStagedModel(state);
 }
 async function startCombinedStagedModel(state){
@@ -330,7 +338,8 @@ function renderStagedComparisonTables(){
 }
 
 function stagedSnapshotColors(draft){
-    const saved={modelData1,modelData2,physicsNodes,physicsSprings,morphMatrixBlocks,physicsPositions,physicsCenterOffset,referenceFiles,referenceInfluences,referenceAssembly,model1Influence,model2Influence,groupSimulation,instancedNodeMesh,backboneChains,physicsDifferenceMode,physicsOriginColorMode};
+    const saved={modelData1,modelData2,physicsNodes,physicsSprings,morphMatrixBlocks,physicsPositions,physicsCenterOffset,referenceFiles,referenceInfluences,referenceAssembly,model1Influence,model2Influence,groupSimulation,instancedNodeMesh,backboneChains,physicsDifferenceMode,physicsOriginColorMode,physicsOcclusionFactors};
+    const speedCache={...residueSpeedState};
     const cache={pairs:validationState.pairs,byPair:validationState.byPair,nodeColors:validationState.nodeColors};
     const colors=draft.viewState.nodes.map(()=>new THREE.Color('#94a3b8'));
     try{
@@ -338,21 +347,91 @@ function stagedSnapshotColors(draft){
         physicsNodes=draft.viewState.nodes;physicsSprings=draft.viewState.springs;morphMatrixBlocks=draft.viewState.blocks;physicsPositions=draft.viewState.positions;
         physicsCenterOffset=draft.viewState.offset;referenceFiles=draft.viewState.referenceFiles;referenceInfluences=draft.viewState.referenceInfluences;
         referenceAssembly=draft.viewState.referenceAssembly;model1Influence=draft.viewState.model1Influence;model2Influence=draft.viewState.model2Influence;
-        groupSimulation={complete:true};backboneChains=[];physicsDifferenceMode=physicsColorMode==='difference';physicsOriginColorMode=physicsColorMode==='origin';
+        physicsOcclusionFactors=draft.viewState.occlusion??[];
+        Object.assign(residueSpeedState,{nodes:physicsNodes,speeds:draft.viewState.residueSpeeds??[],scale:draft.viewState.residueSpeedScale??1});
+        groupSimulation=draft.viewState.groupSimulation??{complete:true};backboneChains=[];physicsDifferenceMode=physicsColorMode==='difference';physicsOriginColorMode=physicsColorMode==='origin';
         instancedNodeMesh={instanceColor:{},setColorAt(index,color){colors[index].copy(color);},getColorAt(index,color){color.copy(colors[index]);}};
         if(['constraint-confidence','spring-strain','model-confidence','alpha-pae'].includes(physicsColorMode))calculateValidationPairs();
         updatePhysicsNodeColors();
     }finally{
-        ({modelData1,modelData2,physicsNodes,physicsSprings,morphMatrixBlocks,physicsPositions,physicsCenterOffset,referenceFiles,referenceInfluences,referenceAssembly,model1Influence,model2Influence,groupSimulation,instancedNodeMesh,backboneChains,physicsDifferenceMode,physicsOriginColorMode}=saved);
+        ({modelData1,modelData2,physicsNodes,physicsSprings,morphMatrixBlocks,physicsPositions,physicsCenterOffset,referenceFiles,referenceInfluences,referenceAssembly,model1Influence,model2Influence,groupSimulation,instancedNodeMesh,backboneChains,physicsDifferenceMode,physicsOriginColorMode,physicsOcclusionFactors}=saved);
+        Object.assign(residueSpeedState,speedCache);
         Object.assign(validationState,cache);updatePhysicsSequences();
     }
     return colors;
 }
+function saveStagedPreviewCamera(preview){
+    if(!preview?.camera||!preview.pivot||!preview.state)return;
+    preview.state.previewCameras??=new Map();
+    preview.state.previewCameras.set(preview.view,{
+        cameraPosition:preview.camera.position.clone(),cameraQuaternion:preview.camera.quaternion.clone(),zoom:preview.camera.zoom,
+        pivotPosition:preview.pivot.position.clone(),pivotQuaternion:preview.pivot.quaternion.clone()
+    });
+}
+function restoreStagedPreviewCamera(state,view,camera,pivot){
+    const saved=state.previewCameras?.get(view);if(!saved)return;
+    camera.position.copy(saved.cameraPosition);camera.quaternion.copy(saved.cameraQuaternion);camera.zoom=saved.zoom;
+    pivot.position.copy(saved.pivotPosition);pivot.quaternion.copy(saved.pivotQuaternion);camera.updateProjectionMatrix();
+}
 function disposeStagedPreview(){
-    if(!stagedPreview)return;stagedPreview.observer.disconnect();
+    if(!stagedPreview)return;saveStagedPreviewCamera(stagedPreview);stagedPreview.lifecycle.cancelled=true;stagedPreview.observer.disconnect();
     stagedPreview.scene.traverse(object=>{object.geometry?.dispose();for(const material of Array.isArray(object.material)?object.material:[object.material])material?.dispose();});
     stagedPreview.renderer.dispose();stagedPreview.renderer.forceContextLoss();stagedPreview=null;document.getElementById('stagedPreviewHost')?.replaceChildren();
 }
+function addStagedDraftGeometry(object,points,colors,lifecycle,render,colorMode=physicsColorMode){
+    if(!points.length)return;
+    const mode=physicsRepresentation,polymer=points[0].entityType!=='other';
+    if(mode==='cartoon'&&polymer&&points.length>1){
+        const ribbon=createCartoonRibbon(points,(i,target)=>target.copy(colors[i]),()=>true,()=>false,()=>viewerSizes.physics.backbone);
+        object.add(ribbon);return;
+    }
+    if(mode==='curves'&&polymer&&points.length>1){
+        const segments=(points.length-1)*8,radial=8;
+        const path=new THREE.CatmullRomCurve3(points.map(p=>new THREE.Vector3(p.x,p.y,p.z)),false,'centripetal');
+        const geometry=new THREE.TubeGeometry(path,segments,.15*viewerSizes.physics.curve,radial,false),rgb=[];
+        for(let i=0;i<geometry.attributes.position.count;i++){
+            const color=colors[Math.min(points.length-1,Math.round(Math.floor(i/(radial+1))/segments*(points.length-1)))];rgb.push(color.r,color.g,color.b);
+        }
+        geometry.setAttribute('color',new THREE.Float32BufferAttribute(rgb,3));
+        object.add(new THREE.Mesh(geometry,new THREE.MeshPhongMaterial({vertexColors:true,shininess:35})));return;
+    }
+    const molecular=['ball-stick','surface','curves'].includes(mode),entries=[],nodes=[];
+    points.forEach((atom,index)=>{
+        nodes.push({blockIdx:0,idx2:index,res:{entityType:atom.entityType}});
+        for(const source of molecular&&atom.sourceAtoms?.length?atom.sourceAtoms:[atom]){
+            const color=molecular?physicsAtomColor(colorMode,source,atom,colors[index],1):colors[index];
+            entries.push({source,nodeIndex:index,color});
+        }
+    });
+    if(mode==='surface'){
+        const radii={H:1.2,D:1.2,C:1.7,N:1.55,O:1.52,S:1.8,P:1.8,SE:1.9};
+        const atoms=entries.map(({source,color})=>({x:source.x,y:source.y,z:source.z,r:(radii[source.element]||1.7)+viewerSizes.physics.surface,c:[color.r,color.g,color.b]}));
+        buildSeparatedMetaballGeometry([atoms],()=>lifecycle.cancelled,geometry=>{
+            if(lifecycle.cancelled){geometry?.dispose();return;}
+            if(geometry)object.add(new THREE.Mesh(geometry,new THREE.MeshPhongMaterial({vertexColors:true,side:THREE.DoubleSide,shininess:12,specular:0x202428})));
+            render();
+        });return;
+    }
+    const balls=new THREE.InstancedMesh(new THREE.SphereGeometry(molecular?.34:.85,10,8),new THREE.MeshPhongMaterial(molecular?{shininess:6,specular:0x080a0d}:{shininess:50}),entries.length);
+    const dummy=new THREE.Object3D();
+    entries.forEach((entry,i)=>{
+        dummy.position.set(entry.source.x,entry.source.y,entry.source.z);dummy.scale.setScalar(molecular?viewerSizes.physics.atom*elementAtomScale(entry.source.element):viewerSizes.physics.residue);
+        dummy.updateMatrix();balls.setMatrixAt(i,dummy.matrix);balls.setColorAt(i,entry.color);
+    });
+    balls.instanceMatrix.needsUpdate=true;if(balls.instanceColor)balls.instanceColor.needsUpdate=true;balls.frustumCulled=false;object.add(balls);
+    const bonds=molecular?sourceAtomBonds(entries,nodes):polymer?points.slice(1).flatMap((atom,i)=>dist3d(points[i],atom)<8?[[i,i+1]]:[]):[];
+    if(!bonds.length)return;
+    const sticks=new THREE.InstancedMesh(new THREE.CylinderGeometry(1,1,1,8),new THREE.MeshPhongMaterial({shininess:6,specular:0x080a0d}),bonds.length);
+    const up=new THREE.Vector3(0,1,0),a=new THREE.Vector3(),b=new THREE.Vector3(),direction=new THREE.Vector3();
+    bonds.forEach(([ia,ib],index)=>{
+        const first=entries[ia],second=entries[ib];a.set(first.source.x,first.source.y,first.source.z);b.set(second.source.x,second.source.y,second.source.z);
+        direction.subVectors(b,a);const length=direction.length();dummy.position.copy(a).add(b).multiplyScalar(.5);dummy.quaternion.setFromUnitVectors(up,length?direction.divideScalar(length):up);
+        const radius=molecular?.07*viewerSizes.physics.stick:.15*viewerSizes.physics.backbone;
+        dummy.scale.set(radius,length,radius);dummy.updateMatrix();sticks.setMatrixAt(index,dummy.matrix);sticks.setColorAt(index,first.color.clone().lerp(second.color,.5));
+    });
+    sticks.instanceMatrix.needsUpdate=true;if(sticks.instanceColor)sticks.instanceColor.needsUpdate=true;sticks.frustumCulled=false;object.add(sticks);
+}
+
 function renderStagedPreview(){
     const state=multiReferenceBuild,host=document.getElementById('stagedPreviewHost');disposeStagedPreview();if(!state||!host||stagedLiveView())return;
     host.classList.remove('hidden');
@@ -362,14 +441,16 @@ function renderStagedPreview(){
     const palette=draft?stagedSnapshotColors(draft):null;
     const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});renderer.setPixelRatio(Math.min(2,window.devicePixelRatio||1));host.append(renderer.domElement);
     const scene=new THREE.Scene();scene.background=new THREE.Color(document.body.classList.contains('light-mode')?'#ffffff':'#020617');
-    scene.add(new THREE.AmbientLight(0xffffff,.8));const light=new THREE.DirectionalLight(0xffffff,1);light.position.set(30,50,100);scene.add(light);
+    addPhysicsViewerLights(scene);
     const pivot=new THREE.Group(),root=new THREE.Group();pivot.add(root);scene.add(pivot);
     const atoms=structures.flatMap(structure=>structure.entries.flatMap(entry=>entry.alignedAtoms));
     const box=new THREE.Box3().setFromPoints(atoms.map(atom=>new THREE.Vector3(atom.x,atom.y,atom.z))),center=box.getCenter(new THREE.Vector3()),radius=Math.max(15,box.getSize(new THREE.Vector3()).length());root.position.copy(center).multiplyScalar(-1);
     const camera=new THREE.PerspectiveCamera(45,1,.1,Math.max(10000,radius*20));camera.position.set(0,0,radius*1.2);camera.lookAt(0,0,0);
+    restoreStagedPreviewCamera(state,state.view,camera,pivot);
     const groups=new Map();if(aligned)state.assembly.groups.forEach((group,index)=>{for(const entry of group.entries.values())groups.set(entry,{group,index});});
     const toggles=document.getElementById('stagedStructureToggles');toggles.replaceChildren();toggles.classList.toggle('hidden',!aligned);
-    const render=()=>renderer.render(scene,camera),makeToggle=(label,key,object)=>{
+    const lifecycle={cancelled:false};
+    const render=()=>{if(!lifecycle.cancelled){syncPhysicsMaterials(scene);renderer.render(scene,camera);}},makeToggle=(label,key,object)=>{
         object.visible=state.visible.get(key)!==false;const button=document.createElement('button');button.type='button';button.className='px-3 py-1 rounded border border-slate-600 text-xs';button.textContent=label;button.setAttribute('aria-pressed',String(object.visible));
         button.addEventListener('click',()=>{object.visible=!object.visible;state.visible.set(key,object.visible);button.setAttribute('aria-pressed',String(object.visible));render();});toggles.append(button);
     };
@@ -391,17 +472,14 @@ function renderStagedPreview(){
         });
     };
     structures.forEach((structure,s)=>{
+        const structureAtoms=aligned?structure.entries.flatMap(entry=>entry.alignedAtoms):[];
+        const burial=aligned?burialFactorsForNodes(structure.entries.flatMap((entry,blockIdx)=>entry.alignedAtoms.map(atom=>({x:atom.x,y:atom.y,z:atom.z,blockIdx})))):[];
+        const shading=new Map(structureAtoms.map((atom,index)=>[atom,burial[index]??1]));
         const object=new THREE.Group();root.add(object);if(aligned)makeToggle(structure.file.pdbId,`draft:${s}`,object);
         for(const entry of structure.entries){
-            const points=entry.alignedAtoms,colors=colorsForEntry(entry,s),positions=[],rgb=[];
-            points.forEach((atom,index)=>{const sources=!aligned&&physicsRepresentation==='ball-stick'&&atom.sourceAtoms?.length?atom.sourceAtoms:[atom];
-                for(const source of sources){positions.push(source.x,source.y,source.z);rgb.push(colors[index].r,colors[index].g,colors[index].b);}});
-            const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geometry.setAttribute('color',new THREE.Float32BufferAttribute(rgb,3));
-            object.add(new THREE.Points(geometry,new THREE.PointsMaterial({vertexColors:true,size:aligned?1.4:.8,sizeAttenuation:true})));
-            if(points[0]?.entityType!=='other'){
-                const trace=new THREE.BufferGeometry();trace.setAttribute('position',new THREE.Float32BufferAttribute(points.flatMap(atom=>[atom.x,atom.y,atom.z]),3));trace.setAttribute('color',new THREE.Float32BufferAttribute(colors.flatMap(color=>[color.r,color.g,color.b]),3));
-                object.add(new THREE.Line(trace,new THREE.LineBasicMaterial({vertexColors:true})));
-            }
+            const points=entry.alignedAtoms,colors=colorsForEntry(entry,s);
+            if(aligned)colors.forEach((color,index)=>color.multiplyScalar(1-(1-shading.get(points[index]))*physicsMaterialSettings.occlusion));
+            addStagedDraftGeometry(object,points,colors,lifecycle,render,aligned?state.alignedMode:physicsColorMode);
         }
     });
     if(aligned){
@@ -420,6 +498,52 @@ function renderStagedPreview(){
         else{pivot.rotation.y+=dx*.008;pivot.rotation.x+=dy*.008;}render();});
     canvas.addEventListener('pointerup',()=>{drag=null;});canvas.addEventListener('pointercancel',()=>{drag=null;});
     canvas.addEventListener('wheel',event=>{event.preventDefault();camera.position.z=Math.max(radius*.1,Math.min(radius*6,camera.position.z*Math.exp(event.deltaY*.001)));render();},{passive:false});
-    stagedPreview={scene,renderer,observer};
-    document.getElementById('physicsColourKey').textContent=aligned?'Draft models are TM-aligned in a shared coordinate frame. Toggle individual drafts or equivalent-entity centre lines above.':'Completed draft snapshot. The current build continues in the background.';
+    stagedPreview={scene,renderer,observer,lifecycle,render,camera,pivot,state,view:state.view};
+    if(aligned){
+        const key=document.getElementById('physicsColourKey');key.replaceChildren();
+        if(state.alignedMode==='reference'){
+            key.append(document.createTextNode('Colour by model: '));
+            structures.forEach((structure,index)=>{
+                const label=document.createElement('span');label.style.color=referenceColor(index);
+                label.textContent=`${index?' · ':''}${structure.file.pdbId}`;key.append(label);
+            });
+        }else key.append(document.createTextNode(document.getElementById('physicsColorSelect').selectedOptions[0]?.textContent??state.alignedMode));
+        key.append(document.createTextNode(' · Draft models are TM-aligned in a shared coordinate frame. Use the toggles above to show or hide models and centre links.'));
+    }
+}
+
+function estimateStagedRemainingMs(activeMs,completed,total){
+    return completed>0?Math.max(0,total-completed)*activeMs/completed:null;
+}
+function updateStagedBuildETC(now,force=false){
+    const groups=typeof groupSimulation==='undefined'?null:groupSimulation;
+    const singleDisplay=document.getElementById('singleBuildETC');
+    if(singleDisplay)singleDisplay.classList.toggle('hidden',!multiReferenceBuild&&(!groups||groups.index<0));
+    if(!multiReferenceBuild&&!groups)return;
+    const state=multiReferenceBuild??(groups.singleETCState??={kind:'combined',current:'single',busy:false});
+    if(!multiReferenceBuild)state.done=groups.complete;
+    state.etc??={activeMs:0,lastAt:now,lastRunning:false,lastDraw:0,counts:new Map(),totals:new Map()};
+    const estimate=state.etc;
+    const current=groups&&!state.busy&&groups.nodes===physicsNodes&&['draft','combined'].includes(state.kind);
+    const running=Boolean(current&&physicsRunning&&simulationPhase===2&&!modelLoading&&!animationPlaying&&!physicsSimulationWorkerState?.buildPending&&!groups.complete);
+    if(estimate.lastRunning&&running)estimate.activeMs+=Math.max(0,now-estimate.lastAt);
+    estimate.lastAt=now;estimate.lastRunning=running;
+    if(current){
+        estimate.counts.set(state.current,groups.complete?groups.results.length:groups.passResults.length+groups.results.length);
+        estimate.totals.set(state.current,groups.originalOrder.length*2);
+    }
+    if(!force&&now-estimate.lastDraw<250)return;estimate.lastDraw=now;
+    const display=singleDisplay;if(!display)return;
+    if(state.failed){display.textContent='ETC: stopped';return;}
+    if(state.done){display.textContent='Build complete';return;}
+    const countChains=chains=>Object.values(chains).filter(atoms=>atoms.some(atom=>atom.entityType==='protein'||atom.entityType==='nucleotide')).length;
+    const draftCounts=(state.files??[]).map((file,index)=>estimate.totals.get(`draft:${index}`)??countChains(file.parsed.chains)*2);
+    const combined=(!multiReferenceBuild?groups.originalOrder.length*2:null)??estimate.totals.get('combined')??(state.merged?countChains(state.merged.chains)*2:state.assembly?state.assembly.groups.length*2:Math.max(0,...draftCounts));
+    const total=draftCounts.reduce((sum,count)=>sum+count,0)+combined;
+    const completed=[...estimate.counts.values()].reduce((sum,count)=>sum+count,0);
+    const remaining=estimateStagedRemainingMs(estimate.activeMs,completed,total);
+    if(remaining===null||estimate.activeMs<=0){display.textContent='ETC: measuring…';return;}
+    const seconds=Math.ceil(remaining/1000),duration=seconds>=60?`${Math.floor(seconds/60)}m ${seconds%60}s`:`${seconds}s`;
+    const time=new Date(Date.now()+remaining).toLocaleTimeString('en-NZ',{hour:'numeric',minute:'2-digit',hour12:true}).replace(/\s+/g,' ').toLowerCase();
+    display.textContent=`ETC: ${duration} remaining (${time})${running?'':' · paused'}`;
 }
