@@ -722,6 +722,8 @@
             {key:'rmsd',label:'RMSD (Phase 2)',color:'#a78bfa',unit:' Å'},
             {key:'energy',label:'Weighted spring-length error',color:'#4ade80',unit:' a.u.'},
             {key:'speed',label:'Average residue speed',color:'#fbbf24',unit:' Å/s'},
+            {key:'stepRate',label:'Simulation step rate',color:'#60a5fa',unit:' steps/s'},
+            {key:'dynamicResidueBudget',label:'Dynamic max sim residue count',color:'#e879f9',unit:' residues'},
             {key:'coreMaxSpeed',label:'Max residue speed of the core subunit',color:'#f87171',unit:' Å/s'},
             {key:'satisfaction',label:'Restraint satisfaction',color:'#fb923c',unit:''},
             {key:'modelConfidence',label:'Overall model confidence',color:'#f472b6',unit:''},
@@ -781,7 +783,7 @@
             const speed=state.lastPositions&&elapsed>0?distance/Math.max(1,residueCount)/elapsed:0;
             const speedText=document.getElementById('physicsSpeedText');
             if(speedText)speedText.textContent=`${speed.toFixed(2)} Å/s`;
-            state.samples.push({time:now,tm:metrics.tm,rmsd:metrics.rmsd,energy,speed,coreMaxSpeed:typeof groupSimulation==='undefined'?null:groupSimulation?.maxSpeed??null});
+            state.samples.push({time:now,tm:metrics.tm,rmsd:metrics.rmsd,energy,speed,stepRate:updatePhysicsStepRate(now),dynamicResidueBudget:groupMaxSimulationResidues==='dynamic'?groupSimulation?.residueBudget??100:null,coreMaxSpeed:typeof groupSimulation==='undefined'?null:groupSimulation?.maxSpeed??null});
             if(state.samples.length>60000)state.samples=state.samples.filter((_,index)=>index%2===0);
             state.lastPositions=positions;state.lastSampleAt=now;
             scheduleValidationGraphSample(now);
@@ -932,7 +934,7 @@
                 : 'Raw values share one numeric y-axis even though their units differ; use each series’ legend maximum to interpret its scale. ')
                 +(physicsGraphLogScale?'The logarithmic y-axis spreads out small positive values; zero remains at the baseline. ':'')
                 +'Confidence and membrane scores hold their last measured value between intermittent updates. Vertical lines mark group starts and changes to build controls; their labels are rotated to fit.';
-            canvas.setAttribute('aria-label',`Live ${physicsGraphNormalized?'normalised':'raw'} TM-score, RMSD, weighted spring-length error, average residue speed, max residue speed of the core subunit, restraint satisfaction, overall model confidence, and membrane placement confidence over Phase 2 time on a ${physicsGraphLogScale?'logarithmic':'linear'} y-axis`);
+            canvas.setAttribute('aria-label',`Live ${physicsGraphNormalized?'normalised':'raw'} TM-score, RMSD, weighted spring-length error, average residue speed, simulation step rate, dynamic max sim residue count, max residue speed of the core subunit, restraint satisfaction, overall model confidence, and membrane placement confidence over Phase 2 time on a ${physicsGraphLogScale?'logarithmic':'linear'} y-axis`);
             physicsGraphHistory.lastDrawAt=performance.now();
         }
 // physicsHistoryGraph.js end
@@ -1130,6 +1132,12 @@
         // 3. FAST FLAT DISTANCE MATRIX CALCULATION
         // ==========================================
         // Flat Float32Array: length N*N. Cached globally per chain so it NEVER recomputes on mouse move!
+        function calculateLazyDistanceMatrixCell(atoms,cutoff,i,j){
+            const a=atoms[i],b=atoms[j];
+            if(a.sequenceOnly||b.sequenceOnly||(a.fileIndex!==undefined&&b.fileIndex!==undefined&&a.fileIndex!==b.fileIndex))return -1;
+            const distance=Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z);
+            return distance<=cutoff?distance:-1;
+        }
         function getOrComputeDistanceMatrix(modelData, chainKey, atoms) {
             const cacheKey = `${chainKey}:${springCutoffVal}`;
             const cutoff = springCutoffVal;
@@ -1145,10 +1153,7 @@
                         if (typeof property !== 'string' || !/^\d+$/.test(property)) return target[property];
                         const index = Number(property), i = Math.floor(index / N), j = index % N;
                         if (i >= N) return undefined;
-                        const a = atoms[i], b = atoms[j];
-                        if (a.sequenceOnly || b.sequenceOnly || (a.fileIndex !== undefined && b.fileIndex !== undefined && a.fileIndex !== b.fileIndex)) return -1;
-                        const distance = Math.hypot(a.x-b.x, a.y-b.y, a.z-b.z);
-                        return distance <= cutoff ? distance : -1;
+                        return calculateLazyDistanceMatrixCell(atoms,cutoff,i,j);
                     }
                 });
                 modelData.matrixCache.set(cacheKey, matrix);
@@ -1747,6 +1752,7 @@
             const token = ++referenceSearchRequest;
             const original = searchInput.value;
             const isCurrent=()=>token===referenceSearchRequest && searchInput.value===original && document.getElementById('pdbInput1').value===referenceAtStart;
+            globalThis.BuildTimeline?.reset(true);
             referenceSearchLoading=true;
             updateBuildButtonState();
             button.disabled = true; status.textContent = mode === 'query' ? 'Searching RCSB for matching PDB entries…' : 'Searching RCSB for structures matching every sequence…';
@@ -1770,10 +1776,13 @@
                 let planningNote = '';
                 if(mode==='query' && window.ModellerAI?.connected()) {
                     status.textContent='AI is planning PDB searches for your request…';
+                    const queryTiming=globalThis.BuildTimeline?.start('AI processing query');
                     try { searches=await window.ModellerAI.planSearches(searchQuery); }
                     catch(error) { planningNote=`AI search planning failed: ${error.message} Used your original query. `; }
+                    finally {globalThis.BuildTimeline?.end(queryTiming);}
                     if(!isCurrent())return;
                 }
+                const fetchTiming=globalThis.BuildTimeline?.start('Fetching PDBs');
                 const merged = new Map(), failedSearches=[];
                 let successfulSearches=0;
                 for(const term of searches) {
@@ -1828,6 +1837,7 @@
                     }
                 }));
                 if(!isCurrent())return;
+                globalThis.BuildTimeline?.end(fetchTiming);
                 const best = Number(referenceSearchResults[0].score) || 0;
                 // Relative threshold retains results close to the top hit despite query-specific score normalization.
                 const ids = referenceSearchResults.filter(hit => Number(hit.score) >= best * 0.7).slice(0,mode === 'query' ? 2 : 5).map(hit => hit.identifier);
@@ -1836,6 +1846,7 @@
                 const view = document.getElementById('viewReferenceSearchResultsBtn'); view.classList.remove('hidden');
                 renderReferenceSearchResults();
                 if (window.ModellerAI?.connected()) {
+                    const selectionTiming=globalThis.BuildTimeline?.start('AI processing results table and choosing PDBs');
                     status.textContent = 'AI is reviewing the query, PDB titles and protein mappings…';
                     try {
                         const decision = await window.ModellerAI.chooseReferences({query: searchQuery, sequences, results: hits, searches: searches.filter(Boolean)});
@@ -1847,6 +1858,7 @@
                     } catch (error) {
                         selectionNote = `AI selection failed: ${error.message} Using score-based selection (${ids.length} entries).`;
                     }
+                    finally {globalThis.BuildTimeline?.end(selectionTiming);}
                 }
                 if(!isCurrent())return;
                 setReferenceSearchSelection(chosenIds);
@@ -1854,6 +1866,7 @@
             } catch (error) { if (token === referenceSearchRequest) status.textContent = `Reference search failed: ${error.message}`; }
             finally {
                 if (token === referenceSearchRequest) {
+                    for(const row of globalThis.BuildTimeline?.state.rows??[])if(row.end===null)globalThis.BuildTimeline.end(row,'Stopped');
                     referenceSearchLoading=false;
                     button.disabled=false;
                     updateBuildButtonState();
@@ -3768,16 +3781,7 @@
             physicsRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             container.appendChild(physicsRenderer.domElement);
 
-            const ambientLight = new THREE.AmbientLight(0xffffff, physicsMaterialSettings.ambient);
-            physicsScene.add(ambientLight);
-
-            const dirLight1 = new THREE.DirectionalLight(0xffffff, physicsMaterialSettings.key);
-            dirLight1.position.set(50, 100, 50);
-            physicsScene.add(dirLight1);
-
-            const dirLight2 = new THREE.DirectionalLight(0xffffff, physicsMaterialSettings.fill);
-            dirLight2.position.set(-50, -50, -50);
-            physicsScene.add(dirLight2);
+            addPhysicsViewerLights(physicsScene);
 
             backboneLinesGroup = new THREE.Group();
             physicsScene.add(backboneLinesGroup);
@@ -4852,6 +4856,7 @@
 
 // physicsSetup.js start
         function initPhysicsSimulation() {
+            patternExtensionCounts.clear();patternExtensionUnits=0;detectedExtensionPatterns=[];
             disposePhysicsSimulationWorker();
             cancelPendingSimulationRender();
             singleChainRotations.clear();document.getElementById('singleChainRotationsRows')?.removeAttribute('data-signature');
@@ -5023,6 +5028,7 @@
             refreshSelectedGlowIndices();
             resetGroupSimulation();
             setSimulationPhase(2); // Start Phase 2 automatically when initialization is complete
+            updatePatternVariance(true);
             if(paeSpringInfluence>0)requestSpringPae();
 
             const elapsed = PerfTracker.end('initPhysics');
@@ -5634,6 +5640,7 @@
                     : referenceKeyframeColors ? referenceKeyframeColors[referenceNodeIndex]??'#475569'
                     : referenceSiteColors ? referenceSiteColors[referenceNodeIndex]??'#475569'
                     : referenceMutationColors ? referenceMutationColors[referenceNodeIndex]??'#475569'
+                    : mode==='steric-clashes' ? stericClashColor(referenceNodeIndex)
                     : mode==='residue-speed' ? residueSpeedColor(referenceNodeIndex)
                     : ['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','qmeandisco'].includes(mode) ? validationNodeColor(referenceNodeIndex,mode)
                     : mode === 'residue-index' ? residueIndexColor(physicsNodes[referenceNodeIndex], atomIdx)
@@ -5823,7 +5830,7 @@
 // referenceOverlay.js end
 
 // physicsDynamics.js start
-        let groupNeighbourDistance=30,groupMaxResidueSpeed=.03,groupMaxWaitingTime=10,groupSimultaneousCount=1;
+        let groupNeighbourDistance=30,groupMaxResidueSpeed=.03,groupMaxWaitingTime=10,groupMaxSimulationResidues='dynamic';
         let groupSimulation=null;
         function resetGroupSimulation(){
             for(const [id,assign,minimum] of [
@@ -5831,16 +5838,56 @@
                 ['groupMaxResidueSpeed',value=>{groupMaxResidueSpeed=value;},0],
                 ['groupMaxWaitingTime',value=>{groupMaxWaitingTime=value;},.1]
             ]){const value=Number(document.getElementById(id)?.value);if(Number.isFinite(value)&&value>=minimum)assign(value);}
-            const selectedCount=document.getElementById('groupSimultaneousCount')?.value;
-            if(selectedCount==='all')groupSimultaneousCount='all';
-            else if(Number.isInteger(Number(selectedCount))&&Number(selectedCount)>0)groupSimultaneousCount=Number(selectedCount);
+            const selectedBudget=document.getElementById('groupMaxSimulationResidues')?.value;
+            groupMaxSimulationResidues=selectedBudget==='dynamic'||!selectedBudget?'dynamic':Math.max(1,Math.floor(Number(selectedBudget)||1));
             const polymers=physicsNodes.filter(node=>node.res.entityType==='protein'||node.res.entityType==='nucleotide');
             groupSimulation={nodes:physicsNodes,order:[...new Set((polymers.length?polymers:physicsNodes).map(node=>node.blockIdx))],index:-1,
-                active:new Set(),processed:new Set(),complete:false,elapsed:0,lastTick:null,wasRunning:false,maxSpeed:null,results:[]};
-            groupSimulation.parallel=groupSimultaneousCount==='all'||groupSimultaneousCount>1;
-            groupSimulation.capacity=groupSimultaneousCount==='all'?groupSimulation.order.length:groupSimultaneousCount;
+                active:new Set(),processed:new Set(),pass:1,passResults:[],complete:false,elapsed:0,lastTick:null,wasRunning:false,maxSpeed:null,results:[]};
+            groupSimulation.originalOrder=groupSimulation.order.slice();
+            groupSimulation.parallel=true;
             groupSimulation.groups=[];groupSimulation.nextIndex=0;
-            const status=document.getElementById('groupSimulationStatus');if(status)status.textContent='Waiting to start subunit groups.';
+            groupSimulation.residueBudget=groupMaxSimulationResidues==='dynamic'?100:groupMaxSimulationResidues;
+            groupSimulation.budgetLastAt=null;groupSimulation.budgetLastSteps=0;
+            updateDynamicResidueBudgetDisplay();
+            const status=document.getElementById('groupSimulationStatusText');if(status)status.textContent='Waiting to start subunit groups.';
+        }
+        function updateDynamicResidueBudgetDisplay(){
+            const display=document.getElementById('dynamicMaxSimResidueCount');
+            if(display)display.textContent=groupMaxSimulationResidues==='dynamic'?(groupSimulation?.residueBudget??100).toLocaleString():'Manual';
+        }
+        let activeSimulationResidueCountUpdatedAt=-Infinity;
+        function updateActiveSimulationResidueCount(now=performance.now()){
+            if(now-activeSimulationResidueCountUpdatedAt<250)return;
+            activeSimulationResidueCountUpdatedAt=now;
+            const state=groupSimulation;
+            const count=state&&!state.complete&&!modelLoading&&state.nodes===physicsNodes?countSimulationResidues(state.active):0;
+            const display=document.getElementById('activeSimulationResidueCount');
+            if(display)display.textContent=count.toLocaleString();
+        }
+        function countSimulationResidues(blocks){
+            return physicsNodes.reduce((count,node)=>count+(blocks.has(node.blockIdx)&&!node.referenceLockTarget?1:0),0);
+        }
+        function regulateSimulationResidueBudget(now,running){
+            const state=groupSimulation;
+            if(groupMaxSimulationResidues!=='dynamic')return false;
+            if(!running){state.budgetLastAt=null;return false;}
+            if(state.budgetLastAt===null){state.budgetLastAt=now;state.budgetLastSteps=physicsWorkerStepCount;return false;}
+            if(now-state.budgetLastAt<2500)return false;
+            const steps=physicsWorkerStepCount-state.budgetLastSteps;
+            const rate=steps*1000/(now-state.budgetLastAt);
+            state.budgetLastAt=now;state.budgetLastSteps=physicsWorkerStepCount;
+            // Dead band and modest changes avoid chasing individual slow steps.
+            const previous=state.residueBudget,total=countSimulationResidues(new Set(physicsNodes.map(node=>node.blockIdx)));
+            if(rate>5.5)state.residueBudget=Math.min(Math.max(100,total),Math.ceil(previous*1.2));
+            else if(rate<4.5)state.residueBudget=Math.max(1,Math.floor(previous*.8));
+            updateDynamicResidueBudgetDisplay();
+            return previous!==state.residueBudget;
+        }
+        function startPhysicsPassTimeline(){
+            const state=groupSimulation;if(state.timelineRow)return;
+            const build=typeof multiReferenceBuild==='undefined'?null:multiReferenceBuild;
+            const name=build?.kind==='draft'?`Draft ${build.index+1}`:build?.kind==='combined'?'Combined model':'Homology model';
+            state.timelineRow=globalThis.BuildTimeline?.start(`${name} pass ${state.pass}`);
         }
         function findGroupNeighbourBlocks(nodes,coreBlock,distance){
             const active=new Set([coreBlock]),grid=new Map();
@@ -5876,20 +5923,26 @@
         function fillParallelPhysicsGroups(now){
             const state=groupSimulation;
             startPhysicsGraphHistory();
-            while(state.groups.length<state.capacity&&state.nextIndex<state.order.length){
-                const index=state.nextIndex++,core=state.order[index],name=morphMatrixBlocks[core]?.c1??String(core+1);
+            startPhysicsPassTimeline();
+            while(state.nextIndex<state.order.length){
+                const index=state.nextIndex,core=state.order[index],name=morphMatrixBlocks[core]?.c1??String(core+1);
                 const indices=[];physicsNodes.forEach((node,i)=>{if(node.blockIdx===core)indices.push(i);});
                 const fixed=indices.every(i=>physicsNodes[i].referenceLockTarget);
-                markPhysicsGraphControl(`Group ${index+1}: ${name}${fixed?' (fixed)':''}`,`group:${index}`);
+                const active=findGroupNeighbourBlocks(physicsNodes,core,groupNeighbourDistance);
+                const combined=new Set(state.groups.flatMap(group=>[...group.active]));
+                for(const block of active)combined.add(block);
+                if(!fixed&&state.groups.length&&countSimulationResidues(combined)>state.residueBudget)break;
+                state.nextIndex++;
+                markPhysicsGraphControl(`Pass ${state.pass} · Group ${index+1}: ${name}${fixed?' (fixed)':''}`,`pass:${state.pass}:group:${index}`);
                 if(fixed){state.processed.add(core);state.results.push({core,reason:'fixed',elapsed:0,maxSpeed:0,unresolvedClashes:0});continue;}
-                state.groups.push({index,core,active:findGroupNeighbourBlocks(physicsNodes,core,groupNeighbourDistance),
+                state.groups.push({index,core,active,
                     elapsed:0,sampleElapsed:0,sampleSteps:0,maxSpeed:null,converged:false,unresolvedClashes:0,
                     indices,positions:indices.flatMap(i=>{const n=physicsNodes[i];return [n.x,n.y,n.z];}),distances:indices.map(()=>0)});
             }
             refreshParallelPhysicsGroups();
             if(!state.groups.length){finishGroupSimulation();return;}
             if(sideChainJiggleEnabled)toggleSideChainJiggle();
-            setPhysicsColorMode('residue-speed');
+            if(!state.colourInitialized){state.colourInitialized=true;setPhysicsColorMode(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.liveColorMode?multiReferenceBuild.liveColorMode:'running-simulation');}
             updateGroupSimulationStatus();
         }
         function tickParallelPhysicsGroups(now){
@@ -5900,18 +5953,34 @@
             }
             if(state.wasRunning!==running)resetParallelPhysicsSampling();
             state.lastTick=now;state.wasRunning=running;
+            const budgetChanged=regulateSimulationResidueBudget(now,running);
+            if(budgetChanged)state.budgetRefill=true;
             if(!running)return;
             let changed=!state.groups.length;
+
             if(!workerState?.pending){
                 state.groups=state.groups.filter(group=>{
-                    const expired=group.elapsed>=groupMaxWaitingTime*1000;
+                    const expired=group.elapsed>=groupMaxWaitingTime*500;
                     if(!expired&&!group.converged)return true;
                     state.processed.add(group.core);state.results.push({core:group.core,reason:expired?'time limit':'converged',
                         elapsed:group.elapsed,maxSpeed:group.maxSpeed,unresolvedClashes:group.unresolvedClashes});
                     changed=true;return false;
                 });
             }
-            if(changed)fillParallelPhysicsGroups(now);
+            if(!workerState?.pending){
+                // Retain the oldest group even if it alone exceeds the budget.
+                while(state.groups.length>1){
+                    const active=new Set(state.groups.flatMap(group=>[...group.active]));
+                    if(countSimulationResidues(active)<=state.residueBudget)break;
+                    // Defer newer cores and revisit them after the retained groups.
+                    const deferred=state.groups.pop();
+                    state.order.splice(state.nextIndex,0,deferred.core);
+                    state.order.splice(deferred.index,1);state.nextIndex--;
+                    for(const group of state.groups)if(group.index>deferred.index)group.index--;
+                    changed=true;
+                }
+            }
+            if((changed||state.budgetRefill)&&!workerState?.pending){state.budgetRefill=false;fillParallelPhysicsGroups(now);}
             else refreshParallelPhysicsGroups();
         }
         function recordParallelPhysicsGroupStep(unresolvedClashes,unresolvedClashBlocks){
@@ -5943,6 +6012,7 @@
             }
             if(state.index>=state.order.length){finishGroupSimulation();return;}
             state.active=findGroupNeighbourBlocks(physicsNodes,state.core,groupNeighbourDistance);
+            startPhysicsPassTimeline();
             state.elapsed=0;state.lastTick=now;state.maxSpeed=null;state.sampleElapsed=0;state.sampleSteps=0;
             state.coreIndices=[];state.corePositions=[];state.coreDistances=[];
             physicsNodes.forEach((node,index)=>{if(node.blockIdx===state.core){state.coreIndices.push(index);state.corePositions.push(node.x,node.y,node.z);}});
@@ -5953,20 +6023,20 @@
             markPhysicsGraphControl(`Group ${state.index+1}: ${name}`,`group:${state.index}`);
             if(sideChainJiggleEnabled)toggleSideChainJiggle();
             resetResidueSpeedTracking();
-            setPhysicsColorMode('residue-speed');
+            if(!state.colourInitialized){state.colourInitialized=true;setPhysicsColorMode(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.liveColorMode?multiReferenceBuild.liveColorMode:'running-simulation');}
             updateGroupSimulationStatus();
         }
         function updateGroupSimulationStatus(){
-            const state=groupSimulation,status=document.getElementById('groupSimulationStatus');
+            const state=groupSimulation,status=document.getElementById('groupSimulationStatusText');
             if(!state||!status||state.complete)return;
             if(state.parallel){
                 const names=state.groups.slice(0,4).map(group=>morphMatrixBlocks[group.core]?.c1??String(group.core+1));
                 if(state.groups.length>4)names.push(`+${state.groups.length-4} more`);
-                status.textContent=`${state.groups.length} concurrent groups · ${state.processed.size}/${state.order.length} processed · cores ${names.join(', ')} · ${state.order.filter(block=>state.active.has(block)).length} active subunits · max core speed ${state.maxSpeed===null?'measuring…':state.maxSpeed.toFixed(3)+' Å/s'} · ${(state.elapsed/1000).toFixed(1)} s`;
+                status.textContent=`Pass ${state.pass}/2 · ${state.groups.length} concurrent groups · ${state.processed.size}/${state.order.length} processed · cores ${names.join(', ')} · ${state.order.filter(block=>state.active.has(block)).length} active subunits · max core speed ${state.maxSpeed===null?'measuring…':state.maxSpeed.toFixed(3)+' Å/s'} · ${(state.elapsed/1000).toFixed(1)} s`;
                 return;
             }
             const name=morphMatrixBlocks[state.core]?.c1??String(state.core+1);
-            status.textContent=`Group ${state.index+1}/${state.order.length} · core ${name} · ${state.order.filter(block=>state.active.has(block)).length} active subunits · max core speed ${state.maxSpeed===null?'measuring…':state.maxSpeed.toFixed(3)+' Å/s'} · ${(state.elapsed/1000).toFixed(1)} s`;
+            status.textContent=`Pass ${state.pass}/2 · Group ${state.index+1}/${state.order.length} · core ${name} · ${state.order.filter(block=>state.active.has(block)).length} active subunits · max core speed ${state.maxSpeed===null?'measuring…':state.maxSpeed.toFixed(3)+' Å/s'} · ${(state.elapsed/1000).toFixed(1)} s`;
         }
         function tickGroupSimulation(now){
             if(!groupSimulation||groupSimulation.nodes!==physicsNodes)resetGroupSimulation();
@@ -5983,7 +6053,7 @@
             state.lastTick=now;state.wasRunning=running;
             if(!running)return;
             if(state.index<0)startNextPhysicsGroup(now);
-            if(state.elapsed>=groupMaxWaitingTime*1000&&!workerState?.pending){
+            if(state.elapsed>=groupMaxWaitingTime*500&&!workerState?.pending){
                 completePhysicsGroup('time limit',now);
             }
         }
@@ -6011,19 +6081,34 @@
         }
         function finishGroupSimulation(){
             const state=groupSimulation;
+            globalThis.BuildTimeline?.end(state.timelineRow);state.timelineRow=null;
+            if(state.pass===1){
+                state.passResults.push(...state.results.map(result=>({...result,pass:1})));
+                state.pass=2;state.order=state.originalOrder.slice();state.processed.clear();state.active.clear();
+                state.results=[];state.groups=[];state.nextIndex=0;state.index=-1;state.core=null;
+                state.elapsed=0;state.lastTick=null;state.wasRunning=false;state.maxSpeed=null;state.converged=false;
+                state.budgetLastAt=null;physicsGraphHistory.lastPositions=null;
+                resetResidueSpeedTracking();
+                if(state.parallel)fillParallelPhysicsGroups(performance.now());else startNextPhysicsGroup(performance.now());
+                return;
+            }
+            globalThis.BuildTimeline?.completeCalculations();
+            state.results=[...state.passResults,...state.results.map(result=>({...result,pass:2}))];
             state.complete=true;state.completedAt=performance.now();state.active.clear();physicsRunning=false;
+            if(typeof updateStagedBuildETC==='function')updateStagedBuildETC(performance.now(),true);
             if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.kind==='draft'&&!multiReferenceBuild.done){
                 const build=multiReferenceBuild;void advanceStagedBuild().catch(error=>failStagedBuild(error,build));return;
             }
             if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.kind==='combined'){
                 multiReferenceBuild.done=true;renderStagedBuildControls();
             }
-            const unresolved=state.results.filter(result=>result.unresolvedClashes>0).length;
-            document.getElementById('groupSimulationStatus').textContent=`Model build complete · ${state.order.length} subunit groups processed.${unresolved?' '+unresolved+' group(s) reached the time limit with unresolved steric contacts.':''}`;
+            const unresolved=new Set(state.results.filter(result=>result.unresolvedClashes>0).map(result=>result.core)).size;
+            document.getElementById('groupSimulationStatusText').textContent=`Model build complete · ${state.order.length} subunit groups processed in two passes.${unresolved?' '+unresolved+' group(s) reached the time limit with unresolved steric contacts.':''}`;
             document.getElementById('physicsStatusBadge').textContent='Build complete';
             document.getElementById('physicsPauseText').textContent='Build complete';
-            setPhysicsColorMode('chain');
+            if(physicsColorMode==='running-simulation')setPhysicsColorMode('chain');
             if(sideChainJiggleEnabled!==(state.order.length<=30))toggleSideChainJiggle();
+            globalThis.BuildTimeline?.finish();
             modelBuildCompleted=true;completedModelInputKey=modelBuildInputKey;updateBuildButtonState();
             if(modelBuildStartedAt!==null)document.getElementById('modelBuildTime').textContent=`Homology model built in ${((performance.now()-modelBuildStartedAt)/1000).toFixed(2)} seconds`;
             updateHomologyViewerToggle();
@@ -6683,6 +6768,28 @@
         }
         let physicsSimulationWorkerState=null;
         let physicsWorkerStepCount=0;
+        const physicsStepRateSamples=[];
+        let physicsStepRateWasRunning=false;
+        function updatePhysicsStepRate(now=performance.now()){
+            const running=physicsRunning&&simulationPhase===2&&!modelLoading&&
+                readyModelGeneration===modelBuildGeneration&&!animationPlaying&&physicsRepresentation!=='surface'&&
+                !(typeof groupSimulation!=='undefined'&&groupSimulation?.complete);
+            if(!running||!physicsStepRateWasRunning)physicsStepRateSamples.length=0;
+            physicsStepRateWasRunning=running;
+            let rate=0;
+            if(running){
+                physicsStepRateSamples.push({time:now,count:physicsWorkerStepCount});
+                // Keep the sample just before the window boundary so the elapsed
+                // time is measured rather than assumed to be exactly one second.
+                while(physicsStepRateSamples.length>2&&physicsStepRateSamples[1].time<=now-2000)physicsStepRateSamples.shift();
+                const first=physicsStepRateSamples[0],elapsed=now-first.time;
+                if(elapsed>=250)rate=(physicsWorkerStepCount-first.count)*1000/elapsed;
+            }
+            const display=document.getElementById('physicsStepRateText');
+            if(display)display.textContent=`${rate.toFixed(1)} steps/s`;
+            return rate;
+        }
+
         function disposePhysicsSimulationWorker(){
             physicsSimulationWorkerState?.worker.terminate();physicsSimulationWorkerState=null;
         }
@@ -8074,7 +8181,13 @@
             return dark;
         }
         function updateLipidColors(){
-            const system=membraneLipids;if(!system)return;
+            // Both membranes share the selected palette, including existing
+            // lipids when the protein colour mode changes after detection.
+            for(const system of new Set([membraneLipids,secondMembraneLipids])){
+                if(system)updateMembraneLipidSystemColors(system);
+            }
+        }
+        function updateMembraneLipidSystemColors(system){
             const palette=LIPID_ATOMS.map((atom,index)=>new THREE.Color(lipidAtomColor(physicsColorMode,atom,index)));
             LipidRenderer.colors(system.gpu,LIPID_ATOMS,LIPID_BONDS,(_,index)=>palette[index]);
             // Each simplified part represents a group of atoms. Average their
@@ -8554,6 +8667,9 @@
 
             globalThis.AppPerformanceDiagnostics?.frame();
             PerfTracker.recordFrame();
+            if(typeof updateStagedBuildETC==='function')updateStagedBuildETC(performance.now());
+            updatePhysicsStepRate();
+            updateActiveSimulationResidueCount();
             physicsPulseUniform.value = physicsPulseOpacity(performance.now(), physicsOriginColorMode);
 
             advanceAnimation(performance.now());
@@ -8566,18 +8682,18 @@
                 scheduleValidationReportRefresh();
             // Refresh against the current conformation at display cadence, including
             // animation playback when the physics step itself is paused.
-            if(physicsColorMode==='residue-speed'||(groupSimulation&&!groupSimulation.complete))updateResidueSpeeds(performance.now());
-            if((physicsColorMode==='af-difference'||physicsColorMode==='residue-speed'||['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence'].includes(physicsColorMode))&&
+            if(['residue-speed','running-simulation'].includes(physicsColorMode)||(groupSimulation&&!groupSimulation.complete))updateResidueSpeeds(performance.now());
+            if((physicsColorMode==='af-difference'||['residue-speed','running-simulation','steric-clashes'].includes(physicsColorMode)||['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence'].includes(physicsColorMode))&&
                 (++physicsAfDifferenceFrame%2===0)&&(!['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence'].includes(physicsColorMode)||performance.now()-validationState.lastDraw>1000)){
                 if(['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence'].includes(physicsColorMode)){
                     calculateValidationPairs();validationState.lastDraw=performance.now();
                 }
                 updatePhysicsNodeColors();
-                if(physicsColorMode==='residue-speed'&&physicsAfDifferenceFrame%10===0&&showModel1Overlay&&referenceColorMode==='same')updateModel1AlignmentColors();
+                if(['residue-speed','running-simulation'].includes(physicsColorMode)&&physicsAfDifferenceFrame%10===0&&showModel1Overlay&&referenceColorMode==='same')updateModel1AlignmentColors();
             }
             if(physicsColorMode==='rotational-symmetry')updateRotationalSymmetry();
             if(physicsColorMode==='equivalent-protein-shape')updateEquivalentProteinShape();
-            if(physicsColorMode==='pattern-variance'||patternMarkersVisible||patternExtensionUnits>0)updatePatternVariance();
+            if(physicsColorMode==='pattern-variance'||patternMarkersVisible||patternExtensionUnits>0||detectedExtensionPatterns.length)updatePatternVariance();
             updateInferredMembrane(performance.now());
             if (!physicsRunning) homologyEnergyStableSince = null;
             updateSpringDisplay();
@@ -9046,6 +9162,8 @@
                 if(kind==='surface')lastSurfaceUpdate=-Infinity;
                 updateAtomRepresentation();
                 if(showModel1Overlay&&physicsScene){if(model1OverlayGroup){physicsScene.remove(model1OverlayGroup);disposeModel1Overlay(model1OverlayGroup);}model1OverlayGroup=buildModel1OverlayGroup();physicsScene.add(model1OverlayGroup);}
+                if(patternExtensionUnits>0)updatePatternVariance(true);
+                if(typeof stagedLiveView==='function'&&!stagedLiveView())renderStagedPreview();
                 if (physicsRenderer) { for (const chain of backboneChains) chain.line.userData.syncBackbone?.(); physicsRenderer.render(physicsScene, physicsCamera); }
             }
         }
@@ -9706,6 +9824,8 @@
         }
         async function fetchSiftsUniProtIds({autoBuild=false}={}) {
             const ids=referencePdbIdsForSifts();if(!ids.length)return;
+            globalThis.BuildTimeline?.prepare();
+            const mappingTiming=globalThis.BuildTimeline?.start('Loading chain mapping');
             siftsLookupController?.abort();
             const controller=new AbortController();siftsLookupController=controller;
             const signal=controller.signal;
@@ -9749,6 +9869,7 @@
                 status.textContent=signal.aborted?'UniProt discovery timed out. Retry the lookup.':`Could not discover UniProt IDs: ${error.message}`;
                 report.notes=[status.textContent];renderChainMappingReport(report);
             }} finally {
+                globalThis.BuildTimeline?.end(mappingTiming);
                 clearTimeout(timeout);
                 if(token===siftsRequestToken){if(siftsLookupLoading)clearSiftsLookupLoading(true);button.disabled=!referencePdbIdsForSifts().length;updateBuildButtonState();}
             }
@@ -9982,6 +10103,7 @@
         function hidePhysicsViewerLoading(){document.getElementById('physicsInitialLoading')?.classList.add('hidden');}
         function cancelModelBuild() {
             if (!modelLoading) return;
+            globalThis.BuildTimeline?.finish('Cancelled');
             ++modelBuildGeneration;
             modelBuildAbortController?.abort();
             modelBuildAbortController = null;
@@ -10068,9 +10190,10 @@
             document.getElementById('pausePhysicsPulseBtn').textContent = 'Pause Pulsing';
             document.getElementById('pausePhysicsPulseBtn').setAttribute('aria-pressed','false');
             if(rotationalSymmetryAxes){physicsScene?.remove(rotationalSymmetryAxes);rotationalSymmetryAxes.traverse(item=>{item.geometry?.dispose();item.material?.dispose();});rotationalSymmetryAxes=null;}
-            disposePatternExtensions();patternExtensionUnits=0;
+            disposePatternExtensions();patternExtensionUnits=0;patternExtensionCounts.clear();detectedExtensionPatterns=[];
             document.getElementById('physicsPatternExtensionControl')?.classList.add('hidden');
-            const extensionInput=document.getElementById('physicsPatternExtensionUnits');if(extensionInput)extensionInput.value='0';
+            const extensionHost=document.getElementById('physicsPatternExtensionControl');
+            if(extensionHost){extensionHost.replaceChildren();delete extensionHost.dataset.patternKeys;}
             disposePatternMarkers();patternVarianceScores=[];patternMarkersVisible=false;patternVarianceLastUpdate=-Infinity;
             document.getElementById('togglePatternMarkers')?.classList.add('hidden');
             updatePhysicsToggleButton('togglePatternMarkers',false);
@@ -10151,6 +10274,7 @@
             modelBuildAbortController = new AbortController();
             const buildSignal = modelBuildAbortController.signal;
             const generation = ++modelBuildGeneration;
+            globalThis.BuildTimeline?.beginBuild();
             modelBuildStartedAt = performance.now();
             modelBuildCompleted = false; modelLoading = true; simulationAutoRendered = false;
             modelBuildInputKey = currentModelInputKey();
@@ -10195,11 +10319,13 @@
                 PerfTracker.metrics.cachedCells = 0;
                 chainVisibility = {};
 
+                const filesTiming=globalThis.BuildTimeline?.start('Fetching PDBs and AlphaFold models');
                 let [files1, fileResults2] = await Promise.all([
                     Promise.all(entries1.map(entry=>loadModelInput(entry,true,buildSignal))),
                     Promise.all(entries2.map(entry=>loadModelInput(entry,true,buildSignal)))
                 ]);
                 if (generation !== modelBuildGeneration) return;
+                globalThis.BuildTimeline?.end(filesTiming);
                 if(files1.length>1){beginStagedBuild(files1,fileResults2,generation);files1=[files1[0]];model1Influence=multiReferenceBuild.weights[0];}
                 const file1 = files1[0];
                 referenceFiles = files1;
@@ -10322,6 +10448,7 @@
                 modelBuildAbortController = null;
                 hidePhysicsViewerLoading();
                 updateBuildButtonState();
+                globalThis.BuildTimeline?.finish('Failed');
                 document.getElementById("modelBuildTime").textContent = "Model build failed";
                 console.error("Error loading models:", err);
                 showError(err.message || "Failed to load protein structures.");
@@ -10623,6 +10750,7 @@
             }
 
             tickGroupSimulation(performance.now());
+            if(groupSimulation?.complete)return;
             physicsRunning = !physicsRunning;
             if(groupSimulation){groupSimulation.lastTick=performance.now();groupSimulation.wasRunning=physicsRunning;groupSimulation.sampleElapsed=groupSimulation.elapsed;groupSimulation.sampleSteps=0;groupSimulation.coreDistances=groupSimulation.coreIndices?.map(()=>0)||[];groupSimulation.corePositions=groupSimulation.coreIndices?.flatMap(index=>{const n=physicsNodes[index];return [n.x,n.y,n.z];})||[];}
             if(groupSimulation?.parallel)resetParallelPhysicsSampling();
@@ -11393,7 +11521,7 @@
                 for(const {source,inverse} of ends){
                     let points=templates.get(source)?.points;
                     if(!points?.length)continue;
-                    for(let step=1;step<=units;step++){
+                    for(let step=1;step<=(typeof units==='function'?units(pattern):units);step++){
                         const next=points.map(p=>patternTransformPoint(pattern.fit,p,inverse));
                         if(collides(next))break; // This end stops; other ends remain independent.
                         copies.push({source,points:next,step,inverse});next.forEach(add);points=next;
@@ -11403,28 +11531,97 @@
             return copies;
         }
         let patternExtensionUnits=0,patternExtensionGroup=null;
+        const patternExtensionCounts=new Map();
+        let detectedExtensionPatterns=[];
+        function patternExtensionKey(pattern){return [...pattern.members].sort((a,b)=>a-b).join(',');}
+        function patternExtensionLabel(pattern){
+            const members=[...pattern.members].sort((a,b)=>a-b);
+            const names=[...new Set(members.map(chainProteinName).filter(Boolean))];
+            const chains=members.map(block=>physicsNodes.find(node=>node.blockIdx===block)?.res.c1??String(block+1));
+            return `Extend ${names.join(' / ')||'protein'} (${chains.join(', ')}) pattern by`;
+        }
+        function availablePatternExtensions(patterns,templates,obstacles,copies=[]){
+            return patterns.filter(pattern=>{
+                const otherCopies=copies.filter(copy=>!pattern.members.includes(copy.source)).flatMap(copy=>copy.points);
+                return generatePatternExtensions([pattern],templates,[...obstacles,...otherCopies],1).length>0;
+            });
+        }
+        function updatePatternExtensionControls(patterns,templates,obstacles,copies){
+            const host=document.getElementById('physicsPatternExtensionControl');if(!host)return;
+            const available=availablePatternExtensions(patterns,templates,obstacles,copies);
+            const availableKeys=new Set(available.map(patternExtensionKey));
+            for(const key of patternExtensionCounts.keys())if(!availableKeys.has(key))patternExtensionCounts.delete(key);
+            patternExtensionUnits=Math.max(0,...patternExtensionCounts.values());
+            const signature=JSON.stringify(available.map(pattern=>[patternExtensionKey(pattern),patternExtensionLabel(pattern)]));
+            host.classList.toggle('hidden',!available.length);
+            if(host.dataset.patternKeys!==signature){
+                host.dataset.patternKeys=signature;host.replaceChildren();
+                for(const pattern of available){
+                    const key=patternExtensionKey(pattern),caption=patternExtensionLabel(pattern);
+                    const label=document.createElement('label');label.className='inline-flex items-center gap-1 text-xs';
+                    const text=document.createElement('span');text.textContent=caption;
+                    const input=document.createElement('input');input.type='text';input.inputMode='numeric';input.value=String(patternExtensionCounts.get(key)??0);input.dataset.patternExtension=key;
+                    input.setAttribute('aria-label',`${caption} units`);input.style.touchAction='none';input.title='Type 0–100 copies at each open end, or drag up/right to increase';
+                    initializePatternExtensionInput(input,key);label.append(text,input,document.createTextNode(' units'));host.append(label);
+                }
+            }else for(const input of host.querySelectorAll('input')){
+                if(document.activeElement!==input)input.value=String(patternExtensionCounts.get(input.dataset.patternExtension)??0);
+            }
+        }
         function disposePatternExtensions(){
             if(!patternExtensionGroup)return;
+            if(patternExtensionGroup.patternLifecycle)patternExtensionGroup.patternLifecycle.cancelled=true;
             physicsScene?.remove(patternExtensionGroup);
             patternExtensionGroup.traverse(item=>{item.geometry?.dispose();item.material?.dispose();});
             patternExtensionGroup=null;
         }
+        function patternCopyResidues(copy,template,nodes=physicsNodes){
+            const residues=new Map();
+            template.entries.forEach((entry,index)=>{
+                const node=nodes[entry.nodeIndex],original=node.res.atoms2[node.idx2]??node.res.atoms1?.[node.idx1]??{};
+                if(!residues.has(entry.nodeIndex))residues.set(entry.nodeIndex,{...original,...copy.points[index],entityType:node.res.entityType,sourceAtoms:[],nodeIndex:entry.nodeIndex});
+                const residue=residues.get(entry.nodeIndex);
+                if(entry.source.atomName==='CA')Object.assign(residue,copy.points[index]);
+                residue.sourceAtoms.push({...entry.source,...copy.points[index]});
+            });
+            return [...residues.values()];
+        }
         function renderPatternExtensions(patterns){
-            disposePatternExtensions();
-            if(!patternExtensionUnits||!patterns.length||!physicsScene)return;
+            if(!patterns.length||!physicsScene){disposePatternExtensions();if(typeof updatePatternExtensionControls==='function')updatePatternExtensionControls([],new Map(),[],[]);return;}
             // Read current displayed atom positions; copies never enter physicsNodes or springs.
             const entries=simulationAtomEntries(),coords=simulationAtomCoordinates(entries,true),templates=new Map(),obstacles=[];
             entries.forEach((entry,i)=>{
                 const node=physicsNodes[entry.nodeIndex];
-                if(node.res.entityType!=='protein')return;
                 obstacles.push(coords[i]);
+                if(node.res.entityType!=='protein')return;
                 if(node.res.referenceOnly)return;
                 if(!templates.has(node.blockIdx))templates.set(node.blockIdx,{points:[],entries:[]});
                 const template=templates.get(node.blockIdx);template.points.push(coords[i]);template.entries.push(entry);
             });
-            const copies=generatePatternExtensions(patterns,templates,obstacles,patternExtensionUnits);
-            if(!copies.length)return;
+            const requested=typeof patternExtensionCounts==='undefined'?patternExtensionUnits:pattern=>patternExtensionCounts.get(patternExtensionKey(pattern))??0;
+            const copies=generatePatternExtensions(patterns,templates,obstacles,requested);
+            if(typeof updatePatternExtensionControls==='function')updatePatternExtensionControls(patterns,templates,obstacles,copies);
+            if(!copies.length){disposePatternExtensions();return;}
+            const surfaceKey=physicsRepresentation==='surface'?JSON.stringify([copies,viewerSizes.physics.surface,physicsColorMode,physicsMaterialSettings.occlusion,physicsNodes.map(node=>isNodeVisibleInPhysics(node))]):null;
+            if(surfaceKey&&patternExtensionGroup?.patternSurfaceKey===surfaceKey){patternExtensionGroup.visible=homologyStructureVisible;return;}
+            disposePatternExtensions();
             patternExtensionGroup=new THREE.Group();patternExtensionGroup.visible=homologyStructureVisible;physicsScene.add(patternExtensionGroup);
+            if(['curves','cartoon','surface'].includes(physicsRepresentation)){
+                const target=patternExtensionGroup,lifecycle={cancelled:false};target.patternLifecycle=lifecycle;target.patternSurfaceKey=surfaceKey;
+                for(const copy of copies){
+                    const residues=patternCopyResidues(copy,templates.get(copy.source)).filter(atom=>isNodeVisibleInPhysics(physicsNodes[atom.nodeIndex]));
+                    const colors=residues.map(atom=>{const color=new THREE.Color('#94a3b8');instancedNodeMesh?.getColorAt(atom.nodeIndex,color);return color;});
+                    addStagedDraftGeometry(target,residues,colors,lifecycle,()=>{
+                        if(lifecycle.cancelled)return;
+                        const opacity=physicsNonSelectedOpacityUniform.value;
+                        target.traverse(item=>{if(item.material){item.material.opacity=opacity;item.material.transparent=opacity<1;item.material.depthWrite=opacity>=1;}});
+                        if(physicsRenderer)physicsRenderer.render(physicsScene,physicsCamera);
+                    });
+                }
+                const opacity=physicsNonSelectedOpacityUniform.value;
+                target.traverse(item=>{if(item.material){item.material.opacity=opacity;item.material.transparent=opacity<1;item.material.depthWrite=opacity>=1;}});
+                return;
+            }
             const atomStyle=physicsRepresentation==='ball-stick',sphereRadius=atomStyle ? .34 : .85;
             const displayCopies=copies.map(copy=>{
                 const template=templates.get(copy.source);
@@ -11439,8 +11636,8 @@
             });
             const pointCount=displayCopies.reduce((sum,c)=>sum+c.points.length,0),bondCount=displayCopies.reduce((sum,c)=>sum+c.bonds.length,0);
             const opacity=physicsNonSelectedOpacityUniform.value;
-            const material=()=>new THREE.MeshPhongMaterial({shininess:6,transparent:opacity<1,opacity,depthWrite:opacity>=1});
-            const balls=new THREE.InstancedMesh(new THREE.SphereGeometry(sphereRadius,8,6),material(),pointCount);
+            const material=()=>new THREE.MeshPhongMaterial({shininess:atomStyle?6:50,...(atomStyle?{specular:0x080a0d}:{}),transparent:opacity<1,opacity,depthWrite:opacity>=1});
+            const balls=new THREE.InstancedMesh(new THREE.SphereGeometry(sphereRadius,10,8),material(),pointCount);
             const sticks=new THREE.InstancedMesh(new THREE.CylinderGeometry(1,1,1,6),material(),bondCount);
             balls.frustumCulled=false;sticks.frustumCulled=false;patternExtensionGroup.add(balls,sticks);
             const dummy=new THREE.Object3D(),color=new THREE.Color(),other=new THREE.Color(),a=new THREE.Vector3(),b=new THREE.Vector3(),up=new THREE.Vector3(0,1,0);
@@ -11532,7 +11729,7 @@
             patternMarkers.visible=patternMarkersVisible;
             const button=document.getElementById('togglePatternMarkers');
             button?.classList.toggle('hidden',!patternVarianceScores.some(value=>value!==null));
-            document.getElementById('physicsPatternExtensionControl')?.classList.toggle('hidden',!extensionPatterns.length);
+            detectedExtensionPatterns=extensionPatterns;
             if(physicsColorMode==='pattern-variance')updatePhysicsNodeColors();
             renderPatternExtensions(extensionPatterns);
         }
@@ -11741,6 +11938,32 @@
             const targetScale=Math.max(.05,quantile);
             state.scale+=(targetScale-state.scale)*(1-Math.exp(-elapsed/.5));
         }
+        function calculateStericClashScores(nodes,radius,rigid=false){
+            const scores=new Float32Array(nodes.length);
+            forEachNearbyPhysicsPair(nodes,Math.max(radius,radius*(2.2/MIN_RESIDUE_DIST)),(i,j)=>{
+                const a=nodes[i],b=nodes[j];
+                if(a.blockIdx===b.blockIdx&&(Math.abs(i-j)===1||rigid||a.res.entityType==='other'))return;
+                const limit=a.res.entityType==='other'||b.res.entityType==='other'?radius*(2.2/MIN_RESIDUE_DIST):radius;
+                const distance=Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z);
+                if(distance>=limit-.001)return;
+                const overlap=Math.max(0,Math.min(1,(limit-distance)/limit));
+                scores[i]=Math.max(scores[i],overlap);scores[j]=Math.max(scores[j],overlap);
+            });
+            return scores;
+        }
+        const stericClashColourCache={nodes:null,at:-Infinity,radius:null,rigid:null,scores:[]};
+        function stericClashColor(index){
+            const cache=stericClashColourCache,now=performance.now();
+            if(cache.nodes!==physicsNodes||cache.radius!==stericClashRadius||cache.rigid!==rigidBodySimulation||now-cache.at>=250){
+                cache.scores=calculateStericClashScores(physicsNodes,stericClashRadius,rigidBodySimulation);
+                cache.nodes=physicsNodes;cache.radius=stericClashRadius;cache.rigid=rigidBodySimulation;cache.at=now;
+            }
+            const score=cache.scores[index]??0;
+            if(score===0)return '#94a3b8';
+            // Yellow at first contact, red at 50% overlap or greater.
+            const t=Math.min(1,score*2);
+            return `rgb(${Math.round(251-12*t)},${Math.round(191-123*t)},${Math.round(36+32*t)})`;
+        }
         function residueSpeedColor(index){
             const node=physicsNodes[index];
             return node?.res.entityType==='protein'?deviationColor(residueSpeedState.speeds[index]||0,residueSpeedNormalized?residueSpeedState.scale:RESIDUE_SPEED_ABSOLUTE_SCALE):'#475569';
@@ -11933,7 +12156,7 @@
             for (let i = 0; i < N; i++) {
                 const node = physicsNodes[i];
                 let color;
-                if(groupSimulation&&!groupSimulation.complete&&groupSimulation.index>=0){
+                if(physicsColorMode==='running-simulation'&&groupSimulation&&groupSimulation.index>=0){
                     color=new THREE.Color(groupSimulation.active.has(node.blockIdx)?residueSpeedColor(i):groupSimulation.processed.has(node.blockIdx)?'#166534':'#d1d5db');
                     if(groupSimulation.active.has(node.blockIdx)&&!(groupSimulation.parallel?groupSimulation.cores.has(node.blockIdx):node.blockIdx===groupSimulation.core))color.multiplyScalar(.55);
                 } else if (physicsDifferenceMode) {
@@ -11988,6 +12211,8 @@
                     color = new THREE.Color(siteColors[i]);
                 } else if (mutationColors) {
                     color = new THREE.Color(mutationColors[i]);
+                } else if (physicsColorMode === 'steric-clashes') {
+                    color = new THREE.Color(stericClashColor(i));
                 } else if (physicsColorMode === 'residue-speed') {
                     color = new THREE.Color(residueSpeedColor(i));
                 } else if (['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','qmeandisco'].includes(physicsColorMode)) {
@@ -12077,6 +12302,13 @@
         const physicsMaterialApplied=new WeakMap();
         const physicsMaterialOriginals=new WeakMap();
         const physicsLightOriginals=new WeakMap();
+        function addPhysicsViewerLights(scene){
+            scene.add(new THREE.AmbientLight(0xffffff,physicsMaterialSettings.ambient));
+            for(const [setting,position] of [['key',[50,100,50]],['fill',[-50,-50,-50]]]){
+                const light=new THREE.DirectionalLight(0xffffff,physicsMaterialSettings[setting]);
+                light.position.set(...position);scene.add(light);
+            }
+        }
         function syncPhysicsMaterials(scene){
             const signature=`${physicsMaterialSettings.shininess}:${physicsMaterialSettings.specular}:${[...physicsMaterialOverrides].join(',')}`;
             scene.traverse(object=>{
@@ -12123,6 +12355,9 @@
                 updateModel1AlignmentColors();
             }
             if(physicsScene&&physicsRenderer)physicsRenderer.render(physicsScene,physicsCamera);
+            if(typeof stagedPreview!=='undefined'&&stagedPreview){
+                if(key==='occlusion')renderStagedPreview();else stagedPreview.render();
+            }
         }
         for(const key of Object.keys(physicsMaterialSettings)){
             document.getElementById(`physicsMaterial-${key}`)?.addEventListener('input',event=>setPhysicsMaterialControl(key,event.target.value));
@@ -12229,11 +12464,11 @@
             if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.view==='aligned'){
                 if(['reference','chain','protein','equivalent','aligned','distance'].includes(mode)){multiReferenceBuild.alignedMode=mode;physicsColorMode=mode;syncPhysicsColorMenu();renderStagedPreview();}return;
             }
-            if(groupSimulation&&!groupSimulation.complete&&groupSimulation.index>=0&&(typeof stagedLiveView!=='function'||stagedLiveView()))mode='residue-speed';
-            if (!['chain','residue-index','uniform','protein-id','rotational-symmetry','pattern-variance','equivalent-protein-shape','keyframe-difference','residue-speed','binding-sites','binding-site-type','mutation-effect-basic','constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','qmeandisco','element','side-chains','origin','aligned','membrane','membrane-placement','charge','hydrophobicity','accessible-surface-area','secondary','plddt','difference','af-difference',...Object.keys(UNI_PROT_FEATURE_MODES)].includes(mode)) return;
-            if(mode==='residue-speed'&&physicsColorMode!=='residue-speed')resetResidueSpeedTracking();
+            if (!['chain','residue-index','uniform','protein-id','rotational-symmetry','pattern-variance','equivalent-protein-shape','keyframe-difference','residue-speed','running-simulation','steric-clashes','binding-sites','binding-site-type','mutation-effect-basic','constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','qmeandisco','element','side-chains','origin','aligned','membrane','membrane-placement','charge','hydrophobicity','accessible-surface-area','secondary','plddt','difference','af-difference',...Object.keys(UNI_PROT_FEATURE_MODES)].includes(mode)) return;
+            if(['residue-speed','running-simulation'].includes(mode)&&!['residue-speed','running-simulation'].includes(physicsColorMode))resetResidueSpeedTracking();
             if(mode==='accessible-surface-area')accessibleSurfaceCache=null;
             physicsColorMode = mode;
+            if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild&&stagedLiveView())multiReferenceBuild.liveColorMode=mode;
             syncPhysicsColorMenu();
             updateUniProtFetchingBadge();
             if(mode==='alpha-pae'||mode==='constraint-confidence'||mode==='model-confidence')void loadValidationPae();
@@ -12260,6 +12495,8 @@
                 'pattern-variance':'Pattern variance: <span style="color:#38bdf8">low deviation</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">high</span>; repeated translations and rotations of equivalent proteins, scored in Å using corresponding residues; grey: no supported pattern. Pattern markers show 3D arrows at protein centres pointing along the repeat, with lines connecting the centres. Separate repeats are fitted independently; two-copy patterns establish a movement but cannot validate its repetition.',
                 'equivalent-protein-shape':'Equivalent protein shape: <span style="color:#38bdf8">low difference</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">high</span>; each residue is scored by deviations in its distances to other residues from the across-chain average; dark grey: no equivalent protein comparison.',
                 'keyframe-difference':`Keyframe conformation difference: <span style="color:#38bdf8">little change</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">large change</span> in distances to sampled residues across saved keyframes. ${keyframeDifferenceNormalized?'Colours are scaled to the current model’s 95th percentile.':'Medium change: 2.5 Å; large change: 5 Å or more (mean variation).'} Grey: unavailable. <button id="keyframeDifferenceNormalize" type="button" aria-pressed="${keyframeDifferenceNormalized}" class="bg-slate-800 rounded-lg px-2 py-1">Normalised: ${keyframeDifferenceNormalized?'True':'False'}</button>`,
+                'steric-clashes':'Steric clashes: grey means no clash; yellow → red shows increasing overlap relative to the simulation’s steric exclusion distance. Each residue shows its worst overlap. Bonded neighbours and rigid internal contacts are excluded. This is a residue-level check, not an all-atom clash score.',
+                'running-simulation':'Running simulation: cores use residue speed (<span style="color:#38bdf8">blue</span> → <span style="color:#facc15">yellow</span> → <span style="color:#ef4444">red</span>); active neighbours use darker speed colours · <span style="color:#166534">Dark green: processed core</span> · <span style="color:#d1d5db">Light grey: waiting</span>. Progress resets for pass 2.',
                 'residue-speed':'Residue speed: <span style="color:#38bdf8">stationary or slow</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">fast</span>. Colours use smoothed movement in Å/s; non-protein atoms are grey. The scale is fixed unless normalisation is enabled.',
                 'binding-sites':'Binding sites: each distinct inter-protein contact patch has its own colour; grey residues are outside binding sites.',
                 'binding-site-type':'Binding site type: contact patches between the same pair of protein types share a colour; grey residues are outside binding sites.',
@@ -12290,8 +12527,7 @@
                 ? 'UniProt topological domains: regions with the same label share a colour family; different shades distinguish regions. Grey means no annotation or no UniProt record. UniProt positions refer to the canonical sequence.'
                 : `UniProt ${UNI_PROT_FEATURE_MODES[mode]}: annotated residues use distinct colours for each feature; grey means no annotation or no UniProt record. UniProt positions refer to the canonical sequence.`;
             const colourKey = document.getElementById('physicsColourKey');
-            colourKey.innerHTML = groupSimulation&&!groupSimulation.complete&&groupSimulation.index>=0
-                ? 'Core: residue speed (blue → yellow → red) · Active neighbours: darker speed colours · <span style="color:#166534">Dark green: previously processed core</span> · <span style="color:#d1d5db">Light grey: awaiting its turn</span>' : keys[mode];
+            colourKey.innerHTML = keys[mode]??'';
             if(mode==='residue-speed'){
                 const scaleLabel=document.createElement('span');
                 scaleLabel.textContent=residueSpeedNormalized?' · Scale: current 95th-percentile protein-residue speed. ':' · Scale: 0–1 Å/s (fixed). ';
@@ -12398,6 +12634,8 @@
             lastSurfaceUpdate = -Infinity;
             updateAtomRepresentation();
             updateCartoonRepresentation();
+            if(patternExtensionUnits>0)updatePatternVariance(true);
+            if(typeof stagedLiveView==='function'&&!stagedLiveView())renderStagedPreview();
             if (showModel1Overlay && physicsScene) {
                 if (model1OverlayGroup) { physicsScene.remove(model1OverlayGroup); disposeModel1Overlay(model1OverlayGroup); }
                 model1OverlayGroup = buildModel1OverlayGroup();
@@ -13127,7 +13365,16 @@
 
 // mmcifExport.js start
         // Generates compliant PDBx/mmCIF v5 string representing the complete active simulation model
-        function generateSimulationMmCifString(membraneGeometry = inferredMembrane) {
+        function simulationMembraneSnapshot(){
+            const copy=geometry=>geometry?{
+                center:geometry.center.slice(),normal:geometry.normal.slice(),u:geometry.u.slice(),v:geometry.v.slice(),
+                curvature:geometry.curvature.slice(),halfThickness:geometry.halfThickness,extent:geometry.extent
+            }:null;
+            const primary=copy(inferredMembrane);
+            if(primary)primary.secondGeometry=copy(secondMembrane);
+            return primary;
+        }
+        function generateSimulationMmCifString(membraneGeometry = simulationMembraneSnapshot()) {
             if (!physicsNodes || !physicsNodes.length) return null;
 
             const lines = [];
@@ -13209,27 +13456,28 @@
             if(membraneGeometry){
                 // Non-atomic membrane geometry lives in its own category. It must
                 // never be mistaken for simulated atoms or chemical bonds.
-                lines.push('_stringscape_membrane_geometry.kind two_leaflet_surface');
-                lines.push('_stringscape_membrane_geometry.units angstrom');
-                lines.push(`_stringscape_membrane_geometry.half_thickness ${membraneGeometry.halfThickness.toFixed(3)}`);
-                lines.push('loop_','_stringscape_membrane_vertex.id','_stringscape_membrane_vertex.leaflet',
+                const geometries=[membraneGeometry,membraneGeometry.secondGeometry].filter(Boolean);
+                lines.push('loop_','_stringscape_membrane_geometry.id','_stringscape_membrane_geometry.kind',
+                    '_stringscape_membrane_geometry.units','_stringscape_membrane_geometry.half_thickness');
+                geometries.forEach((geometry,i)=>lines.push(`${i+1} two_leaflet_surface angstrom ${geometry.halfThickness.toFixed(3)}`));
+                lines.push('#');
+                lines.push('loop_','_stringscape_membrane_vertex.id','_stringscape_membrane_vertex.membrane_id','_stringscape_membrane_vertex.leaflet',
                     '_stringscape_membrane_vertex.row','_stringscape_membrane_vertex.column',
                     '_stringscape_membrane_vertex.Cartn_x','_stringscape_membrane_vertex.Cartn_y','_stringscape_membrane_vertex.Cartn_z');
                 // Export in the same centred coordinates as simulationAtomCoordinates.
-                const plates=[membranePlateMeshData(membraneGeometry,-1,18,undefined,true,true),
-                    membranePlateMeshData(membraneGeometry,1,18,undefined,true,true)];
+                const plates=geometries.flatMap(geometry=>[-1,1].map(side=>membranePlateMeshData(geometry,side,18,undefined,true,true)));
                 let vertexId=1;
                 for(let plate=0;plate<plates.length;plate++)for(let i=0;i<plates[plate].positions.length;i+=3){
                     const row=Math.floor(i/3/19),column=i/3%19,p=plates[plate].positions;
-                    lines.push(`${vertexId++} ${plate+1} ${row} ${column} ${p[i].toFixed(3)} ${p[i+1].toFixed(3)} ${p[i+2].toFixed(3)}`);
+                    lines.push(`${vertexId++} ${Math.floor(plate/2)+1} ${plate%2+1} ${row} ${column} ${p[i].toFixed(3)} ${p[i+1].toFixed(3)} ${p[i+2].toFixed(3)}`);
                 }
-                lines.push('#','loop_','_stringscape_membrane_triangle.id','_stringscape_membrane_triangle.leaflet',
+                lines.push('#','loop_','_stringscape_membrane_triangle.id','_stringscape_membrane_triangle.membrane_id','_stringscape_membrane_triangle.leaflet',
                     '_stringscape_membrane_triangle.vertex_id_1','_stringscape_membrane_triangle.vertex_id_2','_stringscape_membrane_triangle.vertex_id_3');
                 let triangleId=1;
                 for(let plate=0;plate<plates.length;plate++){
                     const offset=plate*19*19;
                     for(let i=0;i<plates[plate].indices.length;i+=3){const f=plates[plate].indices;
-                        lines.push(`${triangleId++} ${plate+1} ${f[i]+offset+1} ${f[i+1]+offset+1} ${f[i+2]+offset+1}`);
+                        lines.push(`${triangleId++} ${Math.floor(plate/2)+1} ${plate%2+1} ${f[i]+offset+1} ${f[i+1]+offset+1} ${f[i+2]+offset+1}`);
                     }
                 }
                 lines.push('#');
@@ -13358,8 +13606,8 @@
             renderer.domElement.style.cssText='position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3';
             const scene=new THREE.Scene(),camera=new THREE.Camera();
             camera.matrixAutoUpdate=false;
-            for(const side of [-1,1]){
-                const data=membranePlateMeshData(geometry,side,48,undefined,true,false);
+            for(const membrane of [geometry,geometry.secondGeometry].filter(Boolean))for(const side of [-1,1]){
+                const data=membranePlateMeshData(membrane,side,48,undefined,true,false);
                 const meshGeometry=new THREE.BufferGeometry();
                 meshGeometry.setAttribute('position',new THREE.BufferAttribute(data.positions,3));
                 meshGeometry.setIndex(data.indices);meshGeometry.computeVertexNormals();
@@ -13495,10 +13743,7 @@
         }
         async function renderCurrentSimulation() {
             const buildGeneration = modelBuildGeneration;
-            const membraneSnapshot=inferredMembrane?{
-                center:inferredMembrane.center.slice(),normal:inferredMembrane.normal.slice(),u:inferredMembrane.u.slice(),v:inferredMembrane.v.slice(),
-                curvature:inferredMembrane.curvature.slice(),halfThickness:inferredMembrane.halfThickness,extent:inferredMembrane.extent
-            }:null;
+            const membraneSnapshot=simulationMembraneSnapshot();
             const cifContent = generateSimulationMmCifString(membraneSnapshot);
             if (!cifContent) {
                 showError('No simulation structure available. Please load a structure first.');
@@ -13970,8 +14215,8 @@
         if (physicsColorSelect && physicsColorMenu && physicsColorMenuButton) {
             const colorOptions=new Map([...physicsColorSelect.options].map(option=>[option.value,option]));
             const colorColumns=[
-                [['Main',['chain','residue-index','protein-id','secondary','origin','uniform']],
-                 ['Properties',['side-chains','element','charge','hydrophobicity','accessible-surface-area','mutation-effect-basic','residue-speed']]],
+                [['Main',['running-simulation','chain','residue-index','protein-id','secondary','origin','uniform']],
+                 ['Properties',['steric-clashes','side-chains','element','charge','hydrophobicity','accessible-surface-area','mutation-effect-basic','residue-speed']]],
                 [['Regions',['binding-sites','binding-site-type','aligned']],
                  ['Comparison',['rotational-symmetry','pattern-variance','equivalent-protein-shape','keyframe-difference','difference','af-difference']],
                  ['Scores',['model-confidence','constraint-confidence','alpha-pae','plddt','spring-strain','membrane-score']]],
@@ -14046,21 +14291,24 @@
             const safeTitle=physicsCaptureTitle().trim().replace(/[^a-z0-9._ -]+/gi,'').replace(/\s+/g,'-').slice(0,120)||'physics-viewport';
             const link=document.createElement('a');link.href=physicsRecordingUrl;link.download=`${safeTitle}.${physicsRecordingMime.startsWith('video/mp4')?'mp4':'webm'}`;document.body.appendChild(link);link.click();link.remove();
         });
-        function initializePatternExtensionInput(input){
+        function initializePatternExtensionInput(input,patternKey=null){
             if(!input)return;
+            const getUnits=()=>patternKey===null?patternExtensionUnits:patternExtensionCounts.get(patternKey)??0;
             const setUnits=(value,force=true)=>{
                 if(!Number.isFinite(value))return;
                 const units=Math.max(0,Math.min(100,Math.round(value)));
-                if(units===patternExtensionUnits)return;
-                patternExtensionUnits=units;updatePatternVariance(force);
+                if(units===getUnits())return;
+                if(patternKey===null)patternExtensionUnits=units;
+                else {patternExtensionCounts.set(patternKey,units);patternExtensionUnits=Math.max(0,...patternExtensionCounts.values());}
+                updatePatternVariance(force);
             };
             input.addEventListener('input',()=>{if(input.value.trim())setUnits(Number(input.value));});
-            input.addEventListener('change',()=>{if(input.value.trim())setUnits(Number(input.value));input.value=String(patternExtensionUnits);});
+            input.addEventListener('change',()=>{if(input.value.trim())setUnits(Number(input.value));input.value=String(getUnits());});
             input.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();input.dispatchEvent(new Event('change'));input.blur();}});
             let drag=null;
             input.addEventListener('pointerdown',event=>{
                 if(event.button!==0)return;
-                drag={x:event.clientX,y:event.clientY,start:patternExtensionUnits,moved:false};input.setPointerCapture(event.pointerId);
+                drag={x:event.clientX,y:event.clientY,start:getUnits(),moved:false};input.setPointerCapture(event.pointerId);
             });
             input.addEventListener('pointermove',event=>{
                 if(!drag)return;
@@ -14079,7 +14327,6 @@
             input.addEventListener('pointerup',finish);input.addEventListener('pointercancel',finish);
             input.addEventListener('lostpointercapture',()=>{if(drag?.moved)updatePatternVariance(true);drag=null;});
         }
-        initializePatternExtensionInput(document.getElementById('physicsPatternExtensionUnits'));
         document.getElementById('togglePatternMarkers')?.addEventListener('click',()=>{
             patternMarkersVisible=!patternMarkersVisible;
             updatePhysicsToggleButton('togglePatternMarkers',patternMarkersVisible);
@@ -16947,6 +17194,7 @@ function physicsComparisonValues(mode){
     if(mode==='keyframe-difference'){keyframeDifferenceColors();scores=keyframeDifferenceCache.scores;}
     if(mode==='mutation-effect-basic'){mutationEffectColors();scores=mutationEffectCache.scores;}
     if(mode==='accessible-surface-area'){const values=accessibleSurfaceValues();scores=physicsNodes.map((node,index)=>values.get(index)??null);}
+    if(mode==='steric-clashes')scores=calculateStericClashScores(physicsNodes,stericClashRadius,rigidBodySimulation);
     if(mode==='residue-speed'){updateResidueSpeeds(performance.now());scores=residueSpeedState.speeds;}
     if(mode==='binding-sites'||mode==='binding-site-type')bindingSiteColors(mode==='binding-site-type');
     return physicsNodes.map((node,i)=>{
@@ -16954,6 +17202,11 @@ function physicsComparisonValues(mode){
         if(scores)return scores[i]??null;
         if(UNI_PROT_FEATURE_MODES[mode]){if(!atom||!uniProtAnnotationForAtom(atom))return null;const f=uniProtFeatureAt(atom,UNI_PROT_FEATURE_MODES[mode]);return f?`${uniProtAccession(atom.sourcePdbId)}: ${f.description||f.type} (${f.start}–${f.end})`:'No annotation';}
         switch(mode){
+            case 'running-simulation':{
+                if(!groupSimulation||groupSimulation.index<0)return null;
+                if(groupSimulation.active.has(node.blockIdx))return (groupSimulation.parallel?groupSimulation.cores.has(node.blockIdx):node.blockIdx===groupSimulation.core)?'Active core':'Active neighbour';
+                return groupSimulation.processed.has(node.blockIdx)?'Processed':'Waiting';
+            }
             case 'chain':return displayChainName(node.res.c1||node.res.c2||'A');
             case 'protein-id':return source?.sourcePdbId||null;
             case 'uniform':return 'All proteins';
@@ -17084,4 +17337,18 @@ if(physicsComparisonPanel&&window.ProteinVariableComparison){
     let comparisonResizeTimer;window.addEventListener('resize',()=>{clearTimeout(comparisonResizeTimer);comparisonResizeTimer=setTimeout(refreshPhysicsComparison,200);});
     // Closed sections perform no scoring work. Refresh at most once every two seconds.
     setInterval(refreshPhysicsComparison,2000);
+}
+
+// Matrix timers accumulate synchronous numerical work only, excluding display rendering and yields.
+if(globalThis.BuildTimeline){
+    const timeline=globalThis.BuildTimeline;
+    const draftStage=label=>()=>{
+        const build=typeof multiReferenceBuild==='undefined'?null:multiReferenceBuild;
+        return build?.kind==='draft'?`Draft ${build.index+1} · ${label}`:label;
+    };
+    computeAllChainAlignments=timeline.wrap(draftStage('Performing sequence alignment and determining equivalent chains'),computeAllChainAlignments);
+    const distanceStage=draftStage('Calculating distance matrices');
+    getOrComputeDistanceMatrix=timeline.wrapCalculation((model,chain)=>model.matrixCache.has(`${chain}:${springCutoffVal}`)?null:distanceStage(),getOrComputeDistanceMatrix);
+    calculateLazyDistanceMatrixCell=timeline.wrapCalculation(distanceStage,calculateLazyDistanceMatrixCell);
+    getMorphCellValue=timeline.wrapCalculation(draftStage('Calculating morph distance matrix'),getMorphCellValue);
 }
