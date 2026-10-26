@@ -3,7 +3,7 @@
 <head>
     <!-- Codex version -->
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://static.cloudflareinsights.com; script-src-attr 'none'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com; connect-src 'self' blob: https://alphafold.ebi.ac.uk https://data.rcsb.org https://models.rcsb.org https://files.rcsb.org https://search.rcsb.org https://www.ebi.ac.uk https://rest.uniprot.org https://swissmodel.expasy.org https://cloudflareinsights.com; img-src 'self' data: blob: https:; media-src 'self' blob:; worker-src 'self' blob:; child-src blob:">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://static.cloudflareinsights.com; script-src-attr 'none'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com; connect-src 'self' blob: https://api.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com http://127.0.0.1:* http://localhost:* https://alphafold.ebi.ac.uk https://data.rcsb.org https://models.rcsb.org https://files.rcsb.org https://search.rcsb.org https://www.ebi.ac.uk https://rest.uniprot.org https://swissmodel.expasy.org https://cloudflareinsights.com; img-src 'self' data: blob: https:; media-src 'self' blob:; worker-src 'self' blob:; child-src blob:">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>StringScape Homology Modeller - Comparative Protein & Distance Matrix Visualizer</title>
     <link rel="icon" type="image/jpeg" href="https://stringscape.net/images_for_website/StringScape_logo.jpg">
@@ -52,7 +52,7 @@
         #fetchReferenceSequencesBtn { display:inline-flex; align-items:center; gap:.4rem; background:#0f766e; color:#fff; border:1px solid rgba(20,184,166,.4); border-radius:.85rem; padding:.35rem .65rem; font-size:.75rem; font-weight:500; white-space:normal; text-align:center; }
         #fetchReferenceSequencesBtn:hover { background:#0d9488; border-color:#2dd4bf; }
         #fetchReferenceSequencesBtn:disabled, #fetchReferenceQueryBtn:disabled { opacity:.55; cursor:wait; }
-        #fetchReferenceSequencesBtn.hidden, #fetchReferenceQueryBtn[hidden], #fetchSiftsBtn[hidden] { display:none !important; }
+        #fetchReferenceSequencesBtn[hidden], #fetchReferenceSequencesBtn.hidden, #fetchReferenceQueryBtn[hidden], #fetchSiftsBtn[hidden] { display:none !important; }
         @keyframes sifts-ready-glow { 20%,55% { box-shadow:0 0 18px 5px rgba(52,211,153,.78); } }
         #fetchReferenceSequencesBtn.ready-glow { animation:sifts-ready-glow 2.8s ease-out; }
         #physicsSelectionInfo { position:absolute; right:1rem; bottom:1rem; z-index:12; max-width:min(19rem,calc(100% - 2rem)); background:rgba(254,240,138,.96); color:#422006; border:1px solid #eab308; border-radius:.75rem; padding:.7rem .85rem; font-size:.75rem; line-height:1.5; box-shadow:0 0 20px rgba(250,204,21,.25); pointer-events:auto; }
@@ -556,11 +556,11 @@
         #pdbInput1, #pdbInput2 { min-height:3.5rem; overflow-y:hidden; resize:none; }
         body.light-mode #pdbInput1, body.light-mode #pdbInput2 { background:#fff; }
         #recentModels { width:min(20rem,calc(100vw - 3rem)); max-width:100%; min-width:0; flex-shrink:1; }
-        #pdbInput1.reference-suggestions::placeholder { color:#bae6fd; opacity:var(--reference-suggestion-opacity,0); }
+        #referenceSearchInput.reference-suggestions::placeholder { color:#bae6fd; opacity:var(--reference-suggestion-opacity,0); }
         #pdbInput2::placeholder { color:#b5d5d3; opacity:.55; text-transform:none; }
-        body.light-mode #pdbInput1.reference-suggestions::placeholder { color:#0369a1; }
+        body.light-mode #referenceSearchInput.reference-suggestions::placeholder { color:#0369a1; }
         body.light-mode #pdbInput2::placeholder { color:#0f766e; }
-        @media (prefers-reduced-motion:reduce) { #pdbInput1.reference-suggestions::placeholder { opacity:.5; } }
+        @media (prefers-reduced-motion:reduce) { #referenceSearchInput.reference-suggestions::placeholder { opacity:.5; } }
         body.light-mode #physicsContainer button[aria-label="Capture physics viewport"] { background:#f8fafc; border-color:#cbd5e1; color:#334155; }
         body.light-mode #physicsSnapshotPanel, body.light-mode #physicsContainer .absolute.bottom-4.left-4 { background:#f8fafc; border-color:#cbd5e1; color:#334155; }
         body.light-mode #loadSimulationMolstarBtn, body.light-mode #downloadMmCifBtn { color:#fff; }
@@ -625,8 +625,9 @@
         #aboutProteinComplex summary { display:flex; align-items:center; justify-content:flex-start; gap:.5rem; list-style:none; }
         #aboutProteinComplex summary::-webkit-details-marker { display:none; }
         #aboutProteinComplex[open] .about-chevron { transform:rotate(180deg); }
+        #Introduction #modellerAiState { color:#7dd3fc; }
         #Introduction .tips-summary { display:flex; align-items:center; gap:.5rem; list-style:none; cursor:pointer; color:#7dd3fc; }
-        body.light-mode #Introduction .tips-summary { color:#075985; }
+        body.light-mode #Introduction .tips-summary, body.light-mode #Introduction #modellerAiState { color:#075985; }
         #Introduction details { margin-left:-1.25rem; margin-right:-1.25rem; padding:1rem 1.25rem 0; }
         #Introduction .tips-summary::-webkit-details-marker { display:none; }
         #Introduction details[open] .tips-chevron { transform:rotate(180deg); }
@@ -737,6 +738,33 @@
         body.light-mode .about-protein-name.protein-name-selected { color: #a16207; text-shadow: 0 0 6px rgba(234,179,8,.35); }
         #aboutProteinComplexContent sup a { color: #7dd3fc; padding: 0 2px; text-decoration: none; font-weight: 700; }
         #aboutProteinComplexContent sup a:hover { text-decoration: underline; }
+
+        body.light-mode #referenceSearchInput { background:#fff; color:#172033; }
+        #referenceSearchInput { resize:vertical; min-width:0; }
+        #findReferencePdbsBtn:disabled { opacity:.55; cursor:wait; }
+        #modellerAiDialog { --ai-bg:#0f172a; --ai-text:#e2e8f0; --ai-muted:#cbd5e1; --ai-field:#1e293b; --ai-border:#475569; --ai-track:#020617; width:min(560px,94vw); max-height:90vh; overflow:auto; background:var(--ai-bg); color:var(--ai-text); border:1px solid var(--ai-border); border-radius:16px; padding:24px; box-shadow:0 24px 80px #0005; color-scheme:dark; }
+        #modellerAiDialog::backdrop { background:rgba(15,23,42,.65); backdrop-filter:blur(4px); }
+        #modellerAiDialog :is(input,select) { background:var(--ai-field); color:var(--ai-text); border:1px solid var(--ai-border); border-radius:8px; min-height:40px; }
+        #modellerAiDialog :is(input,select,button):focus-visible { outline:3px solid #818cf8; outline-offset:3px; }
+        #modellerAiDialog :is(#modellerAiHelp,#modellerAiPrivacy,#modellerAiStatus) { color:var(--ai-muted); line-height:1.6; }
+        #modellerAiDialog :is(#modellerAiClose,#modellerAiDisconnect) { background:var(--ai-field); color:var(--ai-text); border:1px solid var(--ai-border); border-radius:8px; padding:8px 12px; }
+        #modellerAiMode { position:relative; display:flex; width:100%; isolation:isolate; padding:4px; border:1px solid var(--ai-border); border-radius:999px; background:var(--ai-track); color:var(--ai-muted); font-weight:600; }
+        #modellerAiMode::before { content:""; position:absolute; z-index:-1; left:4px; top:4px; bottom:4px; width:calc(50% - 4px); border-radius:999px; background:#574cf0; transition:transform .2s ease; }
+        #modellerAiMode[data-mode="local"]::before { transform:translateX(100%); }
+        #modellerAiMode span { width:50%; padding:8px; text-align:center; }
+        #modellerAiMode[data-mode="cloud"] span:first-child, #modellerAiMode[data-mode="local"] span:last-child { color:white; }
+        body.light-mode #modellerAiDialog { --ai-bg:#fff; --ai-text:#172033; --ai-muted:#475569; --ai-field:#f1f5f9; --ai-border:#cbd5e1; --ai-track:#e2e8f0; color-scheme:light; }
+        #modellerAiDialog .ai-picker { position:relative; margin-top:4px; }
+        #modellerAiDialog .ai-picker > button { width:100%; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; background:var(--ai-field); color:var(--ai-text); border:1px solid var(--ai-border); border-radius:8px; text-align:left; }
+        #modellerAiDialog .ai-picker > button:disabled { opacity:.7; cursor:default; }
+        #modellerAiDialog .ai-picker-menu { position:absolute; z-index:10; left:0; right:0; top:calc(100% + 6px); padding:6px; overflow-y:auto; background:var(--ai-bg); border:1px solid var(--ai-border); border-radius:12px; box-shadow:0 12px 30px #0003; }
+        #modellerAiDialog .ai-picker-menu.above { top:auto; bottom:calc(100% + 6px); }
+        #modellerAiDialog .ai-picker-menu button { display:block; width:100%; padding:9px 12px; border:0; border-radius:7px; background:var(--ai-field); color:var(--ai-text); text-align:left; overflow-wrap:anywhere; }
+        #modellerAiDialog .ai-picker-menu button + button { margin-top:4px; }
+        #modellerAiDialog .ai-picker-menu button:hover, #modellerAiDialog .ai-picker-menu button:focus-visible { background:var(--ai-track); }
+        #modellerAiDialog .ai-picker-menu button[aria-checked="true"] { background:#574cf0; color:#fff; }
+        @media(prefers-reduced-motion:reduce) { #modellerAiMode::before { transition:none; } }
+body.light-mode #groupSimulationStatus { background:#ecfeff; color:#155e75; border-color:#67e8f9; }
 </style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col">
@@ -778,9 +806,12 @@
             <!--Introduction text-->
             <section id="Introduction" class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-2xl text-sm text-slate-300 leading-relaxed" aria-label="Modelling workflow">
                 <p class="mb-3" style="font-size: 3.0rem; font-weight: bold;"><i id="introCircleNodes" class="fa-solid fa-circle-nodes gradient-text mr-1" style="display:inline-block"></i> StringScape Homology Modeller</p>
-                <p class="mb-3" style="font-size: 1.0rem; font-weight: semibold;">This app builds all-atom homology models of protein complexes (including DNA, RNA, small molecules, ions, and lipid membranes) by aligning AlphaFold models onto a reference structure from the Protein Data Bank and computing membrane positions. Simply enter a search term or a PDB ID to use as a reference structure and click 'Build Homology Model'. Or, use an example below.</p>
+                <p class="mb-3" style="font-size: 1.0rem; font-weight: semibold;">This app builds all-atom homology models of protein complexes (including DNA, RNA, small molecules, ions, and lipid membranes) by aligning AlphaFold models onto a reference structure from the Protein Data Bank and computing membrane positions. Enter search terms, UniProt IDs, or sequences and click 'Find PDBs', or enter reference PDB IDs directly, then click 'Build Homology Model'. Or, use an example below.</p>
                 <p class="mb-3" style="font-size: 1.0rem; font-weight: semibold;">This app has been specifically built to be easy to use to democratise access to all-atom homology modelling. Send feedback to <a href="stringscape.net/contact" target="_blank" rel="noopener noreferrer" class="text-sky-400 hover:underline">stringscape.net/contact<i class="fa-solid fa-arrow-up-right-from-square ml-1" aria-label="Open source code in a new tab"></i></a></p>
                 <p class="mb-3" style="font-size: 1.0rem; font-weight: semibold;">This app is also available as a feature within the main StringScape application (in the Structures view, where all PDB files from a species are displayed and any can be clicked on to build a homology model). This app is open source under an Apache-2.0 licence. <a href="https://github.com/JoelTre/StringScape/tree/main" target="_blank" rel="noopener noreferrer" class="text-sky-400 hover:underline">View source code<i class="fa-solid fa-arrow-up-right-from-square ml-1" aria-label="Open source code in a new tab"></i></a> </p>
+                <div class="mt-4"><div class="flex flex-wrap items-center gap-3"><button id="modellerAiOpen" type="button" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl">Connect an AI</button>
+                <p id="modellerAiState" role="status" class="font-semibold"></p></div>
+                <p class="mt-2 text-sm">This app works without an AI connected, but the models will likely be more accurate if you connect an AI.</p></div>
                 <details class="mt-4 border-t border-slate-800 pt-5">
                     <summary class="tips-summary font-semibold text-sky-300"><i class="fa-solid fa-lightbulb" aria-hidden="true"></i>Tips <i class="tips-chevron fa-solid fa-chevron-down" aria-hidden="true"></i></summary>
                     <ul class="list-disc pl-5 mt-3 space-y-2" style="font-size: 1.0rem;">
@@ -808,10 +839,15 @@
             <!-- Reference PDB input -->
             <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-2 w-full shadow-2xl">
                 <h2 class="text-lg font-semibold text-slate-100">What do you want a model of?</h2>
-                <div class="flex flex-wrap items-center justify-between gap-2"><label for="pdbInput1" class="block text-base font-semibold text-sky-300">Reference Protein Data Bank IDs, UniProt IDs, sequences, or search terms</label><div class="flex flex-wrap items-center gap-2"><button id="viewReferenceSearchResultsBtn" type="button" class="hidden bg-slate-700 hover:bg-slate-600 text-white text-xs rounded-xl px-3 py-2" aria-expanded="false" aria-controls="referenceSearchResults"><i class="fa-solid fa-table-list" aria-hidden="true"></i> View search results</button><button id="fetchReferenceSequencesBtn" type="button" class="hidden"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Fetch Reference PDBs for sequence(s)</button><button id="fetchReferenceQueryBtn" type="button" hidden aria-hidden="true"></button><label class="structure-file-picker model-download-button reference-structure-file-picker"><input id="referenceStructureUpload" type="file" multiple accept=".pdb,.ent,.cif,.mmcif" data-action-change="0"><i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> Upload Structures</label></div></div>
+                <label for="referenceSearchInput" class="block text-base font-semibold text-sky-300">Search terms, UniProt IDs, or sequences</label>
+                <div class="flex items-start gap-3"><textarea rows="2" id="referenceSearchInput" placeholder="" class="w-full bg-slate-950 text-white rounded-lg p-3 focus:outline-none structure-id-input text-xl font-semibold" style="border:1px solid #3498db66"></textarea><button id="findReferencePdbsBtn" type="button" class="bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl px-4 py-3 shrink-0"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Find PDBs</button></div>
+                <div class="flex flex-wrap items-center justify-between gap-2"><label for="pdbInput1" class="block text-base font-semibold text-sky-300">Reference PDB IDs</label><div class="flex flex-wrap items-center gap-2"><button id="viewReferenceSearchResultsBtn" type="button" class="hidden bg-slate-700 hover:bg-slate-600 text-white text-xs rounded-xl px-3 py-2" aria-expanded="false" aria-controls="referenceSearchResults"><i class="fa-solid fa-table-list" aria-hidden="true"></i> View search results</button><button id="fetchReferenceSequencesBtn" type="button" hidden></button><button id="fetchReferenceQueryBtn" type="button" hidden></button><label class="structure-file-picker model-download-button reference-structure-file-picker"><input id="referenceStructureUpload" type="file" multiple accept=".pdb,.ent,.cif,.mmcif" data-action-change="0"><i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> Upload Structures</label></div></div>
                 <p id="referenceSequenceSearchStatus" role="status" class="text-xs text-teal-300 empty:hidden"></p>
-                <div id="referenceSearchResults" class="hidden max-h-80 overflow-auto rounded-xl border border-slate-700"><table class="w-full text-xs text-left"><thead class="sticky top-0 bg-slate-800 text-sky-200"><tr><th class="p-2">PDB ID</th><th class="p-2">Score</th><th class="p-2">Search metadata</th><th class="p-2">Action:</th></tr></thead><tbody id="referenceSearchResultsBody"></tbody></table></div>
-                <textarea rows="1" id="pdbInput1" data-action-input="0" class="w-full bg-slate-950 text-white rounded-lg p-3 focus:outline-none structure-id-input text-xl font-semibold" style="border: 1px solid #3498db66;"></textarea>
+                <div id="referenceSearchResults" class="hidden space-y-4">
+                    <section><h3 class="font-semibold text-sky-300 mb-2">Searches made</h3><div class="max-h-64 overflow-auto rounded-xl border border-slate-700"><table class="w-full text-xs text-left"><thead class="sticky top-0 bg-slate-800 text-sky-200"><tr><th class="p-2">Search</th><th class="p-2">Returned PDB IDs</th><th class="p-2">Status</th></tr></thead><tbody id="referenceSearchHistoryBody"></tbody></table></div></section>
+                    <section style="padding-top:12px"><h3 class="font-semibold text-sky-300 mb-2">Search results</h3><div class="max-h-80 overflow-auto rounded-xl border border-slate-700"><table class="w-full text-xs text-left"><thead class="sticky top-0 bg-slate-800 text-sky-200"><tr><th class="p-2">PDB ID</th><th class="p-2">Score</th><th class="p-2">Species</th><th class="p-2">Reference chain / protein</th><th class="p-2">UniProt IDs</th><th class="p-2">ID source</th><th class="p-2">Match details</th><th class="p-2">Action:</th></tr></thead><tbody id="referenceSearchResultsBody"></tbody></table></div></section>
+                </div>
+                <textarea rows="1" id="pdbInput1" data-action-input="0" placeholder="e.g. 6N2Y, 8EX4" class="w-full bg-slate-950 text-white rounded-lg p-3 focus:outline-none structure-id-input text-xl font-semibold" style="border: 1px solid #3498db66;"></textarea>
             </div>
 
             <!-- AlphaFold / UniProt input -->
@@ -843,6 +879,77 @@
                 <p id="sequenceOnlyNotice" class="text-amber-300 hidden" style="font-size:1.125rem;line-height:1.6;font-weight:600" role="status"></p>
             </form>
             <section id="extraEvidenceBox" class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-2xl"><h2><button id="extraEvidenceToggle" type="button" aria-expanded="false" aria-controls="extraEvidenceContent" class="w-full flex items-center justify-between gap-3 text-left font-semibold text-teal-300 hover:text-teal-200"><span>Add extra evidence</span><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button></h2><div id="extraEvidenceContent" class="hidden space-y-3 pt-3 text-slate-300"><p>If you have extra evidence that can be used to guide the homology modelling process, such as cross-link data, add them below.</p><div class="grid grid-cols-1 md:grid-cols-2 gap-3"><div><label class="string-file-picker evidence-file-picker"><input id="crossLinkEvidenceFile" type="file" accept=".csv,.tsv,.txt"><span class="string-file-button">Choose cross-links file (.csv/.tsv)</span><span class="string-file-name">No file selected</span></label><p class="text-xs text-slate-400 mt-2">Columns: chain1, residue1, chain2, residue2, max_distance_angstrom. Cα–Cα upper bounds in Å.</p></div><div><label class="string-file-picker evidence-file-picker"><input id="distanceEvidenceFile" type="file" accept=".csv,.tsv,.txt"><span class="string-file-button">Choose measured distances file (.csv/.tsv)</span><span class="string-file-name">No file selected</span></label><p class="text-xs text-slate-400 mt-2">Columns: chain1, residue1, chain2, residue2, distance_angstrom. Gently pulls Cα pairs toward measured values.</p></div></div><p class="text-xs text-slate-400">Residue numbers must match the input structures. Files are checked before use.</p><p id="extraEvidenceStatus" role="status" class="text-xs text-teal-300"></p></div></section>
+            <section id="buildSettingsBox" class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-sm">
+                <h2><button id="buildSettingsToggle" type="button" aria-expanded="false" aria-controls="buildSettingsContent" class="w-full flex items-center justify-between gap-3 text-left font-semibold text-teal-300"><span>Build settings</span><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button></h2>
+                <div id="buildSettingsContent" class="hidden space-y-3 pt-3">
+<div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-slate-300">
+<label>Neighbour distance (Å) <input id="groupNeighbourDistance" type="number" min="1" step="1" value="30" class="w-20 bg-slate-950 border border-slate-700 rounded px-2 py-1"></label>
+<label>Max residue speed (Å/s) <input id="groupMaxResidueSpeed" type="number" min="0" step="0.01" value="0.03" class="w-20 bg-slate-950 border border-slate-700 rounded px-2 py-1"></label>
+<label>Max waiting time (seconds) <input id="groupMaxWaitingTime" type="number" min="0.1" step="0.1" value="10" class="w-20 bg-slate-950 border border-slate-700 rounded px-2 py-1"></label>
+<label>Group simulations at once <select id="groupSimultaneousCount" class="bg-slate-950 border border-slate-700 rounded px-2 py-1"><option value="1" selected>1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option><option value="32">32</option><option value="all">All</option></select></label>
+</div><p class="text-xs text-slate-400">Each subunit serves once as a core. Its group includes subunits with any residue within the neighbour distance when that group starts. Running time excludes pauses. Overlapping groups share moving subunits; each core has its own stopping criteria. Group count applies when the next build starts. Fixed reference residues remain locked.</p>
+<div class="flex items-center gap-2">
+                            <label for="springStiffness" class="text-slate-400">Spring Stiffness (k):</label>
+                            <input type="range" id="springStiffness" min="0.1" max="20" step="0.1" value="2.0" class="w-24 h-1.5 bg-slate-800 rounded">
+                            <span id="stiffnessVal" class="text-emerald-400 font-mono font-bold">2.0</span>
+                        </div>
+<div class="flex items-center gap-2">
+                            <label for="mobilitySlider" class="text-slate-400">Mobility / Step Size (μ):</label>
+                            <input type="range" id="mobilitySlider" min="0.001" max="0.02" step="0.001" value="0.005" class="w-24 h-1.5 bg-slate-800 rounded">
+                            <span id="mobilityDisplay" class="text-emerald-400 font-mono font-bold">0.005</span>
+                        </div>
+<div class="flex flex-wrap items-center gap-2">
+                            <span class="text-slate-300">Single-reference drafts lock aligned residues to their reference; active subunits in the combined model are unlocked.</span>
+                            <label id="lockAlignedResiduesFalloff" class="text-slate-400">Any aligned residues that are more than <input id="lockAlignedResiduesDistance" type="number" min="0" step="1" value="3" class="w-12 bg-slate-800 border border-slate-700 text-slate-200 px-1.5 py-1 rounded text-xs text-center"> residues away from unaligned residues (along the chain's backbone), have their coordinates locked to the reference structure during the single-reference draft build.</label>
+                        </div>
+<div class="bg-slate-950 px-6 py-4 border-t border-slate-800 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div id="referenceInfluenceControls"><label class="text-xs text-sky-400">Reference PDB influence on spring lengths and strengths <span id="model1InfluenceVal">100%</span><input id="model1InfluenceSlider" type="range" min="0" max="1" step="0.01" value="1" class="w-full"></label></div>
+                <label class="text-xs text-teal-400">AlphaFold influence on spring lengths and strengths <span id="model2InfluenceVal">100%</span><input id="model2InfluenceSlider" type="range" min="0" max="1" step="0.01" value="1" class="w-full"></label>
+            </div>
+<div class="bg-slate-950 px-6 py-4 border-t border-slate-800 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <label for="paeSpringInfluenceSlider" class="text-xs text-sky-400">PAE effect on spring length and strength <output id="paeSpringInfluenceValue">100%</output><input id="paeSpringInfluenceSlider" type="range" min="0" max="1" step="0.01" value="1" class="w-full" aria-describedby="afSpringConfidenceHelp"></label>
+                <label for="plddtSpringInfluenceSlider" class="text-xs text-teal-400">pLDDT effect on spring length and strength <output id="plddtSpringInfluenceValue">50%</output><input id="plddtSpringInfluenceSlider" type="range" min="0" max="1" step="0.01" value="0.5" class="w-full" aria-describedby="afSpringConfidenceHelp"></label>
+                <p id="afSpringConfidenceHelp" class="md:col-span-2 text-xs text-slate-400">These controls determine how strongly PAE and pLDDT confidence can weaken AlphaFold-derived spring targets and strengths. Zero ignores that confidence measure; higher values give it more effect. Low PAE means stronger pairwise evidence; low pLDDT weakens local evidence. Unavailable scores leave the corresponding factor unchanged.</p>
+            </div>
+<div class="bg-slate-950 px-6 py-4 border-t border-slate-800/80 flex flex-col md:flex-row items-center justify-between gap-4">
+                <div class="flex items-center gap-3 w-full md:w-auto min-w-0"><div class="w-10 h-10 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 shrink-0 shadow-inner" aria-hidden="true"><i class="fa-solid fa-dna text-base"></i></div><div><label for="angularRestraintSlider" class="text-xs font-semibold text-white">Angular/dihedral restraints <output id="angularRestraintValue" class="bg-sky-950/80 border border-sky-500/30 text-sky-400 font-mono text-[11px] font-bold px-2.5 py-0.5 rounded-full shadow-sm">25%</output></label><p class="text-[11px] text-slate-400 mt-0.5">Keeps local Cα backbone bends and twists close to the starting AlphaFold model and aligned reference structures. AlphaFold restraints are weighted by pLDDT; zero turns these forces off.</p></div></div>
+                <input id="angularRestraintSlider" type="range" min="0" max="1" step="0.01" value="0.25" class="w-full md:w-7/12 h-2.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-500" aria-label="Angular and dihedral restraint strength">
+            </div>
+<div class="bg-slate-950 px-6 py-4 border-t border-slate-800/80 flex flex-col md:flex-row items-center justify-between gap-4">
+                <div class="flex items-center gap-3 w-full md:w-auto">
+                    <div class="w-10 h-10 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 shrink-0 shadow-inner" aria-hidden="true"><i class="fa-solid fa-shield-halved text-base"></i></div>
+                    <div>
+                        <label for="stericClashRadiusSlider" class="text-xs font-semibold text-white">Steric clash exclusion radius <output id="stericClashRadiusValue" class="bg-sky-950/80 border border-sky-500/30 text-sky-400 font-mono text-[11px] font-bold px-2.5 py-0.5 rounded-full shadow-sm">3.8 Å</output></label>
+                        <p class="text-[11px] text-slate-400 mt-0.5">Residue centres closer than this distance repel each other. Steric collision prevention is always enabled.</p>
+                    </div>
+                </div>
+                <input type="range" id="stericClashRadiusSlider" min="2" max="8" step="0.1" value="3.8" aria-label="Steric clash exclusion radius" class="w-full md:w-7/12 h-2.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/50">
+            </div>
+                        <div class="flex items-center gap-2">
+                            <label for="springCutoffSelect" class="text-slate-400">Spring Cutoff:</label>
+                            <select id="springCutoffSelect" class="bg-slate-800 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs">
+                                <option value="12">12.0 Å (Local Contacts)</option>
+                                <option value="20" selected>20.0 Å (Medium Range - Recommended)</option>
+                                <option value="35">35.0 Å (Extended Network)</option>
+                            </select>
+                        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-sm">            <div class="flex flex-wrap items-center gap-4 text-xs">
+                <span class="text-slate-400 font-medium uppercase tracking-wider text-[11px]"><i class="fa-solid fa-sliders text-indigo-400 mr-1"></i> Alignment Settings:</span>
+                <label class="flex items-center gap-2 text-slate-300">Method:
+                    <select id="alignmentModeInput" class="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-indigo-300">
+                        <option value="semiglobal" selected>Semi-global (recommended)</option>
+                        <option value="local">Smith–Waterman (local)</option>
+                        <option value="global">Needleman–Wunsch (global)</option>
+                    </select>
+                </label>
+                <div class="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800">
+                    <label for="similarityThreshold" class="text-slate-300">Match Threshold:</label>
+                    <input type="number" id="similarityThreshold" value="25" min="0" max="100" class="w-12 bg-slate-900 border border-slate-700 text-center rounded text-indigo-300 font-bold focus:outline-none">
+                    <span class="text-slate-500">% identity</span>
+                </div><label class="flex items-center gap-2 text-slate-300">Gap open cost: <input id="gapOpenInput" type="number" max="0" step="1" value="-10" class="w-20 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-indigo-300"></label><label class="flex items-center gap-2 text-slate-300">Gap extend cost: <input id="gapExtendInput" type="number" max="0" step="1" value="-1" class="w-20 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-indigo-300"></label></div>
+        </div>
+                </div>
+            </section>
             <div class="flex flex-wrap items-center justify-between gap-4 w-full">
                 <p id="referenceStructureName" class="text-2xl font-semibold text-slate-200 flex-1 min-w-0" aria-live="polite">Reference:</p>
             <button id="viewDetailsBtn" type="button" data-action-click="7" class="ml-auto shrink-0 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg px-6 py-3 text-2xl font-semibold" aria-expanded="false">View homology model build process <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button>
@@ -863,27 +970,27 @@
                         <li><strong class="text-slate-100">Optional:</strong> If STRING files have been uploaded, the app searches each of the reference PDB chain sequences in the FASTA file for matches and then uses the alias file to get the UniProt IDs for each match, which are then used to fetch the AlphaFold models.</li>
                     </ul>
                 </li>
-                <li><strong class="text-slate-100">Optional: If multiple reference files are loaded, identify equivalent chains/molecules between reference files.</strong> Sequence alignments between all chains/polynucleotides within and between reference PDBs are performed to find chains/polynucleotides of the same type. Then, a matrix is calculated of the distances between the centres of the chains/polynucleotides/molecules within each reference PDB. The distance matrixes are then uses to identify which chains/polynuclotides/molecules between the references are equavalent.</li>
                 <li><strong class="text-slate-100">Align each of the chain/polynucleotide sequences from the reference with each of the AlphaFold sequences.</strong> Semi-global alignment fits each reference chain/polynucleotide within an AlphaFold sequence, allowing for extra AlphaFold residues at either end. Alignment Settings also offers local Smith–Waterman and global Needleman–Wunsch as alignment methods.</li>
                 <li><strong class="text-slate-100">Calculate distance matrices.</strong> The distance matrix captures the spatial relationships between residues/nucleotides/atoms within each chain/polynucleotide/molecule and, for the reference structure, between each chain/polynucleotide/molecule.</li>
                 <li><strong class="text-slate-100">Build the morph distance matrix.</strong> The distance matrices of the aligned reference structures and the AlphaFold models are combined to create the morph distance matrix. The per-reference PDB and AlphaFold sliders determine the blend of shared intra-chain distances and each values influence on the simulation.</li>
                 <li>
-                    <strong class="text-slate-100">Align AlphaFold models onto the reference structure.</strong> This has two phases: In phase 1, the AlphaFold structures are aligned to the reference structure via rigid-body Template Modelling alignment. In phase 2, an overdamped elastic simulation relaxes the springs between residues/nucleotides/atoms. AlphaFold spring contributions are weakened where PAE indicates uncertain relative placement or pLDDT indicates uncertain local structure; local Cα angular and pseudo-dihedral restraints help preserve backbone bends and twists. The controls below the 3D viewer adjust these effects.</li>
+                    <strong class="text-slate-100">Align AlphaFold models onto the reference structure.</strong> This has two phases: In phase 1, the AlphaFold structures are aligned to the reference structure via rigid-body Template Modelling alignment. In phase 2, an overdamped elastic simulation relaxes the springs between residues/nucleotides/atoms. AlphaFold spring contributions are weakened where PAE indicates uncertain relative placement or pLDDT indicates uncertain local structure; local Cα angular and pseudo-dihedral restraints help preserve backbone bends and twists. Build Settings controls these effects. Each reference is used independently to build a draft model, keeping aligned interior residues locked while successive groups of nearby subunits relax.</li>
                     <ul class="list-disc pl-5 mt-2 space-y-1">
-                        <li><strong class="text-slate-100">Adding membranes:</strong> The app also calculates weather a protein structure likely resides in a lipid membrane, and calculates the position and curvature of the membrane. The app adjusts the shape of the protein complex to move non-membrane-associated portions of the proteins out of the membrane.</li>
+                        <li><strong class="text-slate-100">Adding membranes:</strong> The app estimates whether a protein complex resides in a lipid membrane and displays its predicted membrane position, curvature, and placement confidence.</li>
                     </ul>
                 </li>
+                <li><strong class="text-slate-100">Combine drafts when multiple references are loaded.</strong> Completed drafts are structurally TM-aligned and equivalent subunits are matched. Their sequences are combined, residue centres and spring values are averaged using the reference influence sliders, and unmatched subunits are retained. The combined model then undergoes group simulations with active subunits free of reference coordinate locks.</li>
                 <li><strong class="text-slate-100">Convert the simulation result into a mmCIF format and display in a Mol* viewer.</strong> The mmCIF file can then be downloaded.</li>
             </ol>
         </section>
 
 
         <section id="referenceComparison" class="hidden space-y-4 mb-6" aria-label="Reference structure comparison">
-            <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
+            <div id="draftCentreDistanceCard" class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
                 <div class="bg-slate-800/80 px-5 py-3 border-b border-slate-700 flex flex-wrap items-center justify-between gap-2"><h2 class="font-semibold text-sm text-white flex items-center gap-2"><i class="fa-solid fa-table-cells text-indigo-400"></i> Reference chain-centre distances</h2><span id="referenceCentreDistanceLegend" class="text-[11px] text-slate-300"></span></div>
                 <div id="referenceDistanceMatrices" class="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4" style="max-height:840px;min-height:0;overflow-y:auto"></div>
             </div>
-            <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
+            <div id="draftEquivalentChainsCard" class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
                 <div class="bg-slate-800/80 px-5 py-3 border-b border-slate-700"><h2 class="font-semibold text-sm text-white flex items-center gap-2"><i class="fa-solid fa-link text-indigo-400"></i> Equivalent reference chains</h2></div>
                 <div id="referenceCorrespondenceTable" style="max-height:840px;min-height:0;overflow:auto"></div>
             </div>
@@ -915,78 +1022,7 @@
             </div>
         </div>
 
-        <!-- Section 2: Individual Distance Matrix Viewers -->
-        <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-sm flex items-center gap-3">
-            <label for="matrixPaletteSelect" class="text-slate-300">Matrix palette:</label>
-            <select id="matrixPaletteSelect" class="bg-slate-950 border border-slate-700 text-slate-300 rounded px-2 py-1 focus:outline-none">
-                <option value="viridis" selected>Viridis Dark</option>
-                <option value="spectral">Rainbow Spectral</option>
-                <option value="coolwarm">Cool-Warm</option>
-                <option value="grayscale">Grayscale</option>
-            </select>
-        </div>
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <!-- Reference PDB Distance Matrix -->
-            <div class="bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden shadow-lg self-start min-w-0 relative">
-                <div class="responsive-viewer-header bg-slate-900/90 px-4 py-2.5 border-b border-slate-800 flex justify-between items-center z-10">
-                    <h3 class="font-semibold text-xs text-slate-200 flex items-center gap-2">
-                        <i class="fa-solid fa-border-all" style="color: #3498db;"></i> Reference PDB Distance Matrix
-                    </h3>
-                    <div class="flex flex-wrap items-center gap-2">
-                        <select id="PDBChainSelect" class="bg-slate-950 border border-slate-700 text-slate-300 rounded text-xs px-2 py-0.5 focus:outline-none"></select>
-                        <button type="button" data-action-click="8" title="Download overview PNG" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-0.5 rounded text-xs border border-slate-700"><i class="fa-solid fa-download"></i> Low-res</button><button type="button" data-action-click="9" title="Download full-resolution PNG" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-0.5 rounded text-xs border border-slate-700"><i class="fa-solid fa-download"></i> Full-res</button>
-                        <button id="resetPDBZoomBtn" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-0.5 rounded text-xs border border-slate-700" title="Reset Zoom">
-                            <i class="fa-solid fa-camera"></i> Reset
-                        </button>
-                    </div>
-                </div>
-                <p id="PDBResolutionNotice" class="hidden shrink-0 px-4 py-2 text-xs text-slate-400">To reduce memory use, this box displays a lower-resolution version of the matrix. Zoom in to see full resolution.</p>
-            <div id="canvasParent1" style="aspect-ratio: 1 / 1; flex-shrink: 0;" class="w-full relative bg-slate-950 flex items-center justify-center overflow-hidden">
-                    <canvas id="matrixCanvas1" class="cursor-crosshair absolute inset-0"></canvas>
-                    <div id="tooltip1" class="absolute hidden bg-slate-900/95 text-white text-xs p-2.5 rounded-lg shadow-2xl pointer-events-none z-20 backdrop-blur-md" style="border: 1px solid #3498db66;"></div>
-                </div>
-                <div id="PDBLegend" class="shrink-0 bg-slate-950 px-3 py-2 border-t border-slate-800 flex flex-wrap gap-2 text-[11px] text-slate-300 min-h-[36px] max-h-48 overflow-y-auto items-center"></div>
-            </div>
-
-            <!-- AlphaFold Distance Matrix -->
-            <div class="bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden shadow-lg self-start min-w-0 relative">
-                <div class="responsive-viewer-header bg-slate-900/90 px-4 py-2.5 border-b border-slate-800 flex justify-between items-center z-10">
-                    <h3 class="font-semibold text-xs text-slate-200 flex items-center gap-2">
-                        <i class="fa-solid fa-border-all" style="color: #2eccbf;"></i> AlphaFold Distance Matrix
-                    </h3>
-                    <div class="flex items-center gap-2">
-                        <select id="AFChainSelect" class="bg-slate-950 border border-slate-700 text-slate-300 rounded text-xs px-2 py-0.5 focus:outline-none"></select>
-                        <button type="button" data-action-click="10" title="Download overview PNG" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-0.5 rounded text-xs border border-slate-700"><i class="fa-solid fa-download"></i> Low-res</button><button type="button" data-action-click="11" title="Download full-resolution PNG" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-0.5 rounded text-xs border border-slate-700"><i class="fa-solid fa-download"></i> Full-res</button>
-                        <button id="resetAFZoomBtn" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-0.5 rounded text-xs border border-slate-700" title="Reset Zoom">
-                            <i class="fa-solid fa-camera"></i> Reset
-                        </button>
-                    </div>
-                </div>
-                <p id="AFResolutionNotice" class="hidden shrink-0 px-4 py-2 text-xs text-slate-400">To reduce memory use, this box displays a lower-resolution version of the matrix. Zoom in to see full resolution.</p>
-            <div id="canvasParent2" style="aspect-ratio: 1 / 1; flex-shrink: 0;" class="w-full relative bg-slate-950 flex items-center justify-center overflow-hidden">
-                    <canvas id="matrixCanvas2" class="cursor-crosshair absolute inset-0"></canvas>
-                    <div id="tooltip2" class="absolute hidden bg-slate-900/95 text-white text-xs p-2.5 rounded-lg shadow-2xl pointer-events-none z-20 backdrop-blur-md" style="border: 1px solid #2eccbf66;"></div>
-                </div>
-                <div id="AFLegend" class="shrink-0 bg-slate-950 px-3 py-2 border-t border-slate-800 flex flex-wrap gap-2 text-[11px] text-slate-300 min-h-[36px] max-h-48 overflow-y-auto items-center"></div>
-            </div>
-        </div>
-
-        <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-sm">            <div class="flex flex-wrap items-center gap-4 text-xs">
-                <span class="text-slate-400 font-medium uppercase tracking-wider text-[11px]"><i class="fa-solid fa-sliders text-indigo-400 mr-1"></i> Alignment Settings:</span>
-                <label class="flex items-center gap-2 text-slate-300">Method:
-                    <select id="alignmentModeInput" class="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-indigo-300">
-                        <option value="semiglobal" selected>Semi-global (recommended)</option>
-                        <option value="local">Smith–Waterman (local)</option>
-                        <option value="global">Needleman–Wunsch (global)</option>
-                    </select>
-                </label>
-                <div class="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800">
-                    <label for="similarityThreshold" class="text-slate-300">Match Threshold:</label>
-                    <input type="number" id="similarityThreshold" value="25" min="0" max="100" class="w-12 bg-slate-900 border border-slate-700 text-center rounded text-indigo-300 font-bold focus:outline-none">
-                    <span class="text-slate-500">% identity</span>
-                </div><label class="flex items-center gap-2 text-slate-300">Gap open cost: <input id="gapOpenInput" type="number" max="0" step="1" value="-10" class="w-20 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-indigo-300"></label><label class="flex items-center gap-2 text-slate-300">Gap extend cost: <input id="gapExtendInput" type="number" max="0" step="1" value="-1" class="w-20 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-indigo-300"></label></div>
-        </div>
-        <!-- Section 3: Sequence Alignment & Chain Equivalence Table -->
+        <!-- Section 2: Sequence Alignment & Chain Equivalence Table -->
         <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
             <div class="bg-slate-800/80 px-5 py-3 border-b border-slate-700 flex flex-wrap justify-between items-center gap-2">
                 <div>
@@ -1049,13 +1085,68 @@
             </div>
         </div>
 
+        <!-- Section 3: Individual Distance Matrix Viewers -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-sm flex items-center gap-3">
+            <label for="matrixPaletteSelect" class="text-slate-300">Matrix palette:</label>
+            <select id="matrixPaletteSelect" class="bg-slate-950 border border-slate-700 text-slate-300 rounded px-2 py-1 focus:outline-none">
+                <option value="viridis" selected>Viridis Dark</option>
+                <option value="spectral">Rainbow Spectral</option>
+                <option value="coolwarm">Cool-Warm</option>
+                <option value="grayscale">Grayscale</option>
+            </select>
+        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Reference PDB Distance Matrix -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden shadow-lg self-start min-w-0 relative">
+                <div class="responsive-viewer-header bg-slate-900/90 px-4 py-2.5 border-b border-slate-800 flex justify-between items-center z-10">
+                    <h3 class="font-semibold text-xs text-slate-200 flex items-center gap-2">
+                        <i class="fa-solid fa-border-all" style="color: #3498db;"></i> Reference PDB Distance Matrix
+                    </h3>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <select id="PDBChainSelect" class="bg-slate-950 border border-slate-700 text-slate-300 rounded text-xs px-2 py-0.5 focus:outline-none"></select>
+                        <button type="button" data-action-click="8" title="Download overview PNG" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-0.5 rounded text-xs border border-slate-700"><i class="fa-solid fa-download"></i> Low-res</button><button type="button" data-action-click="9" title="Download full-resolution PNG" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-0.5 rounded text-xs border border-slate-700"><i class="fa-solid fa-download"></i> Full-res</button>
+                        <button id="resetPDBZoomBtn" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-0.5 rounded text-xs border border-slate-700" title="Reset Zoom">
+                            <i class="fa-solid fa-camera"></i> Reset
+                        </button>
+                    </div>
+                </div>
+                <p id="PDBResolutionNotice" class="hidden shrink-0 px-4 py-2 text-xs text-slate-400">To reduce memory use, this box displays a lower-resolution version of the matrix. Zoom in to see full resolution.</p>
+            <div id="canvasParent1" style="aspect-ratio: 1 / 1; flex-shrink: 0;" class="w-full relative bg-slate-950 flex items-center justify-center overflow-hidden">
+                    <canvas id="matrixCanvas1" class="cursor-crosshair absolute inset-0"></canvas>
+                    <div id="tooltip1" class="absolute hidden bg-slate-900/95 text-white text-xs p-2.5 rounded-lg shadow-2xl pointer-events-none z-20 backdrop-blur-md" style="border: 1px solid #3498db66;"></div>
+                </div>
+                <div id="PDBLegend" class="shrink-0 bg-slate-950 px-3 py-2 border-t border-slate-800 flex flex-wrap gap-2 text-[11px] text-slate-300 min-h-[36px] max-h-48 overflow-y-auto items-center"></div>
+            </div>
+
+            <!-- AlphaFold Distance Matrix -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden shadow-lg self-start min-w-0 relative">
+                <div class="responsive-viewer-header bg-slate-900/90 px-4 py-2.5 border-b border-slate-800 flex justify-between items-center z-10">
+                    <h3 class="font-semibold text-xs text-slate-200 flex items-center gap-2">
+                        <i class="fa-solid fa-border-all" style="color: #2eccbf;"></i> AlphaFold Distance Matrix
+                    </h3>
+                    <div class="flex items-center gap-2">
+                        <select id="AFChainSelect" class="bg-slate-950 border border-slate-700 text-slate-300 rounded text-xs px-2 py-0.5 focus:outline-none"></select>
+                        <button type="button" data-action-click="10" title="Download overview PNG" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-0.5 rounded text-xs border border-slate-700"><i class="fa-solid fa-download"></i> Low-res</button><button type="button" data-action-click="11" title="Download full-resolution PNG" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-0.5 rounded text-xs border border-slate-700"><i class="fa-solid fa-download"></i> Full-res</button>
+                        <button id="resetAFZoomBtn" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-0.5 rounded text-xs border border-slate-700" title="Reset Zoom">
+                            <i class="fa-solid fa-camera"></i> Reset
+                        </button>
+                    </div>
+                </div>
+                <p id="AFResolutionNotice" class="hidden shrink-0 px-4 py-2 text-xs text-slate-400">To reduce memory use, this box displays a lower-resolution version of the matrix. Zoom in to see full resolution.</p>
+            <div id="canvasParent2" style="aspect-ratio: 1 / 1; flex-shrink: 0;" class="w-full relative bg-slate-950 flex items-center justify-center overflow-hidden">
+                    <canvas id="matrixCanvas2" class="cursor-crosshair absolute inset-0"></canvas>
+                    <div id="tooltip2" class="absolute hidden bg-slate-900/95 text-white text-xs p-2.5 rounded-lg shadow-2xl pointer-events-none z-20 backdrop-blur-md" style="border: 1px solid #2eccbf66;"></div>
+                </div>
+                <div id="AFLegend" class="shrink-0 bg-slate-950 px-3 py-2 border-t border-slate-800 flex flex-wrap gap-2 text-[11px] text-slate-300 min-h-[36px] max-h-48 overflow-y-auto items-center"></div>
+            </div>
+        </div>
+
         <!-- Section 4: Aligned Difference Matrix Comparison -->
         <div class="bg-slate-900 border border-indigo-500/30 rounded-xl flex flex-col overflow-hidden shadow-xl">
+            <h2 class="px-5 py-3"><button id="alignedComparisonToggle" type="button" aria-expanded="false" aria-controls="alignedComparisonContent" class="w-full flex items-center justify-between gap-3 text-left font-semibold text-sm text-white"><span><i class="fa-solid fa-code-compare text-indigo-400"></i> Aligned Distance Matrix Comparison</span><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button></h2>
+            <div id="alignedComparisonContent" class="hidden">
             <div class="aligned-matrix-header bg-slate-900/90 px-5 py-3 border-b border-indigo-500/20 flex flex-wrap justify-between items-center gap-3">
                 <div>
-                    <h2 class="font-semibold text-sm text-white flex items-center gap-2">
-                        <i class="fa-solid fa-code-compare text-indigo-400"></i> Aligned Distance Matrix Comparison
-                    </h2>
                     <p class="text-xs text-slate-400">This shows the differences in aligned residue-residue distances between the Reference PDB chain and the AlphaFold chain.</p>
                 </div>
 
@@ -1096,6 +1187,7 @@
                 <span id="diffLegendMin">0.0 Å (Identical Distance)</span> 
                 <div id="diffColorLegend" class="h-2.5 w-64 rounded-full border border-slate-700 shrink-0"></div> 
                 <span id="diffLegendMax">≥ 10.0 Å (High Structural Difference)</span> 
+            </div>
             </div>
         </div>
 
@@ -1235,7 +1327,7 @@
                     <label class="inline-flex items-center gap-2 text-xs text-slate-300 whitespace-nowrap">Jiggle speed <output id="sideChainJiggleSpeedValue">3.0×</output><input data-animation-key="sideChainJiggleSpeed" aria-label="Jiggle speed" type="range" min="0.5" max="5" step="0.1" value="3" data-action-input="4"></label><span id="atomRepresentationNotice" class="hidden text-slate-400">The jiggling does not affect the homology model simulation</span>
                 </div>
                 <!-- Colour by controls -->
-                    <div id="referenceColorControl" class="hidden inline-flex shrink-0 items-center gap-2 whitespace-nowrap"><label for="referenceColorSelect" class="text-slate-300">Colour Reference chains by</label><select id="referenceColorSelect" data-action-change="6" class="bg-slate-800 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs"><option value="same" selected>Same as homology model chains (default)</option><option value="chain">Chain (default)</option><option value="uniform">Uniform</option><option value="protein-id">Protein ID</option><option value="element">Element</option><option value="side-chains">Side chains</option><option value="origin">Origin</option><option value="aligned">Aligned residues</option><option value="membrane">Membrane</option><option value="membrane-placement">Membrane placement residues</option><option value="membrane-repelled">Repelled from membrane</option><option value="charge">Charge</option><option value="hydrophobicity">Hydrophobicity</option><option value="secondary">Secondary structure</option><option value="plddt">pLDDT (from AlphaFold)</option><option value="difference">PDB vs Homology model</option></select></div>
+                    <div id="referenceColorControl" class="hidden inline-flex shrink-0 items-center gap-2 whitespace-nowrap"><label for="referenceColorSelect" class="text-slate-300">Colour Reference chains by</label><select id="referenceColorSelect" data-action-change="6" class="bg-slate-800 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs"><option value="same" selected>Same as homology model chains (default)</option><option value="chain">Chain (default)</option><option value="uniform">Uniform</option><option value="protein-id">Protein ID</option><option value="element">Element</option><option value="side-chains">Side chains</option><option value="origin">Origin</option><option value="aligned">Aligned residues</option><option value="membrane">Membrane</option><option value="membrane-placement">Membrane placement residues</option><option value="charge">Charge</option><option value="hydrophobicity">Hydrophobicity</option><option value="secondary">Secondary structure</option><option value="plddt">pLDDT (from AlphaFold)</option><option value="difference">PDB vs Homology model</option></select></div>
                     <div id="springColorControl" class="hidden inline-flex shrink-0 items-center gap-2 whitespace-nowrap"><label for="springColorSelect" class="text-slate-300">Colour springs by</label><select id="springColorSelect" class="bg-slate-800 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs"><option value="strain" selected>Strain (default)</option><option value="origin">Origin</option></select></div>
                     <!-- Origin Filter Buttons (visible when in Origin mode to hide/show Reference PDB or AlphaFold residues) -->
                     <div id="originFilterBtns" class="hidden flex items-center gap-1.5">
@@ -1281,13 +1373,18 @@
     </select>
     <div id="physicsRepresentationMenu" class="hidden" role="group" aria-label="Style options"></div>
 </div>
-<div class="inline-flex shrink-0 items-center gap-2 whitespace-nowrap"><span class="text-slate-300 font-semibold">Colour proteins by:</span><button id="physicsColorMenuButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="physicsColorMenu" class="bg-slate-800 text-slate-200 px-3 py-1.5 rounded-lg text-xs">Chain (default) <i class="fa-solid fa-chevron-down ml-1" aria-hidden="true"></i></button><select id="physicsColorSelect" data-action-change="5" class="hidden"><option value="chain" selected>Chain (default)</option><option value="residue-index">Residue index</option><option value="uniform">Uniform</option><option value="protein-id">Protein ID</option><option value="pattern-variance">Pattern variance</option><option value="rotational-symmetry">Rotational symmetry</option><option value="equivalent-protein-shape">Equivalent protein shape</option><option value="keyframe-difference">Keyframe conformation diff.</option><option value="residue-speed">Residue speed</option><option value="binding-sites">Binding sites</option><option value="binding-site-type">Binding site type</option><option value="mutation-effect-basic">Mutation effect (basic)</option><option value="constraint-confidence">Constraint confidence</option><option value="alpha-pae">AlphaFold PAE</option><option value="spring-strain">Spring compression / stretch</option><option value="membrane-score">Membrane placement score</option><option value="model-confidence">Model confidence</option><option value="element">Element</option><option value="side-chains">Side chains</option><option value="origin">Origin</option><option value="aligned">Aligned residues</option><option value="membrane">Membrane</option><option value="membrane-placement">Membrane placement residues</option><option value="membrane-repelled">Repelled from membrane</option><option value="charge">Charge</option><option value="hydrophobicity">Hydrophobicity</option><option value="accessible-surface-area">Accessible surface area</option><option value="secondary">Secondary structure</option><option value="plddt">pLDDT (from AlphaFold)</option><option value="difference">PDB vs Homology model</option><option value="af-difference">AF vs Homology model</option><option value="uniprot-topological">UniProt topological domains</option><option value="uniprot-domain">UniProt domains</option><option value="uniprot-transmembrane">UniProt transmembrane</option><option value="uniprot-intramembrane">UniProt intramembrane</option><option value="uniprot-active-site">UniProt active sites</option><option value="uniprot-binding-site">UniProt binding sites</option><option value="uniprot-signal">UniProt signal peptide</option><option value="uniprot-transit">UniProt transit peptide</option><option value="uniprot-region">UniProt region</option><option value="uniprot-motif">UniProt motif</option><option value="uniprot-modified">UniProt modified residue</option><option value="uniprot-glycosylation">UniProt glycosylation</option><option value="uniprot-disulfide">UniProt disulfide bond</option></select><div id="physicsColorMenu" class="hidden" role="group" aria-label="Colour proteins by"></div></div>
+<div class="inline-flex shrink-0 items-center gap-2 whitespace-nowrap"><span class="text-slate-300 font-semibold">Colour proteins by:</span><button id="physicsColorMenuButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="physicsColorMenu" class="bg-slate-800 text-slate-200 px-3 py-1.5 rounded-lg text-xs">Chain (default) <i class="fa-solid fa-chevron-down ml-1" aria-hidden="true"></i></button><select id="physicsColorSelect" data-action-change="5" class="hidden"><option value="chain" selected>Chain (default)</option><option value="residue-index">Residue index</option><option value="uniform">Uniform</option><option value="protein-id">Protein ID</option><option value="pattern-variance">Pattern variance</option><option value="rotational-symmetry">Rotational symmetry</option><option value="equivalent-protein-shape">Equivalent protein shape</option><option value="keyframe-difference">Keyframe conformation diff.</option><option value="residue-speed">Residue speed</option><option value="binding-sites">Binding sites</option><option value="binding-site-type">Binding site type</option><option value="mutation-effect-basic">Mutation effect (basic)</option><option value="constraint-confidence">Constraint confidence</option><option value="alpha-pae">AlphaFold PAE</option><option value="spring-strain">Spring compression / stretch</option><option value="membrane-score">Membrane placement confidence</option><option value="model-confidence">Model confidence</option><option value="element">Element</option><option value="side-chains">Side chains</option><option value="origin">Origin</option><option value="aligned">Aligned residues</option><option value="membrane">Membrane</option><option value="membrane-placement">Membrane placement residues</option><option value="charge">Charge</option><option value="hydrophobicity">Hydrophobicity</option><option value="accessible-surface-area">Accessible surface area</option><option value="secondary">Secondary structure</option><option value="plddt">pLDDT (from AlphaFold)</option><option value="difference">PDB vs Homology model</option><option value="af-difference">AF vs Homology model</option><option value="uniprot-topological">UniProt topological domains</option><option value="uniprot-domain">UniProt domains</option><option value="uniprot-transmembrane">UniProt transmembrane</option><option value="uniprot-intramembrane">UniProt intramembrane</option><option value="uniprot-active-site">UniProt active sites</option><option value="uniprot-binding-site">UniProt binding sites</option><option value="uniprot-signal">UniProt signal peptide</option><option value="uniprot-transit">UniProt transit peptide</option><option value="uniprot-region">UniProt region</option><option value="uniprot-motif">UniProt motif</option><option value="uniprot-modified">UniProt modified residue</option><option value="uniprot-glycosylation">UniProt glycosylation</option><option value="uniprot-disulfide">UniProt disulfide bond</option></select><div id="physicsColorMenu" class="hidden" role="group" aria-label="Colour proteins by"></div></div>
 <button id="conformationAnimationBtn" type="button" class="hidden rounded-xl bg-amber-700 hover:bg-amber-600 px-2.5 py-1.5 font-semibold text-white"><i class="fa-solid fa-film mr-1" aria-hidden="true"></i>Conformational change animation</button><button id="createAnimationBtn" type="button" class="rounded-xl bg-amber-700 hover:bg-amber-600 px-2.5 py-1.5 font-semibold text-white"><i class="fa-solid fa-film mr-1"></i><span>Create animation</span></button><button id="quickPlayAnimationBtn" type="button" class="hidden rounded-xl bg-amber-700 hover:bg-amber-600 px-2.5 py-1.5 font-semibold text-white"><i class="fa-solid fa-play mr-1" aria-hidden="true"></i>Play animation</button><button id="viewSequencesButton" type="button" aria-expanded="false" aria-controls="physicsSequencePanel" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 font-semibold"><i class="fa-solid fa-align-left mr-1" aria-hidden="true"></i>View sequences <i class="sequence-chevron fa-solid fa-chevron-down ml-1" aria-hidden="true"></i></button> <div class="inline-flex shrink-0 items-center gap-2 whitespace-nowrap"><span class="font-semibold">Select:</span> <button id="physicsSelectionMenuButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="physicsSelectionMenu" class="px-3 py-1.5 rounded-lg text-xs">Residue/nucleotide <i class="fa-solid fa-chevron-down ml-1" aria-hidden="true"></i></button><div id="physicsSelectionMenu" class="hidden" role="group" aria-label="Selection options"></div><select id="physicsSelectMode" aria-label="Selection mode" title="Shift-click to add a second selection" class="hidden"><option value="atom">Atom</option><option value="residue" selected>Residue/nucleotide</option><option value="chain">Chain/polynucleotide</option><option value="identical">Identical molecules</option></select></div></div>
             <section id="physicsSequencePanel" class="hidden" aria-label="Protein sequences">
                 <div class="sequence-toolbar"><strong>Protein sequences</strong><label for="sequenceChainButton">Chain:</label><div class="sequence-chain-picker"><button id="sequenceChainButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="sequenceChainMenu">All <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button><div id="sequenceChainMenu" class="hidden" role="group" aria-label="Sequence chain options"></div></div><button id="copySequencesButton" type="button" title="Copy displayed sequences as FASTA"><i class="fa-solid fa-copy" aria-hidden="true"></i> <span id="sequenceCopyLabel">Copy</span></button><span id="sequenceCopyStatus" role="status" aria-live="polite"></span><span>Click a residue to select it in the 3D viewer.</span></div>
                 <div id="physicsSequenceContent"></div>
             </section>
+            <div id="stagedModelButtons" class="hidden px-5 py-3 flex flex-wrap gap-2 border-t border-violet-500/30" role="group" aria-label="Homology model stages"></div>
+            <div id="stagedStructureToggles" class="hidden px-5 py-2 flex flex-wrap gap-2 text-slate-300" role="group" aria-label="Aligned draft structures"></div>
+            <p id="groupSimulationStatus" role="status" class="px-5 py-3 text-sm text-cyan-300 bg-cyan-950/40 border-y border-cyan-500/30">Waiting for Phase 1 alignment.</p>
             <div id="physicsContainer" class="w-full relative bg-slate-950 flex items-center justify-center overflow-hidden cursor-grab active:cursor-grabbing">
+                <div id="groupSimulationRunningBadge" role="status" class="hidden absolute top-4 left-1/2 -translate-x-1/2 z-30 rounded-full border border-cyan-500/40 bg-slate-950/90 px-4 py-2 text-sm font-medium text-cyan-200 shadow-lg pointer-events-none whitespace-nowrap"><i class="fa-solid fa-circle-notch fa-spin mr-2" aria-hidden="true"></i>Running simulations...</div>
+                <div id="stagedPreviewHost" class="hidden absolute inset-0 z-10 bg-slate-950 text-cyan-200"></div>
                 <div id="physics3dCanvas" style="position:relative" class="w-full h-full min-w-0 overflow-hidden"></div>
                 <div id="conformationOptimizingBadge" role="status" aria-live="polite" class="hidden rounded-lg bg-amber-900/90 px-3 py-2 text-sm font-semibold text-amber-100 shadow-lg pointer-events-none"><i class="fa-solid fa-circle-notch fa-spin mr-2" aria-hidden="true"></i>Optimising each conformation</div>
                 <div id="physicsInitialLoading" role="status" aria-live="polite" class="hidden absolute inset-0 z-40 flex items-center justify-center bg-slate-950/85 text-cyan-200 pointer-events-none"><div class="physics-loading-card rounded-2xl border border-slate-700 bg-slate-900/95 text-center text-lg font-semibold shadow-xl"><i class="fa-solid fa-cube text-6xl text-cyan-300" aria-hidden="true"></i><span><i class="fa-solid fa-circle-notch fa-spin mr-2" aria-hidden="true"></i>Building homology model</span></div></div>
@@ -1325,7 +1422,7 @@
             <div id="animationTableDialog" class="hidden fixed inset-0 items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-label="Keyframe table"><div class="animation-table-panel rounded-2xl bg-slate-900 p-5 shadow-2xl"><div class="mb-3 flex shrink-0 items-center justify-between gap-3"><h2 class="text-lg font-semibold text-amber-300">Keyframe table</h2><div class="flex items-center gap-2"><button id="saveAnimationTable" type="button" class="rounded-xl bg-slate-700 px-3 py-1 text-white"><i class="fa-solid fa-download mr-1" aria-hidden="true"></i>Save animation table</button><button id="uploadAnimationTable" type="button" class="rounded-xl bg-slate-700 px-3 py-1 text-white"><i class="fa-solid fa-upload mr-1" aria-hidden="true"></i>Upload animation table</button><input id="animationTableFile" type="file" accept=".csv,text/csv" class="hidden" aria-label="Choose animation table CSV"><button id="toggleAnimationGraph" type="button" class="rounded-xl bg-slate-700 px-3 py-1 text-white">Graph editor</button><button id="closeAnimationTable" type="button" class="shrink-0 rounded-xl bg-slate-700 px-3 py-1 text-white">Close</button></div></div><p id="animationTableTransferStatus" class="hidden mb-2 text-xs text-amber-300" role="status"></p><div id="animationTableContent"></div><div id="animationGraphContent" class="hidden"></div></div></div>
 
             <details id="aboutProteinComplex" class="about-protein-complex border-t border-slate-800 bg-slate-900/90"><summary class="cursor-pointer px-5 py-3 text-sm font-semibold text-white"><span><i class="fa-solid fa-circle-info text-emerald-400 mr-2" aria-hidden="true"></i>About this protein complex</span><i class="about-chevron fa-solid fa-chevron-down" aria-hidden="true"></i></summary><div id="aboutProteinComplexContent" class="px-5 pb-4 text-sm text-slate-300">UniProt information will appear when available.</div></details>
-            <button id="physicsControlsToggle" type="button" aria-expanded="false" aria-controls="physicsControlsPanel" class="w-full bg-slate-900/90 hover:bg-slate-800 border-t border-slate-800 px-5 py-3 text-left text-sm font-semibold text-white"><i class="fa-solid fa-atom text-emerald-400 mr-2" aria-hidden="true"></i>Physics settings <i id="physicsControlsChevron" class="fa-solid fa-chevron-down ml-2" aria-hidden="true"></i></button>
+            <button id="physicsControlsToggle" type="button" aria-expanded="false" aria-controls="physicsControlsPanel" class="w-full bg-slate-900/90 hover:bg-slate-800 border-t border-slate-800 px-5 py-3 text-left text-sm font-semibold text-white"><i class="fa-solid fa-atom text-emerald-400 mr-2" aria-hidden="true"></i>Build stats <i id="physicsControlsChevron" class="fa-solid fa-chevron-down ml-2" aria-hidden="true"></i></button>
             <div id="physicsControlsPanel" class="hidden">
                 <details class="bg-slate-950 px-5 py-3 border-b border-slate-800 text-xs text-slate-400">
                     <summary class="cursor-pointer">Performance diagnostics</summary>
@@ -1338,7 +1435,7 @@
                     <pre id="performanceRecordingSummary" class="mt-2 whitespace-pre-wrap"></pre>
                     <details class="mt-2"><summary class="cursor-pointer">Report data</summary><textarea id="performanceReportData" aria-label="Performance report JSON" readonly class="w-full h-36 bg-slate-900 mt-2 text-xs"></textarea></details>
                 </details>
-                <div class="bg-slate-950 px-5 py-3 border-b border-slate-800 text-xs text-slate-400"><p class="text-xs text-slate-400">Phase 1 aligns each AlphaFold chain to the Reference PDB via rigid-body TM-alignment. Phase 2 runs dynamic elastic network relaxation from these starting positions.</p></div>
+                <div class="bg-slate-950 px-5 py-3 border-b border-slate-800 text-xs text-slate-400"><p class="text-xs text-slate-400">Phase 1 aligns each AlphaFold chain to the Reference PDB via rigid-body TM-alignment. Phase 2 relaxes each subunit and its current neighbours in sequence, keeping all other subunits fixed.</p></div>
                 <div class="bg-slate-950 px-5 py-3 border-b border-slate-800 flex flex-wrap items-center gap-2 text-xs">
                     <!-- Two Phase Switcher -->
                     <div class="inline-flex rounded-xl p-0.5 bg-slate-950 border border-slate-700 text-xs shadow-inner">
@@ -1364,30 +1461,11 @@
                 <!-- Physics Controls & Stats Bar -->
                 <div class="bg-slate-950 px-5 py-3 border-b border-slate-800 flex flex-wrap items-center justify-between gap-4 text-xs">
                     <div class="flex flex-wrap items-center gap-4">
-                        <div class="flex items-center gap-2">
-                            <label for="springStiffness" class="text-slate-400">Spring Stiffness (k):</label>
-                            <input type="range" id="springStiffness" min="0.1" max="20" step="0.1" value="2.0" class="w-24 h-1.5 bg-slate-800 rounded">
-                            <span id="stiffnessVal" class="text-emerald-400 font-mono font-bold">2.0</span>
-                        </div>
+                        
 
-                        <div class="flex items-center gap-2">
-                            <label for="mobilitySlider" class="text-slate-400">Mobility / Step Size (μ):</label>
-                            <input type="range" id="mobilitySlider" min="0.001" max="0.02" step="0.001" value="0.005" class="w-24 h-1.5 bg-slate-800 rounded">
-                            <span id="mobilityDisplay" class="text-emerald-400 font-mono font-bold">0.005</span>
-                        </div>
+                        
 
-                        <div class="flex items-center gap-2">
-                            <label for="springCutoffSelect" class="text-slate-400">Spring Cutoff:</label>
-                            <select id="springCutoffSelect" class="bg-slate-800 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs">
-                                <option value="12">12.0 Å (Local Contacts)</option>
-                                <option value="20" selected>20.0 Å (Medium Range - Recommended)</option>
-                                <option value="35">35.0 Å (Extended Network)</option>
-                            </select>
-                        </div>
-                        <div class="flex flex-wrap items-center gap-2">
-                            <button id="lockAlignedResiduesBtn" type="button" aria-pressed="false" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs border border-slate-700 ">Lock aligned residues to the reference coordinates: <span id="lockAlignedResiduesState">Off</span></button>
-                            <label id="lockAlignedResiduesFalloff" class="hidden text-slate-400">Any aligned residues that are more than <input id="lockAlignedResiduesDistance" type="number" min="0" step="1" value="3" class="w-12 bg-slate-800 border border-slate-700 text-slate-200 px-1.5 py-1 rounded text-xs text-center"> residues away from unaligned residues (along the chain's backbone), have their coordinates locked to the reference structure.</label>
-                        </div>
+                        
                     </div>
 
                     <div class="flex flex-wrap items-center gap-4 font-mono text-[11px]">
@@ -1404,85 +1482,21 @@
                     <div class="flex flex-wrap items-center justify-between gap-3 mb-3"><h3 class="text-sm font-semibold text-sky-300">Phase 2 simulation history</h3><div class="flex flex-wrap items-center gap-2"><label for="physicsGraphRange" class="text-xs text-slate-300">Plot</label><select id="physicsGraphRange" class="bg-slate-800 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs"><option value="all">Since phase 2 started</option><option value="reset">Since last simulation phase 2 reset</option><option value="change">Since last change to physics settings</option><option value="60s">Last 60 seconds</option></select><button id="physicsGraphLogScale" type="button" aria-pressed="false" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs border border-slate-700">Log scale: False</button><button id="physicsGraphNormalize" type="button" aria-pressed="true" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs border border-slate-700">Normalised: True</button><button id="physicsGraphDownload" type="button" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs border border-slate-700 inline-flex items-center gap-1.5"><i class="fa-solid fa-download" aria-hidden="true"></i>Download graph</button></div></div>
                     <div class="rounded-lg border border-slate-800 bg-slate-900/60 p-2"><canvas id="physicsGraphCanvas" class="block w-full" style="height:360px" role="img" aria-label="Live Phase 2 TM-score, Phase 2 RMSD, weighted spring-length error, average residue speed, restraint satisfaction, overall model confidence, and membrane placement over Phase 2 time"></canvas></div>
                     <p id="physicsGraphStatus" class="mt-2 text-xs text-slate-400" role="status">The graph starts when Phase 2 begins.</p>
-                    <div class="mt-3 grid gap-2 text-xs text-slate-300 sm:grid-cols-2"><p><strong class="text-sky-400">TM-score (Phase 2)</strong> is recalculated for each graph sample from equivalent Cα positions in the current simulated model and the reference, after rigid alignment. Higher (up to 1) means closer agreement. The TM-Score (P1) value above is the fixed result from the initial Phase 1 chain alignments.</p><p><strong class="text-violet-400">RMSD (Phase 2)</strong> is the root-mean-square distance between equivalent Cα atoms in the current simulated model and the reference, in ångströms (Å). Lower means closer. The RMSD (P1) value above is fixed at the initial Phase 1 result.</p><p><strong class="text-green-400">Weighted spring-length error</strong> is the square root of the mean stiffness-weighted spring potential, in arbitrary units (a.u.). Lower means the active spring network is more relaxed. It is neither an RMSD nor a physical energy.</p><p><strong class="text-amber-400">Average residue speed</strong> is the mean distance each simulated residue moves per second between samples, in Å/s. Lower means the structure is changing more slowly.</p><p><strong style="color:#fb923c">Restraint satisfaction</strong> shows the mean agreement between active spring lengths and their target distances. A perfect match is 1.0; the score decreases as springs stretch or compress.</p><p><strong style="color:#f472b6">Overall model confidence</strong> combines distance-evidence support and spring satisfaction, with a locally weighted membrane adjustment. Higher is better; it is a heuristic, not a calibrated probability.</p><p><strong style="color:#2dd4bf">Membrane placement</strong> combines how well non-membrane residues have moved out of the membrane with the strength of the detected hydrophobic belt. It is unavailable when no membrane is detected.</p><p id="physicsGraphScaleExplanation" class="sm:col-span-2 text-slate-400">If normalised, each line is divided by its own maximum in the displayed time window, so 1.0 is that line’s current window maximum. The three validation scores are sampled intermittently and hold their last values between updates. Vertical lines mark changes to physics controls.</p></div>
+                    <div class="mt-3 grid gap-2 text-xs text-slate-300 sm:grid-cols-2"><p><strong class="text-sky-400">TM-score (Phase 2)</strong> is recalculated for each graph sample from equivalent Cα positions in the current simulated model and the reference, in the fixed build coordinate frame. Higher (up to 1) means closer agreement. The TM-Score (P1) value above is the fixed result from the initial Phase 1 chain alignments.</p><p><strong class="text-violet-400">RMSD (Phase 2)</strong> is the root-mean-square distance between equivalent Cα atoms in the current simulated model and the reference, in ångströms (Å). Lower means closer. The RMSD (P1) value above is fixed at the initial Phase 1 result.</p><p><strong class="text-green-400">Weighted spring-length error</strong> is the square root of the mean stiffness-weighted spring potential, in arbitrary units (a.u.). Lower means the active spring network is more relaxed. It is neither an RMSD nor a physical energy.</p><p><strong class="text-amber-400">Average residue speed</strong> is the mean distance each simulated residue moves per second between samples, in Å/s. Lower means the structure is changing more slowly.</p><p><strong style="color:#f87171">Max residue speed of the core subunit</strong> is the greatest residue speed in the current core, measured over completed simulation steps in a short running-time window. It determines when the next group starts. With concurrent groups, the plot shows the highest speed across their cores; each core has its own stopping criteria.</p><p><strong style="color:#fb923c">Restraint satisfaction</strong> shows the mean agreement between active spring lengths and their target distances. A perfect match is 1.0; the score decreases as springs stretch or compress.</p><p><strong style="color:#f472b6">Overall model confidence</strong> combines distance-evidence support and spring satisfaction from the available restraints. Higher is better; it is a heuristic, not a calibrated probability.</p><p><strong style="color:#2dd4bf">Membrane placement confidence</strong> reports evidence supporting the inferred hydrophobic belt. It is unavailable when no membrane is detected.</p><p id="physicsGraphScaleExplanation" class="sm:col-span-2 text-slate-400">If normalised, each line is divided by its own maximum in the displayed time window, so 1.0 is that line’s current window maximum. The three validation scores are sampled intermittently and hold their last values between updates. Vertical lines mark group starts and changes to build controls.</p></div>
                 </section>
 
             <!-- Per-model morph influence controls -->
-            <div class="bg-slate-950 px-6 py-4 border-t border-slate-800 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div id="referenceInfluenceControls"><label class="text-xs text-sky-400">Reference PDB influence on spring lengths and strengths <span id="model1InfluenceVal">100%</span><input id="model1InfluenceSlider" type="range" min="0" max="1" step="0.01" value="1" class="w-full"></label></div>
-                <label class="text-xs text-teal-400">AlphaFold influence on spring lengths and strengths <span id="model2InfluenceVal">100%</span><input id="model2InfluenceSlider" type="range" min="0" max="1" step="0.01" value="1" class="w-full"></label>
-            </div>
+            
 
-            <div class="bg-slate-950 px-6 py-4 border-t border-slate-800 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <label for="paeSpringInfluenceSlider" class="text-xs text-sky-400">PAE effect on spring length and strength <output id="paeSpringInfluenceValue">100%</output><input id="paeSpringInfluenceSlider" type="range" min="0" max="1" step="0.01" value="1" class="w-full" aria-describedby="afSpringConfidenceHelp"></label>
-                <label for="plddtSpringInfluenceSlider" class="text-xs text-teal-400">pLDDT effect on spring length and strength <output id="plddtSpringInfluenceValue">50%</output><input id="plddtSpringInfluenceSlider" type="range" min="0" max="1" step="0.01" value="0.5" class="w-full" aria-describedby="afSpringConfidenceHelp"></label>
-                <p id="afSpringConfidenceHelp" class="md:col-span-2 text-xs text-slate-400">These controls determine how strongly PAE and pLDDT confidence can weaken AlphaFold-derived spring targets and strengths. Zero ignores that confidence measure; higher values give it more effect. Low PAE means stronger pairwise evidence; low pLDDT weakens local evidence. Unavailable scores leave the corresponding factor unchanged.</p>
-            </div>
-            <div class="bg-slate-950 px-6 py-4 border-t border-slate-800/80 flex flex-col md:flex-row items-center justify-between gap-4">
-                <div class="flex items-center gap-3 w-full md:w-auto min-w-0"><div class="w-10 h-10 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 shrink-0 shadow-inner" aria-hidden="true"><i class="fa-solid fa-dna text-base"></i></div><div><label for="angularRestraintSlider" class="text-xs font-semibold text-white">Angular/dihedral restraints <output id="angularRestraintValue" class="bg-sky-950/80 border border-sky-500/30 text-sky-400 font-mono text-[11px] font-bold px-2.5 py-0.5 rounded-full shadow-sm">25%</output></label><p class="text-[11px] text-slate-400 mt-0.5">Keeps local Cα backbone bends and twists close to the starting AlphaFold model and aligned reference structures. AlphaFold restraints are weighted by pLDDT; zero turns these forces off.</p></div></div>
-                <input id="angularRestraintSlider" type="range" min="0" max="1" step="0.01" value="0.25" class="w-full md:w-7/12 h-2.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-500" aria-label="Angular and dihedral restraint strength">
-            </div>
+            
+            
 
-            <div class="bg-slate-950 px-6 py-4 border-t border-slate-800/80 flex flex-col md:flex-row items-center justify-between gap-4">
-                <div class="flex items-center gap-3 w-full md:w-auto">
-                    <div class="w-10 h-10 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 shrink-0" aria-hidden="true"><i class="fa-solid fa-water"></i></div>
-                    <div><label for="membraneRepulsionSlider" class="text-xs font-semibold text-white">Membrane repulsion <output id="membraneRepulsionValue" class="bg-sky-950/80 border border-sky-500/30 text-sky-400 font-mono text-[11px] font-bold px-2.5 py-0.5 rounded-full shadow-sm">100%</output></label>
-                    <p class="text-[11px] text-slate-400 mt-0.5">Once repelled, an unaligned non-membrane residue keeps feeling a weaker force as it moves farther from the membrane.</p></div>
-                </div>
-                <input id="membraneRepulsionSlider" type="range" min="0" max="1" step="0.01" value="1" aria-label="Membrane repulsion force" class="w-full md:w-7/12 h-2.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50">
-            </div>
+            
 
-            <!-- All-Residue Mutual Repulsion Force Controller Bar (Below Physics Simulation) -->
-            <div class="bg-slate-950 px-6 py-4 border-t border-slate-800/80 flex flex-col md:flex-row items-center justify-between gap-4">
-                <div class="flex items-center gap-3 w-full md:w-auto">
-                    <div class="w-10 h-10 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 shrink-0 shadow-inner" aria-hidden="true"><i class="fa-solid fa-shield-halved text-base"></i></div>
-                    <div>
-                        <label for="stericClashRadiusSlider" class="text-xs font-semibold text-white">Steric clash exclusion radius <output id="stericClashRadiusValue" class="bg-sky-950/80 border border-sky-500/30 text-sky-400 font-mono text-[11px] font-bold px-2.5 py-0.5 rounded-full shadow-sm">3.8 Å</output></label>
-                        <p class="text-[11px] text-slate-400 mt-0.5">Residue centres closer than this distance repel each other. The Other Physics Constraints slider controls the force strength.</p>
-                    </div>
-                </div>
-                <input type="range" id="stericClashRadiusSlider" min="2" max="8" step="0.1" value="3.8" aria-label="Steric clash exclusion radius" class="w-full md:w-7/12 h-2.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/50">
-            </div>
-            <div class="bg-slate-950 px-6 py-4 border-t border-slate-800/80 flex flex-col md:flex-row items-center justify-between gap-4">
-                <div class="flex items-center gap-3 w-full md:w-auto">
-                    <div class="w-10 h-10 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 shrink-0 shadow-inner">
-                        <i class="fa-solid fa-atom text-base"></i>
-                    </div>
-                    <div>
-                        <div class="flex items-center gap-2">
-                            <span class="text-xs font-semibold text-white tracking-wide">All-Residue Repulsion Force</span>
-                            <span id="residueRepulsionBadge" class="bg-slate-900 border border-slate-700 text-slate-400 font-mono text-[11px] font-bold px-2.5 py-0.5 rounded-full shadow-sm">Off</span>
-                        </div>
-                        <p class="text-[11px] text-slate-400 mt-0.5">
-                            Applies an all-pairs repulsive force pushing all residues apart.
-                        </p>
-                    </div>
-                </div>
+            
+            
 
-                <input type="range" id="residueRepulsionSlider" min="0" max="1" step="0.01" value="0"
-                       class="w-full md:w-7/12 h-2.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50">
-            </div>
-
-            <!-- Other Physics Constraints Influence Controller Bar (Below Physics Simulation) -->
-            <div class="bg-slate-950 px-6 py-4 border-t border-slate-800/80 flex flex-col md:flex-row items-center justify-between gap-4">
-                <div class="flex items-center gap-3 w-full md:w-auto">
-                    <div class="w-10 h-10 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 shrink-0 shadow-inner">
-                        <i class="fa-solid fa-link text-base"></i>
-                    </div>
-                    <div>
-                        <div class="flex items-center gap-2">
-                            <span class="text-xs font-semibold text-white tracking-wide">Other Physics Constraints Influence</span>
-                            <span id="otherConstraintsBadge" class="bg-sky-950/80 border border-sky-500/30 text-sky-400 font-mono text-[11px] font-bold px-2.5 py-0.5 rounded-full shadow-sm">100%</span>
-                        </div>
-                        <p class="text-[11px] text-slate-400 mt-0.5">
-                            Controls peptide backbone bonds and steric clash exclusion.
-                        </p>
-                    </div>
-                </div>
-
-                <input type="range" id="otherConstraintsSlider" min="0" max="1" step="0.01" value="1"
-                       class="w-full md:w-7/12 h-2.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/50">
-            </div>
+            
             </div><!-- End Physics Controls -->
             <details id="physicsVariableComparison" class="border-t border-slate-800 bg-slate-900/90">
                 <summary class="comparison-summary cursor-pointer px-5 py-3 text-sm font-semibold text-white"><span><i class="fa-solid fa-chart-line text-emerald-400 mr-2" aria-hidden="true"></i>Compare two variables</span><i class="comparison-chevron fa-solid fa-chevron-down" aria-hidden="true"></i></summary>
@@ -1506,6 +1520,7 @@
             </details>
         </div>
 
+        <div id="stagedModelComparisons" class="hidden space-y-4"></div>
         <!-- Section 7: View Simulation in Mol* Viewer -->
         <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl flex flex-col gap-4">
             <div class="flex flex-wrap items-center justify-start gap-3">
@@ -1583,14 +1598,14 @@
                 <div class="validation-score-grid">
                     <div class="validation-score-card"><span>Sequence coverage</span><strong id="validationCoverage">—</strong><small>AlphaFold residues mapped</small></div>
                     <div class="validation-score-card"><span>Restraint satisfaction</span><button type="button" class="validation-score-graph" title="View restraint satisfaction on live graph" aria-label="View restraint satisfaction on live graph"><i class="fa-solid fa-chart-line" aria-hidden="true"></i></button><strong id="validationSatisfaction">—</strong><small>Mean spring agreement</small></div>
-                    <div class="validation-score-card"><span>Membrane placement</span><button type="button" class="validation-score-graph" title="View membrane placement on live graph" aria-label="View membrane placement on live graph"><i class="fa-solid fa-chart-line" aria-hidden="true"></i></button><strong id="validationMembrane">—</strong><small>When a membrane is detected</small></div>
+                    <div class="validation-score-card"><span>Membrane placement confidence</span><button type="button" class="validation-score-graph" title="View membrane placement on live graph" aria-label="View membrane placement on live graph"><i class="fa-solid fa-chart-line" aria-hidden="true"></i></button><strong id="validationMembrane">—</strong><small>When a membrane is detected</small></div>
                     <div class="validation-score-card"><span>Overall confidence</span><button type="button" class="validation-score-graph" title="View overall confidence on live graph" aria-label="View overall confidence on live graph"><i class="fa-solid fa-chart-line" aria-hidden="true"></i></button><strong id="validationOverall">—</strong><small>Combined local score</small></div>
                 </div>
                 <div class="validation-score-explanations" aria-label="How the validation summary scores are calculated">
                     <article><p><strong>Sequence coverage</strong> is the percentage of protein residues in the AlphaFold chains that align to at least one reference PDB residue. Each AlphaFold residue is counted once, even if it matches several references. Higher coverage means more of the model has a reference sequence match; it does not measure structural accuracy.</p><details><summary>Equation <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></summary><span class="validation-equation">Coverage = 100 × (unique mapped AlphaFold protein residues) / (all AlphaFold protein residues)</span></details></article>
                     <article><p><strong>Restraint satisfaction</strong> is the average agreement between each active protein-distance spring’s current length and its target length. Exact agreement scores 100%; the score falls exponentially as the difference grows, relative to the target distance. It describes fit to the active restraints, not the reliability of those restraints.</p><details><summary>Equation <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></summary><span class="validation-equation">Pair score = exp(−|model distance − target distance| / max(2 Å, 0.2 × target distance))<br>Restraint satisfaction = 100 × mean(pair scores)</span></details></article>
-                    <article><p><strong>Membrane placement</strong> combines two factors: the average local score for moving residues classified as incompatible with the membrane away from it, multiplied by confidence in the detected hydrophobic belt. The local score falls near residues that still conflict with the membrane. If no membrane is detected, this value is unavailable.</p><details><summary>Equation <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></summary><span class="validation-equation">Local node score = 1 − strongest nearby membrane-conflict penalty<br>Pair shift score = mean(two node scores)<br>Membrane placement = 100 × mean(pair shift scores) × membrane-detection confidence</span></details></article>
-                    <article><p><strong>Overall confidence</strong> averages the active residue-pair scores. Each pair combines support from available reference structures, AlphaFold pLDDT and PAE, agreement with its spring target, and a local membrane adjustment where relevant. This is a heuristic consistency score, not a calibrated probability that the model is correct.</p><details><summary>Equation <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></summary><span class="validation-equation">Pair confidence = evidence support × restraint satisfaction × [1 − 0.2 × membrane-detection confidence × (1 − pair shift score)]<br>Overall confidence = 100 × mean(pair confidences)</span></details></article>
+                    <article><p><strong>Membrane placement confidence</strong> measures support for the inferred membrane using hydrophobic density contrast, hydrophobic density inside the belt, effective hydrophobic support, and the detector score. It does not apply forces to the model. If no membrane is detected, it is unavailable.</p></article>
+                    <article><p><strong>Overall confidence</strong> averages the active residue-pair scores. Each pair combines support from available reference structures, AlphaFold pLDDT and PAE, agreement with its spring target. This is a heuristic consistency score, not a calibrated probability that the model is correct.</p><details><summary>Equation <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></summary><span class="validation-equation">Pair confidence = evidence support × restraint satisfaction<br>Overall confidence = 100 × mean(pair confidences)</span></details></article>
                 </div>
                 <section class="validation-panel">
                     <div class="validation-panel-heading"><h3>Sequence alignment by AlphaFold chain</h3><p>Coverage and mean identity/similarity across matched reference chains</p></div>
@@ -1599,10 +1614,10 @@
                 <div class="validation-figure-grid">
                     <section class="validation-figure-card"><header><h3>Constraint confidence</h3><button class="validation-color-in-3d" type="button" data-color-mode="constraint-confidence"><i class="fa-solid fa-palette" aria-hidden="true"></i> Colour proteins by this</button><p>How strongly the evidence supports each distance</p><button class="validation-matrix-reset" type="button" title="Reset matrix view" aria-label="Reset matrix view"><i class="fa-solid fa-camera" aria-hidden="true"></i> Reset</button></header><div class="validation-matrix-frame"><canvas id="validationConfidenceMatrix" class="validation-matrix" aria-label="Constraint confidence matrix"></canvas></div><div class="validation-legend"><span><i class="validation-swatch validation-swatch-low"></i>Low</span><span><i class="validation-swatch validation-swatch-high"></i>High</span></div><div class="validation-histogram-frame"><span>Distribution</span><canvas id="validationConfidenceHistogram" class="validation-histogram" aria-label="Constraint confidence histogram"></canvas></div><p id="validationConfidenceAverage" class="validation-figure-average"></p></section>
                     <section class="validation-figure-card"><header><h3>Spring compression / stretch</h3><button class="validation-color-in-3d" type="button" data-color-mode="spring-strain"><i class="fa-solid fa-palette" aria-hidden="true"></i> Colour proteins by this</button><p>Current model distance relative to each spring target</p><button class="validation-matrix-reset" type="button" title="Reset matrix view" aria-label="Reset matrix view"><i class="fa-solid fa-camera" aria-hidden="true"></i> Reset</button></header><div class="validation-matrix-frame"><canvas id="validationStrainMatrix" class="validation-matrix" aria-label="Spring strain matrix"></canvas></div><div class="validation-legend"><span><i class="validation-swatch validation-swatch-compressed"></i>Compressed</span><span><i class="validation-swatch validation-swatch-neutral"></i>Target</span><span><i class="validation-swatch validation-swatch-stretched"></i>Stretched</span></div><div class="validation-histogram-frame"><span>Distribution</span><canvas id="validationStrainHistogram" class="validation-histogram" aria-label="Spring strain histogram"></canvas></div><p id="validationStrainAverage" class="validation-figure-average"></p></section>
-                    <section class="validation-figure-card"><header><h3>Conformation shift to fit membrane constraints</h3><button class="validation-color-in-3d" type="button" data-color-mode="membrane-score"><i class="fa-solid fa-palette" aria-hidden="true"></i> Colour proteins by this</button><p>A score of how well non-membrane parts of the complex have been pushed out of the membrane</p><button class="validation-matrix-reset" type="button" title="Reset matrix view" aria-label="Reset matrix view"><i class="fa-solid fa-camera" aria-hidden="true"></i> Reset</button></header><div class="validation-matrix-frame"><canvas id="validationMembraneMatrix" class="validation-matrix" aria-label="Local membrane placement matrix"></canvas></div><div class="validation-legend"><span><i class="validation-swatch validation-swatch-low"></i>Low</span><span><i class="validation-swatch validation-swatch-high"></i>High</span></div><div class="validation-histogram-frame"><span>Distribution</span><canvas id="validationMembraneHistogram" class="validation-histogram" aria-label="Membrane placement histogram"></canvas></div><p id="validationMembraneAverage" class="validation-figure-average"></p></section>
+                    
                     <section class="validation-figure-card"><header><h3>Combined pair confidence</h3><button class="validation-color-in-3d" type="button" data-color-mode="model-confidence"><i class="fa-solid fa-palette" aria-hidden="true"></i> Colour proteins by this</button><p>Evidence support × restraint satisfaction</p><button class="validation-matrix-reset" type="button" title="Reset matrix view" aria-label="Reset matrix view"><i class="fa-solid fa-camera" aria-hidden="true"></i> Reset</button></header><div class="validation-matrix-frame"><canvas id="validationCombinedMatrix" class="validation-matrix" aria-label="Combined confidence matrix"></canvas></div><div class="validation-legend"><span><i class="validation-swatch validation-swatch-low"></i>Low</span><span><i class="validation-swatch validation-swatch-high"></i>High</span></div><div class="validation-histogram-frame"><span>Distribution</span><canvas id="validationCombinedHistogram" class="validation-histogram" aria-label="Combined confidence histogram"></canvas></div><p id="validationCombinedAverage" class="validation-figure-average"></p></section>
                 </div>
-                <p class="validation-method-note">Grey cells have no active distance restraint or exceed the spring cutoff. Scroll to zoom a matrix, drag to pan, and click a cell for pair details. Coloured edge bars identify chains; dashed lines separate them. Evidence support combines available reference agreement (35%), AlphaFold pLDDT (15%), and pairwise PAE (50%), renormalising when a source is unavailable. Restraint satisfaction decreases with absolute distance error. Membrane placement affects nearby residue pairs, fading to zero at twice the spring cutoff. These are heuristics, not calibrated probabilities.</p>
+                <p class="validation-method-note">Grey cells have no active distance restraint or exceed the spring cutoff. Scroll to zoom a matrix, drag to pan, and click a cell for pair details. Coloured edge bars identify chains; dashed lines separate them. Evidence support combines available reference agreement (35%), AlphaFold pLDDT (15%), and pairwise PAE (50%), renormalising when a source is unavailable. Restraint satisfaction decreases with absolute distance error. Membrane placement confidence reports membrane-detection evidence independently of the spring simulation. These are heuristics, not calibrated probabilities.</p>
                 <div id="validationPairDetails" class="validation-pair-details hidden"></div>
                 <p id="validationInterpretation" class="validation-interpretation"></p>
                 <section id="validationExtraEvidence" class="validation-panel hidden"><div class="validation-panel-heading"><h3>Manually added evidence</h3><p id="validationExtraSummary"></p></div><div class="validation-extra-chart"><canvas id="validationExtraHistogram" aria-label="Extra evidence satisfaction histogram"></canvas></div><div class="validation-table-scroll"><table class="validation-table"><thead><tr><th>Type</th><th>Residue pair</th><th>Observed</th><th>Target / upper bound</th><th>Satisfaction</th></tr></thead><tbody id="validationExtraRows"></tbody></table></div></section>
@@ -1631,6 +1646,22 @@
     <script src="performance-diagnostics.js"></script>
     <script src="lipid-renderer.js"></script>
     <script src="variable-comparison.js"></script>
+    <dialog id="modellerAiDialog" aria-labelledby="modellerAiTitle" >
+        <form id="modellerAiForm" class="space-y-3">
+            <div class="flex justify-between items-center"><h2 id="modellerAiTitle" class="text-xl font-bold">Connect an AI</h2><button id="modellerAiClose" type="button" aria-label="Close">Close ×</button></div>
+            <button id="modellerAiMode" type="button" data-mode="cloud" aria-pressed="false" aria-label="Switch to Local LLM" aria-controls="modellerAiProviderLabel modellerAiKeyLabel"><span>Cloud AI</span><span>Local LLM</span></button>
+            <div id="modellerAiProviderLabel"><span id="modellerAiProviderCaption">Provider</span><select id="modellerAiProvider" hidden aria-hidden="true" tabindex="-1"><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="google">Google</option></select><div class="ai-picker"><button id="modellerAiProviderTrigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="modellerAiProviderMenu" aria-labelledby="modellerAiProviderCaption modellerAiProviderText"><span id="modellerAiProviderText">OpenAI</span><span aria-hidden="true">▾</span></button><div id="modellerAiProviderMenu" class="ai-picker-menu" role="menu" aria-labelledby="modellerAiProviderCaption" hidden></div></div></div>
+            <p id="modellerAiHelp" class="text-sm"></p>
+            <label class="block">API URL<input id="modellerAiUrl" type="url" required class="block w-full bg-slate-800 p-2 rounded" value="https://api.openai.com/v1"></label>
+            <label id="modellerAiKeyLabel" class="block">API key<input id="modellerAiKey" type="password" autocomplete="off" class="block w-full bg-slate-800 p-2 rounded"></label>
+            <div><span id="modellerAiModelCaption">Model</span><select id="modellerAiModel" hidden aria-hidden="true" tabindex="-1"></select><div class="ai-picker"><button id="modellerAiModelTrigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="modellerAiModelMenu" aria-labelledby="modellerAiModelCaption modellerAiModelText" disabled><span id="modellerAiModelText">Enter your API key to load models</span><span aria-hidden="true">▾</span></button><div id="modellerAiModelMenu" class="ai-picker-menu" role="menu" aria-labelledby="modellerAiModelCaption" hidden></div></div></div>
+            <p id="modellerAiPrivacy" class="text-sm">Your key stays in this tab. When connected, searches automatically send your query (or input sequences) and the search results table to your provider to select references. Cloud API charges may apply.</p>
+            <p id="modellerAiStatus" role="status" class="text-sm"></p>
+            <div class="flex gap-3"><button type="submit" class="bg-indigo-600 px-4 py-2 rounded">Connect</button><button id="modellerAiDisconnect" type="button" class="bg-slate-700 px-4 py-2 rounded">Disconnect</button></div>
+        </form>
+    </dialog>
+    <script src="modeller-ai.js"></script>
+    <script src="staged-models.js"></script>
     <script id="appScript" src="script.js"></script>
     <div id="simulationLoadingPopup" class="hidden" role="status" aria-live="polite"><div><i class="fa-solid fa-circle-notch fa-spin mr-2" aria-hidden="true"></i>Loading...</div></div>
 </body>
