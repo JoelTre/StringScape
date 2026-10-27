@@ -1639,6 +1639,7 @@
             try { return referenceInputParts(document.getElementById('pdbInput1').value).ids.filter(id => /^[0-9][A-Z0-9]{3}$/.test(id)); }
             catch (_) { return []; }
         }
+        let referenceConformationPlan = null;
         let referenceSearchResults = [];
         let referenceSearchHistory = [];
         let referenceSearchSequences = [];
@@ -1674,10 +1675,14 @@
             saveRecentModel({updateExistingOnly:true});
             renderRecentModels();
             renderReferenceSearchResults();
-            if(selectedReferencePdbIds().length) void fetchSiftsUniProtIds({autoBuild:true});
+            if(selectedReferencePdbIds().length) {
+                if(stringSequenceFile() || stringAliasesFile()) void findStringReferenceMatches();
+                else void fetchSiftsUniProtIds({autoBuild:true});
+            }
             else {
                 siftsRequestToken++;
                 clearSiftsLookupLoading(true);
+                document.getElementById('fetchSiftsStatus').classList.remove('discovery-warning', 'search-success');
                 document.getElementById('fetchSiftsStatus').textContent='Select at least one reference PDB to fetch UniProt IDs.';
                 updateBuildButtonState();
             }
@@ -1693,49 +1698,115 @@
                 body.append(row);
             }
         }
+        function createReferenceSearchRow(hit,selected) {
+            const row = document.createElement('tr');
+            row.className = 'border-t border-slate-700';
+            const id = document.createElement('td'); id.className = 'p-2 font-semibold text-sky-300'; id.textContent = hit.identifier;
+            const score = document.createElement('td'); score.className = 'p-2 tabular-nums'; score.textContent = Number.isFinite(Number(hit.score)) ? Number(hit.score).toFixed(3) : '—';
+            if(hit.name){const name=document.createElement('div');name.className='font-normal text-slate-300';name.textContent=hit.name;id.append(name);}
+            if(hit.searchMatches?.length){const provenance=document.createElement('div');provenance.className='text-xs font-normal text-slate-400';provenance.textContent='Searches: '+hit.searchMatches.map(match=>match.query).join('; ');id.append(provenance);}
+            const species=document.createElement('td');species.className='p-2 align-top';species.textContent=hit.species?.join('; ')||'Not reported';
+            const records=hit.mapping?.records || [];
+            const mappingCells=['reference','accessions','origin','detail'].map(field=>{
+                const cell=document.createElement('td');cell.className='p-2 align-top';
+                for(const record of records){
+                    const line=document.createElement('div');line.className='mb-2';
+                    line.textContent=field==='reference' ? `${record.chains.join(', ') || 'Chain not reported'} · ${record.name || 'Protein name unavailable'}`
+                        : field==='accessions' ? record.accessions.join(', ') || 'No ID found'
+                        : field==='origin' ? record.origin || 'Unresolved'
+                        : record.detail || (record.origin==='SIFTS' ? 'Mapped by PDBe SIFTS' : '—');
+                    cell.append(line);
+                }
+                if(!records.length)cell.textContent=field==='detail' ? hit.mapping?.notes?.join(' ') || 'Mapping unavailable' : '—';
+                return cell;
+            });
+            const action = document.createElement('td'); action.className = 'p-2';
+            const button = document.createElement('button'); button.type = 'button'; button.className = 'bg-slate-700 hover:bg-slate-600 text-white rounded-lg px-2 py-1';
+            button.textContent = selected.has(hit.identifier) ? "Don't Use" : 'Use';
+            button.addEventListener('click', () => {
+                const next = new Set(selectedReferencePdbIds());
+                if (next.has(hit.identifier)) next.delete(hit.identifier); else next.add(hit.identifier);
+                setReferenceSearchSelection([...next]);
+            });
+            action.append(button); row.append(id, score, species, ...mappingCells, action);
+            return row;
+        }
+        function renderChosenReferences() {
+            const body=document.getElementById('chosenReferencesBody');if(!body)return;
+            body.replaceChildren();
+            const ids=selectedReferencePdbIds(),selected=new Set(ids);
+            const plan=referenceConformationPlan;
+            const groups=plan&&plan.pdbIds.length===ids.length&&ids.every(id=>plan.pdbIds.includes(id))
+                ? plan.groups : [{name:'Combined model',pdbIds:ids}];
+            for(const [index,group] of groups.entries())for(const id of group.pdbIds){
+                const hit=referenceSearchResults.find(hit=>hit.identifier===id)||{identifier:id};
+                const row=createReferenceSearchRow(hit,selected);
+                for(const value of [String(index+1),group.name,group.pdbIds.join(', ')]){
+                    const cell=document.createElement('td');cell.className='p-2 align-top';cell.textContent=value;row.append(cell);
+                }
+                body.append(row);
+            }
+            if(!ids.length){
+                const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=11;cell.className='p-3 text-slate-400';cell.textContent='No references chosen yet.';row.append(cell);body.append(row);
+            }
+        }
         function renderReferenceSearchResults() {
             renderReferenceSearchHistory();
-            const body = document.getElementById('referenceSearchResultsBody');
-            if (!body) return;
+            const body=document.getElementById('referenceSearchResultsBody');if(!body)return;
             body.replaceChildren();
-            const selected = new Set(selectedReferencePdbIds());
-            for (const hit of referenceSearchResults) {
-                const row = document.createElement('tr');
-                row.className = 'border-t border-slate-700';
-                const id = document.createElement('td'); id.className = 'p-2 font-semibold text-sky-300'; id.textContent = hit.identifier;
-                const score = document.createElement('td'); score.className = 'p-2 tabular-nums'; score.textContent = Number.isFinite(Number(hit.score)) ? Number(hit.score).toFixed(3) : '—';
-                if(hit.name){const name=document.createElement('div');name.className='font-normal text-slate-300';name.textContent=hit.name;id.append(name);}
-                if(hit.searchMatches?.length){const provenance=document.createElement('div');provenance.className='text-xs font-normal text-slate-400';provenance.textContent='Searches: '+hit.searchMatches.map(match=>match.query).join('; ');id.append(provenance);}
-                const species=document.createElement('td');species.className='p-2 align-top';species.textContent=hit.species?.join('; ')||'Not reported';
-                const records=hit.mapping?.records || [];
-                const mappingCells=['reference','accessions','origin','detail'].map(field=>{
-                    const cell=document.createElement('td');cell.className='p-2 align-top';
-                    for(const record of records){
-                        const line=document.createElement('div');line.className='mb-2';
-                        line.textContent=field==='reference' ? `${record.chains.join(', ') || 'Chain not reported'} · ${record.name || 'Protein name unavailable'}`
-                            : field==='accessions' ? record.accessions.join(', ') || 'No ID found'
-                            : field==='origin' ? record.origin || 'Unresolved'
-                            : record.detail || (record.origin==='SIFTS' ? 'Mapped by PDBe SIFTS' : '—');
-                        cell.append(line);
-                    }
-                    if(!records.length)cell.textContent=field==='detail' ? hit.mapping?.notes.join(' ') || 'Mapping unavailable' : '—';
-                    return cell;
-                });
-                const action = document.createElement('td'); action.className = 'p-2';
-                const button = document.createElement('button'); button.type = 'button'; button.className = 'bg-slate-700 hover:bg-slate-600 text-white rounded-lg px-2 py-1';
-                button.textContent = selected.has(hit.identifier) ? "Don't Use" : 'Use';
-                button.addEventListener('click', () => {
-                    const next = new Set(selectedReferencePdbIds());
-                    if (next.has(hit.identifier)) next.delete(hit.identifier); else next.add(hit.identifier);
-                    setReferenceSearchSelection([...next]);
-                });
-                action.append(button); row.append(id, score, species, ...mappingCells, action); body.append(row);
+            const selected=new Set(selectedReferencePdbIds());
+            for(const hit of referenceSearchResults)body.append(createReferenceSearchRow(hit,selected));
+            renderChosenReferences();
+        }
+        let completedReferenceSearchKey = null;
+        function currentReferenceSearchKey() {
+            return JSON.stringify([document.getElementById('referenceSearchInput')?.value.trim(), referenceSearchTaxon()]);
+        }
+        function selectedModellingSpecies() {
+            return speciesChoices.get(document.getElementById('stringSpeciesSearch')?.value) || null;
+        }
+        function stringFileTaxon() {
+            return (stringSequenceFile() || stringAliasesFile())?.name.match(/^(\d+)\.protein\./i)?.[1] || null;
+        }
+        function referenceSearchTaxon() {
+            const selected = selectedModellingSpecies();
+            const fileTaxon = stringFileTaxon();
+            return selected ? (fileTaxon ? null : selected.taxon) : fileTaxon;
+        }
+        function filterReferenceSearchBySpecies(query, taxon) {
+            if (!taxon) return query;
+            return {type:'group',logical_operator:'and',nodes:[query,{
+                type:'terminal',service:'text',parameters:{
+                    attribute:'rcsb_entity_source_organism.taxonomy_lineage.id',
+                    operator:'exact_match',value:String(taxon)
+                }
+            }]};
+        }
+        function updateReferenceSpeciesGuidance() {
+            const selected = selectedModellingSpecies();
+            const taxon = stringFileTaxon();
+            const guidance = document.getElementById('referenceSpeciesGuidance');
+            if (selected) {
+                guidance.textContent = `By default, this app will only use reference PDB structures from ${selected.name}. If you upload STRING files below, the app will use the best reference structures from any species.`;
+            } else if (taxon) {
+                const name = stringSpeciesCatalog[taxon]?.[0] || `taxon ${taxon}`;
+                guidance.textContent = `With no species selected, this app will only use reference PDB structures from ${name}, the species in your STRING files. AlphaFold models will be selected using the STRING files alignment search.`;
+            } else {
+                guidance.textContent = 'By default, this app will use reference PDB structures from any species. If you select a species, the app will only search for reference structures from that species unless you upload STRING files below.';
             }
+            // Discard any in-flight search when its species scope changes.
+            referenceSearchRequest++;
+            referenceSearchLoading=false;
+            updateBuildButtonState();
+            const button=document.getElementById('findReferencePdbsBtn');
+            if(button)button.disabled=!document.getElementById('referenceSearchInput')?.value.trim();
         }
         async function fetchReferencePdbsForSequences(mode = 'sequence') {
             const button = document.getElementById('findReferencePdbsBtn') || document.getElementById(mode === 'query' ? 'fetchReferenceQueryBtn' : 'fetchReferenceSequencesBtn');
             const status = document.getElementById('referenceSequenceSearchStatus');
+            status.classList.remove('search-no-results', 'search-success');
             const searchInput=document.getElementById('referenceSearchInput') || document.getElementById('pdbInput1');
+            const searchTaxon = referenceSearchTaxon();
             const referenceAtStart=document.getElementById('pdbInput1').value;
             let parts;
             try { parts = referenceInputParts(searchInput.value); }
@@ -1755,7 +1826,7 @@
             globalThis.BuildTimeline?.reset(true);
             referenceSearchLoading=true;
             updateBuildButtonState();
-            button.disabled = true; status.textContent = mode === 'query' ? 'Searching RCSB for matching PDB entries…' : 'Searching RCSB for structures matching every sequence…';
+            if(button)button.disabled = true; status.textContent = mode === 'query' ? 'Searching RCSB for matching PDB entries…' : 'Searching RCSB for structures matching every sequence…';
             try {
                 const accessions=String(searchQuery||'').toUpperCase().split(/[\s,;]+/).filter(Boolean);
                 if(mode==='query' && accessions.length && accessions.every(id=>/^(?:[OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9](?:[A-Z][A-Z0-9]{2}[0-9]){1,2})(?:-\d+)?$/.test(id))) {
@@ -1795,6 +1866,7 @@
                         return_type:'entry',
                         request_options:{results_verbosity:'verbose',paginate:{start:0,rows:25}}
                     };
+                    query.query = filterReferenceSearchBySpecies(query.query, searchTaxon);
                     const searchRecord={query:term||('Sequences: '+(searchQuery||sequences.join(', '))),ids:[],error:null};
                     referenceSearchHistory.push(searchRecord);
                     try {
@@ -1825,6 +1897,7 @@
                 if (!referenceSearchResults.length) {
                     document.getElementById('viewReferenceSearchResultsBtn').classList.remove('hidden');
                     renderReferenceSearchResults();
+                    status.classList.add('search-no-results');
                     status.textContent=planningNote+(mode === 'query' ? 'No PDB entry matched those search terms.' : 'No PDB entry matched every sequence.'); return;
                 }
                 status.textContent = `Found ${referenceSearchResults.length} PDB entries. Fetching protein names and chain mappings…`;
@@ -1842,6 +1915,7 @@
                 // Relative threshold retains results close to the top hit despite query-specific score normalization.
                 const ids = referenceSearchResults.filter(hit => Number(hit.score) >= best * 0.7).slice(0,mode === 'query' ? 2 : 5).map(hit => hit.identifier);
                 let chosenIds = ids;
+                let chosenGroups = null;
                 let selectionNote = `Selected ${ids.length} within 70% of the top score.`;
                 const view = document.getElementById('viewReferenceSearchResultsBtn'); view.classList.remove('hidden');
                 renderReferenceSearchResults();
@@ -1852,6 +1926,7 @@
                         const decision = await window.ModellerAI.chooseReferences({query: searchQuery, sequences, results: hits, searches: searches.filter(Boolean)});
                         if(!isCurrent())return;
                         chosenIds = decision.pdbIds;
+                        chosenGroups = decision.groups || null;
                         selectionNote = chosenIds.length
                             ? `AI selected ${chosenIds.join(', ')}. ${decision.reason}`
                             : `AI found no suitable references. ${decision.reason} Refine your search or select references manually.`;
@@ -1861,14 +1936,17 @@
                     finally {globalThis.BuildTimeline?.end(selectionTiming);}
                 }
                 if(!isCurrent())return;
+                referenceConformationPlan = chosenGroups ? {pdbIds:chosenIds.slice(),groups:chosenGroups} : null;
+                completedReferenceSearchKey = currentReferenceSearchKey();
                 setReferenceSearchSelection(chosenIds);
+                status.classList.add('search-success');
                 status.textContent = `${planningNote}Found ${referenceSearchResults.length} unique PDB entries from ${searches.length} search${searches.length===1?'':'es'} (up to 25 per search). ${selectionNote}`;
             } catch (error) { if (token === referenceSearchRequest) status.textContent = `Reference search failed: ${error.message}`; }
             finally {
                 if (token === referenceSearchRequest) {
                     for(const row of globalThis.BuildTimeline?.state.rows??[])if(row.end===null)globalThis.BuildTimeline.end(row,'Stopped');
                     referenceSearchLoading=false;
-                    button.disabled=false;
+                    if(button)button.disabled=false;
                     updateBuildButtonState();
                 }
             }
@@ -1980,6 +2058,7 @@
             referenceSpeciesController?.abort();
             const revision = ++referenceSpeciesRevision;
             const note = document.getElementById('referenceSpeciesNote'), links = document.getElementById('referenceSpeciesLinks'), status = document.getElementById('referenceSpeciesStatus');
+            if (!note || !links || !status) return;
             note.textContent = ''; links.replaceChildren(); status.textContent = '';
             let ids=[]; try { ids=referenceInputParts(raw).ids.filter(id=>/^[0-9][A-Z0-9]{3}$/.test(id)); } catch (_) {}
             if (!ids.length) return;
@@ -2104,127 +2183,237 @@
         // STRING files stay local. Parse and score in a worker to keep the UI responsive.
         function stringMatchingWorker() {
             async function* lines(file) {
-                const reader = file.stream().getReader(), decoder = new TextDecoder();
-                let pending = '';
-                try {
-                    while (true) {
-                        const {value, done} = await reader.read();
-                        pending += done ? decoder.decode() : decoder.decode(value, {stream:true});
-                        let start = 0, end;
-                        while ((end = pending.indexOf('\n', start)) !== -1) {
-                            yield pending.slice(start,end).replace(/\r$/, ''); start = end + 1;
-                        }
-                        pending = pending.slice(start);
-                        if (done) { if (pending) yield pending.replace(/\r$/, ''); break; }
-                    }
-                } finally { reader.releaseLock(); }
-            }
-            function kmers(sequence, k) {
-                const result = new Set();
-                for (let i=0;i<=sequence.length-k;i++) result.add(sequence.slice(i,i+k));
-                return result;
-            }
-            // Score-only affine-gap Smith–Waterman, with O(target length) memory.
-            function smithWaterman(query, target, matrix, alphabet, open, extend) {
-                const index = Object.fromEntries(Array.from(alphabet, (aa,i)=>[aa,i]));
-                const encode = seq => Int32Array.from(seq, aa=>index[aa] ?? index.X);
-                const q=encode(query), t=encode(target), width=t.length+1, stride=alphabet.length;
-                let M=new Int32Array(width), X=new Int32Array(width), Y=new Int32Array(width);
-                let nextM=new Int32Array(width), nextX=new Int32Array(width), nextY=new Int32Array(width), best=0;
-                for (let i=0;i<q.length;i++) {
-                    nextM[0]=nextX[0]=nextY[0]=0;
-                    for (let j=1;j<width;j++) {
-                        nextM[j]=Math.max(0,Math.max(M[j-1],X[j-1],Y[j-1])+matrix[q[i]*stride+t[j-1]]);
-                        nextX[j]=Math.max(0,M[j]+open,X[j]+extend,Y[j]+open);
-                        nextY[j]=Math.max(0,nextM[j-1]+open,nextY[j-1]+extend,nextX[j-1]+open);
-                        best=Math.max(best,nextM[j],nextX[j],nextY[j]);
-                    }
-                    [M,nextM]=[nextM,M]; [X,nextX]=[nextX,X]; [Y,nextY]=[nextY,Y];
+                let stream=file.stream();
+                if(/\.gz$/i.test(file.name)){
+                    if(typeof DecompressionStream==='undefined')throw new Error('This browser cannot decompress .gz files. Unzip the STRING files before uploading them.');
+                    stream=stream.pipeThrough(new DecompressionStream('gzip'));
                 }
-                return best;
+                const reader=stream.getReader(),decoder=new TextDecoder();let pending='';
+                try{while(true){const {value,done}=await reader.read();pending+=done?decoder.decode():decoder.decode(value,{stream:true});
+                    let start=0,end;while((end=pending.indexOf('\n',start))!==-1){yield pending.slice(start,end).replace(/\r$/,'');start=end+1;}
+                    pending=pending.slice(start);if(done){if(pending)yield pending.replace(/\r$/,'');break;}
+                }}finally{reader.releaseLock();}
             }
-            self.onmessage = async ({data}) => {
-                try {
-                    const {sequencesFile, aliasesFile, queries, taxon, matrix, alphabet, gapOpen, gapExtend}=data;
-                    // Repeated reference sequences share one shortlist and alignment run.
-                    const groups = new Map();
-                    for (const query of queries) {
-                        if (!groups.has(query.sequence)) groups.set(query.sequence,{sequence:query.sequence,chains:[],k:Math.min(3,query.sequence.length),shortlist:[]});
-                        groups.get(query.sequence).chains.push(query.chain);
+            const normal=value=>String(value||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+            const stop=new Set(['protein','putative','probable','predicted','hypothetical','uncharacterized','precursor','chain','subunit','family','member','like','of','the','and']);
+            const words=value=>new Set(String(value||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').split(' ').filter(word=>word&&!stop.has(word)));
+            function kmers(sequence,k){const result=new Set();for(let i=0;i<=sequence.length-k;i++)result.add(sequence.slice(i,i+k));return result;}
+            // Affine-gap local alignment. Carry path statistics with each score so
+            // verification needs O(target length) memory, without a traceback matrix.
+            function align(query,target,matrix,alphabet,open,extend,metrics=false){
+                const index=Object.fromEntries([...alphabet].map((aa,i)=>[aa,i])),stride=alphabet.length;
+                const q=Int32Array.from(query,aa=>index[aa]??index.X),t=Int32Array.from(target,aa=>index[aa]??index.X),width=t.length+1;
+                if(!metrics){
+                    let M=new Int32Array(width),X=new Int32Array(width),Y=new Int32Array(width),nextM=new Int32Array(width),nextX=new Int32Array(width),nextY=new Int32Array(width),best=0;
+                    for(let i=0;i<q.length;i++){
+                        nextM[0]=nextX[0]=nextY[0]=0;
+                        for(let j=1;j<width;j++){
+                            nextM[j]=Math.max(0,M[j-1],X[j-1],Y[j-1])+matrix[q[i]*stride+t[j-1]];
+                            nextM[j]=Math.max(0,nextM[j]);
+                            nextX[j]=Math.max(0,M[j]+open,X[j]+extend,Y[j]+open);
+                            nextY[j]=Math.max(0,nextM[j-1]+open,nextY[j-1]+extend,nextX[j-1]+open);
+                            best=Math.max(best,nextM[j],nextX[j],nextY[j]);
+                        }
+                        [M,nextM]=[nextM,M];[X,nextX]=[nextX,X];[Y,nextY]=[nextY,Y];
                     }
-                    for (const group of groups.values()) group.words=kmers(group.sequence,group.k);
-                    let id=null, fragments=[], count=0;
-                    function accept() {
-                        if (!id) return;
-                        const sequence=fragments.join('').toUpperCase().replace(/\*$/, '');
-                        if (!sequence || !/^[ACDEFGHIKLMNPQRSTVWYBXZJUO]+$/.test(sequence)) throw new Error(`Invalid protein sequence for ${id}.`);
-                        const sets=new Map(); count++;
-                        for (const group of groups.values()) {
-                            if (!sets.has(group.k)) sets.set(group.k,kmers(sequence,group.k));
-                            let hits=0;
-                            for (const word of group.words) if (sets.get(group.k).has(word)) hits++;
-                            group.shortlist.push({id,sequence,hits});
-                            // Keep memory bounded while scanning large species proteomes.
-                            if (group.shortlist.length>=1000) trim(group);
+                    return best;
+                }
+                const row=()=>Array.from({length:metrics?6:1},()=>new Int32Array(width));
+                let previous=[row(),row(),row()],next=[row(),row(),row()],best=0,bestStats=[0,0,0,0,0];
+                for(let i=1;i<=q.length;i++){
+                    for(const state of next)for(const field of state)field[0]=0;
+                    for(let j=1;j<width;j++)for(let state=0;state<3;state++){
+                        const rows=state===2?next:previous,column=state===0?j-1:state===1?j:j-1;
+                        const addition=state===0?matrix[q[i-1]*stride+t[j-1]]:0;
+                        let value=0,from=-1;
+                        for(let prior=0;prior<3;prior++){
+                            const score=rows[prior][0][column]+(state===0?addition:prior===state?extend:open);
+                            if(score>value){value=score;from=prior;}
+                        }
+                        next[state][0][j]=value;
+                        if(metrics){
+                            for(let field=1;field<6;field++)next[state][field][j]=from<0?0:rows[from][field][column];
+                            if(from>=0){
+                                next[state][1][j]+=state===0&&query[i-1]===target[j-1]?1:0;
+                                next[state][2][j]++;
+                                next[state][3][j]+=state!==2?1:0;
+                                next[state][4][j]+=state!==1?1:0;
+                                next[state][5][j]+=state===0&&addition>0?1:0;
+                            }
+                        }
+                        if(value>best){best=value;if(metrics)bestStats=next[state].slice(1).map(field=>field[j]);}
+                    }
+                    [previous,next]=[next,previous];
+                }
+                if(!metrics)return best;
+                const [matches,columns,queryCount,targetCount,positives]=bestStats;
+                return {score:best,identity:columns?100*matches/columns:0,similarity:columns?100*positives/columns:0,referenceCoverage:queryCount/query.length,targetCoverage:targetCount/target.length,alignedResidues:Math.min(queryCount,targetCount)};
+            }
+            self.onmessage=async({data})=>{
+                try{
+                    const {sequencesFile,aliasesFile,queries,taxon,matrix,alphabet,gapOpen,gapExtend}=data;
+                    const groups=new Map();
+                    for(const query of queries){
+                        const ids=[...(query.accessions||[])].sort(),roleIds=[...(query.roleAccessions||ids)].sort();
+                        const key=roleIds.length?'accessions:'+roleIds.join(','):'sequence:'+query.sequence+'|'+([...(query.genes||[])].map(normal).sort().join(',')||[...(query.names||[])].map(normal).sort().join(','));
+                        if(!groups.has(key))groups.set(key,{key,queries:[],sequences:new Set(),ids:new Set(),genes:new Set(),loci:new Set(),names:[],evidence:new Map(),shortlist:[],metadataSequences:new Map()});
+                        const group=groups.get(key);group.queries.push(query);group.sequences.add(query.sequence);
+                        [...ids,...query.identifiers||[]].forEach(id=>group.ids.add(normal(id.replace(/^(\w+_\d+)\.\d+$/,'$1'))));
+                        (query.genes||[]).forEach(gene=>group.genes.add(normal(gene)));
+                        if((query.taxa||[]).map(String).includes(String(taxon)))(query.loci||[]).forEach(locus=>group.loci.add(normal(locus)));
+                        for(const name of query.names||[]){group.names.push(words(name));
+                            for(const symbol of name.match(/\b(?:[A-Z][a-z]{1,8}[A-Z][A-Za-z0-9]*|[a-z]{2,8}[A-Z][A-Za-z0-9]*)\b/g)||[])group.genes.add(normal(symbol));
                         }
                     }
-                    function trim(group) {
-                        group.shortlist.sort((a,b)=>b.hits-a.hits || a.id.localeCompare(b.id));
-                        group.shortlist.length=Math.min(500,group.shortlist.length);
+                    const direct=new Map(),genes=new Map(),loci=new Map();
+                    const register=(index,values,group)=>{for(const value of values){if(!index.has(value))index.set(value,new Set());index.get(value).add(group);}};
+                    for(const group of groups.values()){
+                        register(direct,group.ids,group);register(genes,group.genes,group);register(loci,group.loci,group);
+                        group.sequences=[...group.sequences];group.k=Math.min(3,...group.sequences.map(sequence=>sequence.length));
+                        group.kmers=group.sequences.map(sequence=>kmers(sequence,group.k));
                     }
-                    self.postMessage({progress:'Reading species FASTA and filtering by shared 3-mers…'});
-                    for await (const raw of lines(sequencesFile)) {
-                        const line=raw.trim(); if(!line) continue;
-                        // Also accept the first STRING identifier without a leading >.
-                        if(line.startsWith('>') || /^\d+\.\S+$/.test(line)) {
-                            accept(); id=line.replace(/^>/,'').split(/\s+/)[0]; fragments=[];
-                            if(!id.startsWith(taxon+'.')) throw new Error(`FASTA identifier ${id} does not match taxon ${taxon}.`);
-                        } else {
-                            if(!id) throw new Error('FASTA sequence found before a STRING protein identifier.');
-                            fragments.push(line.replace(/\s/g,''));
-                        }
+                    function evidence(group,protein,score,reason){
+                        if(!group.evidence.has(protein))group.evidence.set(protein,{score:0,reasons:new Set()});
+                        const hit=group.evidence.get(protein);hit.score=Math.max(hit.score,score);hit.reasons.add(reason);
                     }
-                    accept(); if(!count) throw new Error('The FASTA file contains no proteins.');
-                    const matches=[]; let groupNumber=0;
-                    for(const group of groups.values()) {
-                        trim(group); let best=null, ties=0;
-                        for(let i=0;i<group.shortlist.length;i++) {
-                            const candidate=group.shortlist[i];
-                            if(i%10===0) self.postMessage({progress:`Smith–Waterman: reference ${groupNumber+1}/${groups.size}, candidate ${i+1}/${group.shortlist.length}…`});
-                            const score=smithWaterman(group.sequence,candidate.sequence,matrix,alphabet,gapOpen,gapExtend);
-                            if(!best || score>best.score) {best={...candidate,score};ties=1;}
-                            else if(score===best.score) {ties++;if(candidate.id.localeCompare(best.id)<0)best={...candidate,score};}
-                        }
-                        for(const chain of group.chains) matches.push({chain,protein:best.score>0?best.id:null,score:best.score,ties,shortlist:group.shortlist.length});
-                        groupNumber++;
-                    }
-                    self.postMessage({progress:'Resolving UniProt accessions from aliases…'});
-                    const wanted=new Map(matches.filter(m=>m.protein).map(m=>[m.protein,{preferred:new Set(),fallback:new Set()}]));
-                    let validRows=0;
-                    const accession=/^(?:[OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9](?:[A-Z][A-Z0-9]{2}[0-9]){1,2})(?:-[0-9]+)?$/;
-                    for await(const raw of lines(aliasesFile)) {
-                        if(!raw.trim() || raw.startsWith('#'))continue;
-                        const [protein,alias,source]=raw.split('\t');
-                        if(protein==='string_protein_id')continue;
-                        if(!protein || !alias || !source)throw new Error('Aliases must have tab-separated string_protein_id, alias and source columns.');
+                    self.postMessage({progress:'Finding identifier, gene-name and protein-name candidates in STRING aliases…'});
+                    let aliasRows=0;
+                    for await(const line of lines(aliasesFile)){
+                        if(!line.trim()||line.startsWith('#'))continue;
+                        const [protein,raw,source]=line.split('\t');if(protein==='string_protein_id')continue;
+                        if(!protein||!raw||!source)throw new Error('Aliases must have tab-separated string_protein_id, alias and source columns.');
                         if(!protein.startsWith(taxon+'.'))throw new Error(`Alias identifier ${protein} does not match taxon ${taxon}.`);
-                        validRows++;
-                        const record=wanted.get(protein), value=alias.trim().toUpperCase();
-                        if(!record || !accession.test(value))continue;
-                        const sources=source.trim().split(/[\s;,]+/);
-                        if(sources.includes('RefSeq_xref_UniProtKB_Swiss_Prot'))record.preferred.add(value);
-                        else if(sources.includes('UniProt_AC'))record.fallback.add(value);
+                        aliasRows++;
+                        const sources=source.trim().split(/[\s;,]+/),value=normal(raw.replace(/^(\w+_\d+)\.\d+$/,'$1'));
+                        if(sources.some(s=>/^(?:UniProt_AC|UniProt_ID|RefSeq(?:_short)?|RefSeq_xref_UniProtKB_Swiss_Prot|UniProt_DR_RefSeq)$/.test(s))){
+                            for(const group of direct.get(value)||[])evidence(group,protein,100,`Exact protein identifier ${raw} (${source})`);
+                        }
+                        if(sources.some(s=>/^(?:UniProt_GN_Name|UniProt_GN_Synonyms|RefSeq_gene|KEGG_NAME)$/.test(s))){
+                            for(const group of genes.get(value)||[])evidence(group,protein,80,`Gene-name match ${raw} (${source})`);
+                        }
+                        if(sources.some(s=>/^(?:UniProt_GN_OrderedLocusNames|UniProt_GN_ORFNames|RefSeq_locus|KEGG_KEGGID_SHORT)$/.test(s))){
+                            for(const group of loci.get(value)||[])evidence(group,protein,90,`Same-taxon locus ${raw} (${source})`);
+                        }
+                        if(sources.some(s=>/^(?:UniProt_DE_(?:RecName|AltName)_Full|RefSeq_product|KEGG_PRODUCT)$/.test(s))){
+                            const targetWords=words(raw);
+                            for(const group of groups.values()){
+                                // Preserve informative symbols (MotA versus MotB) and
+                                // reject generic descriptions such as "putative protein".
+                                for(const name of group.names){
+                                    const intersection=[...name].filter(word=>targetWords.has(word)).length;
+                                    const union=new Set([...name,...targetWords]).size;
+                                    const distinctive=[...group.genes].some(gene=>targetWords.has(gene));
+                                    if(name.size>=2&&intersection>=2&&intersection/Math.max(1,union)>=.7||distinctive){
+                                        evidence(group,protein,distinctive?70:55,`Protein-name match: ${raw} (${source})`);break;
+                                    }
+                                }
+                            }
+                        }
                     }
-                    if(!validRows)throw new Error('The aliases file contains no alias records.');
-                    for(const match of matches) {
-                        const record=wanted.get(match.protein);
-                        const ids=record ? Array.from(record.preferred.size?record.preferred:record.fallback).sort() : [];
-                        match.accession=ids[0] || null;
-                        match.aliasCount=ids.length;
-                        match.source=record?.preferred.size?'RefSeq_xref_UniProtKB_Swiss_Prot':'UniProt_AC';
+                    if(!aliasRows)throw new Error('The aliases file contains no alias records.');
+                    for(const group of groups.values())group.metadataIds=new Set([...group.evidence].sort((a,b)=>b[1].score-a[1].score).slice(0,200).map(([id])=>id));
+                    let id=null,fragments=[],count=0;
+                    function trim(group){group.shortlist.sort((a,b)=>b.hits-a.hits);group.shortlist.length=Math.min(500,group.shortlist.length);}
+                    function accept(){
+                        if(!id)return;
+                        const sequence=fragments.join('').toUpperCase().replace(/\*$/,'');
+                        if(!sequence||!/^[ACDEFGHIKLMNPQRSTVWYBXZJUO]+$/.test(sequence))throw new Error(`Invalid protein sequence for ${id}.`);
+                        count++;const wordCache=new Map();
+                        for(const group of groups.values()){
+                            if(!wordCache.has(group.k))wordCache.set(group.k,kmers(sequence,group.k));
+                            const targetWords=wordCache.get(group.k);
+                            const hits=Math.max(...group.kmers.map(words=>[...words].reduce((sum,word)=>sum+Number(targetWords.has(word)),0)));
+                            const candidate={id,sequence,hits};
+                            if(group.metadataIds.has(id))group.metadataSequences.set(id,candidate);
+                            group.shortlist.push(candidate);if(group.shortlist.length>=1000)trim(group);
+                        }
                     }
-                    self.postMessage({matches,count});
-                } catch(error) { self.postMessage({error:error.message}); }
+                    self.postMessage({progress:'Reading the target proteome and preparing sequence-search fallbacks…'});
+                    for await(const raw of lines(sequencesFile)){
+                        const line=raw.trim();if(!line)continue;
+                        if(line.startsWith('>')||/^\d+\.\S+$/.test(line)){accept();id=line.replace(/^>/,'').split(/\s+/)[0];fragments=[];
+                            if(!id.startsWith(taxon+'.'))throw new Error(`FASTA identifier ${id} does not match taxon ${taxon}.`);
+                        }else{if(!id)throw new Error('FASTA sequence found before a STRING protein identifier.');fragments.push(line.replace(/\s/g,''));}
+                    }
+                    accept();if(!count)throw new Error('The FASTA file contains no proteins.');
+                    const results=[];let fallbackGroups=0,metadataGroups=0,groupNumber=0;
+                    for(const group of groups.values()){
+                        trim(group);const scores=new Map(),verified=new Map();
+                        const score=candidate=>{
+                            if(!scores.has(candidate.id))scores.set(candidate.id,{...candidate,score:group.sequences.reduce((sum,sequence)=>sum+align(sequence,candidate.sequence,matrix,alphabet,gapOpen,gapExtend),0)/group.sequences.length});
+                            return scores.get(candidate.id);
+                        };
+                        const verify=candidate=>{
+                            if(verified.has(candidate.id))return verified.get(candidate.id);
+                            const paths=group.sequences.map(sequence=>align(sequence,candidate.sequence,matrix,alphabet,gapOpen,gapExtend,true));
+                            const identity=Math.min(...paths.map(path=>path.identity)),similarity=Math.min(...paths.map(path=>path.similarity)),referenceCoverage=Math.min(...paths.map(path=>path.referenceCoverage)),targetCoverage=Math.min(...paths.map(path=>path.targetCoverage));
+                            const evidence=group.evidence.get(candidate.id),metadataScore=evidence?.score||0;
+                            const knownLength=group.queries.some(query=>query.fullLength&&candidate.sequence.length/query.fullLength>=.5&&candidate.sequence.length/query.fullLength<=2);
+                            const enough=paths.every((path,index)=>path.alignedResidues>=Math.min(30,group.sequences[index].length));
+                            const shortSupport=Math.min(...group.sequences.map(sequence=>sequence.length))>=30||metadataScore>=70||identity>=85&&referenceCoverage>=.85&&targetCoverage>=.75;
+                            const distantSupport=metadataScore>=70&&identity>=20&&similarity>=40&&referenceCoverage>=.75&&targetCoverage>=.5&&paths.every(path=>path.alignedResidues>=80);
+                            const supported=(identity>=25||distantSupport)&&referenceCoverage>=.6&&enough&&shortSupport&&(targetCoverage>=.35||metadataScore>=70&&identity>=40&&referenceCoverage>=.8&&knownLength&&Math.min(...group.sequences.map(s=>s.length))>=40);
+                            const result={...score(candidate),identity,similarity,distantSupport,referenceCoverage,targetCoverage,metadataScore,evidence:[...(evidence?.reasons||[])],verified:supported};
+                            verified.set(candidate.id,result);return result;
+                        };
+                        const evaluate=candidates=>{
+                            const ranked=candidates.map(score).sort((a,b)=>b.score-a.score),accepted=[];
+                            for(const candidate of ranked){
+                                if(accepted.length&&candidate.score<accepted[0].score*.95&&accepted.length>=1)break;
+                                const result=verify(candidate);if(result.verified)accepted.push(result);
+                            }
+                            return accepted;
+                        };
+                        self.postMessage({progress:`Verifying metadata candidates for protein ${++groupNumber}/${groups.size}…`});
+                        let candidates=evaluate([...group.metadataSequences.values()].filter(candidate=>(group.evidence.get(candidate.id)?.score||0)>=90)),method='Metadata + sequence verification';
+                        if(!candidates.length)candidates=evaluate([...group.metadataSequences.values()].filter(candidate=>(group.evidence.get(candidate.id)?.score||0)>=70));
+                        const strong=candidates.filter(candidate=>candidate.metadataScore>=70);
+                        let chosen=strong.length===1&&strong[0].identity>=25?strong[0]:null;
+                        if(!chosen){
+                            fallbackGroups++;method='Sequence-search fallback';
+                            self.postMessage({progress:`Sequence-search fallback for protein ${groupNumber}/${groups.size} (top-500 k-mer shortlist)…`});
+                            const all=new Map([...group.shortlist,...group.metadataSequences.values()].map(candidate=>[candidate.id,candidate]));
+                            candidates=evaluate([...all.values()]);
+                            const near=candidates.filter(candidate=>candidate.score>=candidates[0]?.score*.95);
+                            if(near.length===1)chosen=near[0];
+                            else if(near.length>1){
+                                const named=near.filter(candidate=>candidate.metadataScore>=70);
+                                if(named.length===1){chosen=named[0];method='Metadata resolved sequence-search ambiguity';}
+                            }
+                        }else metadataGroups++;
+                        const alternatives=[...verified.values()].sort((a,b)=>Number(b.verified)-Number(a.verified)||b.score-a.score||b.metadataScore-a.metadataScore).slice(0,5);
+                        if(chosen&&!alternatives.includes(chosen))alternatives.unshift(chosen);
+                        results.push({group,chosen,method,alternatives,decision:chosen?'accepted':candidates.length?'ambiguous':'no-match'});
+                    }
+                    // Read aliases for only the final candidates. Keep every eligible
+                    // accession; current-primary/sequence validation runs in the main app.
+                    const wanted=new Map();for(const result of results)for(const candidate of result.alternatives)wanted.set(candidate.id,{accessions:new Map(),name:'',nameRank:Infinity});
+                    const accession=/^(?:[OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9](?:[A-Z][A-Z0-9]{2}[0-9]){1,2})(?:-\d+)?$/;
+                    for await(const line of lines(aliasesFile)){
+                        if(!line.trim()||line.startsWith('#'))continue;
+                        const [protein,raw,source]=line.split('\t'),record=wanted.get(protein);if(!record)continue;
+                        const sources=source.trim().split(/[\s;,]+/),value=raw.trim().toUpperCase();
+                        if(accession.test(value)&&sources.some(s=>s==='UniProt_AC'||s==='RefSeq_xref_UniProtKB_Swiss_Prot')){
+                            const preferred=sources.includes('RefSeq_xref_UniProtKB_Swiss_Prot');
+                            if(!record.accessions.has(value)||preferred)record.accessions.set(value,{accession:value,source,preferred});
+                        }
+                        const rank=['UniProt_GN_Name','RefSeq_gene','KEGG_NAME'].findIndex(source=>sources.includes(source));
+                        if(rank!==-1&&rank<record.nameRank){record.name=raw;record.nameRank=rank;}
+                    }
+                    const matches=[];
+                    for(const result of results){
+                        for(const candidate of result.alternatives){const record=wanted.get(candidate.id);candidate.accessionCandidates=[...(record?.accessions.values()||[])];candidate.name=record?.name||'';}
+                        for(const query of result.group.queries){
+                            const chosen=result.chosen;
+                            matches.push({chain:query.chain,queryKey:result.group.key,referenceName:query.names?.[0]||'',referenceAccessions:query.accessions||[],metadataWarnings:query.metadataWarnings||[],protein:chosen?.id||null,sequence:chosen?.sequence||null,score:chosen?.score||result.alternatives[0]?.score||0,
+                                identity:chosen?.identity??null,similarity:chosen?.similarity??null,referenceCoverage:chosen?.referenceCoverage??null,targetCoverage:chosen?.targetCoverage??null,
+                                metadataScore:chosen?.metadataScore||0,evidence:chosen?.evidence||[],method:result.method,decision:result.decision,
+                                confidence:chosen?(chosen.metadataScore>=70&&chosen.identity>=40&&chosen.referenceCoverage>=.8?'High':'Moderate'):'Review required',alternatives:result.alternatives,accessionCandidates:chosen?.accessionCandidates||[],targetName:chosen?.name||'',
+                                accession:null,aliasCount:chosen?.accessionCandidates.length||0,source:'',shortlist:result.group.shortlist.length});
+                        }
+                    }
+                    self.postMessage({matches,count,queryGroups:groups.size,metadataGroups,fallbackGroups});
+                }catch(error){self.postMessage({error:error.message||'Could not read the STRING files. Check that the files are complete and any .gz compression is valid.'});}
             };
         }
 
@@ -2254,7 +2443,12 @@
                             links.get(key).add(protein);
                         }
                     }
-                    const reader=file.stream().getReader(),decoder=new TextDecoder();let pending='';
+                    let stream=file.stream();
+                    if(/\.gz$/i.test(file.name)){
+                        if(typeof DecompressionStream==='undefined')throw new Error('This browser cannot decompress .gz files. Unzip the STRING files before uploading them.');
+                        stream=stream.pipeThrough(new DecompressionStream('gzip'));
+                    }
+                    const reader=stream.getReader(),decoder=new TextDecoder();let pending='';
                     try {
                         while(true) {
                             const {value,done}=await reader.read();
@@ -2274,7 +2468,7 @@
                         if(labels.size)result.push([id,{name:Array.from(labels).sort().join(' / '),source:Array.from(sources).join(', ')}]);
                     }
                     self.postMessage({entries:result});
-                } catch(error){self.postMessage({error:error.message});}
+                } catch(error){self.postMessage({error:error.message || 'Could not read the STRING files. Check that the files are complete and any .gz compression is valid.'});}
             };
         }
         let preferredNames = new Map(), preferredNamesJob = null, preferredNamesState = '';
@@ -2285,17 +2479,18 @@
         function selectStringFiles(input){
             let invalid=false,aliasesChanged=false;
             for(const file of input.files){
-                if(/^\d+\.protein\.sequences\.v[\d.]+\.fa$/i.test(file.name))selectedStringFiles.sequence=file;
-                else if(/^\d+\.protein\.aliases\.v[\d.]+\.txt$/i.test(file.name)){
+                if(/^\d+\.protein\.sequences\.v[\d.]+\.fa(?:\.gz)?$/i.test(file.name))selectedStringFiles.sequence=file;
+                else if(/^\d+\.protein\.aliases\.v[\d.]+\.txt(?:\.gz)?$/i.test(file.name)){
                     aliasesChanged=selectedStringFiles.aliases!==file;selectedStringFiles.aliases=file;
                 }else invalid=true;
             }
             const picker=input.closest('.string-file-picker'),names=[stringSequenceFile()?.name,stringAliasesFile()?.name].filter(Boolean);
             picker.classList.toggle('has-file',names.length>0);
             picker.querySelector('.string-file-name').textContent=names.length?names.join(' · '):'No files selected';
-            document.getElementById('stringFilesStatus').textContent=invalid?'Choose STRING .fa sequences and .txt aliases files with the expected names.':
+            document.getElementById('stringFilesStatus').textContent=invalid?'Choose STRING .fa or .fa.gz sequences and .txt or .txt.gz aliases files with the expected names.':
                 names.length===1?'Choose the other STRING file as well.':'';
             cancelStringMatching();updateFindMatchesReady();
+            updateReferenceSpeciesGuidance();
             if(aliasesChanged)loadPreferredNames();
         }
         function currentStringReferenceKey() {
@@ -2346,29 +2541,58 @@
                 cell.title=record?.source || (preferredNamesState==='error'?'Alias file could not be read':'No preferred name found');
             });
         }
-        function renderStringMatchResults(matches) {
-            const container=document.getElementById('stringMatchResults');container.replaceChildren();
-            document.getElementById('downloadStringMatchesBtn')?.classList.toggle('hidden', !matches.length);
+        function renderStringMatchResults(matches, container=document.getElementById('stringMatchResults')) {
+            container.replaceChildren();
+            document.getElementById('downloadStringMatchesBtn')?.classList.toggle('hidden',!matches.length);
             const table=document.createElement('table');table.className='w-full text-left text-xs';
             const thead=document.createElement('thead'),head=document.createElement('tr');
             head.className='bg-slate-950/80 text-slate-400 uppercase tracking-wider text-[11px] border-b border-slate-800';
-            for(const label of ['Reference PDB chain','STRING protein','SW score','UniProt accession','Alias source','Notes']) {
+            for(const label of ['Reference PDB chain','Reference protein','STRING protein / name','Match method','Confidence','SW score','Identity','BLOSUM62 positives','Reference coverage','Target coverage','Verified UniProt accession','Evidence / validation','Review alternatives']){
                 const th=document.createElement('th');th.className='py-3 px-4';th.scope='col';th.textContent=label;head.appendChild(th);
             }
             thead.appendChild(head);table.appendChild(thead);
-            const tbody=document.createElement('tbody');tbody.className='divide-y divide-slate-800/60 font-mono';
-            for(const match of matches) {
-                const row=document.createElement('tr');row.className='hover:bg-slate-900/60 transition border-b border-slate-800/40';
-                const notes=[];
-                if(!match.protein)notes.push('No positive-scoring match');
-                else if(!match.accession)notes.push('No eligible UniProt accession; nothing added');
-                if(match.ties>1)notes.push(`${match.ties} tied best scores; selected by STRING ID`);
-                if(match.aliasCount>1)notes.push(`${match.aliasCount} eligible aliases; selected first alphabetically`);
-                const values=[match.chain,match.protein||'—',match.score,match.accession||'—',match.accession?match.source:'—',notes.join('; ')||'—'];
-                values.forEach((value,index)=>{const td=document.createElement('td');td.className='py-2.5 px-4 '+(index===0?'font-bold text-sky-400':index===3?'font-bold text-teal-400':'text-slate-300');td.textContent=String(value);row.appendChild(td);});
-                tbody.appendChild(row);
+            const tbody=document.createElement('tbody');tbody.className='divide-y divide-slate-800/60';
+            const percent=value=>Number.isFinite(value)?value.toFixed(1)+'%':'—';
+            const coverage=value=>Number.isFinite(value)?percent(value*100):'—';
+            for(const match of matches){
+                const row=document.createElement('tr');row.className='hover:bg-slate-900/60 border-b border-slate-800/40';
+                const notes=[...match.evidence||[],...match.metadataWarnings||[],match.source?'UniProt alias source: '+match.source:'',match.validationNote,...match.rejectedAliases||[]].filter(Boolean);
+                if(match.decision==='ambiguous')notes.unshift('Several candidates have similar sequence support. Choose a verified alternative to resolve this identity.');
+                if(match.identity!==null&&match.identity<25&&match.protein)notes.unshift('Distant homolog: strong metadata plus long, positive-scoring alignment supports this assignment; review is recommended.');
+                if(match.decision==='no-match')notes.unshift('No candidate passed sequence identity and coverage checks.');
+                const values=[match.chain,[match.referenceName,...match.referenceAccessions||[]].filter(Boolean).join(' · '),[match.protein,match.targetName].filter(Boolean).join(' · ')||'Unresolved',match.method,match.confidence,Number(match.score).toFixed(1),percent(match.identity),percent(match.similarity),coverage(match.referenceCoverage),coverage(match.targetCoverage),match.accession||'Unresolved',notes.join('; ')||'—'];
+                values.forEach((value,index)=>{const td=document.createElement('td');td.className='py-2.5 px-4 align-top '+(index===0?'font-bold text-sky-400':index===10?'font-bold text-teal-400':'text-slate-300');td.textContent=String(value);row.appendChild(td);});
+                const review=document.createElement('td');review.className='py-2.5 px-4 align-top';
+                if(match.alternatives?.length){
+                    const select=document.createElement('select');select.className='bg-slate-800 text-slate-100 border border-slate-600 rounded-lg p-2 max-w-xs';select.setAttribute('aria-label',`Target protein for ${match.chain}`);
+                    const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='Review STRING candidates';select.appendChild(placeholder);
+                    for(const candidate of match.alternatives){
+                        const option=document.createElement('option');option.value=candidate.id;option.disabled=!candidate.verified;
+                        option.textContent=`${candidate.id}${candidate.name?' · '+candidate.name:''} · ${percent(candidate.identity)} identity · ${coverage(candidate.referenceCoverage)} reference coverage${candidate.verified?'':' (insufficient support)'}`;
+                        select.appendChild(option);
+                    }
+                    select.value=match.protein||'';select.addEventListener('change',()=>{if(select.value)void reviewStringCandidate(match.queryKey,select.value);});review.appendChild(select);
+                }
+                if(!match.accession&&match.validAccessions?.length>1){
+                    const select=document.createElement('select');select.className='block mt-2 bg-slate-800 text-slate-100 border border-slate-600 rounded-lg p-2';select.setAttribute('aria-label',`UniProt accession for ${match.chain}`);
+                    const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='Choose a verified UniProt entry';select.appendChild(placeholder);
+                    for(const candidate of match.validAccessions){const option=document.createElement('option');option.value=candidate.accession;option.textContent=candidate.accession+(candidate.reviewed?' · reviewed':'');select.appendChild(option);}
+                    select.addEventListener('change',()=>reviewStringAccession(match.protein,select.value));review.appendChild(select);
+                }
+                if(match.protein&&!match.accession){
+                    const input=document.createElement('input');input.type='text';input.placeholder='UniProt ID to verify';input.className='block mt-2 bg-slate-800 text-slate-100 border border-slate-600 rounded-lg p-2';input.setAttribute('aria-label',`Verify a UniProt ID for ${match.chain}`);
+                    const button=document.createElement('button');button.type='button';button.className='mt-1 bg-slate-700 text-slate-100 rounded-lg p-2';button.textContent='Verify UniProt ID';
+                    button.addEventListener('click',()=>{void reviewStringManualAccession(match.protein,input.value);});
+                    input.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();void reviewStringManualAccession(match.protein,input.value);}});
+                    review.appendChild(input);review.appendChild(button);
+                }
+                row.appendChild(review);tbody.appendChild(row);
             }
             table.appendChild(tbody);container.appendChild(table);
+            if(matches.length){
+                const note=document.createElement('p');note.className='p-3 text-slate-300';note.textContent='Confidence labels are evidence summaries, not calibrated probabilities. Sequence-only matches require at least 25% identity, 60% reference coverage and adequate target coverage. Strong metadata can support a distant homolog at 20% identity only with at least 40% BLOSUM62 positives, 75% reference coverage, 50% target coverage and an 80-residue alignment. Near-equal sequence candidates require metadata support or review. If metadata validation is unavailable, press Build Homology Model to retry.';container.appendChild(note);
+                const button=document.createElement('button');button.type='button';button.className='model-download-button m-3';button.textContent='Build using resolved STRING matches';button.disabled=!stringMatchesResolved(matches);button.addEventListener('click',buildReviewedStringMatches);container.appendChild(button);
+            }
             syncStringMatchStatusVisibility();
         }
 
@@ -2397,20 +2621,199 @@
             return {value:updated,added};
         }
 
+        const stringProteinMetadataCache=new Map(),stringTaxonomyCache=new Map();
+        async function stringJson(url,signal){
+            const requestSignal=signal?AbortSignal.any([signal,AbortSignal.timeout(20000)]):AbortSignal.timeout(20000);
+            const response=await fetch(url,{signal:requestSignal,headers:{Accept:'application/json'}});
+            if(!response.ok)throw new Error(`Metadata request failed (HTTP ${response.status}).`);
+            return response.json();
+        }
+        async function stringProteinMetadata(accession,signal){
+            if(!stringProteinMetadataCache.has(accession)){
+                const task=stringJson(`https://rest.uniprot.org/uniprotkb/${encodeURIComponent(accession)}.json`,signal).then(entry=>{
+                    if(!entry.primaryAccession||!entry.sequence?.value||/inactive/i.test(entry.entryType||''))throw new Error(`No current protein sequence is available for ${accession}.`);
+                    return entry;
+                }).catch(error=>{stringProteinMetadataCache.delete(accession);throw error;});
+                stringProteinMetadataCache.set(accession,task);
+            }
+            const entry=await stringProteinMetadataCache.get(accession);
+            if(signal?.aborted)throw new DOMException('Matching cancelled','AbortError');
+            return entry;
+        }
+        async function stringMapLimited(items,limit,visit){
+            const results=new Array(items.length);let next=0;
+            await Promise.all(Array.from({length:Math.min(limit,items.length)},async()=>{
+                while(next<items.length){const index=next++;results[index]=await visit(items[index],index);}
+            }));return results;
+        }
+        async function buildStringQueries(files,signal){
+            const referenceText=document.getElementById('pdbInput1').value;
+            const metadataByFile=await stringMapLimited(files,4,async file=>{
+                const id=file.pdbId.toUpperCase();
+                const hit=referenceSearchResults.find(hit=>hit.identifier===id);
+                if(hit?.mapping?.records?.length)return hit.mapping.records;
+                const cachedRecords=chainMappingReport?.referenceText===referenceText?chainMappingReport.records.filter(record=>record.pdbId===id&&['SIFTS','UniProt sequence search'].includes(record.origin)):[];
+                if(cachedRecords.length)return cachedRecords;
+                if(!/^[0-9][A-Z0-9]{3}$/.test(id))return [];
+                const results=await Promise.allSettled([
+                    fetchDiscoveryEntities(id,AbortSignal.any([signal,AbortSignal.timeout(20000)])),
+                    fetch(`https://www.ebi.ac.uk/pdbe/api/mappings/uniprot/${id.toLowerCase()}`,{signal:AbortSignal.any([signal,AbortSignal.timeout(20000)])}).then(async response=>{
+                        if(!response.ok)throw new Error('SIFTS unavailable');return (await response.json())[id.toLowerCase()]||{};
+                    })
+                ]);
+                if(signal.aborted)throw new DOMException('Matching cancelled','AbortError');
+                const entities=results[0].status==='fulfilled'?results[0].value:[];
+                const mapping=results[1].status==='fulfilled'?results[1].value:{};
+                if(entities.length)return applySiftsDiscoveryMappings(entities,mapping);
+                return Object.entries(mapping.UniProt||{}).map(([accession,entry])=>({pdbId:id,name:entry.name||entry.identifier||'',accessions:[accession],chains:[...new Set((entry.mappings||[]).map(record=>record.struct_asym_id||record.chain_id).filter(Boolean))],chainAliases:Object.fromEntries((entry.mappings||[]).filter(record=>record.chain_id).map(record=>[record.chain_id,record.struct_asym_id||record.chain_id]))}));
+            });
+            const accessions=[...new Set(metadataByFile.flatMap(records=>records.flatMap(record=>record.accessions||[])))];
+            const entries=new Map(await stringMapLimited(accessions,4,async accession=>{
+                try{return [accession,await stringProteinMetadata(accession,signal)];}catch(error){if(signal.aborted)throw error;return [accession,null];}
+            }));
+            return files.flatMap((file,index)=>Object.entries(file.parsed.chains).filter(([,atoms])=>atoms[0]?.entityType==='protein').map(([chain,atoms])=>{
+                const records=metadataByFile[index].filter(record=>{
+                    if(file.format==='mmcif')return (record.chains||[]).includes(chain);
+                    if(Object.keys(record.chainAliases||{}).length)return Object.hasOwn(record.chainAliases,chain)&&(record.chains||[]).includes(record.chainAliases[chain]);
+                    return (record.chains||[]).includes(chain);
+                });
+                const ids=[...new Set(records.flatMap(record=>record.accessions||[]))];
+                const names=new Set(records.map(record=>record.name).filter(Boolean)),genes=new Set(),loci=new Set(),identifiers=new Set(ids),taxa=new Set(records.flatMap(record=>record.taxa||[]));
+                for(const id of ids){
+                    const entry=entries.get(id);if(!entry)continue;
+                    (entry.secondaryAccessions||[]).forEach(id=>identifiers.add(id));
+                    identifiers.add(entry.primaryAccession);if(entry.uniProtkbId)identifiers.add(entry.uniProtkbId);
+                    if(entry.organism?.taxonId)taxa.add(entry.organism.taxonId);
+                    const description=entry.proteinDescription||{};
+                    for(const name of [description.recommendedName,...description.alternativeNames||[],...description.submissionNames||[]])if(name?.fullName?.value)names.add(name.fullName.value);
+                    for(const gene of entry.genes||[]){if(gene.geneName?.value)genes.add(gene.geneName.value);(gene.synonyms||[]).forEach(name=>genes.add(name.value));[...gene.orderedLocusNames||[],...gene.orfNames||[]].forEach(name=>loci.add(name.value));}
+                    for(const xref of entry.uniProtKBCrossReferences||[])if(xref.database==='RefSeq'&&/^(?:[NXYW]P)_\d+(?:\.\d+)?$/.test(xref.id))identifiers.add(xref.id);
+                }
+                return {chain:`${file.pdbId}: ${chain}`,sequence:atoms.map(atom=>atom.singleChar).join(''),accessions:ids,roleAccessions:[...new Set(ids.map(id=>entries.get(id)?.primaryAccession||id))],names:[...names],genes:[...genes],loci:[...loci],identifiers:[...identifiers],taxa:[...taxa],fullLength:Math.max(0,...records.map(record=>record.sequence?.length||0),...ids.map(id=>entries.get(id)?.sequence?.value?.length||0)),metadataWarnings:ids.filter(id=>!entries.get(id)).map(id=>`Reference UniProt metadata unavailable for ${id}; retained known names and sequence evidence`)};
+            })).filter(query=>query.sequence.length);
+        }
+        async function stringTaxonomy(taxon,signal){
+            const key=String(taxon);
+            if(!stringTaxonomyCache.has(key))stringTaxonomyCache.set(key,stringJson(`https://rest.uniprot.org/taxonomy/${encodeURIComponent(key)}`,signal).catch(error=>{stringTaxonomyCache.delete(key);throw error;}));
+            return stringTaxonomyCache.get(key);
+        }
+        async function stringTargetTaxonCompatible(entryTaxon,targetTaxon,signal){
+            if(String(entryTaxon)===String(targetTaxon))return true;
+            if(!entryTaxon)return false;
+            const target=await stringTaxonomy(targetTaxon,signal);
+            const lineage=target.lineage||[],speciesIndex=lineage.findIndex(node=>node.rank==='species');
+            // A UniProt protein may be assigned to K-12 while STRING identifies
+            // its MG1655 substrain. Accept ancestors only down to species rank.
+            if(speciesIndex>=0&&lineage.slice(speciesIndex).some(node=>String(node.taxonId)===String(entryTaxon)))return true;
+            if(target.rank==='species'){
+                const organism=await stringTaxonomy(entryTaxon,signal);
+                return (organism.lineage||[]).some(node=>String(node.taxonId)===String(targetTaxon));
+            }
+            return false;
+        }
+        async function validateStringAccessions(matches,taxon,signal){
+            const proteins=new Map();for(const match of matches)if(match.protein&&!proteins.has(match.protein))proteins.set(match.protein,match);
+            const validations=new Map(await stringMapLimited([...proteins],4,async([protein,match])=>{
+                const aliases=match.accessionCandidates||[],notes=[];
+                if(aliases.length>50)return [protein,{accession:null,note:'Too many UniProt aliases to validate automatically; review this target.'}];
+                const checked=await stringMapLimited(aliases,3,async alias=>{
+                    try{
+                        const entry=await stringProteinMetadata(alias.accession,signal);
+                        if(![entry.primaryAccession,...entry.secondaryAccessions||[]].includes(alias.accession))throw new Error('Response does not identify the requested accession');
+                        if(entry.sequence.value.toUpperCase().replace(/\*$/,'')!==match.sequence)throw new Error('Sequence differs from the uploaded STRING protein');
+                        if(!await stringTargetTaxonCompatible(entry.organism?.taxonId,taxon,signal))throw new Error('Organism does not match the uploaded STRING proteome');
+                        return {accession:entry.primaryAccession,reviewed:entry.entryType==='UniProtKB reviewed (Swiss-Prot)',source:alias.source,preferred:Boolean(alias.preferred),from:alias.accession};
+                    }catch(error){if(signal.aborted)throw error;notes.push(`${alias.accession}: ${error.message}`);return null;}
+                });
+                const current=new Map();for(const result of checked.filter(Boolean))if(!current.has(result.accession)||result.preferred&&!current.get(result.accession).preferred)current.set(result.accession,result);
+                const candidates=[...current.values()],reviewed=candidates.filter(candidate=>candidate.reviewed);
+                const manual=candidates.find(candidate=>candidate.accession===match.manualAccession);
+                const selected=manual||(candidates.length===1?candidates[0]:reviewed.length===1?reviewed[0]:null);
+                return [protein,selected?{...selected,validAccessions:candidates,note:`Current UniProt accession verified against the STRING sequence and taxonomy${selected.from!==selected.accession?`; ${selected.from} resolves to ${selected.accession}`:''}${manual?'; user-reviewed primary selection':candidates.length>1?'; selected the uniquely reviewed entry':''}.`,rejectedAliases:notes}
+                    :{accession:null,validAccessions:candidates,note:candidates.length?'Multiple current UniProt entries remain equally eligible. Review the aliases.':aliases.length?'No UniProt alias passed current-entry, sequence and taxonomy verification.':'No eligible UniProt accession in the STRING aliases.',rejectedAliases:notes}];
+            }));
+            if(signal.aborted)throw new DOMException('Matching cancelled','AbortError');
+            for(const match of matches){
+                const result=validations.get(match.protein);
+                match.accession=result?.accession||null;match.source=result?.source||'';match.validationNote=result?.note||'';match.rejectedAliases=result?.rejectedAliases||[];match.validAccessions=result?.validAccessions||[];
+                if(match.protein&&!match.accession)match.confidence='Review required';
+            }
+            return matches;
+        }
+        function currentStringReviewValid(){
+            return stringMatchReview&&stringMatchReview.reference===currentStringReferenceKey()&&stringMatchReview.fasta===stringSequenceFile()&&stringMatchReview.aliases===stringAliasesFile()
+                &&stringMatchReview.gapOpen===alignmentGapOpen&&stringMatchReview.gapExtend===alignmentGapExtend;
+        }
+        function stringMatchesResolved(matches){return Boolean(matches.length)&&matches.every(match=>match.protein&&match.accession&&match.decision==='accepted');}
+        function publishStringMatches(response){
+            const input=document.getElementById('pdbInput2'),status=document.getElementById('stringMatchStatus');
+            const {value,added}=appendStringUniProtIds(input.value,response.matches);
+            input.value=added.length?value:parseModelInputs(input.value).filter(entry=>entry.sequence).map(entry=>entry.sequence).join(', ');resizeStructureIdInputs();updateBuildButtonState();
+            const unresolved=new Set(response.matches.filter(match=>!match.accession||match.decision!=='accepted').map(match=>match.queryKey)).size;
+            status.textContent=`Searched ${response.count.toLocaleString()} proteins. Loaded ${added.length} unique UniProt ID(s).${unresolved?` ${unresolved} protein identity match(es) require review; automatic build paused.`:''}`;
+            status.classList.toggle('search-success',!unresolved);
+            renderStringMatchResults(response.matches);
+            updateStringReviewDialog(response);
+            renderChainMappingReport({referenceText:document.getElementById('pdbInput1').value,targetText:input.value,notes:[`${response.metadataGroups||0} identities matched by metadata and verified by alignment; ${response.fallbackGroups||0} used sequence-search fallback.`,...(unresolved?['Automatic build paused until every reference protein has a resolved target.']:[])],records:response.matches.map(match=>({pdbId:match.chain.split(':')[0],chains:[match.chain],name:match.referenceName,accessions:match.accession?[match.accession]:[],origin:match.method,detail:[match.confidence,...match.evidence||[],match.validationNote].filter(Boolean).join('; ')}))});
+            syncStringMatchStatusVisibility();return !unresolved&&added.length>0;
+        }
+        function updateStringReviewDialog(response){
+            const dialog=document.getElementById('stringReviewDialog');
+            if(!dialog)return;
+            const unresolved=!stringMatchesResolved(response.matches);
+            const humanReview=unresolved&&!window.ModellerAI?.connected();
+            if(!dialog.open&&!humanReview)return;
+            document.getElementById('stringReviewStatus').textContent=document.getElementById('stringMatchStatus').textContent;
+            renderStringMatchResults(response.matches,document.getElementById('stringReviewResults'));
+            if(humanReview&&!dialog.open&&stringMatchReview&&!stringMatchReview.dialogShown){
+                stringMatchReview.dialogShown=true;
+                dialog.showModal();
+            }
+        }
+        async function reviewStringCandidate(queryKey,protein){
+            if(!currentStringReviewValid()||stringMatchingLoading)return;
+            const response=stringMatchReview.response,match=response.matches.find(match=>match.queryKey===queryKey),candidate=match?.alternatives.find(candidate=>candidate.id===protein);
+            if(!candidate?.verified)return;
+            const controller=new AbortController();stringMetadataController=controller;stringMatchingLoading=true;updateBuildButtonState();
+            try{
+                for(const item of response.matches.filter(item=>item.queryKey===queryKey))Object.assign(item,{protein:candidate.id,sequence:candidate.sequence,score:candidate.score,identity:candidate.identity,similarity:candidate.similarity,referenceCoverage:candidate.referenceCoverage,targetCoverage:candidate.targetCoverage,metadataScore:candidate.metadataScore,evidence:candidate.evidence,accessionCandidates:candidate.accessionCandidates,targetName:candidate.name,aliasCount:candidate.accessionCandidates.length,accession:null,manualAccession:null,decision:'accepted',confidence:'User selected',method:'User reviewed candidate + sequence verification'});
+                await validateStringAccessions(response.matches,stringMatchReview.taxon,controller.signal);
+                if(currentStringReviewValid()&&!controller.signal.aborted)publishStringMatches(response);
+            }catch(error){if(!controller.signal.aborted)document.getElementById('stringMatchStatus').textContent=error.message;}
+            finally{if(stringMetadataController===controller)stringMetadataController=null;stringMatchingLoading=false;updateBuildButtonState();const reviewStatus=document.getElementById('stringReviewStatus');if(reviewStatus)reviewStatus.textContent=document.getElementById('stringMatchStatus').textContent;}
+        }
+        function reviewStringAccession(protein,accession){
+            if(!currentStringReviewValid()||stringMatchingLoading)return;
+            const matches=stringMatchReview.response.matches,verified=matches.find(match=>match.protein===protein)?.validAccessions?.find(candidate=>candidate.accession===accession);
+            if(!verified)return;
+            for(const match of matches.filter(match=>match.protein===protein))Object.assign(match,{accession,manualAccession:accession,source:verified.source,confidence:'User selected',validationNote:'User selected a current UniProt entry verified against the uploaded STRING sequence and target taxonomy.'});
+            publishStringMatches(stringMatchReview.response);
+        }
+        async function reviewStringManualAccession(protein,rawAccession){
+            const accession=rawAccession.trim().toUpperCase();
+            if(!currentStringReviewValid()||stringMatchingLoading)return;
+            if(!/^(?:[OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9](?:[A-Z][A-Z0-9]{2}[0-9]){1,2})(?:-\d+)?$/.test(accession)){document.getElementById('stringMatchStatus').textContent='Enter a valid UniProt accession, such as P09348.';const reviewStatus=document.getElementById('stringReviewStatus');if(reviewStatus)reviewStatus.textContent=document.getElementById('stringMatchStatus').textContent;return;}
+            const response=stringMatchReview.response,controller=new AbortController();stringMetadataController=controller;stringMatchingLoading=true;updateBuildButtonState();
+            try{
+                const entry=await stringProteinMetadata(accession,controller.signal);
+                for(const match of response.matches.filter(match=>match.protein===protein))Object.assign(match,{accessionCandidates:[{accession,source:'User supplied'}],manualAccession:entry.primaryAccession,confidence:'User selected'});
+                await validateStringAccessions(response.matches,stringMatchReview.taxon,controller.signal);
+                if(currentStringReviewValid()&&!controller.signal.aborted)publishStringMatches(response);
+            }catch(error){if(!controller.signal.aborted)document.getElementById('stringMatchStatus').textContent=`Could not verify ${accession}: ${error.message}`;}
+            finally{if(stringMetadataController===controller)stringMetadataController=null;stringMatchingLoading=false;updateBuildButtonState();const reviewStatus=document.getElementById('stringReviewStatus');if(reviewStatus)reviewStatus.textContent=document.getElementById('stringMatchStatus').textContent;}
+        }
+        function buildReviewedStringMatches(){
+            if(!currentStringReviewValid()||stringMatchingLoading||!stringMatchesResolved(stringMatchReview.response.matches))return;
+            document.getElementById('stringReviewDialog')?.close();
+            const input=document.getElementById('pdbInput2'),value=appendStringUniProtIds(input.value,stringMatchReview.response.matches).value;
+            void loadModelPair(document.getElementById('pdbInput1').value.trim(),value);
+        }
+
         let stringMatchJob = null;
-        let findMatchesWasReady = false;
+        let stringMetadataController=null,stringMatchReview=null;
+        let stringMatchingLoading = false;
         function updateFindMatchesReady() {
-            const id = document.getElementById('pdbInput1').value.trim().toUpperCase();
-            const ready = (selectedReferencePdbIds().length > 0 || Boolean(uploadedStructureFiles.reference && id === uploadedStructureFiles.reference.inputValue))
-                && Boolean(stringSequenceFile())
-                && Boolean(stringAliasesFile());
-            const button = document.getElementById('findStringMatchesBtn');
-            if (ready && !findMatchesWasReady) {
-                button.classList.remove('ready-glow');
-                void button.offsetWidth;
-                button.classList.add('ready-glow');
-            } else if (!ready) button.classList.remove('ready-glow');
-            findMatchesWasReady = ready;
+            updateBuildButtonState();
         }
         function updateStringFileStyle(input) {
             const picker = input.closest('.string-file-picker');
@@ -2419,32 +2822,44 @@
             updateFindMatchesReady();
         }
         function cancelStringMatching() {
+            document.getElementById('stringReviewDialog')?.close();
+            stringMetadataController?.abort();stringMetadataController=null;stringMatchReview=null;
+            if(stringMatchingLoading){const status=document.getElementById('stringMatchStatus');if(status)status.textContent='Matching cancelled because inputs changed. Press Build Homology Model to search again.';}
             if(stringMatchJob) {stringMatchJob.worker.terminate();stringMatchJob.reject(new Error('Matching cancelled because an input changed.'));stringMatchJob=null;}
         }
         async function findStringReferenceMatches() {
-            const button=document.getElementById('findStringMatchesBtn'), status=document.getElementById('stringMatchStatus');
+            if (stringMatchingLoading) return;
+            stringMatchingLoading = true;
+            updateBuildButtonState();
+            const controller=new AbortController();stringMetadataController=controller;
+            const status=document.getElementById('stringMatchStatus');
+            status.classList.remove('search-success');
             const result=document.getElementById('stringMatchResults');
             const fasta=stringSequenceFile(), aliases=stringAliasesFile();
             const referenceInput=document.getElementById('pdbInput1').value;
             stringMatchStatusReference = currentStringReferenceKey();
-            status.textContent = 'Loading reference chains…';
-            button.disabled=true; result.textContent=''; syncStringMatchStatusVisibility();
+            status.textContent = 'Matching STRING proteins: loading reference chains…';
+            result.textContent=''; syncStringMatchStatusVisibility();
             const alphaFoldInput = document.getElementById('pdbInput2');
             alphaFoldInput.value = '';
             alphaFoldInput.classList.remove('string-id-glow');
             updateBuildButtonState();
             try {
-                const fa=fasta?.name.match(/^(\d+)\.protein\.sequences\.v([\d.]+)\.fa$/i);
-                const al=aliases?.name.match(/^(\d+)\.protein\.aliases\.v([\d.]+)\.txt$/i);
-                if(!fa || !al)throw new Error('Choose both STRING files: [taxon].protein.sequences.v[version].fa and [taxon].protein.aliases.v[version].txt.');
+                const fa=fasta?.name.match(/^(\d+)\.protein\.sequences\.v([\d.]+)\.fa(?:\.gz)?$/i);
+                const al=aliases?.name.match(/^(\d+)\.protein\.aliases\.v([\d.]+)\.txt(?:\.gz)?$/i);
+                if(!fa || !al)throw new Error('Choose both STRING files: [taxon].protein.sequences.v[version].fa and [taxon].protein.aliases.v[version].txt (optionally compressed as .gz).');
+                const selectedSpecies = selectedModellingSpecies();
+                if(selectedSpecies && selectedSpecies.taxon !== fa[1])throw new Error(`Upload STRING files for ${selectedSpecies.name} (taxon ${selectedSpecies.taxon}), or clear the species selection to use the uploaded files species.`);
                 if(fa[1]!==al[1] || fa[2]!==al[2])throw new Error('The two STRING files must have the same taxon ID and version.');
-                status.textContent='Loading reference chains…';
+                status.textContent='Matching STRING proteins: loading reference chains…';
                 const entries=modelInputEntries(referenceInput,'reference');
                 if(!entries.length)throw new Error('Enter a reference PDB ID first.');
-                const files=await Promise.all(entries.map(entry=>loadModelInput(entry,false)));
+                const files=await Promise.all(entries.map(entry=>loadModelInput(entry,false,controller.signal)));
                 const inputsUnchanged=()=>document.getElementById('pdbInput1').value===referenceInput && stringSequenceFile()===fasta && stringAliasesFile()===aliases;
-                if(!inputsUnchanged())throw new Error('Inputs changed; press Find matches again.');
-                const queries=files.flatMap(file=>Object.entries(file.parsed.chains).filter(([,atoms])=>atoms[0]?.entityType==='protein').map(([chain,atoms])=>({chain:`${file.pdbId}: ${chain}`,sequence:atoms.map(a=>a.singleChar).join('')}))).filter(q=>q.sequence.length);
+                if(!inputsUnchanged())throw new Error('Inputs changed; press Build Homology Model again.');
+                status.textContent='Matching STRING proteins: collecting reference IDs, gene names and protein descriptions…';
+                const queries=await buildStringQueries(files,controller.signal);
+                if(!inputsUnchanged()||controller.signal.aborted)throw new Error('Inputs changed; press Build Homology Model again.');
                 if(!queries.length)throw new Error('No protein chains found in the reference.');
                 const url=URL.createObjectURL(new Blob([`(${stringMatchingWorker.toString()})();`],{type:'text/javascript'}));
                 let worker;
@@ -2453,28 +2868,20 @@
                 try {
                     response=await new Promise((resolve,reject)=>{
                         stringMatchJob={worker,reject};
-                        worker.onmessage=({data})=>{if(data.progress)status.textContent=data.progress;else if(data.error)reject(new Error(data.error));else resolve(data);};
+                        worker.onmessage=({data})=>{if(data.progress)status.textContent='Matching STRING proteins: '+data.progress;else if(data.error)reject(new Error(data.error));else resolve(data);};
                         worker.onerror=event=>reject(new Error(event.message || 'Sequence matching worker failed.'));
                         worker.postMessage({sequencesFile:fasta,aliasesFile:aliases,queries,taxon:fa[1],matrix:BLOSUM62_VALUES,alphabet:BLOSUM62_ALPHABET,gapOpen:alignmentGapOpen,gapExtend:alignmentGapExtend});
                     });
                 } finally {worker.terminate();stringMatchJob=null;}
-                if(!inputsUnchanged())throw new Error('Inputs changed; press Find matches again.');
-                const input=document.getElementById('pdbInput2');
-                const {value, added}=appendStringUniProtIds(input.value,response.matches);
-                if(added.length) {
-                    input.value=value;
-                    resizeStructureIdInputs();
-                    input.classList.remove('string-id-glow');
-                    void input.offsetWidth;
-                    input.classList.add('string-id-glow');
-                    updateBuildButtonState();
-                }
-                status.textContent=`Searched ${response.count.toLocaleString()} proteins. Loaded ${added.length} unique UniProt ID(s).`;
-                renderStringMatchResults(response.matches);
-                renderChainMappingReport({referenceText:document.getElementById('pdbInput1').value,targetText:input.value,notes:['IDs fetched from STRING sequence matching and UniProt aliases.'],records:response.matches.map(match=>({pdbId:'',chains:[match.chain],name:'',accessions:match.accession?[match.accession]:[],origin:'STRING sequence search',detail:match.accession?'': 'No UniProt alias found'}))});
-                if (added.length) void loadModelPair(document.getElementById('pdbInput1').value.trim(), input.value.trim().toUpperCase());
-            } catch(error) {status.textContent=error.message;syncStringMatchStatusVisibility();}
-            finally {button.disabled=false;}
+                if(!inputsUnchanged())throw new Error('Inputs changed; press Build Homology Model again.');
+                status.textContent='Matching STRING proteins: validating current UniProt aliases against target sequences and taxonomy…';
+                await validateStringAccessions(response.matches,fa[1],controller.signal);
+                if(!inputsUnchanged()||controller.signal.aborted)throw new Error('Inputs changed; press Build Homology Model again.');
+                stringMatchReview={reference:currentStringReferenceKey(),fasta,aliases,taxon:fa[1],gapOpen:alignmentGapOpen,gapExtend:alignmentGapExtend,response};
+                if(publishStringMatches(response))void loadModelPair(document.getElementById('pdbInput1').value.trim(),document.getElementById('pdbInput2').value.trim().toUpperCase());
+            }catch(error){if(!controller.signal.aborted){status.textContent=error.message;syncStringMatchStatusVisibility();}}
+            finally{if(stringMetadataController===controller)stringMetadataController=null;stringMatchingLoading=false;updateBuildButtonState();const reviewStatus=document.getElementById('stringReviewStatus');if(reviewStatus)reviewStatus.textContent=document.getElementById('stringMatchStatus').textContent;}
+
         }
 
 // stringSpeciesMatching.js end
@@ -4734,6 +5141,7 @@
                 return pair.map(index=>selectionMatches(physicsNodes[index])?1:0);
             });
             mesh.geometry.setAttribute('selectionEndpoints',new THREE.InstancedBufferAttribute(new Float32Array(selectionEndpoints),2));
+            mesh.geometry.setAttribute('conformationEndpoints',new THREE.InstancedBufferAttribute(new Float32Array(selectionEndpoints.length).fill(1),2));
             mesh.userData.physicsSelectionNodeIndices=selectionNodeIndices;
             // Keep opaque geometry in the source mesh. Translucent instances are
             // grouped by endpoint opacity, with a nearest-surface depth pass.
@@ -4747,12 +5155,12 @@
                     shader.uniforms.physicsPulse=physicsPulseUniform;
                     shader.uniforms.nonSelectedOpacity=physicsNonSelectedOpacityUniform;
                     shader.vertexShader='attribute vec2 pulseEndpoints; varying float pulseWeight;\n'+shader.vertexShader;
-                    shader.vertexShader='attribute vec2 selectionEndpoints; varying float selectionWeight;\n'+shader.vertexShader;
+                    shader.vertexShader='attribute vec2 selectionEndpoints; varying float selectionWeight; attribute vec2 conformationEndpoints; varying float conformationWeight;\n'+shader.vertexShader;
                     shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>',
-                        '#include <begin_vertex>\npulseWeight = '+(backbone?'mix(pulseEndpoints.x, pulseEndpoints.y, clamp(position.y + 0.5, 0.0, 1.0))':'pulseEndpoints.x')+';\nselectionWeight = '+(backbone?'max(selectionEndpoints.x, selectionEndpoints.y)':'selectionEndpoints.x')+';');
-                    shader.fragmentShader='uniform float physicsPulse; uniform float nonSelectedOpacity; varying float pulseWeight; varying float selectionWeight;\n'+shader.fragmentShader;
+                        '#include <begin_vertex>\npulseWeight = '+(backbone?'mix(pulseEndpoints.x, pulseEndpoints.y, clamp(position.y + 0.5, 0.0, 1.0))':'pulseEndpoints.x')+';\nselectionWeight = '+(backbone?'max(selectionEndpoints.x, selectionEndpoints.y)':'selectionEndpoints.x')+';\nconformationWeight = '+(backbone?'min(conformationEndpoints.x, conformationEndpoints.y)':'conformationEndpoints.x')+';');
+                    shader.fragmentShader='uniform float physicsPulse; uniform float nonSelectedOpacity; varying float pulseWeight; varying float selectionWeight; varying float conformationWeight;\n'+shader.fragmentShader;
                     shader.fragmentShader=shader.fragmentShader.replace('#include <color_fragment>',
-                        '#include <color_fragment>\ndiffuseColor.a *= mix(nonSelectedOpacity,1.0,selectionWeight) * mix(1.0, physicsPulse, pulseWeight);\n'+
+                        '#include <color_fragment>\ndiffuseColor.a *= conformationWeight * mix(nonSelectedOpacity,1.0,selectionWeight) * mix(1.0, physicsPulse, pulseWeight);\n'+
                         (translucent?'if (diffuseColor.a >= 0.999 || diffuseColor.a <= 0.0) discard;':'if (diffuseColor.a < 0.999) discard;'));
                 };
                 material.customProgramCacheKey=()=>`physics-opacity-batch-${backbone?'backbone':'residue'}-${translucent?'transparent':'opaque'}`;
@@ -4775,11 +5183,12 @@
             // Each batch owns its small sphere/cylinder geometry and compact instance
             // buffers, so disposing a batch cannot invalidate source GPU buffers.
             for(const [name,attribute] of Object.entries(source.geometry.attributes))
-                if(name!=='pulseEndpoints'&&name!=='selectionEndpoints')geometry.setAttribute(name,attribute.clone());
+                if(name!=='pulseEndpoints'&&name!=='selectionEndpoints'&&name!=='conformationEndpoints')geometry.setAttribute(name,attribute.clone());
             if(source.geometry.index)geometry.setIndex(source.geometry.index.clone());
             for(const group of source.geometry.groups)geometry.addGroup(group.start,group.count,group.materialIndex);
             geometry.setAttribute('pulseEndpoints',new THREE.InstancedBufferAttribute(new Float32Array(capacity*2),2));
             geometry.setAttribute('selectionEndpoints',new THREE.InstancedBufferAttribute(new Float32Array(capacity*2),2));
+            geometry.setAttribute('conformationEndpoints',new THREE.InstancedBufferAttribute(new Float32Array(capacity*2).fill(1),2));
             const material=state.material.clone();
             material.onBeforeCompile=state.material.onBeforeCompile;material.customProgramCacheKey=state.material.customProgramCacheKey;
             const color=new THREE.InstancedMesh(geometry,material,capacity);
@@ -4797,16 +5206,32 @@
 
         function syncPhysicsTransparency(scene) {
             const sources=[];
-            scene.traverseVisible(object=>{if(object.userData.physicsTransparency)sources.push(object);});
+            scene.traverseVisible(object=>{
+                if(object.userData.physicsTransparency)sources.push(object);
+                if(object.userData.conformationNodeIndex!==undefined&&object.material){
+                    const alpha=conformationNodeOpacity(object.userData.conformationNodeIndex);
+                    object.material.opacity=alpha;object.material.transparent=alpha<1;object.material.depthWrite=alpha>=1;
+                }
+                const indices=object.geometry?.getAttribute('conformationNodeIndex'),alpha=object.geometry?.getAttribute('conformationAlpha');
+                if(indices&&alpha){for(let i=0;i<indices.count;i++)alpha.setX(i,conformationNodeOpacity(indices.getX(i)));alpha.needsUpdate=true;}
+            });
             const matrix=new THREE.Matrix4(),tint=new THREE.Color();
             for(const source of sources) {
                 const state=source.userData.physicsTransparency,groups=new Map();
                 const pulses=source.geometry.getAttribute('pulseEndpoints'),selections=source.geometry.getAttribute('selectionEndpoints');
+                const presence=source.geometry.getAttribute('conformationEndpoints');
+                const nodeIndices=source.userData.physicsSelectionNodeIndices;
+                for(let i=0;i<source.count;i++){
+                    const indices=nodeIndices[i],pair=Array.isArray(indices)?indices:[indices,indices];
+                    presence.setXY(i,conformationNodeOpacity(pair[0]),conformationNodeOpacity(pair[1]));
+                }
+                presence.needsUpdate=true;
                 for(let i=0;i<source.count;i++) {
                     const selected=state.backbone?Math.max(selections.getX(i),selections.getY(i)):selections.getX(i);
                     const selectionAlpha=physicsNonSelectedOpacityUniform.value+(1-physicsNonSelectedOpacityUniform.value)*selected;
-                    const alphaA=selectionAlpha*(1+(physicsPulseUniform.value-1)*pulses.getX(i));
-                    const alphaB=state.backbone?selectionAlpha*(1+(physicsPulseUniform.value-1)*pulses.getY(i)):alphaA;
+                    const groupAlpha=state.backbone?Math.min(presence.getX(i),presence.getY(i)):presence.getX(i);
+                    const alphaA=groupAlpha*selectionAlpha*(1+(physicsPulseUniform.value-1)*pulses.getX(i));
+                    const alphaB=state.backbone?groupAlpha*selectionAlpha*(1+(physicsPulseUniform.value-1)*pulses.getY(i)):alphaA;
                     if(Math.min(alphaA,alphaB)>=.999||Math.max(alphaA,alphaB)<=0)continue;
                     const key=alphaA+','+alphaB;
                     if(!groups.has(key))groups.set(key,[]);
@@ -4820,17 +5245,18 @@
                         batch=createPhysicsOpacityBatch(source,Math.max(16,2**Math.ceil(Math.log2(indices.length))));
                         state.batches[slot]=batch;
                     }
-                    const batchPulses=batch.geometry.getAttribute('pulseEndpoints'),batchSelections=batch.geometry.getAttribute('selectionEndpoints');
+                    const batchPulses=batch.geometry.getAttribute('pulseEndpoints'),batchSelections=batch.geometry.getAttribute('selectionEndpoints'),batchPresence=batch.geometry.getAttribute('conformationEndpoints');
                     indices.forEach((index,i)=>{
                         source.getMatrixAt(index,matrix);batch.color.setMatrixAt(i,matrix);
                         if(source.instanceColor)source.getColorAt(index,tint);else tint.set(0xffffff);
                         batch.color.setColorAt(i,tint);
                         batchPulses.setXY(i,pulses.getX(index),pulses.getY(index));
                         batchSelections.setXY(i,selections.getX(index),selections.getY(index));
+                        batchPresence.setXY(i,presence.getX(index),presence.getY(index));
                     });
                     batch.depth.instanceColor=batch.color.instanceColor;
                     batch.color.instanceMatrix.needsUpdate=true;batch.color.instanceColor.needsUpdate=true;
-                    batchPulses.needsUpdate=true;batchSelections.needsUpdate=true;
+                    batchPulses.needsUpdate=true;batchSelections.needsUpdate=true;batchPresence.needsUpdate=true;
                     for(const child of [batch.color,batch.depth]){child.count=indices.length;child.visible=true;}
                     slot++;
                 }
@@ -4962,6 +5388,7 @@
                 const initZ = initialCoords[i].z - cz;
 
                 physicsNodes.push({
+                    simulationIndex:i,
                     phase1X: initX, phase1Y: initY, phase1Z: initZ,
                     initX, initY, initZ,
                     x: initX, y: initY, z: initZ,
@@ -5027,7 +5454,11 @@
             updatePhysicsNodeColors();
             refreshSelectedGlowIndices();
             resetGroupSimulation();
-            setSimulationPhase(2); // Start Phase 2 automatically when initialization is complete
+            if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.kind==='combined'&&multiReferenceBuild.conformationGroups?.length>1){
+                physicsRunning=false;
+                groupSimulation.pass=2;
+                requestAnimationFrame(()=>{if(groupSimulation?.nodes===physicsNodes&&multiReferenceBuild?.kind==='combined')finishGroupSimulation();});
+            }else setSimulationPhase(2); // Start Phase 2 automatically when initialization is complete
             updatePatternVariance(true);
             if(paeSpringInfluence>0)requestSpringPae();
 
@@ -5351,8 +5782,12 @@
             applyPhysicsVisibility();
         }
 
+        function conformationNodeOpacity(index) {
+            return typeof conformationNodePresence==='undefined' ? 1 : conformationNodePresence?.[index] ?? 1;
+        }
         function isNodeVisibleInPhysics(node, ignoreHomologyVisibility=false) {
             if (!node?.res) return false;
+            if(node.simulationIndex!==undefined&&conformationNodeOpacity(node.simulationIndex)<=0)return false;
             if (!ignoreHomologyVisibility && !homologyStructureVisible) return false;
             if (node.res.entityType !== 'protein') {
                 if (!nonProteinAtomsVisible) return false;
@@ -6113,6 +6548,7 @@
             if(modelBuildStartedAt!==null)document.getElementById('modelBuildTime').textContent=`Homology model built in ${((performance.now()-modelBuildStartedAt)/1000).toFixed(2)} seconds`;
             updateHomologyViewerToggle();
             void loadSimulationIntoMolstar();
+            if(typeof createGroupedConformationAnimation==='function')createGroupedConformationAnimation();
         }
 
         function setSimulationPhase(phase) {
@@ -9635,6 +10071,7 @@
             return (data.data.entry.polymer_entities || []).filter(entity => entity.entity_poly?.rcsb_entity_polymer_type === 'Protein').map(entity => ({
                 entryName:data.data.entry.struct?.title || '', pdbId, entityId: entity.rcsb_polymer_entity_container_identifiers.entity_id,
                 chains: entity.rcsb_polymer_entity_container_identifiers.asym_ids || [],
+                chainAliases:Object.fromEntries((entity.rcsb_polymer_entity_container_identifiers.auth_asym_ids||[]).map((auth,index)=>[auth,entity.rcsb_polymer_entity_container_identifiers.asym_ids?.[index]||auth])),
                 sequence: (entity.entity_poly.pdbx_seq_one_letter_code_can || '').replace(/\s/g, '').toUpperCase(),
                 species:[...new Set((entity.rcsb_entity_source_organism||[]).map(source=>source.ncbi_scientific_name).filter(Boolean))],
                 taxa: [...new Set((entity.rcsb_entity_source_organism || []).map(source => source.ncbi_taxonomy_id).filter(Number.isInteger))],
@@ -9831,7 +10268,7 @@
             const signal=controller.signal;
             const timeout=setTimeout(()=>controller.abort(),180000);
             const token=++siftsRequestToken,button=document.getElementById('fetchSiftsBtn'),status=document.getElementById('fetchSiftsStatus');
-            status.classList.remove('discovery-warning');
+            status.classList.remove('discovery-warning', 'search-success');
             const referenceText=document.getElementById('pdbInput1').value;
             const alphaFoldInput=document.getElementById('pdbInput2');
             const current=()=>token===siftsRequestToken && referenceText===document.getElementById('pdbInput1').value && ids.join(',')===referencePdbIdsForSifts().join(',');
@@ -9861,6 +10298,7 @@
                 clearUploadedStructure('alphaFold');alphaFoldInput.value=report.targetText;
                 status.textContent=`Found ${accessions.length} unique UniProt IDs${unresolved.length?' with unresolved chains':''}. See chain mapping information.`;
                 if(unresolved.length){status.classList.add('discovery-warning');showWarning(status.textContent);}
+                else status.classList.add('search-success');
                 clearSiftsLookupLoading();resizeStructureIdInputs();
                 updateBuildButtonState();updateExampleSelection();saveRecentModel({updateExistingOnly:true});
                 if(autoBuild && current() && !unresolved.length && !coverageIncomplete)
@@ -10069,24 +10507,17 @@
         function updateBuildButtonState() {
             const button = document.getElementById('loadBtn');
             if (!button) return;
-            button.disabled=siftsLookupLoading || referenceSearchLoading;
-            if(siftsLookupLoading){
-                button.classList.remove('homology-build-glow');
-                button.textContent='Fetching UniProt IDs…';
-                return;
-            }
-            if(referenceSearchLoading){
-                button.classList.remove('homology-build-glow');
-                button.textContent='Searching Reference PDBs…';
-                return;
-            }
-            button.classList.toggle('homology-build-glow', modelLoading);
-            if (modelLoading) {
+            const preparing=siftsLookupLoading || referenceSearchLoading || stringMatchingLoading;
+            const building=preparing || modelLoading || (modelBuildStartedAt!==null && !modelBuildCompleted);
+            button.disabled=Boolean(preparing);
+            button.setAttribute('aria-busy',String(building));
+            button.classList.toggle('homology-build-glow', building);
+            if (building) {
                 button.replaceChildren();
                 const spinner = document.createElement('i');
                 spinner.className = 'fa-solid fa-circle-notch fa-spin';
                 spinner.setAttribute('aria-hidden', 'true');
-                button.append(spinner, document.createTextNode(' Building homology model (click to cancel)'));
+                button.append(spinner, document.createTextNode(' Building homology model...'));
             } else button.textContent = completedModelInputKey !== null && completedModelInputKey === currentModelInputKey()
                 ? 'Homology Model Built (see below)' : 'Build Homology Model';
         }
@@ -10094,7 +10525,6 @@
         let modelBuildAbortController = null;
         let currentReferenceFile = null;
         let homologyViewerMode = 'reference';
-        let simulationViewerInteracted = false;
         let modelLoading = false;
         let modelLoadQueue = Promise.resolve();
         let simulationRenderTask = null;
@@ -10102,7 +10532,7 @@
         function showPhysicsViewerLoading(){document.getElementById('physicsInitialLoading')?.classList.remove('hidden');}
         function hidePhysicsViewerLoading(){document.getElementById('physicsInitialLoading')?.classList.add('hidden');}
         function cancelModelBuild() {
-            if (!modelLoading) return;
+            if (!modelLoading && !(modelBuildStartedAt!==null&&!modelBuildCompleted)) return;
             globalThis.BuildTimeline?.finish('Cancelled');
             ++modelBuildGeneration;
             modelBuildAbortController?.abort();
@@ -10176,6 +10606,7 @@
             disposeAtomRepresentation();
             disposeCartoonRepresentation();
             stopAnimation();
+            conformationNodePresence=null;activeConformationGroup=null;animationAtomOffsets=null;
             physicsRunning = false;
             readyModelGeneration = -1;
             currentReferenceFile = null;
@@ -10246,13 +10677,14 @@
             if (previousReference.trim().toUpperCase() !== pdbId1.trim().toUpperCase()) {
                 const status = document.getElementById('fetchSiftsStatus');
                 status.textContent = '';
-                status.classList.remove('discovery-warning');
+                status.classList.remove('discovery-warning', 'search-success');
             }
             if (document.getElementById('pdbInput1').value.trim().toUpperCase() !== pdbId1.trim().toUpperCase()) hideStringMatchResults();
             if (uploadedStructureFiles.reference && pdbId1.toUpperCase() !== uploadedStructureFiles.reference.inputValue) clearUploadedStructure('reference');
             if (uploadedStructureFiles.alphaFold && pdbId2Raw.toUpperCase() !== uploadedStructureFiles.alphaFold.inputValue) clearUploadedStructure('alphaFold');
             if(chainMappingReport && (chainMappingReport.referenceText!==pdbId1 || chainMappingReport.targetText!==pdbId2Raw))renderChainMappingReport(null);
             document.getElementById('pdbInput1').value = pdbId1;
+            renderChosenReferences();
             updateReferenceSequenceSearchButton();
             let currentSequences=[]; try { currentSequences=referenceInputParts(pdbId1).sequences; } catch (_) {}
             let currentQuery=null; try { currentQuery=referenceInputParts(pdbId1).query; } catch (_) {}
@@ -10445,6 +10877,7 @@
             } catch (err) {
                 if (generation !== modelBuildGeneration) return;
                 modelLoading = false;
+                modelBuildStartedAt = null;
                 modelBuildAbortController = null;
                 hidePhysicsViewerLoading();
                 updateBuildButtonState();
@@ -10947,8 +11380,16 @@
             });
             document.getElementById('dualPdbForm').addEventListener('submit', (e) => {
                 e.preventDefault();
-                if (modelLoading) { cancelModelBuild(); return; }
+                if (modelLoading || (modelBuildStartedAt!==null&&!modelBuildCompleted&&!referenceSearchLoading&&!siftsLookupLoading&&!stringMatchingLoading)) { cancelModelBuild(); return; }
                 if(referenceSearchLoading || siftsLookupLoading)return;
+                const searchText = document.getElementById('referenceSearchInput').value.trim();
+                if(searchText && (completedReferenceSearchKey !== currentReferenceSearchKey() || !document.getElementById('pdbInput1').value.trim())) {
+                    try {
+                        const parts=referenceInputParts(searchText);
+                        void fetchReferencePdbsForSequences(parts.sequences.length?'sequence':'query');
+                    } catch(error) {document.getElementById('referenceSequenceSearchStatus').textContent=error.message;}
+                    return;
+                }
                 const id1 = document.getElementById('pdbInput1').value.trim();
                 const id2 = document.getElementById('pdbInput2').value.trim().toUpperCase();
                 if(!id1)return;
@@ -10961,6 +11402,11 @@
                         void fetchReferencePdbsForSequences(parts.query?'query':'sequence');
                         return;
                     }
+                }
+                if(stringSequenceFile() || stringAliasesFile()) {
+                    if(currentStringReviewValid()&&stringMatchesResolved(stringMatchReview.response.matches))buildReviewedStringMatches();
+                    else if(!stringMatchJob)void findStringReferenceMatches();
+                    return;
                 }
                 if(id2)loadModelPair(id1,id2);
                 else if(selectedReferencePdbIds().length)void fetchSiftsUniProtIds({autoBuild:true});
@@ -12366,6 +12812,7 @@
         document.getElementById('physicsVisibilityButton')?.addEventListener('click',event=>{
             const opening=document.getElementById('physicsVisibilityPanel').classList.toggle('hidden')===false;
             event.currentTarget.setAttribute('aria-expanded',String(opening));
+            requestAnimationFrame(()=>{if(typeof updateConformationGroupPill==='function')updateConformationGroupPill();});
             event.currentTarget.querySelector('.visibility-chevron').className=`visibility-chevron fa-solid fa-chevron-${opening?'up':'down'}`;
         });
         let sequenceCopyResetTimer=null;
@@ -12664,7 +13111,7 @@
             cartoonRepresentation = null;
         }
 
-        function createCartoonRibbon(nodes, colorAt, visibleAt, pulseAt, sizeAt) {
+        function createCartoonRibbon(nodes, colorAt, visibleAt, pulseAt, sizeAt, opacityAt=()=>1) {
             const steps = nodes.length > 3000 ? 1 : nodes.length > 1200 ? 2 : 4;
             const samples = (nodes.length - 1) * steps + 1;
             const geometry = new THREE.BufferGeometry();
@@ -12672,6 +13119,8 @@
             geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
             geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
             geometry.setAttribute('ribbonPulse', new THREE.BufferAttribute(pulse, 1));
+            const conformationAlpha=new Float32Array(samples*4).fill(1);
+            geometry.setAttribute('conformationAlpha',new THREE.BufferAttribute(conformationAlpha,1));
             const indices = [];
             for (let s = 0; s < samples - 1; s++) {
                 const a=4*s,b=a+4;
@@ -12685,10 +13134,10 @@
             const material = new THREE.MeshPhongMaterial({ vertexColors: true, side: THREE.DoubleSide, shininess: 55, transparent: true, depthWrite: true });
             material.onBeforeCompile = shader => {
                 shader.uniforms.physicsPulse = physicsPulseUniform;
-                shader.vertexShader = 'attribute float ribbonPulse; varying float ribbonPulseWeight;\n' + shader.vertexShader;
-                shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nribbonPulseWeight = ribbonPulse;');
-                shader.fragmentShader = 'uniform float physicsPulse; varying float ribbonPulseWeight;\n' + shader.fragmentShader;
-                shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.a *= mix(1.0, physicsPulse, ribbonPulseWeight);');
+                shader.vertexShader = 'attribute float ribbonPulse; varying float ribbonPulseWeight; attribute float conformationAlpha; varying float conformationWeight;\n' + shader.vertexShader;
+                shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nribbonPulseWeight = ribbonPulse; conformationWeight=conformationAlpha;');
+                shader.fragmentShader = 'uniform float physicsPulse; varying float ribbonPulseWeight; varying float conformationWeight;\n' + shader.fragmentShader;
+                shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.a *= conformationWeight * mix(1.0, physicsPulse, ribbonPulseWeight); if(diffuseColor.a<=0.0)discard;');
             };
             material.customProgramCacheKey = () => 'physics-continuous-cartoon-ribbon';
             const mesh = new THREE.Mesh(geometry, material);
@@ -12718,7 +13167,7 @@
                     sampleWidth[s]=width*visibility*sizeAt()/2;
                     samplePulse[s]=(pulseAt(edge)?1:0)*(1-t)+(pulseAt(edge+1)?1:0)*t;
                     const c1=nodeColors[edge],c2=nodeColors[edge+1],r=c1.r*(1-t)+c2.r*t,g=c1.g*(1-t)+c2.g*t,b=c1.b*(1-t)+c2.b*t;
-                    for(let vertex=0;vertex<4;vertex++){const offset=(s*4+vertex)*3;colors[offset]=r;colors[offset+1]=g;colors[offset+2]=b;pulse[s*4+vertex]=samplePulse[s];}
+                    for(let vertex=0;vertex<4;vertex++){const offset=(s*4+vertex)*3;colors[offset]=r;colors[offset+1]=g;colors[offset+2]=b;pulse[s*4+vertex]=samplePulse[s];conformationAlpha[s*4+vertex]=opacityAt(edge)*(1-t)+opacityAt(edge+1)*t;}
                 }
                 side.set(0,0,1);
                 for(let s=0;s<samples;s++){
@@ -12740,6 +13189,7 @@
                 geometry.attributes.position.needsUpdate=true;
                 geometry.attributes.color.needsUpdate=true;
                 geometry.attributes.ribbonPulse.needsUpdate=true;
+                geometry.attributes.conformationAlpha.needsUpdate=true;
                 geometry.computeVertexNormals();
             };
             mesh.userData.updateRibbon();
@@ -12765,7 +13215,8 @@
                             (i,target)=>instancedNodeMesh.getColorAt(first+i,target),
                             i=>isNodeVisibleInPhysics(nodes[i].node),
                             i=>isModel2Only(nodes[i].node),
-                            ()=>viewerSizes.physics.backbone);
+                            ()=>viewerSizes.physics.backbone,
+                            i=>conformationNodeOpacity(first+i));
                         physicsScene.add(ribbon);meshes.push(ribbon);
                     }
                     start=end;
@@ -12864,6 +13315,7 @@
                 }
                 geometry.setAttribute('color',new THREE.BufferAttribute(colors,3));
                 const mesh=new THREE.Mesh(geometry,new THREE.MeshPhongMaterial({vertexColors:true,shininess:35,specular:0x111111}));
+                mesh.userData.conformationNodeIndex=run[0];
                 mesh.frustumCulled=false;physicsScene.add(mesh);meshes.push(mesh);
             }
             curveRepresentation={nodes:physicsNodes,signature,meshes};
@@ -13132,6 +13584,13 @@
                 balls.frustumCulled=false;
                 balls.visible=false;
                 physicsScene.add(balls);
+                balls.material.transparent=true;balls.material.depthWrite=false;
+                balls.material.onBeforeCompile=shader=>{
+                    shader.vertexShader='attribute float conformationAlpha; varying float conformationWeight;\n'+shader.vertexShader;
+                    shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nconformationWeight=conformationAlpha;');
+                    shader.fragmentShader='varying float conformationWeight;\n'+shader.fragmentShader;
+                    shader.fragmentShader=shader.fragmentShader.replace('#include <color_fragment>','#include <color_fragment>\ndiffuseColor.a*=conformationWeight; if(diffuseColor.a<=0.0)discard;');
+                };
                 atomRepresentation={entries,bonds:[],balls,sticks:null,mode:'surface',pending:false,cancelled:false,ready:false};
                 atomRepresentation.loadingStartedAt=performance.now();
                 document.getElementById('metaballLoading')?.classList.remove('hidden');
@@ -13151,7 +13610,7 @@
                 const chainKey=node.blockIdx;
                 if(!atomsByChain.has(chainKey))atomsByChain.set(chainKey,[]);
                 const atomColor=physicsAtomColor(physicsColorMode,entry.source,node.res.atoms2[node.idx2],color,physicsOcclusionFactors[entry.nodeIndex]??1);
-                atomsByChain.get(chainKey).push({x:p.x,y:p.y,z:p.z,r:(vdw[entry.source.element]||1.7)+viewerSizes.physics.surface,c:[atomColor.r,atomColor.g,atomColor.b]});
+                atomsByChain.get(chainKey).push({x:p.x,y:p.y,z:p.z,nodeIndex:entry.nodeIndex,r:(vdw[entry.source.element]||1.7)+viewerSizes.physics.surface,c:[atomColor.r,atomColor.g,atomColor.b]});
             }
             state.pending=true;
             buildSeparatedMetaballGeometry([...atomsByChain.values()],()=>state.cancelled||atomRepresentation!==state||physicsRepresentation!=='surface',geometry=>{
@@ -13273,18 +13732,23 @@
                 if(cancelled()){for(const part of parts)part.dispose();return;}
                 if(next===chains.length){
                     const geometry=new THREE.BufferGeometry();
-                    for(const name of ['position','color','normal']){
+                    for(const name of ['position','color','normal','conformationNodeIndex','conformationAlpha']){
                         const length=parts.reduce((sum,part)=>sum+part.attributes[name].array.length,0);
                         const values=new Float32Array(length);let offset=0;
                         for(const part of parts){values.set(part.attributes[name].array,offset);offset+=part.attributes[name].array.length;}
-                        geometry.setAttribute(name,new THREE.BufferAttribute(values,3));
+                        geometry.setAttribute(name,new THREE.BufferAttribute(values,['conformationNodeIndex','conformationAlpha'].includes(name)?1:3));
                     }
                     for(const part of parts)part.dispose();
                     finished(geometry);
                     return;
                 }
                 buildMetaballGeometry(chains[next++],cancelled,part=>{
-                    if(part)parts.push(part);
+                    if(part){
+                        const index=chains[next-1][0]?.nodeIndex??0,count=part.attributes.position.count;
+                        part.setAttribute('conformationNodeIndex',new THREE.BufferAttribute(new Float32Array(count).fill(index),1));
+                        part.setAttribute('conformationAlpha',new THREE.BufferAttribute(new Float32Array(count).fill(1),1));
+                        parts.push(part);
+                    }
                     setTimeout(buildNext,0);
                 });
             }
@@ -13568,7 +14032,12 @@
             const show = panels.classList.toggle('hidden') === false;
             panels.setAttribute('aria-hidden', String(!show));
             button.setAttribute('aria-expanded', String(show));
-            button.textContent = show ? 'Hide homology model build process ▾' : 'View homology model build process ▾';
+            const chevron = document.createElement('i');
+            chevron.className = `fa-solid fa-chevron-${show ? 'up' : 'down'}`;
+            chevron.setAttribute('aria-hidden', 'true');
+            const label=document.createElement('span');
+            label.textContent=`${show ? 'Hide' : 'View'} homology model build process`;
+            button.replaceChildren(label, chevron);
             if (show) requestAnimationFrame(() => {
                 resizeCanvases();
                 resetCanvasViews();
@@ -13782,7 +14251,9 @@
                         if (placeholder) placeholder.classList.add('hidden');
                         // Allow the completed viewer to paint before recording end-to-end time.
                         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-                        if (buildGeneration === modelBuildGeneration && modelBuildStartedAt !== null && !modelBuildCompleted) {
+                        if (buildGeneration === modelBuildGeneration && modelBuildStartedAt !== null && !modelBuildCompleted
+                            && (typeof groupSimulation==='undefined'||groupSimulation?.complete)
+                            && (typeof multiReferenceBuild==='undefined'||!multiReferenceBuild||multiReferenceBuild.done)) {
                             const seconds = (performance.now() - modelBuildStartedAt) / 1000;
                             document.getElementById('modelBuildTime').textContent = `Homology model built in ${seconds.toFixed(2)} seconds`;
                             modelBuildCompleted = true;
@@ -13888,6 +14359,13 @@
         // ==========================================
 
         // Static actions are bound here so the HTML contains no executable event attributes.
+        document.getElementById('examplePresets')?.addEventListener('click', event => {
+            if (!event.target.closest('button[data-reference]')) return;
+            completedReferenceSearchKey = currentReferenceSearchKey();
+            requestAnimationFrame(() => document.getElementById('physicsSimulationTitle')?.scrollIntoView({
+                behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth', block:'start'
+            }));
+        });
         const htmlActionHandlers = {
             click: [
                 function() { loadModelPair('6YKM', 'P09348, P0AF06') },
@@ -13950,8 +14428,8 @@
                 function() { loadModelPair('6IOK, 6IOL', 'Q51487, P52002, P52477') },
             ],
             input: [
-                function() { referenceSearchRequest++; referenceSearchLoading=false; siftsRequestToken++; if(siftsLookupLoading)clearSiftsLookupLoading(true); document.getElementById('fetchSiftsStatus').textContent=''; document.getElementById('fetchSiftsStatus').classList.remove('discovery-warning'); referenceSearchSessionId=null; clearUploadedStructure('reference'); cancelStringMatching(); hideStringMatchResults(); if(!this.value.trim()){const alphaFoldInput=document.getElementById('pdbInput2'); if(alphaFoldInput.value){alphaFoldInput.value=''; alphaFoldInput.dispatchEvent(new Event('input',{bubbles:true}));}} updateBuildButtonState(); updateFindMatchesReady(); updateExampleSelection(); updateReferenceSequenceSearchButton(true); document.getElementById('viewReferenceSearchResultsBtn').classList.add('hidden'); document.getElementById('referenceSearchResults').classList.add('hidden'); document.getElementById('referenceSequenceSearchStatus').textContent='' },
-                function() { if(siftsLookupLoading){siftsRequestToken++;clearSiftsLookupLoading();} clearUploadedStructure('alphaFold'); this.classList.remove('string-id-glow'); updateBuildButtonState(); updateExampleSelection() },
+                function() { referenceSearchRequest++; referenceSearchLoading=false; siftsRequestToken++; if(siftsLookupLoading)clearSiftsLookupLoading(true); document.getElementById('fetchSiftsStatus').textContent=''; document.getElementById('fetchSiftsStatus').classList.remove('discovery-warning', 'search-success'); referenceSearchSessionId=null; clearUploadedStructure('reference'); cancelStringMatching(); hideStringMatchResults(); if(!this.value.trim()){const alphaFoldInput=document.getElementById('pdbInput2'); if(alphaFoldInput.value){alphaFoldInput.value=''; alphaFoldInput.dispatchEvent(new Event('input',{bubbles:true}));}} updateBuildButtonState(); updateFindMatchesReady(); updateExampleSelection(); updateReferenceSequenceSearchButton(true); document.getElementById('viewReferenceSearchResultsBtn').classList.add('hidden'); document.getElementById('referenceSearchResults').classList.add('hidden'); document.getElementById('referenceSequenceSearchStatus').textContent='' },
+                function() { if(stringMatchingLoading)cancelStringMatching(); if(siftsLookupLoading){siftsRequestToken++;clearSiftsLookupLoading();} clearUploadedStructure('alphaFold'); this.classList.remove('string-id-glow'); updateBuildButtonState(); updateExampleSelection() },
                 function() { setViewerSize('alignment', 'residue', this.value) },
                 function() { setViewerSize('alignment', 'backbone', this.value) },
                 function() { setSideChainJiggleSpeed(this.value) },
@@ -13998,14 +14476,51 @@
         });
         document.getElementById('fetchSiftsBtn')?.addEventListener('click',fetchSiftsUniProtIds);
         document.getElementById('copyShareLinkBtn')?.addEventListener('click',copyShareableModelLink);
-        document.getElementById('stringFiles')?.addEventListener('change',event=>selectStringFiles(event.currentTarget));
-        document.getElementById('findReferencePdbsBtn')?.addEventListener('click',()=>{
-            const input=document.getElementById('referenceSearchInput');
-            try {const parts=referenceInputParts(input.value);void fetchReferencePdbsForSequences(parts.sequences.length?'sequence':'query');}
-            catch(error){document.getElementById('referenceSequenceSearchStatus').textContent=error.message;}
+        const speciesSearch = document.getElementById('stringSpeciesSearch');
+        const speciesOptions = document.getElementById('stringSpeciesOptions');
+        const speciesChoices = new Map();
+        for (const [taxon, names] of Object.entries(stringSpeciesCatalog).sort((a,b)=>a[1][0].localeCompare(b[1][0]))) {
+            const value = `${names[0]} (${taxon})`;
+            speciesChoices.set(value, {taxon, name:names[0]});
+            const option = document.createElement('option');
+            option.value = value;
+            option.label = names[1];
+            speciesOptions.appendChild(option);
+        }
+        speciesSearch.addEventListener('input', () => {
+            cancelStringMatching();
+            updateReferenceSpeciesGuidance();
+            const species = speciesChoices.get(speciesSearch.value);
+            const link = document.getElementById('stringSpeciesDownload');
+            link.setAttribute('aria-disabled', String(!species));
+            if(species)link.removeAttribute('tabindex');
+            else link.setAttribute('tabindex','-1');
+            link.replaceChildren();
+            document.getElementById('selectedStringSpeciesName').textContent = species?.name || 'your selected species';
+            for (const [id,kind,extension] of [['stringSequenceFilename','sequences','fa'],['stringAliasesFilename','aliases','txt']]) {
+                document.getElementById(id).textContent = `${species?.taxon || '[taxon ID]'}.protein.${kind}.v${species ? '12.5' : '[version number]'}.${extension}`;
+            }
+            if(species) {
+                link.href = 'https://string-db.org/cgi/download?species_text=' + encodeURIComponent(species.name);
+                link.append(document.createTextNode(`Go to ${species.name} download page `));
+                const icon = document.createElement('i');
+                icon.className = 'fa-solid fa-arrow-up-right-from-square ml-1';
+                icon.setAttribute('aria-label','Opens in a new tab');
+                link.appendChild(icon);
+            } else {
+                link.removeAttribute('href');
+                link.textContent = 'Go to species download page';
+                const icon = document.createElement('i');
+                icon.className = 'fa-solid fa-arrow-up-right-from-square ml-1';
+                icon.setAttribute('aria-hidden','true');
+                link.appendChild(icon);
+            }
         });
+        document.getElementById('stringFiles')?.addEventListener('change',event=>selectStringFiles(event.currentTarget));
+        document.getElementById('pdbInput1')?.addEventListener('input',renderChosenReferences);
         document.getElementById('referenceSearchInput')?.addEventListener('input',()=>{
-            referenceSearchRequest++;referenceSearchLoading=false;document.getElementById('findReferencePdbsBtn').disabled=!document.getElementById('referenceSearchInput').value.trim();
+            cancelStringMatching();
+            referenceSearchRequest++;referenceSearchLoading=false;
             document.getElementById('referenceSequenceSearchStatus').textContent='';updateBuildButtonState();
         });
         document.getElementById('fetchReferenceSequencesBtn')?.addEventListener('click',()=>fetchReferencePdbsForSequences('sequence'));
@@ -14047,6 +14562,7 @@
             event.currentTarget.setAttribute('aria-pressed', String(physicsBackgroundHidden));
             if (physicsScene) physicsScene.background = physicsBackgroundHidden ? null : new THREE.Color(document.body.classList.contains('light-mode') ? 0xffffff : 0x020617);
             physicsRenderer?.render(physicsScene, physicsCamera);
+            if(typeof stagedPreview!=='undefined')stagedPreview?.render();
         });
         document.getElementById('physicsSnapBtn')?.addEventListener('click',capturePhysicsSnapshot);
         document.getElementById('physicsRecordBtn')?.addEventListener('click',togglePhysicsRecording);
@@ -14371,12 +14887,14 @@
             const expanded=event.currentTarget.getAttribute('aria-expanded')==='true';
             event.currentTarget.setAttribute('aria-expanded',String(!expanded));
             document.getElementById('buildSettingsContent').classList.toggle('hidden',expanded);
+            event.currentTarget.querySelector(':scope > i').className=`fa-solid fa-chevron-${expanded?'down':'up'}`;
         });
         document.getElementById('extraEvidenceToggle')?.addEventListener('click',event=>{
             const content=document.getElementById('extraEvidenceContent');
             const expanded=event.currentTarget.getAttribute('aria-expanded')==='true';
             event.currentTarget.setAttribute('aria-expanded',String(!expanded));
             content.classList.toggle('hidden',expanded);
+            event.currentTarget.querySelector(':scope > i').className=`fa-solid fa-chevron-${expanded?'down':'up'}`;
         });
         for(const [id,kind] of [['crossLinkEvidenceFile','crosslink'],['distanceEvidenceFile','distance']]){
             document.getElementById(id)?.addEventListener('change',event=>{
@@ -14423,6 +14941,7 @@
             document.body.classList.toggle('light-mode',enabled);
             window.refreshPhysicsComparisonSelection?.(true);
             if (physicsScene) physicsScene.background = physicsBackgroundHidden ? null : new THREE.Color(enabled ? 0xffffff : 0x020617);
+            if(typeof stagedPreview!=='undefined')stagedPreview?.render();
             if (referenceComparisonScene?.scene) {
                 referenceComparisonScene.scene.background = new THREE.Color(enabled ? 0xffffff : 0x020617);
                 referenceComparisonScene.render();
@@ -15212,12 +15731,12 @@
                 ...['animationSyncToggle','duplicateAnimationKeyframe','deleteAnimationKeyframe','showAnimationTable','recordAnimation','loopAnimation','deleteAnimation'].map(animationEl)]
                 .filter(Boolean).forEach(element=>element.classList.add('animation-editor-lockable'));
             animationPanel.addEventListener('click',event=>{
-                if((animationPlaying||animationPreparing)&&event.isTrusted&&event.target.closest('.animation-lockable,.animation-editor-lockable,#physicsViewerKey button,#physicsSelectionInfo button')&&!event.target.closest('#quickPlayAnimationBtn')){
+                if((animationPlaying||animationPreparing)&&event.isTrusted&&event.target.closest('.animation-lockable,.animation-editor-lockable,#physicsViewerKey button,#physicsSelectionInfo button')&&!event.target.closest('#quickPlayAnimationBtn,#conformationGroupSection,#physicsVisibilityButton,#stagedModelButtons')){
                     event.preventDefault();event.stopPropagation();
                 }
             },true);
             animationPanel.addEventListener('keydown',event=>{
-                if((animationPlaying||animationPreparing)&&event.isTrusted&&event.target.closest('.animation-lockable,.animation-editor-lockable')&&!event.target.closest('#quickPlayAnimationBtn')){
+                if((animationPlaying||animationPreparing)&&event.isTrusted&&event.target.closest('.animation-lockable,.animation-editor-lockable')&&!event.target.closest('#quickPlayAnimationBtn,#conformationGroupSection,#physicsVisibilityButton,#stagedModelButtons')){
                     event.preventDefault();event.stopPropagation();
                 }
             },true);
@@ -15301,6 +15820,8 @@
                 framesToNext:existing?.framesToNext??30,
                 coords:physicsNodes.map(node=>[node.x,node.y,node.z].map(value=>+value.toFixed(4))),
                 atomOffsets:captureAnimationAtomOffsets(),
+                conformationGroup:typeof activeConformationGroup==='undefined'?null:activeConformationGroup,
+                groupPresence:typeof conformationNodePresence==='undefined'?null:conformationNodePresence?.slice(),
                 displayCoords:physicsNodes.map(node=>{const point=visualPointForNode(node);return [point.x,point.y,point.z].map(value=>+value.toFixed(4));}),
                 settings:animationSettings()};
         }
@@ -15433,7 +15954,8 @@
             animationSelected=index;
             applyAnimationSettings(frame.settings);
             frame.coords.forEach((point,i)=>{const node=physicsNodes[i];[node.x,node.y,node.z]=point;});
-            animationAtomOffsets=animationPlaying?frame.atomOffsets||null:null;
+            animationAtomOffsets=animationPlaying||frame.groupPresence ? frame.atomOffsets||null : null;
+            applyGroupFramePresence(frame,frame,0);
             syncVisualPhysicsMeshes();renderAnimationTimeline();
         }
         function animationSegmentFrames(frame){return Math.max(0,Math.min(10000,Number(frame?.framesToNext)||0));}
@@ -15697,6 +16219,7 @@
             if(animationFrames.length<2||!physicsNodes.length){animationEl('animationStatus').textContent='Add at least two keyframes to play an animation.';return;}
             saveSelectedAnimationFrame();
             const currentEntry=animationLibrary.find(item=>item.id===animationActiveId);
+            if(currentEntry?.groupConformations&&multiReferenceBuild?.groupAnimation===currentEntry){multiReferenceBuild.view=multiReferenceBuild.current='combined';renderStagedBuildControls();}
             if(currentEntry?.conformationalChange&&!currentEntry.optimized){
                 startConformationOptimization(record);
                 return;
@@ -15770,6 +16293,7 @@
             if(animationSelected!==index){animationSelected=index;applyAnimationSettings(a.settings);renderAnimationTimeline();}
             applyInterpolatedAnimationControls(a,b,t);
             animationAtomOffsets=interpolateAnimationAtomOffsets(a,b,t);
+            applyGroupFramePresence(a,b,t);
             animationDisplayOverride=new Array(physicsNodes.length);
             for(let i=0;i<physicsNodes.length;i++){
                 const from=a.coords[i],to=b.coords[i],node=physicsNodes[i];
@@ -15923,8 +16447,8 @@
         function animationSyncDefinitions(){
             if(!animationFrames.length)return [];
             const rows=animationRowDefinitions().filter(row=>row.key);
-            const conformation={key:'conformation',category:'Conformation',label:'Conformation',get:frame=>frame.coords,
-                set:(frame,value)=>{frame.coords=structuredClone(value);}};
+            const conformation={key:'conformation',category:'Conformation',label:'Conformation (group)',get:frame=>({coords:frame.coords,groupPresence:frame.groupPresence,conformationGroup:frame.conformationGroup}),
+                set:(frame,value)=>{frame.coords=structuredClone(value.coords);frame.groupPresence=structuredClone(value.groupPresence);frame.conformationGroup=value.conformationGroup;}};
             const rotations=[...new Set(physicsNodes.map(node=>node.blockIdx))].map(block=>({key:`chainRotation:${block}`,category:'Visual variables',label:`${chainProteinName(block)} single-chain rotation`,
                 get:frame=>(frame.settings.chainRotations||[]).find(item=>Number(item.block)===block)||null,
                 set:(frame,value)=>{frame.settings.chainRotations=(frame.settings.chainRotations||[]).filter(item=>Number(item.block)!==block);if(value)frame.settings.chainRotations.push(structuredClone(value));}}));
