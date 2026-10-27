@@ -401,6 +401,7 @@
         .structure-file-picker input { position:absolute; width:1px; height:1px; opacity:0; }
         #findStringMatchesBtn { border:1px solid rgba(20,184,166,.4); border-radius:.85rem; }
         .model-download-button { display:inline-flex; align-items:center; gap:.5rem; background:linear-gradient(to right,#059669,#0d9488); color:#fff; font-weight:500; padding:.625rem 1rem; border:0; border-radius:.75rem; font-size:.75rem; line-height:1rem; transition:transform .15s,filter .15s; box-shadow:0 10px 15px -3px rgba(2,44,34,.4); }
+        #stringSpeciesDownload[aria-disabled="true"] { opacity:.5; cursor:not-allowed; pointer-events:none; box-shadow:none; }
         .model-download-button:hover { background:linear-gradient(to right,#10b981,#14b8a6); filter:none; }
         .model-download-button:active { transform:scale(.95); }
         .model-download-button:disabled { opacity:.5; }
@@ -449,7 +450,7 @@
         body.light-mode .reference-comparison-table td { color:#334155; border-color:#cbd5e1; }
         body.light-mode #stringUploadBox { background:linear-gradient(145deg,#f8fafc,#e9f2f5); border:0; }
         body.light-mode .string-file-name { color:#0f766e; }
-        body.light-mode label[for="pdbInput1"] { color:#075985; }
+        body.light-mode label[for="pdbInput1"], body.light-mode label[for="referenceSearchInput"] { color:#075985; }
         body.light-mode label[for="pdbInput2"] { color:#0f766e; }
         .chain-mapping-box { border:1px solid #334155; border-radius:0.75rem; overflow:hidden; }
         .chain-mapping-toggle { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:0.8rem 1rem; cursor:pointer; color:#5eead4; font-size:0.875rem; font-weight:600; list-style:none; }
@@ -509,9 +510,11 @@
         }
         body.light-mode .model-download-button,
         body.light-mode .model-download-button:hover {
-            background:linear-gradient(to right,#059669,#0d9488);
-            color:#fff;
+            background:linear-gradient(to right,#6ee7b7,#5eead4);
+            color:#064e3b;
+            box-shadow:0 3px 8px rgba(15,118,110,.12);
         }
+        body.light-mode .model-download-button:hover { background:linear-gradient(to right,#a7f3d0,#99f6e4); }
         body.light-mode #stringFinderToggle.model-download-button,
         body.light-mode #findStringMatchesBtn.model-download-button {
             background:linear-gradient(to right,#059669,#0d9488) !important;
@@ -760,6 +763,33 @@
         body.light-mode #referenceSearchInput { background:#fff; color:#172033; }
         #referenceSearchInput { resize:vertical; min-width:0; }
         #findReferencePdbsBtn:disabled { opacity:.55; cursor:wait; }
+        :is(#referenceSequenceSearchStatus, #fetchSiftsStatus, #stringMatchStatus):not(.search-no-results):not(.discovery-warning):not(.hidden):not(:empty) { display:block; margin-top:.75rem; padding:.75rem 1rem; border:1px solid #0d9488; border-radius:.75rem; background:#042f2e; color:#99f6e4; font-size:.95rem; line-height:1.5; font-weight:500; }
+        body.light-mode :is(#referenceSequenceSearchStatus, #fetchSiftsStatus, #stringMatchStatus):not(.search-no-results):not(.discovery-warning):not(.hidden):not(:empty) { background:#f0fdfa; color:#115e59; border-color:#5eead4; }
+        :is(#fetchSiftsStatus, #stringMatchStatus):not(:empty) { margin-bottom:1rem; }
+        #stringMatchStatus.search-success:not(.hidden):not(:empty) { display:block; padding:.75rem 1rem; border:1px solid #0d9488; border-radius:.75rem; background:#042f2e; color:#99f6e4; font-size:.95rem; line-height:1.5; }
+        body.light-mode #stringMatchStatus.search-success:not(.hidden):not(:empty) { background:#f0fdfa; color:#115e59; border-color:#5eead4; }
+        .animation-controls-locked #stagedModelButtons::after { display:none; }
+        #conformationGroupSection, #physicsVisibilityButton, #stagedModelButtons { position:relative; z-index:41; }
+        #conformationGroupPill { position:relative; display:inline-flex; max-width:100%; overflow:auto; border-radius:999px; background:#1e293b; padding:4px; gap:4px; }
+        #conformationGroupPill button { position:relative; z-index:1; flex-shrink:0; padding:.5rem 1rem; border-radius:999px; color:#cbd5e1; font-size:.85rem; }
+        #conformationGroupPill button[aria-pressed="true"] { color:#042f2e; }
+        .conformation-group-thumb { position:absolute; left:0; top:4px; bottom:4px; border-radius:999px; background:#5eead4; transition:transform .25s ease,width .25s ease; }
+        body.light-mode #conformationGroupPill { background:#e2e8f0; }
+        body.light-mode #conformationGroupPill button { color:#334155; }
+        @media(prefers-reduced-motion:reduce) { .conformation-group-thumb { transition:none; } }
+        #referenceSequenceSearchStatus.search-no-results:not(:empty) { display:block; margin-top:.75rem; padding:1rem 1.25rem; border:2px solid #fbbf24; border-radius:.75rem; background:#451a03; color:#fef3c7; font-size:1.125rem; line-height:1.6; font-weight:700; }
+        body.light-mode #referenceSequenceSearchStatus.search-no-results:not(:empty) { background:#fffbeb; color:#92400e; border-color:#d97706; }
+        #stringReviewDialog { width:min(1400px,94vw); max-height:90vh; overflow:auto; padding:24px; border:1px solid #475569; border-radius:16px; background:#0f172a; color:#e2e8f0; box-shadow:0 24px 80px #0005; color-scheme:dark; }
+        #stringReviewDialog::backdrop { background:rgba(15,23,42,.65); backdrop-filter:blur(4px); }
+        #stringReviewDialog p { margin:16px 0; line-height:1.6; }
+        #stringReviewResults { overflow:auto; }
+        #stringReviewStatus { padding:12px; border:1px solid #14b8a6; border-radius:8px; background:#134e4a; }
+        #stringReviewDialog button:disabled { opacity:.5; cursor:not-allowed; }
+        #stringReviewDialog :is(button,input,select):focus-visible { outline:3px solid #818cf8; outline-offset:3px; }
+        body.light-mode #stringReviewDialog { background:#fff; color:#172033; color-scheme:light; }
+        body.light-mode #stringReviewDialog :is(td,p) { color:#334155; }
+        body.light-mode #stringReviewDialog :is(input,select) { background:#f1f5f9; color:#172033; }
+        body.light-mode #stringReviewStatus { background:#ccfbf1; color:#134e4a; }
         #modellerAiDialog { --ai-bg:#0f172a; --ai-text:#e2e8f0; --ai-muted:#cbd5e1; --ai-field:#1e293b; --ai-border:#475569; --ai-track:#020617; width:min(560px,94vw); max-height:90vh; overflow:auto; background:var(--ai-bg); color:var(--ai-text); border:1px solid var(--ai-border); border-radius:16px; padding:24px; box-shadow:0 24px 80px #0005; color-scheme:dark; }
         #modellerAiDialog::backdrop { background:rgba(15,23,42,.65); backdrop-filter:blur(4px); }
         #modellerAiDialog :is(input,select) { background:var(--ai-field); color:var(--ai-text); border:1px solid var(--ai-border); border-radius:8px; min-height:40px; }
@@ -816,7 +846,7 @@ body.light-mode #groupSimulationStatus { background:#ecfeff; color:#155e75; bord
         #buildSettingsToggle span { display:flex; align-items:center; gap:10px; }
         #buildSettingsToggle:hover { background:rgba(20,184,166,.06); }
         #buildSettingsToggle > i { font-size:12px; }
-        #buildSettingsContent { padding:0 20px 20px; }
+        #buildSettingsContent { padding:1rem 0 0; }
         #buildSettingsContent:not(.hidden) { display:grid; gap:14px; }
         .build-settings-card { background:var(--build-surface); border:1px solid var(--build-border); border-radius:12px; padding:20px; min-width:0; }
         .build-settings-card h3 { margin:0; font-size:14px; font-weight:600; color:var(--build-text); }
@@ -836,10 +866,15 @@ body.light-mode #groupSimulationStatus { background:#ecfeff; color:#155e75; bord
         body.light-mode #buildSettingsBox { --build-surface:#f8fafc; --build-border:#d8e1eb; --build-text:#1e293b; --build-muted:#526278; --build-input:#fff; }
         body.light-mode #buildSettingsToggle { color:#0f766e; }
         body.light-mode #buildSettingsContent .build-value { color:#0f766e; }
-        @media(max-width:640px) { .build-settings-grid { grid-template-columns:minmax(0,1fr); gap:18px; } #buildSettingsContent { padding:0 12px 12px; } .build-settings-card { padding:16px; } }
+        @media(max-width:640px) { .build-settings-grid { grid-template-columns:minmax(0,1fr); gap:18px; }  .build-settings-card { padding:16px; } }
 
         #buildSettingsContent .extra-reference-slider { margin-top:12px; }
-        #buildSettingsToggle[aria-expanded="true"] > i { transform:rotate(180deg); }
+        :is(#extraEvidenceToggle,#buildSettingsToggle,#viewDetailsBtn) { display:flex; align-items:center; justify-content:space-between; width:100%; max-width:none; margin:0; padding:0; gap:1rem; background:transparent; border:0; border-radius:0; color:#5eead4; font-size:1rem; line-height:1.5; font-weight:600; text-align:left; white-space:normal; }
+        :is(#extraEvidenceToggle,#buildSettingsToggle,#viewDetailsBtn) > span { display:flex; align-items:center; gap:10px; }
+        :is(#extraEvidenceToggle,#buildSettingsToggle,#viewDetailsBtn) > i { flex-shrink:0; font-size:1rem; }
+        :is(#extraEvidenceToggle,#buildSettingsToggle,#viewDetailsBtn):hover { color:#99f6e4; background:transparent; }
+        body.light-mode :is(#extraEvidenceBox,#buildSettingsBox,#buildProcessBox) { background:#f2f5f8; border-color:#cbd5e1; }
+        body.light-mode :is(#extraEvidenceToggle,#buildSettingsToggle,#viewDetailsBtn) { color:#0f766e; }
 
 </style>
 </head>
@@ -882,12 +917,9 @@ body.light-mode #groupSimulationStatus { background:#ecfeff; color:#155e75; bord
             <!--Introduction text-->
             <section id="Introduction" class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-2xl text-sm text-slate-300 leading-relaxed" aria-label="Modelling workflow">
                 <p class="mb-3" style="font-size: 3.0rem; font-weight: bold;"><i id="introCircleNodes" class="fa-solid fa-circle-nodes gradient-text mr-1" style="display:inline-block"></i> StringScape Homology Modeller</p>
-                <p class="mb-3" style="font-size: 1.0rem; font-weight: semibold;">This app builds all-atom homology models of protein complexes (including DNA, RNA, small molecules, ions, and lipid membranes) by aligning AlphaFold models onto a reference structure from the Protein Data Bank and computing membrane positions. Enter search terms, UniProt IDs, or sequences and click 'Find PDBs', or enter reference PDB IDs directly, then click 'Build Homology Model'. Or, use an example below.</p>
+                <p class="mb-3" style="font-size: 1.0rem; font-weight: semibold;">This app builds all-atom homology models of protein complexes (including DNA, RNA, small molecules, ions, and lipid membranes) by aligning AlphaFold models onto reference structures from the Protein Data Bank and computing membrane positions. Enter search terms, UniProt IDs, or sequences, select a species, optionally upload files from the STRING database, optionally connect an AI, and then simply click 'Build Homology Model'. Or, use an example below.</p>
                 <p class="mb-3" style="font-size: 1.0rem; font-weight: semibold;">This app has been specifically built to be easy to use to democratise access to all-atom homology modelling. Send feedback to <a href="stringscape.net/contact" target="_blank" rel="noopener noreferrer" class="text-sky-400 hover:underline">stringscape.net/contact<i class="fa-solid fa-arrow-up-right-from-square ml-1" aria-label="Open source code in a new tab"></i></a></p>
                 <p class="mb-3" style="font-size: 1.0rem; font-weight: semibold;">This app is also available as a feature within the main StringScape application (in the Structures view, where all PDB files from a species are displayed and any can be clicked on to build a homology model). This app is open source under an Apache-2.0 licence. <a href="https://github.com/JoelTre/StringScape/tree/main" target="_blank" rel="noopener noreferrer" class="text-sky-400 hover:underline">View source code<i class="fa-solid fa-arrow-up-right-from-square ml-1" aria-label="Open source code in a new tab"></i></a> </p>
-                <div class="mt-4"><div class="flex flex-wrap items-center gap-3"><button id="modellerAiOpen" type="button" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl">Connect an AI</button>
-                <p id="modellerAiState" role="status" class="font-semibold"></p></div>
-                <p class="mt-2 text-sm">This app works without an AI connected, but the models will likely be more accurate if you connect an AI.</p></div>
                 <details class="mt-4 border-t border-slate-800 pt-5">
                     <summary class="tips-summary font-semibold text-sky-300"><i class="fa-solid fa-lightbulb" aria-hidden="true"></i>Tips <i class="tips-chevron fa-solid fa-chevron-down" aria-hidden="true"></i></summary>
                     <ul class="list-disc pl-5 mt-3 space-y-2" style="font-size: 1.0rem;">
@@ -912,40 +944,55 @@ body.light-mode #groupSimulationStatus { background:#ecfeff; color:#155e75; bord
                 <div class="w-full flex flex-wrap items-center gap-2 pt-2"><label for="recentModels" class="text-slate-300 text-base font-semibold">Recent:</label><select id="recentModels" class="bg-slate-800 text-slate-100 rounded-lg px-3 py-1.5 text-xs max-w-full"><option value="">Select a previous build</option></select><span id="recentModelStatus" role="status" class="text-xs text-amber-300"></span></div>
             </div>
 
+            <section class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-2xl text-slate-300 leading-relaxed">
+                <p>There are two main ways this app can build a homology model. Either using reference Protein Data Bank structures from a range of species (possibly including your target species), or only using reference PDB structures from your target species. If doing the former, you will need to upload files from the STRING database to allow this app to identify the right proteins to use. If doing the latter, you do not need to upload STRING files. The former (using references from a range of species) is often preferable because the best reference structures for your protein complex of interest might not be in your target species. You can also manually input the reference structures to use (PDB IDs) and the proteins to use (UniProt IDs).</p>
+            </section>
+            <div id="stringUploadBox" class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3 shadow-2xl text-slate-300">
+
+                <div id="stringFinderContent" class="space-y-3">
+                <h2 class="text-lg font-semibold text-slate-100">Select Species</h2>
+                <label for="stringSpeciesSearch" class="block font-semibold text-teal-300">Search STRING species</label>
+                <input id="stringSpeciesSearch" type="search" list="stringSpeciesOptions" autocomplete="off" placeholder="Type a species name or taxon ID" class="w-full bg-slate-950 text-white rounded-lg p-3 border border-slate-700">
+                <datalist id="stringSpeciesOptions"></datalist>
+                <a id="stringSpeciesDownload" role="link" aria-disabled="true" tabindex="-1" target="_blank" rel="noopener noreferrer" class="model-download-button">Go to species download page <i class="fa-solid fa-arrow-up-right-from-square ml-1" aria-hidden="true"></i></a>
+                <p id="referenceSpeciesGuidance" class="text-s">By default, this app will use reference PDB structures from any species. If you select a species, the app will only search for reference structures from that species, unless you also upload STRING files below (and then it will use the best available reference structures from any species, but only use the proteins from your selected species).</p>
+                <p class="text-s">By default, this app will use the AlphaFold models of the proteins from the reference PDB species, unless you upload STRING files below (and then it will use AlphaFold models of the proteins from <span id="selectedStringSpeciesName">your selected species</span>). Click on the download page button below and download these two files: <span id="stringSequenceFilename" class="text-teal-400">[taxon ID].protein.sequences.v[version number].fa</span> and <span id="stringAliasesFilename" class="text-teal-400">[taxon ID].protein.aliases.v[version number].txt</span>. Upload them below.</p>
+                <label class="string-file-picker"><input id="stringFiles" type="file" accept=".fa,.txt,.gz" multiple>
+                    <span class="string-file-button model-download-button">Choose sequences and aliases files (.fa, .txt, .gz)</span><span class="string-file-name">No files selected</span>
+                </label>
+                <p id="stringFilesStatus" role="status" class="text-xs text-teal-200 empty:hidden"></p>
+                <p class="text-s">The app first uses protein identifiers, gene names and protein descriptions to find candidate STRING proteins, then verifies them by local BLOSUM62 Smith-Waterman alignment. If metadata is missing or inconclusive, it searches a top-500 k-mer shortlist. The gap penalties are set in Alignment Settings (see build process below). Ambiguous matches are shown for review, and UniProt IDs are checked against the uploaded sequences and target taxonomy before building.</p>
+
+                <p id="stringAliasStatus" role="status" class="hidden text-xs text-slate-400"></p>
+                <button id="downloadStringMatchesBtn" type="button" data-action-click="6" class="hidden self-end bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded text-xs border border-slate-700"><i class="fa-solid fa-download"></i> Download CSV</button>
+                <div id="stringMatchResults" class="rounded-lg border border-slate-800 text-xs text-slate-300 max-h-80 overflow-auto empty:hidden"></div>
+                </div>
+            </div>
+            
+            <section class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3 shadow-2xl text-slate-300">
+                <h2 class="text-lg font-semibold text-slate-100">Connect an AI</h2>
+                <p>This app can work without AI, but the models tend to be better with AI. AI is used to help find the best reference structures to use in the Protein Data Bank</p>
+                <div class="flex flex-wrap items-center gap-3"><button id="modellerAiOpen" type="button" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl">Connect an AI</button><p id="modellerAiState" role="status" class="font-semibold"></p></div>
+            </section>
             <!-- Reference PDB input -->
             <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-2 w-full shadow-2xl">
                 <h2 class="text-lg font-semibold text-slate-100">What do you want a model of?</h2>
                 <label for="referenceSearchInput" class="block text-base font-semibold text-sky-300">Search terms, UniProt IDs, or sequences</label>
-                <div class="flex items-start gap-3"><textarea rows="2" id="referenceSearchInput" placeholder="" class="w-full bg-slate-950 text-white rounded-lg p-3 focus:outline-none structure-id-input text-xl font-semibold" style="border:1px solid #3498db66"></textarea><button id="findReferencePdbsBtn" type="button" class="bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl px-4 py-3 shrink-0"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Find PDBs</button></div>
+                <div class="flex items-start gap-3"><textarea rows="2" id="referenceSearchInput" placeholder="" class="w-full bg-slate-950 text-white rounded-lg p-3 focus:outline-none structure-id-input text-xl font-semibold" style="border:1px solid #3498db66"></textarea></div>
                 <div class="flex flex-wrap items-center justify-between gap-2"><label for="pdbInput1" class="block text-base font-semibold text-sky-300">Reference PDB IDs</label><div class="flex flex-wrap items-center gap-2"><button id="viewReferenceSearchResultsBtn" type="button" class="hidden bg-slate-700 hover:bg-slate-600 text-white text-xs rounded-xl px-3 py-2" aria-expanded="false" aria-controls="referenceSearchResults"><i class="fa-solid fa-table-list" aria-hidden="true"></i> View search results</button><button id="fetchReferenceSequencesBtn" type="button" hidden></button><button id="fetchReferenceQueryBtn" type="button" hidden></button><label class="structure-file-picker model-download-button reference-structure-file-picker"><input id="referenceStructureUpload" type="file" multiple accept=".pdb,.ent,.cif,.mmcif" data-action-change="0"><i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> Upload Structures</label></div></div>
                 <p id="referenceSequenceSearchStatus" role="status" class="text-xs text-teal-300 empty:hidden"></p>
                 <div id="referenceSearchResults" class="hidden space-y-4">
                     <section><h3 class="font-semibold text-sky-300 mb-2">Searches made</h3><div class="max-h-64 overflow-auto rounded-xl border border-slate-700"><table class="w-full text-xs text-left"><thead class="sticky top-0 bg-slate-800 text-sky-200"><tr><th class="p-2">Search</th><th class="p-2">Returned PDB IDs</th><th class="p-2">Status</th></tr></thead><tbody id="referenceSearchHistoryBody"></tbody></table></div></section>
                     <section style="padding-top:12px"><h3 class="font-semibold text-sky-300 mb-2">Search results</h3><div class="max-h-80 overflow-auto rounded-xl border border-slate-700"><table class="w-full text-xs text-left"><thead class="sticky top-0 bg-slate-800 text-sky-200"><tr><th class="p-2">PDB ID</th><th class="p-2">Score</th><th class="p-2">Species</th><th class="p-2">Reference chain / protein</th><th class="p-2">UniProt IDs</th><th class="p-2">ID source</th><th class="p-2">Match details</th><th class="p-2">Action:</th></tr></thead><tbody id="referenceSearchResultsBody"></tbody></table></div></section>
+                    <section style="padding-top:12px"><h3 class="font-semibold text-sky-300 mb-2">Chosen references</h3><div class="max-h-80 overflow-auto rounded-xl border border-slate-700"><table class="w-full text-xs text-left"><thead class="sticky top-0 bg-slate-800 text-sky-200"><tr><th class="p-2">PDB ID</th><th class="p-2">Score</th><th class="p-2">Species</th><th class="p-2">Reference chain / protein</th><th class="p-2">UniProt IDs</th><th class="p-2">ID source</th><th class="p-2">Match details</th><th class="p-2">Action</th><th class="p-2">Group order</th><th class="p-2">Conformation group</th><th class="p-2">References in group</th></tr></thead><tbody id="chosenReferencesBody"></tbody></table></div></section>
                 </div>
-                <textarea rows="1" id="pdbInput1" data-action-input="0" placeholder="e.g. 6N2Y, 8EX4" class="w-full bg-slate-950 text-white rounded-lg p-3 focus:outline-none structure-id-input text-xl font-semibold" style="border: 1px solid #3498db66;"></textarea>
+                <textarea rows="1" id="pdbInput1" data-action-input="0" placeholder="e.g. 6N2Y. Click 'Build Homology Model' to auto-fill this box based in the input in the box above" class="w-full bg-slate-950 text-white rounded-lg p-3 focus:outline-none structure-id-input text-xl font-semibold" style="border: 1px solid #3498db66;"></textarea>
             </div>
 
             <!-- AlphaFold / UniProt input -->
             <form id="dualPdbForm" class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3 w-full shadow-2xl">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div class="md:col-span-2"><div class="flex flex-wrap items-center justify-between gap-2 mb-2"><label for="pdbInput2" class="block text-base font-semibold text-teal-300">AlphaFold IDs, UniProt IDs, or PDB IDs</label><div class="flex flex-wrap items-center gap-2"><button id="fetchSiftsBtn" type="button" hidden aria-hidden="true"></button><h2><button id="stringFinderToggle" type="button" data-action-click="4" aria-expanded="false" aria-controls="stringUploadBox" class="structure-file-picker model-download-button"><span id="stringFinderTitle">Select Species</span><i id="stringFinderChevron" class="fa-solid fa-chevron-down" aria-hidden="true"></i></button></h2><label class="structure-file-picker model-download-button"><input id="alphaFoldStructureUpload" type="file" accept=".pdb,.ent,.cif,.mmcif" data-action-change="3"><i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> Upload structures</label></div></div><p id="fetchSiftsStatus" role="status" class="text-xs text-teal-300 empty:hidden"></p>            <div id="stringUploadBox" class="hidden border rounded-xl p-4 space-y-3">
-
-                <div id="stringFinderContent" class="space-y-3">
-                <p class="text-s">By default, clicking 'Build Homology Model' will use the AlphaFold models of the proteins in the reference PDB(s) from the same species as the reference PDB(s). If you want to use proteins from another species, either enter their UniProt IDs below, or upload two files from the STRING database to allow this app to automatically find the UniProt IDs using a sequence alignment search. Go to the <a href="https://string-db.org/" target="_blank" rel="noopener noreferrer" class="text-sky-400 hover:underline">STRING Database<i class="fa-solid fa-arrow-up-right-from-square ml-1" aria-label="Open STRING database in a new tab"></i></a>, click Search, then Organisims, and search for your organisim<span id="referenceSpeciesNote"></span>. Click "Go to Download page" and download these two files: <a class="text-teal-400">[taxon ID].protein.sequences.v[version number].fa </a> and <a class="text-teal-400">[taxon ID].protein.aliases.v[version number].txt</a>. Upload them below.</p>
-                <label class="string-file-picker"><input id="stringFiles" type="file" accept=".fa,.txt" multiple>
-                    <span class="string-file-button model-download-button">Choose sequences and aliases files (.fa, .txt)</span><span class="string-file-name">No files selected</span>
-                </label>
-                <p id="stringFilesStatus" role="status" class="text-xs text-teal-200 empty:hidden"></p>
-                <p class="text-s">The app will search for matches for each of the chains in the reference PDB typed above using a top-500 k-mer shortlist and local BLOSUM62 Smith-Waterman alignment with the gap penalties set in the Alignment Settings (see build process below).</p>
-                <button id="findStringMatchesBtn" type="button" data-action-click="5" class="model-download-button disabled:opacity-50"><i class="fa-solid fa-magnifying-glass mr-2" aria-hidden="true"></i>Find matches for Reference PDB chains</button>
-                <p id="stringAliasStatus" role="status" class="hidden text-xs text-slate-400"></p>
-                <p id="stringMatchStatus" role="status" class="hidden text-xs text-teal-200"></p> <button id="downloadStringMatchesBtn" type="button" data-action-click="6" class="hidden self-end bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded text-xs border border-slate-700"><i class="fa-solid fa-download"></i> Download CSV</button>
-                <div id="stringMatchResults" class="rounded-lg border border-slate-800 text-xs text-slate-300 max-h-80 overflow-auto empty:hidden"></div>
-                </div>
-            </div>
-            
-<textarea id="pdbInput2" rows="1" data-action-input="1" placeholder="Click 'Build Homology Model' to auto-fill this box" class="w-full bg-slate-950 text-white rounded-lg p-3 focus:outline-none uppercase structure-id-input text-xl font-semibold" style="border: 1px solid #2eccbf66;"></textarea></div>
+                    <div class="md:col-span-2"><div class="flex flex-wrap items-center justify-between gap-2 mb-2"><label for="pdbInput2" class="block text-base font-semibold text-teal-300">AlphaFold IDs, UniProt IDs, or PDB IDs</label><div class="flex flex-wrap items-center gap-2"><button id="fetchSiftsBtn" type="button" hidden aria-hidden="true"></button><label class="structure-file-picker model-download-button"><input id="alphaFoldStructureUpload" type="file" accept=".pdb,.ent,.cif,.mmcif" data-action-change="3"><i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> Upload structures</label></div></div><p id="stringMatchStatus" role="status" class="hidden text-xs text-teal-200"></p><p id="fetchSiftsStatus" role="status" class="text-xs text-teal-300 empty:hidden"></p><textarea id="pdbInput2" rows="1" data-action-input="1" placeholder="Click 'Build Homology Model' to auto-fill this box" class="w-full bg-slate-950 text-white rounded-lg p-3 focus:outline-none uppercase structure-id-input text-xl font-semibold" style="border: 1px solid #2eccbf66;"></textarea></div>
                 </div>
                 <details id="chainMappingBox" class="hidden w-full chain-mapping-box">
                     <summary class="chain-mapping-toggle"><span>Chain mapping and ID sources</span><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></summary>
@@ -954,8 +1001,8 @@ body.light-mode #groupSimulationStatus { background:#ecfeff; color:#155e75; bord
                 <button type="submit" id="loadBtn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 text-xs"><i class="fa-solid fa-code-compare"></i> Build Homology model</button>
                 <p id="sequenceOnlyNotice" class="text-amber-300 hidden" style="font-size:1.125rem;line-height:1.6;font-weight:600" role="status"></p>
             </form>
-            <section id="extraEvidenceBox" class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-2xl"><h2><button id="extraEvidenceToggle" type="button" aria-expanded="false" aria-controls="extraEvidenceContent" class="w-full flex items-center justify-between gap-3 text-left font-semibold text-teal-300 hover:text-teal-200"><span>Add extra evidence</span><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button></h2><div id="extraEvidenceContent" class="hidden space-y-3 pt-3 text-slate-300"><p>If you have extra evidence that can be used to guide the homology modelling process, such as cross-link data, add them below.</p><div class="grid grid-cols-1 md:grid-cols-2 gap-3"><div><label class="string-file-picker evidence-file-picker"><input id="crossLinkEvidenceFile" type="file" accept=".csv,.tsv,.txt"><span class="string-file-button">Choose cross-links file (.csv/.tsv)</span><span class="string-file-name">No file selected</span></label><p class="text-xs text-slate-400 mt-2">Columns: chain1, residue1, chain2, residue2, max_distance_angstrom. Cα–Cα upper bounds in Å.</p></div><div><label class="string-file-picker evidence-file-picker"><input id="distanceEvidenceFile" type="file" accept=".csv,.tsv,.txt"><span class="string-file-button">Choose measured distances file (.csv/.tsv)</span><span class="string-file-name">No file selected</span></label><p class="text-xs text-slate-400 mt-2">Columns: chain1, residue1, chain2, residue2, distance_angstrom. Gently pulls Cα pairs toward measured values.</p></div></div><p class="text-xs text-slate-400">Residue numbers must match the input structures. Files are checked before use.</p><p id="extraEvidenceStatus" role="status" class="text-xs text-teal-300"></p></div></section>
-            <section id="buildSettingsBox" class="bg-slate-900 border border-slate-800 rounded-xl">
+            <section id="extraEvidenceBox" class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-2xl"><h2><button id="extraEvidenceToggle" type="button" aria-expanded="false" aria-controls="extraEvidenceContent" class="w-full flex items-center justify-between gap-3 text-left font-semibold text-teal-300 hover:text-teal-200"><span><i class="fa-solid fa-flask" aria-hidden="true"></i> Add extra evidence</span><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button></h2><div id="extraEvidenceContent" class="hidden space-y-3 pt-3 text-slate-300"><p>If you have extra evidence that can be used to guide the homology modelling process, such as cross-link data, add them below.</p><div class="grid grid-cols-1 md:grid-cols-2 gap-3"><div><label class="string-file-picker evidence-file-picker"><input id="crossLinkEvidenceFile" type="file" accept=".csv,.tsv,.txt"><span class="string-file-button">Choose cross-links file (.csv/.tsv)</span><span class="string-file-name">No file selected</span></label><p class="text-xs text-slate-400 mt-2">Columns: chain1, residue1, chain2, residue2, max_distance_angstrom. Cα–Cα upper bounds in Å.</p></div><div><label class="string-file-picker evidence-file-picker"><input id="distanceEvidenceFile" type="file" accept=".csv,.tsv,.txt"><span class="string-file-button">Choose measured distances file (.csv/.tsv)</span><span class="string-file-name">No file selected</span></label><p class="text-xs text-slate-400 mt-2">Columns: chain1, residue1, chain2, residue2, distance_angstrom. Gently pulls Cα pairs toward measured values.</p></div></div><p class="text-xs text-slate-400">Residue numbers must match the input structures. Files are checked before use.</p><p id="extraEvidenceStatus" role="status" class="text-xs text-teal-300"></p></div></section>
+            <section id="buildSettingsBox" class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-2xl">
                 <h2><button id="buildSettingsToggle" type="button" aria-expanded="false" aria-controls="buildSettingsContent"><span><i class="fa-solid fa-sliders" aria-hidden="true"></i> Build settings</span><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button></h2>
                 <div id="buildSettingsContent" class="hidden"><section class="build-settings-card"><h3>Group simulation</h3><p class="build-card-description">Control which subunits relax together and when each group stops.</p><div class="build-settings-grid"><label class="build-field" for="groupNeighbourDistance"><span>Neighbour distance (Å)</span><input id="groupNeighbourDistance" type="number" min="1" step="1" value="30"></label><label class="build-field" for="groupMaxSimulationResidues"><span>Simultaneous residue budget</span><select id="groupMaxSimulationResidues" aria-label="Max simultaneous simulation residue count"><option value="dynamic" selected>Dynamic</option><option value="100">100</option><option value="250">250</option><option value="500">500</option><option value="1000">1,000</option><option value="2500">2,500</option><option value="5000">5,000</option><option value="10000">10,000</option><option value="20000">20,000</option><option value="50000">50,000</option><option value="100000">100,000</option></select></label><label class="build-field" for="groupMaxResidueSpeed"><span>Stopping speed (Å/s)</span><input id="groupMaxResidueSpeed" type="number" min="0" step="0.01" value="0.03"></label><label class="build-field" for="groupMaxWaitingTime"><span>Maximum waiting time (s)</span><input id="groupMaxWaitingTime" type="number" min="0.1" step="0.1" value="10"></label></div><details class="build-settings-help"><summary>How group simulation works</summary><p>Each subunit serves once as a core. Its group includes subunits with any residue within the neighbour distance when that group starts. Each model runs two passes, each using half the maximum waiting time per group. Running time excludes pauses. Colours reset for the second pass. Overlapping groups share moving subunits; each core has its own stopping criteria. The residue budget applies when the next build starts. Additional groups start only when their combined active, unlocked residue count fits the budget; overlapping residues count once. A single group may exceed it. Dynamic starts at 100 and adjusts toward 5.0 steps/s; newer groups may be deferred when the budget falls. Fixed reference residues remain locked.</p></details></section><section class="build-settings-card"><h3>Elastic network</h3><p class="build-card-description">Set the spring behaviour and simulation step size.</p><div class="build-settings-grid"><div class="build-slider"><label for="springStiffness">Spring stiffness (k)<span id="stiffnessVal" class="build-value">2.0</span></label><input type="range" id="springStiffness" min="0.1" max="20" step="0.1" value="2.0"></div><div class="build-slider"><label for="mobilitySlider">Mobility / step size (μ)<span id="mobilityDisplay" class="build-value">0.005</span></label><input type="range" id="mobilitySlider" min="0.001" max="0.02" step="0.001" value="0.005"></div><label class="build-field" for="springCutoffSelect"><span>Spring cutoff</span><select id="springCutoffSelect">
                                 <option value="12">12.0 Å (Local Contacts)</option>
@@ -967,10 +1014,10 @@ body.light-mode #groupSimulationStatus { background:#ecfeff; color:#155e75; bord
                         <option value="global">Needleman–Wunsch (global)</option>
                     </select></label><label class="build-field" for="similarityThreshold"><span>Match threshold (% identity)</span><input type="number" id="similarityThreshold" value="25" min="0" max="100"></label><label class="build-field" for="gapOpenInput"><span>Gap open cost</span><input id="gapOpenInput" type="number" max="0" step="1" value="-10"></label><label class="build-field" for="gapExtendInput"><span>Gap extend cost</span><input id="gapExtendInput" type="number" max="0" step="1" value="-1"></label></div></section></div>
             </section>
-            <div class="flex flex-wrap items-center justify-between gap-4 w-full">
-                <p id="referenceStructureName" class="text-2xl font-semibold text-slate-200 flex-1 min-w-0" aria-live="polite">Reference:</p>
-            <button id="viewDetailsBtn" type="button" data-action-click="7" class="ml-auto shrink-0 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg px-6 py-3 text-2xl font-semibold" aria-expanded="false">View homology model build process <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button>
-            </div>
+            <p id="referenceStructureName" class="text-2xl font-semibold text-slate-200" aria-live="polite">Reference:</p>
+            <section id="buildProcessBox" class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-2xl">
+                <h2><button id="viewDetailsBtn" type="button" data-action-click="7" aria-expanded="false" aria-controls="detailsPanels"><span>View homology model build process</span><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button></h2>
+            </section>
         </section>
 
 
@@ -984,7 +1031,7 @@ body.light-mode #groupSimulationStatus { background:#ecfeff; color:#155e75; bord
                 <li>
                     <strong class="text-slate-100">Load one or more reference structures from the Protein Data Bank and load the AlphaFold structures from the AlphaFold database.</strong> If no AlphaFold model is available, the app just uses the protein sequence without any structural information.
                     <ul class="list-disc pl-5 mt-2 space-y-1">
-                        <li><strong class="text-slate-100">Optional:</strong> If STRING files have been uploaded, the app searches each of the reference PDB chain sequences in the FASTA file for matches and then uses the alias file to get the UniProt IDs for each match, which are then used to fetch the AlphaFold models.</li>
+                        <li><strong class="text-slate-100">Optional:</strong> If STRING files have been uploaded, the app uses reference IDs, gene names and protein names to find target candidates in the aliases file, verifies them by sequence alignment, and falls back to a top-500 k-mer sequence search when needed. Repeated chains and conformational references reuse the same protein-identity assignment. UniProt accessions must match the target sequence and taxonomy; unresolved or ambiguous matches pause the build for review.</li>
                     </ul>
                 </li>
                 <li><strong class="text-slate-100">Align each of the chain/polynucleotide sequences from the reference with each of the AlphaFold sequences.</strong> Semi-global alignment fits each reference chain/polynucleotide within an AlphaFold sequence, allowing for extra AlphaFold residues at either end. Alignment Settings also offers local Smith–Waterman and global Needleman–Wunsch as alignment methods.</li>
@@ -996,7 +1043,7 @@ body.light-mode #groupSimulationStatus { background:#ecfeff; color:#155e75; bord
                         <li><strong class="text-slate-100">Adding membranes:</strong> The app estimates whether a protein complex resides in a lipid membrane and displays its predicted membrane position, curvature, and placement confidence.</li>
                     </ul>
                 </li>
-                <li><strong class="text-slate-100">Combine drafts when multiple references are loaded.</strong> Completed drafts are structurally TM-aligned and equivalent subunits are matched. Their sequences are combined, residue centres and spring values are averaged using the reference influence sliders, and unmatched subunits are retained. The combined model then undergoes group simulations with active subunits free of reference coordinate locks.</li>
+                <li><strong class="text-slate-100">Combine drafts when multiple references are loaded.</strong> Completed drafts are structurally TM-aligned and equivalent subunits are matched. By default, all references belong to one group: their sequences are combined, residue centres and spring values are averaged using the reference influence sliders, and unmatched subunits are retained. The combined model then undergoes group simulations with active subunits free of reference coordinate locks. When a connected AI identifies distinct conformational states, it names and orders separate reference groups. Only drafts within the same group are merged. The final combined model animates between these group models, morphing equivalent subunits and fading subunits that are absent from a state. The Conformation group selector in Visibility toggles displays an individual state. The generated animation has 100 frames between each group keyframe, with all variables synced except conformation.</li>
                 <li><strong class="text-slate-100">Convert the simulation result into a mmCIF format and display in a Mol* viewer.</strong> The mmCIF file can then be downloaded.</li>
             </ol>
         </section>
@@ -1290,6 +1337,10 @@ body.light-mode #groupSimulationStatus { background:#ecfeff; color:#155e75; bord
 
             <button id="physicsVisibilityButton" type="button" aria-expanded="false" aria-controls="physicsVisibilityPanel" class="w-full border-t border-slate-800 px-5 py-3 text-left text-sm font-semibold text-white"><span><i class="fa-solid fa-eye text-emerald-400 mr-2" aria-hidden="true"></i>Visibility toggles</span><i class="visibility-chevron fa-solid fa-chevron-down" aria-hidden="true"></i></button>
             <div id="physicsVisibilityPanel" class="hidden">
+            <section id="conformationGroupSection" class="hidden px-5 py-3 border-b border-slate-800">
+                <h3 class="text-sm font-semibold text-teal-300 mb-2">Conformation group</h3>
+                <div id="conformationGroupPill" role="group" aria-label="Conformation group"></div>
+            </section>
             <!-- Chain Visibility Toggle Bar -->
             <div class="physics-toggle-row bg-slate-900/60 px-5 py-2 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
                 <div class="flex flex-wrap items-center gap-2">
@@ -1401,7 +1452,7 @@ body.light-mode #groupSimulationStatus { background:#ecfeff; color:#155e75; bord
             <div id="groupSimulationStatus" class="px-5 py-3 text-sm text-cyan-300 bg-cyan-950/40 border-y border-cyan-500/30" style="display:flex;flex-wrap:nowrap;align-items:center;gap:8px"><span id="groupSimulationStatusText" style="flex:1;min-width:0" role="status">Waiting for Phase 1 alignment.</span><span id="singleBuildETC" title="Estimated time remaining across both passes of all models in this build" class="hidden" style="margin-left:auto;flex-shrink:0;white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums"></span></div>
             <div id="physicsContainer" class="w-full relative bg-slate-950 flex items-center justify-center overflow-hidden cursor-grab active:cursor-grabbing">
                 <div id="groupSimulationRunningBadge" role="status" class="hidden absolute top-4 left-1/2 -translate-x-1/2 z-30 rounded-full border px-4 py-2 text-sm font-medium shadow-lg pointer-events-none whitespace-nowrap"><i class="fa-solid fa-circle-notch fa-spin mr-2" aria-hidden="true"></i>Running simulations...</div>
-                <div id="stagedPreviewHost" class="hidden absolute inset-0 z-10 bg-slate-950 text-cyan-200"></div>
+                <div id="stagedPreviewHost" class="hidden absolute inset-0 z-10 text-cyan-200"></div>
                 <div id="physics3dCanvas" style="position:relative" class="w-full h-full min-w-0 overflow-hidden"></div>
                 <div id="conformationOptimizingBadge" role="status" aria-live="polite" class="hidden rounded-lg bg-amber-900/90 px-3 py-2 text-sm font-semibold text-amber-100 shadow-lg pointer-events-none"><i class="fa-solid fa-circle-notch fa-spin mr-2" aria-hidden="true"></i>Optimising each conformation</div>
                 <div id="physicsInitialLoading" role="status" aria-live="polite" class="hidden absolute inset-0 z-40 flex items-center justify-center bg-slate-950/85 text-cyan-200 pointer-events-none"><div class="physics-loading-card rounded-2xl border border-slate-700 bg-slate-900/95 text-center text-lg font-semibold shadow-xl"><i class="fa-solid fa-cube text-6xl text-cyan-300" aria-hidden="true"></i><span><i class="fa-solid fa-circle-notch fa-spin mr-2" aria-hidden="true"></i>Building homology model</span></div></div>
@@ -1640,6 +1691,13 @@ body.light-mode #groupSimulationStatus { background:#ecfeff; color:#155e75; bord
     <script src="performance-diagnostics.js"></script>
     <script src="lipid-renderer.js"></script>
     <script src="variable-comparison.js"></script>
+    <dialog id="stringReviewDialog" aria-labelledby="stringReviewTitle">
+        <div class="flex justify-between items-center gap-4"><h2 id="stringReviewTitle" class="text-xl font-bold">Review protein matches</h2><button type="button" onclick="document.getElementById('stringReviewDialog').close()" aria-label="Close protein match review">Close ×</button></div>
+        <p>No AI is connected. Review the reference proteins, candidate names, sequence identity, coverage and supporting evidence below. Choose a supported STRING candidate and, where needed, verify or select its UniProt ID. Building stays paused until every match is resolved.</p>
+        <p>You can close this window and continue reviewing in the STRING results table. If no candidate has sufficient support, revise the reference or uploaded files and search again.</p>
+        <p id="stringReviewStatus" role="status" aria-live="polite"></p>
+        <div id="stringReviewResults"></div>
+    </dialog>
     <dialog id="modellerAiDialog" aria-labelledby="modellerAiTitle" >
         <form id="modellerAiForm" class="space-y-3">
             <div class="flex justify-between items-center"><h2 id="modellerAiTitle" class="text-xl font-bold">Connect an AI</h2><button id="modellerAiClose" type="button" aria-label="Close">Close ×</button></div>
@@ -1651,7 +1709,7 @@ body.light-mode #groupSimulationStatus { background:#ecfeff; color:#155e75; bord
             <div><span id="modellerAiModelCaption">Model</span><select id="modellerAiModel" hidden aria-hidden="true" tabindex="-1"></select><div class="ai-picker"><button id="modellerAiModelTrigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="modellerAiModelMenu" aria-labelledby="modellerAiModelCaption modellerAiModelText" disabled><span id="modellerAiModelText">Enter your API key to load models</span><span aria-hidden="true">▾</span></button><div id="modellerAiModelMenu" class="ai-picker-menu" role="menu" aria-labelledby="modellerAiModelCaption" hidden></div></div></div>
             <p id="modellerAiPrivacy" class="text-sm">Your key stays in this tab. When connected, searches automatically send your query (or input sequences) and the search results table to your provider to select references. Cloud API charges may apply.</p>
             <p id="modellerAiStatus" role="status" class="text-sm"></p>
-            <div class="flex gap-3"><button type="submit" class="bg-indigo-600 px-4 py-2 rounded">Connect</button><button id="modellerAiDisconnect" type="button" class="bg-slate-700 px-4 py-2 rounded">Disconnect</button></div>
+            <div class="flex gap-3"><button id="modellerAiConnect" type="submit" disabled class="bg-indigo-600 px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed">Connect</button><button id="modellerAiDisconnect" type="button" class="bg-slate-700 px-4 py-2 rounded">Disconnect</button></div>
         </form>
     </dialog>
     <script src="build-timeline.js"></script>
