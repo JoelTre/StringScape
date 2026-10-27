@@ -2,6 +2,29 @@
 let multiReferenceBuild=null;
 let stagedPreview=null;
 const stagedReferenceWeights=new Map();
+let activeConformationGroup=null;
+let conformationNodePresence=null;
+
+function conformationGroupsForFiles(files,plan){
+    const ids=files.map(file=>file.pdbId.toUpperCase());
+    if(!plan||plan.pdbIds.length!==ids.length||!ids.every(id=>plan.pdbIds.includes(id)))return [{name:'Combined model',pdbIds:ids}];
+    return plan.groups.map(group=>({name:group.name,pdbIds:group.pdbIds.slice()}));
+}
+function groupAtomLookup(chains){
+    const lookup=new Map();
+    for(const atoms of Object.values(chains))for(const atom of atoms)for(const origin of atom.draftOrigins||[])lookup.set(`${origin.draft}:${origin.node}`,atom);
+    return lookup;
+}
+function groupedConformationPoses(union,groups){
+    const lookups=groups.map(group=>groupAtomLookup(group.merged.chains));
+    const unionAtoms=Object.values(union.chains).flat();
+    return groups.map((group,index)=>{
+        const atoms=unionAtoms.map(atom=>(atom.draftOrigins||[]).map(origin=>lookups[index].get(`${origin.draft}:${origin.node}`)).find(Boolean)||null);
+        const fallback=unionAtoms.map(atom=>lookups.map(lookup=>(atom.draftOrigins||[]).map(origin=>lookup.get(`${origin.draft}:${origin.node}`)).find(Boolean)).find(Boolean)||atom);
+        return {name:group.name,atoms:atoms.map((atom,i)=>atom||fallback[i]),presence:atoms.map(atom=>atom?1:0)};
+    });
+}
+
 
 function alignDraftAssembly(assembly){
     const identity={R:[[1,0,0],[0,1,0],[0,0,1]],t:[0,0,0],tmScore:1,rmsd:0,numEquiv:0};
@@ -103,12 +126,13 @@ function alignDraftAssembly(assembly){
     return assembly;
 }
 
-function mergeDraftModels(assembly,drafts,weights){
+function mergeDraftModels(assembly,drafts,weights,allowed=null,unionOnly=false){
     const chains={},nodeMaps=drafts.map(()=>new Map()),nodeInfo=[],springs=new Map();
-    const weighted=(items,value)=>{const total=items.reduce((sum,item)=>sum+Math.max(0,weights[item.draft]??1),0);return items.reduce((sum,item)=>sum+(total?Math.max(0,weights[item.draft]??1):1)*value(item),0)/(total||items.length);};
+    const weighted=(items,value)=>{if(unionOnly)return value(items[0]);const total=items.reduce((sum,item)=>sum+Math.max(0,weights[item.draft]??1),0);return items.reduce((sum,item)=>sum+(total?Math.max(0,weights[item.draft]??1):1)*value(item),0)/(total||items.length);};
     for(const group of assembly.groups){
         let columns=[];
         for(const [draft,entry] of group.entries){
+            if(allowed&&!allowed.has(draft))continue;
             const incoming=entry.alignedAtoms;
             if(!columns.length){columns=incoming.map(atom=>[{draft,atom}]);continue;}
             const representative=columns.map(column=>column[0].atom);
@@ -120,6 +144,7 @@ function mergeDraftModels(assembly,drafts,weights){
             if(!pairs)throw new Error(`Unable to merge the sequence of draft chain ${entry.chain}.`);
             columns=pairs.map(pair=>[...(pair.idx1===null?[]:columns[pair.idx1]),...(pair.idx2===null?[]:[{draft,atom:incoming[pair.idx2]}])]);
         }
+        if(!columns.length)continue;
         const atoms=columns.map((items,index)=>{
             const exemplar=items.reduce((a,b)=>(weights[b.draft]??1)>(weights[a.draft]??1)?b:a).atom;
             const point={x:weighted(items,item=>item.atom.x),y:weighted(items,item=>item.atom.y),z:weighted(items,item=>item.atom.z)};
@@ -133,6 +158,7 @@ function mergeDraftModels(assembly,drafts,weights){
         chains[group.key]=atoms;
     }
     drafts.forEach((draft,index)=>{
+        if(allowed&&!allowed.has(index))return;
         for(const spring of draft.springTargets){
             const a=nodeMaps[index].get(spring.i),b=nodeMaps[index].get(spring.j);
             if(a===undefined||b===undefined||a===b)continue;
@@ -162,12 +188,13 @@ function beginStagedBuild(files,alphaFiles,generation){
     const oldWeights=new Map(referenceFiles.map((file,i)=>[file.pdbId,referenceInfluences[i]??1]));
     multiReferenceBuild={files,alphaFiles,generation,weights:files.map(file=>stagedReferenceWeights.get(file.pdbId)??oldWeights.get(file.pdbId)??1),
         drafts:[],kind:'draft',index:0,current:'draft:0',view:'draft:0',follow:true,busy:false,done:false,
+        conformationGroups:conformationGroupsForFiles(files,typeof referenceConformationPlan==='undefined'?null:referenceConformationPlan),
         assembly:null,merged:null,alignedMode:'reference',visible:new Map(),links:true};
     renderStagedBuildControls();
 }
 function clearStagedBuild(){
     if(multiReferenceBuild){multiReferenceBuild.cancelled=true;multiReferenceBuild.cancelNetwork?.();if(multiReferenceBuild.normalColorMenuNodes)document.getElementById('physicsColorMenu')?.replaceChildren(...multiReferenceBuild.normalColorMenuNodes);if(multiReferenceBuild.normalColorOptions){const select=document.getElementById('physicsColorSelect');select.replaceChildren();for(const option of multiReferenceBuild.normalColorOptions)select.add(new Option(option.label,option.value));}}
-    multiReferenceBuild=null;disposeStagedPreview();
+    multiReferenceBuild=null;activeConformationGroup=null;conformationNodePresence=null;document.getElementById('conformationGroupSection')?.classList.add('hidden');disposeStagedPreview();
     document.getElementById('stagedModelButtons')?.classList.add('hidden');
     document.getElementById('stagedModelComparisons')?.classList.add('hidden');
     document.getElementById('stagedStructureToggles')?.classList.add('hidden');
@@ -185,6 +212,8 @@ function renderStagedReferenceControls(){
         const label=document.createElement('label');label.className='extra-reference-slider block text-xs mt-2 text-violet-300';
         const span=document.createElement('span');span.textContent=`${file.pdbId} influence on its draft and the weighted merge: ${Math.round(state.weights[index]*100)}%`;
         const input=document.createElement('input');input.type='range';input.min=0;input.max=1;input.step=.01;input.value=state.weights[index];input.className='w-full';
+        input.defaultValue=String(state.weights[index]);
+        input.dataset.animationKey=`referenceInfluence:${file.pdbId}:${state.files.slice(0,index).filter(other=>other.pdbId===file.pdbId).length}`;
         input.addEventListener('input',()=>{state.weights[index]=Number(input.value);stagedReferenceWeights.set(file.pdbId,state.weights[index]);span.textContent=`${file.pdbId} influence on its draft and the weighted merge: ${Math.round(state.weights[index]*100)}%`;
             if(state.kind==='draft'&&state.index===index&&!state.busy){model1Influence=state.weights[index];referenceInfluences=[model1Influence];updateReferenceCoordinateLockTargets();applyReferenceCoordinateLocks();}
         });label.append(span,input);host.append(label);
@@ -195,7 +224,9 @@ function renderStagedBuildControls(){
     host.classList.toggle('hidden',!state);if(!state)return;host.replaceChildren();
     const buttons=document.createElement('div');buttons.style.cssText='display:flex;flex-wrap:wrap;gap:8px;flex:1;min-width:0';host.append(buttons);
     const choices=state.files.map((file,index)=>({id:`draft:${index}`,label:`Draft ${index+1} · ${file.pdbId}`,built:Boolean(state.drafts[index])}));
-    choices.push({id:'aligned',label:'Aligned draft models',built:Boolean(state.assembly)},{id:'combined',label:'Combined model',built:state.done});
+    choices.push({id:'aligned',label:'Aligned draft models',built:Boolean(state.assembly)});
+    if(state.conformationGroups)state.conformationGroups.forEach((group,index)=>choices.push({id:`group:${index}`,label:`Group ${index+1} · ${group.name}`,built:state.done}));
+    choices.push({id:'combined',label:'Combined model',built:state.done});
     for(const choice of choices){
         const building=choice.id===state.current&&!state.done&&!state.failed,enabled=choice.built||building;
         const button=document.createElement('button');button.type='button';button.disabled=!enabled;
@@ -206,9 +237,21 @@ function renderStagedBuildControls(){
     }
     updateStagedBuildETC(performance.now(),true);
 }
-function stagedLiveView(){return !multiReferenceBuild||multiReferenceBuild.view===multiReferenceBuild.current&&multiReferenceBuild.current!=='aligned'&&!multiReferenceBuild.busy;}
+function stagedLiveView(){return !multiReferenceBuild||(multiReferenceBuild.view===multiReferenceBuild.current||multiReferenceBuild.done&&multiReferenceBuild.view.startsWith('group:'))&&multiReferenceBuild.current!=='aligned'&&!multiReferenceBuild.busy;}
 function selectStagedModel(id){
     const state=multiReferenceBuild;if(!state)return;
+    if(state.done&&state.conformationGroups?.length===1&&id.startsWith('group:'))id='combined';
+    if(state.done&&state.conformationGroups?.length>1&&(id==='combined'||id.startsWith('group:'))){
+        state.view=id;state.current='combined';state.follow=true;
+        document.getElementById('physics3dCanvas').classList.remove('hidden');
+        document.getElementById('stagedPreviewHost').classList.add('hidden');
+        document.getElementById('stagedStructureToggles').classList.add('hidden');
+        disposeStagedPreview();
+        if(id.startsWith('group:'))selectConformationGroup(Number(id.split(':')[1]));
+        else {if(animationPlaying||animationPreparing)stopAnimation(true);if(state.groupAnimation)activateAnimation(state.groupAnimation);void playAnimation();}
+        renderStagedBuildControls();return;
+    }
+    if(typeof animationPlaying!=='undefined'&&animationPlaying)stopAnimation(true);
     state.view=id;renderStagedBuildControls();
     const select=document.getElementById('physicsColorSelect');
     if(state.lastColourView!=='aligned'&&state.normalColorOptions)state.liveColorMode=physicsColorMode;
@@ -234,7 +277,7 @@ function selectStagedModel(id){
 function failStagedBuild(error,state=multiReferenceBuild){
     if(!state||state.cancelled||error.name==='AbortError'||state!==multiReferenceBuild||state.generation!==modelBuildGeneration)return;
     globalThis.BuildTimeline?.finish('Failed');
-    state.failed=true;state.busy=false;physicsRunning=false;modelLoading=false;
+    state.failed=true;state.busy=false;physicsRunning=false;modelLoading=false;modelBuildStartedAt=null;updateBuildButtonState();
     document.getElementById('groupSimulationStatusText').textContent=error.message;
     document.getElementById('modelBuildTime').textContent='Combined model build stopped';renderStagedBuildControls();showError(error.message);
 }
@@ -299,7 +342,18 @@ async function advanceStagedBuild(){
     if(state!==multiReferenceBuild||state.generation!==modelBuildGeneration)return;
     state.assembly=output.assembly;renderStagedComparisonTables();selectStagedModel(state.view);
     await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
-    state.merged=mergeDraftModels(state.assembly,state.drafts,state.weights);
+    if(state.conformationGroups.length>1){
+        for(const group of state.conformationGroups){
+            const indices=new Set(state.files.flatMap((file,index)=>group.pdbIds.includes(file.pdbId.toUpperCase())?[index]:[]));
+            group.merged=mergeDraftModels(state.assembly,state.drafts,state.weights,indices);
+        }
+        // The final topology is a union. Coordinates always come from one state,
+        // never an average across different conformations.
+        state.merged=mergeDraftModels(state.assembly,state.drafts,state.weights,null,true);
+        state.groupPoses=groupedConformationPoses(state.merged,state.conformationGroups);
+        const firstPresent=Object.values(state.merged.chains).flat();
+        firstPresent.forEach((atom,i)=>{const source=state.groupPoses.find(pose=>pose.presence[i])?.atoms[i];if(source)Object.assign(atom,{x:source.x,y:source.y,z:source.z,sourceAtoms:source.sourceAtoms});});
+    }else state.merged=mergeDraftModels(state.assembly,state.drafts,state.weights);
     globalThis.BuildTimeline?.end(alignTiming);
     await startCombinedStagedModel(state);
 }
@@ -432,6 +486,11 @@ function addStagedDraftGeometry(object,points,colors,lifecycle,render,colorMode=
     sticks.instanceMatrix.needsUpdate=true;if(sticks.instanceColor)sticks.instanceColor.needsUpdate=true;sticks.frustumCulled=false;object.add(sticks);
 }
 
+function stagedViewerBackground(){
+    if(typeof physicsScene!=='undefined'&&physicsScene)return physicsScene.background?.clone()??null;
+    if(typeof physicsBackgroundHidden!=='undefined'&&physicsBackgroundHidden)return null;
+    return new THREE.Color(document.body.classList.contains('light-mode')?0xffffff:0x020617);
+}
 function renderStagedPreview(){
     const state=multiReferenceBuild,host=document.getElementById('stagedPreviewHost');disposeStagedPreview();if(!state||!host||stagedLiveView())return;
     host.classList.remove('hidden');
@@ -439,8 +498,8 @@ function renderStagedPreview(){
     if(aligned&&!state.assembly||!aligned&&!draft){host.textContent=aligned?'Aligning completed draft models…':'Preparing draft model…';return;}
     const structures=aligned?state.assembly.structures:[{file:{pdbId:draft.id},entries:Object.entries(draft.chains).map(([chain,atoms])=>({chain,alignedAtoms:atoms,alignedCenter:referenceCenter(atoms)}))}];
     const palette=draft?stagedSnapshotColors(draft):null;
-    const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});renderer.setPixelRatio(Math.min(2,window.devicePixelRatio||1));host.append(renderer.domElement);
-    const scene=new THREE.Scene();scene.background=new THREE.Color(document.body.classList.contains('light-mode')?'#ffffff':'#020617');
+    const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true,powerPreference:'high-performance'});renderer.setPixelRatio(Math.min(2,window.devicePixelRatio||1));host.append(renderer.domElement);
+    const scene=new THREE.Scene();scene.background=stagedViewerBackground();
     addPhysicsViewerLights(scene);
     const pivot=new THREE.Group(),root=new THREE.Group();pivot.add(root);scene.add(pivot);
     const atoms=structures.flatMap(structure=>structure.entries.flatMap(entry=>entry.alignedAtoms));
@@ -450,7 +509,7 @@ function renderStagedPreview(){
     const groups=new Map();if(aligned)state.assembly.groups.forEach((group,index)=>{for(const entry of group.entries.values())groups.set(entry,{group,index});});
     const toggles=document.getElementById('stagedStructureToggles');toggles.replaceChildren();toggles.classList.toggle('hidden',!aligned);
     const lifecycle={cancelled:false};
-    const render=()=>{if(!lifecycle.cancelled){syncPhysicsMaterials(scene);renderer.render(scene,camera);}},makeToggle=(label,key,object)=>{
+    const render=()=>{if(!lifecycle.cancelled){scene.background=stagedViewerBackground();syncPhysicsMaterials(scene);renderer.render(scene,camera);}},makeToggle=(label,key,object)=>{
         object.visible=state.visible.get(key)!==false;const button=document.createElement('button');button.type='button';button.className='px-3 py-1 rounded border border-slate-600 text-xs';button.textContent=label;button.setAttribute('aria-pressed',String(object.visible));
         button.addEventListener('click',()=>{object.visible=!object.visible;state.visible.set(key,object.visible);button.setAttribute('aria-pressed',String(object.visible));render();});toggles.append(button);
     };
@@ -546,4 +605,64 @@ function updateStagedBuildETC(now,force=false){
     const seconds=Math.ceil(remaining/1000),duration=seconds>=60?`${Math.floor(seconds/60)}m ${seconds%60}s`:`${seconds}s`;
     const time=new Date(Date.now()+remaining).toLocaleTimeString('en-NZ',{hour:'numeric',minute:'2-digit',hour12:true}).replace(/\s+/g,' ').toLowerCase();
     display.textContent=`ETC: ${duration} remaining (${time})${running?'':' · paused'}`;
+}
+
+function applyGroupFramePresence(a,b,t){
+    if(!a.groupPresence&&!b.groupPresence){conformationNodePresence=null;activeConformationGroup=null;return;}
+    conformationNodePresence=physicsNodes.map((_,i)=>{const from=a.groupPresence?.[i]??1,to=b.groupPresence?.[i]??1;return from+(to-from)*t;});
+    activeConformationGroup=t<.5?a.conformationGroup:b.conformationGroup;
+    updateConformationGroupPill();
+}
+function updateConformationGroupPill(){
+    const host=document.getElementById('conformationGroupPill');if(!host)return;
+    for(const button of host.querySelectorAll('button'))button.setAttribute('aria-pressed',String(Number(button.dataset.group)===activeConformationGroup));
+    const button=host.querySelector(`button[data-group="${activeConformationGroup}"]`),thumb=host.querySelector('.conformation-group-thumb');
+    if(button&&thumb){thumb.style.width=button.offsetWidth+'px';thumb.style.transform=`translateX(${button.offsetLeft}px)`;}
+}
+function renderConformationGroupPill(){
+    const state=multiReferenceBuild,section=document.getElementById('conformationGroupSection'),host=document.getElementById('conformationGroupPill');
+    if(!section||!host)return;
+    section.classList.toggle('hidden',!state?.done);host.replaceChildren();if(!state?.done)return;
+    if(state.conformationGroups.length===1)activeConformationGroup=0;
+    const thumb=document.createElement('span');thumb.className='conformation-group-thumb';thumb.setAttribute('aria-hidden','true');host.append(thumb);
+    state.conformationGroups.forEach((group,index)=>{
+        const button=document.createElement('button');button.type='button';button.textContent=group.name;button.dataset.group=String(index);button.setAttribute('aria-pressed',String(index===activeConformationGroup));
+        button.addEventListener('click',()=>selectConformationGroup(index));host.append(button);
+    });
+    requestAnimationFrame(updateConformationGroupPill);
+}
+function selectConformationGroup(index){
+    const state=multiReferenceBuild;if(!state?.groupAnimation?.frames[index])return;
+    if(animationPlaying||animationPreparing)stopAnimation(true);
+    if(animationActiveId!==state.groupAnimation.id)activateAnimation(state.groupAnimation);
+    state.view=`group:${index}`;state.current='combined';
+    document.getElementById('physics3dCanvas').classList.remove('hidden');
+    document.getElementById('stagedPreviewHost').classList.add('hidden');
+    document.getElementById('stagedStructureToggles').classList.add('hidden');
+    disposeStagedPreview();renderStagedBuildControls();
+    showAnimationFrame(index);
+    saveAnimation();
+}
+function createGroupedConformationAnimation(){
+    const state=multiReferenceBuild;
+    if(!state?.done)return;
+    if(state.conformationGroups.length<2){renderConformationGroupPill();return;}
+    if(state.groupAnimation)return;
+    if(animationPlaying||animationPreparing)stopAnimation(true);
+    animationOnModelReady();
+    const base=captureAnimationFrame();
+    const frames=state.groupPoses.map((pose,index)=>{
+        const frame=structuredClone(base);frame.id=animationId();frame.name=pose.name;frame.framesToNext=100;
+        frame.conformationGroup=index;frame.groupPresence=pose.presence.slice();
+        frame.coords=pose.atoms.map(atom=>[atom.x-physicsCenterOffset.cx,atom.y-physicsCenterOffset.cy,atom.z-physicsCenterOffset.cz]);frame.displayCoords=structuredClone(frame.coords);
+        frame.atomOffsets=pose.atoms.map(atom=>Object.fromEntries((atom.sourceAtoms||[]).map(source=>[source.atomName,[source.x-atom.x,source.y-atom.y,source.z-atom.z]])));
+        return frame;
+    });
+    const entry={id:animationId(),title:'Reference conformation groups',frames,loop:true,syncKeys:[],interpolation:{},groupConformations:true};
+    state.groupAnimation=entry;animationLibrary.push(entry);activateAnimation(entry);
+    animationSyncKeys=new Set(animationSyncDefinitions().filter(row=>row.key!=='conformation').map(row=>row.key));
+    entry.syncKeys=[...animationSyncKeys];syncAnimationVariables(frames[0]);
+    renderConformationGroupPill();renderAnimationSyncTable();
+    document.getElementById('animationEditor').classList.remove('hidden');
+    saveAnimation();void playAnimation();
 }
