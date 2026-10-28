@@ -460,7 +460,7 @@ function addStagedDraftGeometry(object,points,colors,lifecycle,render,colorMode=
     if(mode==='surface'){
         const radii={H:1.2,D:1.2,C:1.7,N:1.55,O:1.52,S:1.8,P:1.8,SE:1.9};
         const atoms=entries.map(({source,color})=>({x:source.x,y:source.y,z:source.z,r:(radii[source.element]||1.7)+viewerSizes.physics.surface,c:[color.r,color.g,color.b]}));
-        buildSeparatedMetaballGeometry([atoms],()=>lifecycle.cancelled,geometry=>{
+        buildSeparatedProbeSurfaceGeometry([atoms],()=>lifecycle.cancelled,geometry=>{
             if(lifecycle.cancelled){geometry?.dispose();return;}
             if(geometry)object.add(new THREE.Mesh(geometry,new THREE.MeshPhongMaterial({vertexColors:true,side:THREE.DoubleSide,shininess:12,specular:0x202428})));
             render();
