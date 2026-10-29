@@ -300,18 +300,19 @@ async function captureStagedDraft(state){
         chains[chain].push({...original,x:node.x,y:node.y,z:node.z,sourceAtoms:fullAtoms[index],draftNodeIndex:index,
             afResSeq:original.resSeq,afFileIndex:original.fileIndex,afSourcePdbId:original.sourcePdbId});
     });
-    const viewState={groupSimulation,occlusion:physicsOcclusionFactors.slice(),residueSpeeds:residueSpeedState.speeds.slice(),residueSpeedScale:residueSpeedState.scale,nodes:physicsNodes,blocks:morphMatrixBlocks,springs:physicsSprings,positions:physicsPositions,offset:{...physicsCenterOffset},
+    const viewState={groupSimulation,occlusion:Float32Array.from(physicsOcclusionFactors),residueSpeeds:residueSpeedState.speeds.slice(),residueSpeedScale:residueSpeedState.scale,nodes:physicsNodes,blocks:morphMatrixBlocks,springs:physicsSprings,positions:physicsPositions,offset:{...physicsCenterOffset},
         referenceFiles:referenceFiles.slice(),referenceInfluences:referenceInfluences.slice(),model1Influence,model2Influence,referenceAssembly,modelData1:{...modelData1,matrixCache:new Map()},modelData2:{...modelData2,matrixCache:new Map()}};
-    const input=physicsSpringInputSnapshot();input.nodes.forEach(node=>{node.locked=false;});
+    const input=physicsSpringInputSnapshot();for(let i=0;i<input.flags.length;i++)input.flags[i]&=~1;
     const packed=await buildStagedFullNetwork(input,state);
     if(state!==multiReferenceBuild||state.generation!==modelBuildGeneration)throw new DOMException('Build cancelled','AbortError');
-    updatePhysicsSpringConfidence(packed,input,validationState.pae);
-    const scratch={referenceValues:new Array(packed.referenceCount||0)},springTargets=[];
+    updatePhysicsSpringConfidence(packed,hydratePhysicsSpringInput(input),validationState.pae);
+    const scratch={referenceValues:new Array(packed.referenceCount||0)},springTargets=MemoryData.builder(['i','j','target','weight','isBackbone','isBasePair']);
     for(let index=0;index<packed.length;index++){
         const spring=physicsWorkerSpringAt(packed,index,scratch);spring.afConfidenceRevision=springPaeRevision;
-        const active=getActiveSpring(spring);if(active)springTargets.push({i:spring.i,j:spring.j,target:active.targetRestLen,weight:active.weight,isBackbone:spring.isBackbone,isBasePair:spring.isBasePair});
+        const active=getActiveSpring(spring);if(active)springTargets.push({i:spring.i,j:spring.j,target:active.targetRestLen,weight:active.weight,isBackbone:Number(spring.isBackbone),isBasePair:Number(spring.isBasePair)});
     }
-    return {id:`Draft ${state.index+1} · ${state.files[state.index].pdbId}`,chains,springTargets,viewState};
+    MemoryData.packAtoms({chains});
+    return {id:`Draft ${state.index+1} · ${state.files[state.index].pdbId}`,chains,springTargets:springTargets.finish(),viewState};
 }
 async function startStagedDraft(index,state){
     if(state!==multiReferenceBuild||state.generation!==modelBuildGeneration)return;
@@ -340,7 +341,7 @@ async function advanceStagedBuild(){
     const output=await runModellingWorker({id,operation:'drafts',settings:{mode:alignmentMode,gapOpen:alignmentGapOpen,gapExtend:alignmentGapExtend},
         files:state.drafts.map(draft=>({pdbId:draft.id,parsed:{chains:draft.chains}}))});
     if(state!==multiReferenceBuild||state.generation!==modelBuildGeneration)return;
-    state.assembly=output.assembly;renderStagedComparisonTables();selectStagedModel(state.view);
+    state.assembly=MemoryData.packAtoms(shareAssemblySourceAtoms(output.assembly,state.drafts.map(draft=>({pdbId:draft.id,parsed:{chains:draft.chains}}))));renderStagedComparisonTables();selectStagedModel(state.view);
     await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
     if(state.conformationGroups.length>1){
         for(const group of state.conformationGroups){
@@ -355,6 +356,7 @@ async function advanceStagedBuild(){
         firstPresent.forEach((atom,i)=>{const source=state.groupPoses.find(pose=>pose.presence[i])?.atoms[i];if(source)Object.assign(atom,{x:source.x,y:source.y,z:source.z,sourceAtoms:source.sourceAtoms});});
     }else state.merged=mergeDraftModels(state.assembly,state.drafts,state.weights);
     globalThis.BuildTimeline?.end(alignTiming);
+    MemoryData.packAtoms(state.merged);if(state.groupPoses)MemoryData.packAtoms(state.groupPoses);
     await startCombinedStagedModel(state);
 }
 async function startCombinedStagedModel(state){
@@ -376,7 +378,7 @@ async function startCombinedStagedModel(state){
 function installStagedMergedSprings(){
     const state=ensurePhysicsSimulationWorker(),build=multiReferenceBuild;
     if(state.stagedMerged===build.merged)return;
-    state.stagedMerged=build.merged;state.springInput=physicsSpringInputSnapshot();state.springInput.nodes.forEach(node=>{node.locked=false;});state.inputSent=true;
+    state.stagedMerged=build.merged;state.springInput=physicsSpringInputSnapshot();for(let i=0;i<state.springInput.flags.length;i++)state.springInput.flags[i]&=~1;state.inputSent=true;
     state.buildCutoff=springCutoffVal;state.buildRevision=(state.buildRevision||0)+1;state.buildPending=true;
     const packed=packPhysicsWorkerSprings(build.merged.springs);packed.packed=true;packed.cutoff=springCutoffVal;packed.nodeCount=physicsNodes.length;
     state.worker.postMessage({command:'installSprings',revision:state.buildRevision,packed,input:state.springInput,influences:referenceInfluences.slice()});
@@ -429,7 +431,7 @@ function restoreStagedPreviewCamera(state,view,camera,pivot){
 }
 function disposeStagedPreview(){
     if(!stagedPreview)return;saveStagedPreviewCamera(stagedPreview);stagedPreview.lifecycle.cancelled=true;stagedPreview.observer.disconnect();
-    stagedPreview.scene.traverse(object=>{object.geometry?.dispose();for(const material of Array.isArray(object.material)?object.material:[object.material])material?.dispose();});
+    stagedPreview.scene.traverse(object=>{object.dispose?.();object.geometry?.dispose();for(const material of Array.isArray(object.material)?object.material:[object.material])material?.dispose();});
     stagedPreview.renderer.dispose();stagedPreview.renderer.forceContextLoss();stagedPreview=null;document.getElementById('stagedPreviewHost')?.replaceChildren();
 }
 function addStagedDraftGeometry(object,points,colors,lifecycle,render,colorMode=physicsColorMode){
@@ -466,7 +468,7 @@ function addStagedDraftGeometry(object,points,colors,lifecycle,render,colorMode=
             render();
         });return;
     }
-    const balls=new THREE.InstancedMesh(new THREE.SphereGeometry(molecular?.34:.85,10,8),new THREE.MeshPhongMaterial(molecular?{shininess:6,specular:0x080a0d}:{shininess:50}),entries.length);
+    const balls=createMolecularInstances(entries.length,molecular?.34:.85,false,{shininess:molecular?6:50});
     const dummy=new THREE.Object3D();
     entries.forEach((entry,i)=>{
         dummy.position.set(entry.source.x,entry.source.y,entry.source.z);dummy.scale.setScalar(molecular?viewerSizes.physics.atom*elementAtomScale(entry.source.element):viewerSizes.physics.residue);
@@ -475,7 +477,7 @@ function addStagedDraftGeometry(object,points,colors,lifecycle,render,colorMode=
     balls.instanceMatrix.needsUpdate=true;if(balls.instanceColor)balls.instanceColor.needsUpdate=true;balls.frustumCulled=false;object.add(balls);
     const bonds=molecular?sourceAtomBonds(entries,nodes):polymer?points.slice(1).flatMap((atom,i)=>dist3d(points[i],atom)<8?[[i,i+1]]:[]):[];
     if(!bonds.length)return;
-    const sticks=new THREE.InstancedMesh(new THREE.CylinderGeometry(1,1,1,8),new THREE.MeshPhongMaterial({shininess:6,specular:0x080a0d}),bonds.length);
+    const sticks=createMolecularInstances(bonds.length,1,true);
     const up=new THREE.Vector3(0,1,0),a=new THREE.Vector3(),b=new THREE.Vector3(),direction=new THREE.Vector3();
     bonds.forEach(([ia,ib],index)=>{
         const first=entries[ia],second=entries[ib];a.set(first.source.x,first.source.y,first.source.z);b.set(second.source.x,second.source.y,second.source.z);
@@ -509,7 +511,7 @@ function renderStagedPreview(){
     const groups=new Map();if(aligned)state.assembly.groups.forEach((group,index)=>{for(const entry of group.entries.values())groups.set(entry,{group,index});});
     const toggles=document.getElementById('stagedStructureToggles');toggles.replaceChildren();toggles.classList.toggle('hidden',!aligned);
     const lifecycle={cancelled:false};
-    const render=()=>{if(!lifecycle.cancelled){scene.background=stagedViewerBackground();syncPhysicsMaterials(scene);renderer.render(scene,camera);}},makeToggle=(label,key,object)=>{
+    const render=()=>{if(!lifecycle.cancelled){scene.background=stagedViewerBackground();syncPhysicsMaterials(scene);syncPhysicsTransparency(scene);renderer.render(scene,camera);}},makeToggle=(label,key,object)=>{
         object.visible=state.visible.get(key)!==false;const button=document.createElement('button');button.type='button';button.className='px-3 py-1 rounded border border-slate-600 text-xs';button.textContent=label;button.setAttribute('aria-pressed',String(object.visible));
         button.addEventListener('click',()=>{object.visible=!object.visible;state.visible.set(key,object.visible);button.setAttribute('aria-pressed',String(object.visible));render();});toggles.append(button);
     };
@@ -643,19 +645,20 @@ function selectConformationGroup(index){
     showAnimationFrame(index);
     saveAnimation();
 }
-function createGroupedConformationAnimation(){
+async function createGroupedConformationAnimation(){
     const state=multiReferenceBuild;
     if(!state?.done)return;
     if(state.conformationGroups.length<2){renderConformationGroupPill();return;}
     if(state.groupAnimation)return;
     if(animationPlaying||animationPreparing)stopAnimation(true);
-    animationOnModelReady();
-    const base=captureAnimationFrame();
+    await animationOnModelReady();
+    if(state!==multiReferenceBuild||!state.done)return;
+    const base=captureAnimationFrame(null,{deferAtoms:true});
     const frames=state.groupPoses.map((pose,index)=>{
-        const frame=structuredClone(base);frame.id=animationId();frame.name=pose.name;frame.framesToNext=100;
+        const frame=sharedAnimationFrame(base);frame.name=pose.name;frame.framesToNext=100;
         frame.conformationGroup=index;frame.groupPresence=pose.presence.slice();
-        frame.coords=pose.atoms.map(atom=>[atom.x-physicsCenterOffset.cx,atom.y-physicsCenterOffset.cy,atom.z-physicsCenterOffset.cz]);frame.displayCoords=structuredClone(frame.coords);
-        frame.atomOffsets=pose.atoms.map(atom=>Object.fromEntries((atom.sourceAtoms||[]).map(source=>[source.atomName,[source.x-atom.x,source.y-atom.y,source.z-atom.z]])));
+        frame.coords=MemoryData.vectors(pose.atoms.map(atom=>[atom.x-physicsCenterOffset.cx,atom.y-physicsCenterOffset.cy,atom.z-physicsCenterOffset.cz]));frame.displayCoords=frame.coords;
+        frame.atomOffsets=animationResidueOffsets(pose.atoms);
         return frame;
     });
     const entry={id:animationId(),title:'Reference conformation groups',frames,loop:true,syncKeys:[],interpolation:{},groupConformations:true};
