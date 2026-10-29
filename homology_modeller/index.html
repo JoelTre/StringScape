@@ -3,7 +3,7 @@
 <head>
     <!-- Codex version -->
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://static.cloudflareinsights.com; script-src-attr 'none'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com; connect-src 'self' blob: https://api.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com http://127.0.0.1:* http://localhost:* https://alphafold.ebi.ac.uk https://data.rcsb.org https://models.rcsb.org https://files.rcsb.org https://search.rcsb.org https://www.ebi.ac.uk https://rest.uniprot.org https://swissmodel.expasy.org https://cloudflareinsights.com; img-src 'self' data: blob: https:; media-src 'self' blob:; worker-src 'self' blob:; child-src blob:">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://static.cloudflareinsights.com; script-src-attr 'none'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com; connect-src 'self' blob: https://api.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com http://127.0.0.1:* http://localhost:* https://alphafold.ebi.ac.uk https://data.rcsb.org https://models.rcsb.org https://files.rcsb.org https://search.rcsb.org https://www.ebi.ac.uk https://rest.uniprot.org https://eutils.ncbi.nlm.nih.gov https://swissmodel.expasy.org https://cloudflareinsights.com; img-src 'self' data: blob: https:; media-src 'self' blob:; worker-src 'self' blob:; child-src blob:">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src="page-start.js"></script>
     <title>StringScape Homology Modeller - Comparative Protein & Distance Matrix Visualizer</title>
@@ -409,20 +409,20 @@
         .structure-file-picker:hover { background:#0d9488; border-color:#2dd4bf; }
         .structure-file-picker input { position:absolute; width:1px; height:1px; opacity:0; }
         #findStringMatchesBtn { border:1px solid rgba(20,184,166,.4); border-radius:.85rem; }
-        .model-download-button { display:inline-flex; align-items:center; gap:.5rem; background:linear-gradient(to right,#059669,#0d9488); color:#fff; font-weight:500; padding:.625rem 1rem; border:0; border-radius:.75rem; font-size:.75rem; line-height:1rem; transition:transform .15s,filter .15s; box-shadow:0 10px 15px -3px rgba(2,44,34,.4); }
+        .model-download-button { display:inline-flex; align-items:center; gap:.5rem; background:#059669; color:#fff; font-weight:500; padding:.625rem 1rem; border:0; border-radius:.75rem; font-size:.75rem; line-height:1rem; transition:transform .15s,filter .15s; box-shadow:0 10px 15px -3px rgba(2,44,34,.4); }
         #stringSpeciesDownload[aria-disabled="true"] { opacity:.5; cursor:not-allowed; pointer-events:none; box-shadow:none; }
         .model-download-button.hidden, .model-download-button[hidden] { display:none !important; }
-        .model-download-button:hover { background:linear-gradient(to right,#10b981,#14b8a6); filter:none; }
+        .model-download-button:hover { background:#10b981; filter:none; }
         .model-download-button:active { transform:scale(.95); }
         .model-download-button:disabled { opacity:.5; }
         #stringFinderToggle.model-download-button,
         #findStringMatchesBtn.model-download-button {
-            background:linear-gradient(to right,#059669,#0d9488) !important;
+            background:#059669 !important;
             border:0 !important;
         }
         #stringFinderToggle.model-download-button:hover,
         #findStringMatchesBtn.model-download-button:hover {
-            background:linear-gradient(to right,#10b981,#14b8a6) !important;
+            background:#10b981 !important;
             border:0 !important;
         }
         #selectedResidueToggles:not(.hidden) { display:contents; }
@@ -520,20 +520,20 @@
         }
         body.light-mode .model-download-button,
         body.light-mode .model-download-button:hover {
-            background:linear-gradient(to right,#6ee7b7,#5eead4);
+            background:#6ee7b7;
             color:#064e3b;
             box-shadow:0 3px 8px rgba(15,118,110,.12);
         }
-        body.light-mode .model-download-button:hover { background:linear-gradient(to right,#a7f3d0,#99f6e4); }
+        body.light-mode .model-download-button:hover { background:#a7f3d0; }
         body.light-mode #stringFinderToggle.model-download-button,
         body.light-mode #findStringMatchesBtn.model-download-button {
-            background:linear-gradient(to right,#059669,#0d9488) !important;
+            background:#059669 !important;
             border:0 !important;
             color:#fff !important;
         }
         body.light-mode #stringFinderToggle.model-download-button:hover,
         body.light-mode #findStringMatchesBtn.model-download-button:hover {
-            background:linear-gradient(to right,#10b981,#14b8a6) !important;
+            background:#10b981 !important;
             border:0 !important;
             color:#fff !important;
         }
@@ -586,7 +586,7 @@
         #loadSimulationMolstarBtn, #downloadMmCifBtn { border-radius:.75rem !important; }
         #pdbInput1, #pdbInput2 { min-height:3.5rem; overflow-y:hidden; resize:none; }
         body.light-mode #pdbInput1, body.light-mode #pdbInput2 { background:#fff; }
-        #recentModels { width:min(20rem,calc(100vw - 3rem)); max-width:100%; min-width:0; flex-shrink:1; }
+        #recentModelsButton { width:min(20rem,calc(100vw - 3rem)); max-width:100%; min-width:0; flex-shrink:1; }
         #referenceSearchInput.reference-suggestions::placeholder { color:#bae6fd; opacity:var(--reference-suggestion-opacity,0); }
         #pdbInput2::placeholder { color:#b5d5d3; opacity:.55; text-transform:none; }
         body.light-mode #referenceSearchInput.reference-suggestions::placeholder { color:#0369a1; }
@@ -650,11 +650,11 @@
         body.light-mode .nucleic-type-trigger:hover { background:#cbd5e1; }
         :is(#physicsRepresentationMenuButton,#physicsSelectionMenuButton,#membranePresenceMenuButton,#physicsProjectionButton) { min-width:10rem; display:inline-flex; align-items:center; justify-content:space-between; gap:1rem; background:#7c3aed; color:#fff; }
         :is(#physicsRepresentationMenuButton,#physicsSelectionMenuButton,#membranePresenceMenuButton,#physicsProjectionButton):hover, #viewSequencesButton:hover { background:#6d28d9; }
-        :is(#physicsRepresentationMenu,#physicsSelectionMenu,#membranePresenceMenu,#physicsProjectionMenu,.nucleic-type-menu) { position:absolute; z-index:80; min-width:10rem; max-width:calc(100vw - 1rem); overflow:auto; padding:.45rem; border:0; border-radius:.75rem; background:#0f172a; box-shadow:0 16px 38px #0009; }
-        :is(#physicsRepresentationMenu,#physicsSelectionMenu,#membranePresenceMenu,#physicsProjectionMenu,.nucleic-type-menu):not(.hidden) { display:flex; flex-direction:column; gap:.35rem; }
-        :is(#physicsRepresentationMenu,#physicsSelectionMenu,#membranePresenceMenu,#physicsProjectionMenu,.nucleic-type-menu) button { min-width:0; padding:.55rem .7rem; border:0; border-radius:.5rem; background:#334155; color:#e2e8f0; text-align:left; font-size:.75rem; line-height:1.25; white-space:nowrap; }
-        :is(#physicsRepresentationMenu,#physicsSelectionMenu,#membranePresenceMenu,#physicsProjectionMenu,.nucleic-type-menu) button:hover { background:#475569; }
-        :is(#physicsRepresentationMenu,#physicsSelectionMenu,#membranePresenceMenu,#physicsProjectionMenu,.nucleic-type-menu) button[aria-pressed="true"] { background:#7c3aed; color:white; }
+        :is(#physicsRepresentationMenu,#physicsSelectionMenu,#membranePresenceMenu,#physicsProjectionMenu,#recentModelsMenu,.nucleic-type-menu) { position:absolute; z-index:80; min-width:10rem; max-width:calc(100vw - 1rem); overflow:auto; padding:.45rem; border:0; border-radius:.75rem; background:#0f172a; box-shadow:0 16px 38px #0009; }
+        :is(#physicsRepresentationMenu,#physicsSelectionMenu,#membranePresenceMenu,#physicsProjectionMenu,#recentModelsMenu,.nucleic-type-menu):not(.hidden) { display:flex; flex-direction:column; gap:.35rem; }
+        :is(#physicsRepresentationMenu,#physicsSelectionMenu,#membranePresenceMenu,#physicsProjectionMenu,#recentModelsMenu,.nucleic-type-menu) button { min-width:0; padding:.55rem .7rem; border:0; border-radius:.5rem; background:#334155; color:#e2e8f0; text-align:left; font-size:.75rem; line-height:1.25; white-space:nowrap; }
+        :is(#physicsRepresentationMenu,#physicsSelectionMenu,#membranePresenceMenu,#physicsProjectionMenu,#recentModelsMenu,.nucleic-type-menu) button:hover { background:#475569; }
+        :is(#physicsRepresentationMenu,#physicsSelectionMenu,#membranePresenceMenu,#physicsProjectionMenu,#recentModelsMenu,.nucleic-type-menu) button[aria-pressed="true"] { background:#7c3aed; color:white; }
         .membrane-stat-card { padding:10px 12px; border-radius:8px; background:rgba(30,41,59,.85); }
         .membrane-stat-name { font-size:13px; color:#94a3b8; margin-bottom:3px; }
         .membrane-stat-value { font-size:16px; line-height:1.5; color:#e2e8f0; white-space:pre-line; }
@@ -701,10 +701,10 @@
         body.light-mode :is(#physicsColorMenu,.comparison-variable-menu) button[aria-pressed="true"] { background:#8849ee; color:white; }
         body.light-mode :is(#physicsColorMenuButton,.comparison-variable-button) { background:#8849ee; color:#fff; }
         body.light-mode :is(#physicsColorMenuButton,.comparison-variable-button):hover { background:#8849ee; }
-        body.light-mode :is(#physicsRepresentationMenu,#physicsSelectionMenu,#membranePresenceMenu,#physicsProjectionMenu,.nucleic-type-menu) { background:#f8fafc; box-shadow:0 16px 38px #33415555; }
-        body.light-mode :is(#physicsRepresentationMenu,#physicsSelectionMenu,#membranePresenceMenu,#physicsProjectionMenu,.nucleic-type-menu) button { background:#e2e8f0; color:#334155; }
-        body.light-mode :is(#physicsRepresentationMenu,#physicsSelectionMenu,#membranePresenceMenu,#physicsProjectionMenu,.nucleic-type-menu) button:hover { background:#cbd5e1; }
-        body.light-mode :is(#physicsRepresentationMenu,#physicsSelectionMenu,#membranePresenceMenu,#physicsProjectionMenu,.nucleic-type-menu) button[aria-pressed="true"] { background:#8849ee; color:white; }
+        body.light-mode :is(#physicsRepresentationMenu,#physicsSelectionMenu,#membranePresenceMenu,#physicsProjectionMenu,#recentModelsMenu,.nucleic-type-menu) { background:#f8fafc; box-shadow:0 16px 38px #33415555; }
+        body.light-mode :is(#physicsRepresentationMenu,#physicsSelectionMenu,#membranePresenceMenu,#physicsProjectionMenu,#recentModelsMenu,.nucleic-type-menu) button { background:#e2e8f0; color:#334155; }
+        body.light-mode :is(#physicsRepresentationMenu,#physicsSelectionMenu,#membranePresenceMenu,#physicsProjectionMenu,#recentModelsMenu,.nucleic-type-menu) button:hover { background:#cbd5e1; }
+        body.light-mode :is(#physicsRepresentationMenu,#physicsSelectionMenu,#membranePresenceMenu,#physicsProjectionMenu,#recentModelsMenu,.nucleic-type-menu) button[aria-pressed="true"] { background:#8849ee; color:white; }
         body.light-mode :is(#physicsRepresentationMenuButton,#physicsSelectionMenuButton,#membranePresenceMenuButton,#physicsProjectionButton), body.light-mode #viewSequencesButton { background:#8849ee; color:#fff; }
         body.light-mode :is(#physicsRepresentationMenuButton,#physicsSelectionMenuButton,#membranePresenceMenuButton,#physicsProjectionButton):hover, body.light-mode #viewSequencesButton:hover { background:#8849ee; }
         body.light-mode button[class~="bg-violet-600"] { background-color:#8849ee; color:#fff; }
@@ -807,7 +807,7 @@
         @media(prefers-reduced-motion:reduce) { .conformation-group-thumb { transition:none; } }
         #referenceSequenceSearchStatus.search-no-results:not(:empty) { display:block; margin-top:.75rem; padding:1rem 1.25rem; border:2px solid #fbbf24; border-radius:.75rem; background:#451a03; color:#fef3c7; font-size:1.125rem; line-height:1.6; font-weight:700; }
         body.light-mode #referenceSequenceSearchStatus.search-no-results:not(:empty) { background:#fffbeb; color:#92400e; border-color:#d97706; }
-        #stringReviewDialog { width:min(1400px,94vw); max-height:90vh; overflow:auto; padding:0; border:1px solid #475569; border-radius:16px; background:#0f172a; color:#e2e8f0; box-shadow:0 24px 80px #0005; color-scheme:dark; }
+        #stringReviewDialog { width:min(1400px,94vw); max-height:90vh; overflow:auto; padding:0; border:1px solid #475569; border-radius:16px; background:rgb(30 41 59 / .7); color:#e2e8f0; box-shadow:0 24px 80px #0005; color-scheme:dark; }
         #stringReviewHeader { position:sticky; top:0; z-index:2; padding:20px 24px; background:#0f172a; border-bottom:1px solid #475569; }
         #stringReviewBody { padding:0 24px 24px; }
         #stringMatchStatusBox:not(.hidden) { display:block; margin-top:.75rem; padding:.75rem 1rem; border:1px solid #0d9488; border-radius:.75rem; background:#042f2e; color:#99f6e4; font-size:.95rem; line-height:1.5; }
@@ -911,6 +911,66 @@ body.light-mode #groupSimulationStatus { background:#ecfeff; color:#155e75; bord
         body.light-mode :is(#extraEvidenceBox,#buildSettingsBox,#buildProcessBox) { background:#f2f5f8; border-color:#cbd5e1; }
         body.light-mode :is(#extraEvidenceToggle,#buildSettingsToggle,#viewDetailsBtn) { color:#0f766e; }
 
+
+#aboutProteinComplexContent > section { border:1px solid #334155; border-radius:16px; }
+body.light-mode #aboutProteinComplexContent > section { border-color:#cbd5e1; }
+.complex-ai { margin:1rem 1.25rem 1rem; padding:1rem; border:1px solid #334155; border-radius:16px; background:#0f172a; color:#e2e8f0; font-size:.875rem; }
+.complex-ai-heading { display:flex; justify-content:space-between; gap:1rem; margin-bottom:.75rem; }
+.complex-ai-heading button { color:#7dd3fc; }
+.complex-ai-text { white-space:pre-wrap; line-height:1.7; overflow-wrap:anywhere; }
+.complex-ai-text, .complex-ai-message {font-weight:500;}
+.complex-ai-token { animation:complex-token-in .4s ease-out both; }
+@keyframes complex-token-in { from {opacity:0} to {opacity:1} }
+@media(prefers-reduced-motion:reduce) { .complex-ai-token {animation:none} }
+#complexAiForm { display:flex; gap:.5rem; margin-top:1rem; }
+#complexAiQuestion { flex:1; min-width:0; border:1px solid #475569; border-radius:999px; background:#1e293b; padding:.7rem 1rem; color:inherit; }
+#complexAiQuestion:focus { outline:none; }
+#complexAiSend { border-radius:999px; background:#3498db; color:#fff; padding:.7rem 1.2rem; font-weight:600; }
+#complexAi button:disabled {opacity:.5;cursor:wait}
+#complexAiSend:disabled {background:#475569;color:#cbd5e1;opacity:1;cursor:not-allowed}
+#complexAiSend:not(:disabled):hover {background:#2980b9}
+#complexAiStatus {font-size:.75rem;color:#94a3b8;margin-top:.5rem}
+.complex-ai-chat {max-height:1260px;overflow:auto;margin-top:1rem;padding-top:1rem;}
+.complex-ai-chat:not([hidden]) {display:flex;flex-direction:column;gap:.75rem;}
+.complex-ai-message {max-width:90%;padding:.75rem 1rem;border-radius:1.325rem;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7;}
+.complex-ai-user {align-self:flex-end;background:#3498db;color:#fff;border-bottom-right-radius:4px;}
+.complex-ai-assistant {align-self:flex-start;background:#334155;color:#e2e8f0;border-bottom-left-radius:4px;}
+.complex-ai-assistant:empty {display:none;}
+.complex-ai-search {align-self:flex-start;width:min(100%,42rem);color:#cbd5e1;font-size:.8rem;}
+.complex-ai-search summary {display:inline-flex;align-items:center;gap:.5rem;cursor:pointer;color:#7dd3fc;font-weight:600;list-style:none;}
+.complex-ai-search summary::-webkit-details-marker {display:none;}
+.complex-ai-search summary:focus-visible {outline:2px solid #7dd3fc;outline-offset:3px;border-radius:4px;}
+.complex-ai-search-chevron {font-size:.65rem;transition:transform .15s;}
+.complex-ai-search[open] > summary .complex-ai-search-chevron,
+.complex-ai-search-abstract[open] > summary .complex-ai-search-chevron {transform:rotate(180deg);}
+.complex-ai-search-content {margin-top:.6rem;padding:.85rem 1rem;border-radius:16px;background:#1e293b;}
+.complex-ai-search-query + .complex-ai-search-query {margin-top:1rem;padding-top:1rem;border-top:1px solid #475569;}
+.complex-ai-search-query-label {color:#94a3b8;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
+.complex-ai-search-term {margin-top:.2rem;font-weight:600;overflow-wrap:anywhere;}
+.complex-ai-search-paper {margin-top:.7rem;padding:.7rem .8rem;border-radius:10px;background:#334155;overflow-wrap:anywhere;}
+.complex-ai-search-title {font-weight:600;line-height:1.4;}
+.complex-ai-search-title a {color:#7dd3fc;text-decoration:underline;text-underline-offset:2px;}
+.complex-ai-search-meta,.complex-ai-search-empty {margin-top:.3rem;color:#cbd5e1;font-size:.75rem;line-height:1.5;}
+.complex-ai-search-abstract {margin-top:.5rem;}
+.complex-ai-search-abstract summary {font-size:.75rem;}
+.complex-ai-search-abstract p {margin-top:.4rem;white-space:pre-wrap;line-height:1.5;}
+body.light-mode .complex-ai-search {color:#334155;}
+body.light-mode .complex-ai-search summary,body.light-mode .complex-ai-search-title a {color:#0369a1;}
+body.light-mode .complex-ai-search-content {background:#f8fafc;}
+body.light-mode .complex-ai-search-query + .complex-ai-search-query {border-color:#cbd5e1;}
+body.light-mode .complex-ai-search-query-label {color:#64748b;}
+body.light-mode .complex-ai-search-paper {background:#e2e8f0;}
+body.light-mode .complex-ai-search-meta,body.light-mode .complex-ai-search-empty {color:#475569;}
+.complex-ai-typing {display:inline-flex;align-items:center;gap:5px;min-height:1.5rem;}
+.complex-ai-typing > span {width:6px;height:6px;border-radius:50%;background:currentColor;animation:complex-ai-bounce 1.2s ease-in-out infinite;}
+.complex-ai-typing > span:nth-child(2) {animation-delay:.15s;}
+.complex-ai-typing > span:nth-child(3) {animation-delay:.3s;}
+@keyframes complex-ai-bounce {0%,60%,100% {transform:translateY(0);opacity:.5;}30% {transform:translateY(-5px);opacity:1;}}
+@media(prefers-reduced-motion:reduce) {.complex-ai-typing > span {animation:none;}}
+
+body.light-mode .complex-ai-assistant {background:#e2e8f0;color:#1e293b;}
+body.light-mode .complex-ai {background:#fff;color:#1e293b;border-color:#cbd5e1}
+body.light-mode #complexAiQuestion {background:white;border-color:#cbd5e1}
 </style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col">
@@ -977,7 +1037,7 @@ body.light-mode #groupSimulationStatus { background:#ecfeff; color:#155e75; bord
                 <button data-reference="5DUD" data-alphafold="P77611, P0A7Z4, P0A8V2, P0A8T7, P0A7R5, P0AFG0, P0A780, P0AFF6, P0A800" data-action-click="3" class="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded-lg text-slate-300 font-mono border border-slate-700 "><i>E. coli</i> RNA polymerase antitermination complex </button>
                 <button data-reference="6IOK, 6IOL" data-alphafold="Q51487, P52002, P52477" data-action-click="57" class="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded-lg text-slate-300 font-mono border border-slate-700 ">Efflux pump (animated)</button>
                 <button data-reference="6BNO, 7AQK" data-alphafold="P68135, Q99JY9, P61161, Q9WV32, Q9CVB6, Q9JM76, P59999, Q9CPW4, P68134" class="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded-lg text-slate-300 font-mono border border-slate-700">Mouse actin Arp2/3 complex</button>
-                <div class="w-full flex flex-wrap items-center gap-2 pt-2"><label for="recentModels" class="text-slate-300 text-base font-semibold">Recent:</label><select id="recentModels" class="bg-slate-800 text-slate-100 rounded-lg px-3 py-1.5 text-xs max-w-full"><option value="">Select a previous build</option></select><span id="recentModelStatus" role="status" class="text-xs text-amber-300"></span></div>
+                <div class="w-full flex flex-wrap items-center gap-2 pt-2"><label for="recentModels" class="text-slate-300 text-base font-semibold">Recent:</label><select id="recentModels" class="hidden" aria-label="Recent builds"><option value="">Select a previous build</option></select><button id="recentModelsButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="recentModelsMenu" class="bg-slate-800 text-slate-100 rounded-lg px-3 py-1.5 text-xs max-w-full" style="text-align:left;display:flex;align-items:center;justify-content:space-between">Select a previous build<span aria-hidden="true" style="font-size:10px">▼</span></button><div id="recentModelsMenu" class="hidden" role="group" aria-label="Recent builds"></div><span id="recentModelStatus" role="status" class="text-xs text-amber-300"></span></div>
             </div>
 
             <section class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-2xl text-slate-300 leading-relaxed">
@@ -1502,7 +1562,7 @@ body.light-mode #groupSimulationStatus { background:#ecfeff; color:#155e75; bord
             </section>
             <div id="stagedModelButtons" style="flex-wrap:nowrap;align-items:center" class="hidden px-5 py-3 flex gap-2 border-t border-violet-500/30" role="group" aria-label="Homology model stages"></div>
             <div id="stagedStructureToggles" class="hidden px-5 py-2 flex flex-wrap gap-2 text-slate-300" role="group" aria-label="Aligned draft structures"></div>
-            <div id="groupSimulationStatus" class="px-5 py-3 text-sm text-cyan-300 bg-cyan-950/40 border-y border-cyan-500/30" style="display:flex;flex-wrap:nowrap;align-items:center;gap:8px"><span id="groupSimulationStatusText" style="flex:1;min-width:0" role="status">Waiting for Phase 1 alignment.</span><span id="singleBuildETC" title="Estimated time remaining across both passes of all models in this build" class="hidden" style="margin-left:auto;flex-shrink:0;white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums"></span></div>
+            <div id="groupSimulationStatus" class="px-5 py-3 text-sm text-cyan-300 bg-cyan-950/40 border-y border-cyan-500/30" style="display:flex;flex-wrap:nowrap;align-items:center;gap:8px"><span id="groupSimulationStatusText" style="flex:1;min-width:0" role="status">Waiting for Phase 1 alignment.</span><span id="gpuStatus" role="status" hidden style="flex-shrink:0;white-space:nowrap" title="Software WebGL uses the same molecular shaders on the CPU.">No GPU conneced</span><span id="singleBuildETC" title="Estimated time remaining across both passes of all models in this build" class="hidden" style="margin-left:auto;flex-shrink:0;white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums"></span></div>
             <div id="physicsContainer" class="w-full relative bg-slate-950 flex items-center justify-center overflow-hidden cursor-grab active:cursor-grabbing">
                 <div id="groupSimulationRunningBadge" role="status" class="hidden absolute top-4 left-1/2 -translate-x-1/2 z-30 rounded-full border px-4 py-2 text-sm font-medium shadow-lg pointer-events-none whitespace-nowrap"><i class="fa-solid fa-circle-notch fa-spin mr-2" aria-hidden="true"></i>Running simulations...</div>
                 <div id="stagedPreviewHost" class="hidden absolute inset-0 z-10 text-cyan-200"></div>
@@ -1542,7 +1602,7 @@ body.light-mode #groupSimulationStatus { background:#ecfeff; color:#155e75; bord
             </div>
             <div id="animationTableDialog" class="hidden fixed inset-0 items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-label="Keyframe table"><div class="animation-table-panel rounded-2xl bg-slate-900 p-5 shadow-2xl"><div class="mb-3 flex shrink-0 items-center justify-between gap-3"><h2 class="text-lg font-semibold text-amber-300">Keyframe table</h2><div class="flex items-center gap-2"><button id="saveAnimationTable" type="button" class="rounded-xl bg-slate-700 px-3 py-1 text-white"><i class="fa-solid fa-download mr-1" aria-hidden="true"></i>Save animation table</button><button id="uploadAnimationTable" type="button" class="rounded-xl bg-slate-700 px-3 py-1 text-white"><i class="fa-solid fa-upload mr-1" aria-hidden="true"></i>Upload animation table</button><input id="animationTableFile" type="file" accept=".csv,text/csv" class="hidden" aria-label="Choose animation table CSV"><button id="toggleAnimationGraph" type="button" class="rounded-xl bg-slate-700 px-3 py-1 text-white">Graph editor</button><button id="closeAnimationTable" type="button" class="shrink-0 rounded-xl bg-slate-700 px-3 py-1 text-white">Close</button></div></div><p id="animationTableTransferStatus" class="hidden mb-2 text-xs text-amber-300" role="status"></p><div id="animationTableContent"></div><div id="animationGraphContent" class="hidden"></div></div></div>
 
-            <details id="aboutProteinComplex" class="about-protein-complex border-t border-slate-800 bg-slate-900/90"><summary class="cursor-pointer px-5 py-3 text-sm font-semibold text-white"><span><i class="fa-solid fa-circle-info text-emerald-400 mr-2" aria-hidden="true"></i>About this protein complex</span><i class="about-chevron fa-solid fa-chevron-down" aria-hidden="true"></i></summary><div id="aboutProteinComplexContent" class="px-5 pb-4 text-sm text-slate-300">UniProt information will appear when available.</div></details>
+            <details id="aboutProteinComplex" class="about-protein-complex border-t border-slate-800 bg-slate-900/90"><summary class="cursor-pointer px-5 py-3 text-sm font-semibold text-white"><span><i class="fa-solid fa-circle-info text-emerald-400 mr-2" aria-hidden="true"></i>About this protein complex</span><i class="about-chevron fa-solid fa-chevron-down" aria-hidden="true"></i></summary><section id="complexAi" class="complex-ai"><div class="complex-ai-heading"><strong>AI overview</strong><button id="complexAiRefresh" type="button">Refresh summary</button></div><div id="complexAiSummary" class="complex-ai-text">Connect an AI to generate an overview of this complex.</div><div id="complexAiChat" class="complex-ai-chat" role="log" aria-label="Protein complex conversation" hidden></div><p id="complexAiStatus" role="status"></p><form id="complexAiForm"><input id="complexAiQuestion" aria-label="Ask about this protein complex" placeholder="Connect an AI above to chat" required maxlength="10000"><button id="complexAiSend" type="submit" disabled>Send</button></form></section><div id="aboutProteinComplexContent" class="px-5 pb-4 text-sm text-slate-300">UniProt information will appear when available.</div></details>
             <button id="physicsControlsToggle" type="button" aria-expanded="false" aria-controls="physicsControlsPanel" class="w-full bg-slate-900/90 hover:bg-slate-800 border-t border-slate-800 px-5 py-3 text-left text-sm font-semibold text-white"><i class="fa-solid fa-atom text-emerald-400 mr-2" aria-hidden="true"></i>Build stats <i id="physicsControlsChevron" class="fa-solid fa-chevron-down ml-2" aria-hidden="true"></i></button>
             <div id="physicsControlsPanel" class="hidden">
                 <details class="bg-slate-950 px-5 py-3 border-b border-slate-800 text-xs text-slate-400">
@@ -1566,7 +1626,7 @@ body.light-mode #groupSimulationStatus { background:#ecfeff; color:#155e75; bord
 
                 </div>
 <section class="build-timeline" aria-label="Build timeline"><div class="build-stats-heading"><h3>Build timeline</h3><span>Total elapsed <strong id="buildTimelineTotal">—</strong></span></div><ol id="buildTimelineRows"><li>Stage timings appear when a search or build starts.</li></ol><p>Matrix times count numerical calculation only, excluding rendering and waiting. Other stages show elapsed wall time; total includes time between stages.</p></section>
-<section class="build-stats" aria-label="Build statistics"><div class="build-stats-heading"><div><h3>Build overview</h3><p>Alignment quality and live simulation activity</p></div>                        <button id="physicsGraphToggle" type="button" aria-expanded="false" aria-controls="physicsGraphPanel" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs border border-slate-700 inline-flex items-center gap-1.5 shadow"><i class="fa-solid fa-chart-line text-sky-400" aria-hidden="true"></i><span>View graph</span></button></div><dl class="build-stats-grid"><div class="build-stat"><dt>Active sim. residues</dt><dd id="activeSimulationResidueCount" class="text-sky-400">0</dd><p>Active subunits · excluding reference-locked residues</p></div>
+<section class="build-stats" aria-label="Build statistics"><div class="build-stats-heading"><div><h3>Build overview</h3><p>Alignment quality and live simulation activity</p><p id="buildCompletionSummary" role="status" hidden></p></div>                        <button id="physicsGraphToggle" type="button" aria-expanded="false" aria-controls="physicsGraphPanel" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs border border-slate-700 inline-flex items-center gap-1.5 shadow"><i class="fa-solid fa-chart-line text-sky-400" aria-hidden="true"></i><span>View graph</span></button></div><dl class="build-stats-grid"><div class="build-stat"><dt>Active sim. residues</dt><dd id="activeSimulationResidueCount" class="text-sky-400">0</dd><p>Active subunits · excluding reference-locked residues</p></div>
 <div class="build-stat"><dt>TM-score · Phase 1</dt><dd id="tmScoreDisplay" class="text-sky-400">--</dd><p>Higher is better · up to 1</p></div>
 <div class="build-stat"><dt>RMSD · Phase 1</dt><dd id="tmRmsdDisplay" class="text-violet-400">--</dd><p>Alignment deviation · lower is better</p></div>
 <div class="build-stat"><dt>Weighted spring-length error</dt><dd id="physicsEnergyText" class="text-green-400">0.00 a.u.</dd><p>Spring relaxation · lower is better</p></div>
@@ -1741,6 +1801,8 @@ body.light-mode #groupSimulationStatus { background:#ecfeff; color:#155e75; bord
         </div>
     </div>
 
+    <script src="memory-data.js?v=20261029pipeline4"></script>
+    <script src="molecular-impostors.js?v=20261029gpuspin1"></script>
     <script src="performance-diagnostics.js"></script>
     <script src="lipid-renderer.js"></script>
     <script src="variable-comparison.js"></script>
@@ -1769,10 +1831,13 @@ body.light-mode #groupSimulationStatus { background:#ecfeff; color:#155e75; bord
     </dialog>
     <script src="build-timeline.js"></script>
     <script src="modeller-ai.js"></script>
-    <script src="staged-models.js"></script>
-    <script src="nucleotide-extensions.js"></script>
-    <script id="appScript" src="script.js"></script>
-    <script src="sessions.js"></script>
+    <script src="complex-ai.js"></script>
+    <script src="staged-models.js?v=20261029springs2"></script>
+    <script src="nucleotide-extensions.js?v=20261029"></script>
+    <script src="molecular-topology.js?v=20261029pipeline5"></script>
+    <script src="animation-storage.js?v=20261029pipeline4"></script>
+    <script id="appScript" src="script.js?v=20261029early3"></script>
+    <script src="sessions.js?v=20261029pan"></script>
     <div id="simulationLoadingPopup" class="hidden" role="status" aria-live="polite"><div><i class="fa-solid fa-circle-notch fa-spin mr-2" aria-hidden="true"></i>Loading...</div></div>
 </body>
 </html>
