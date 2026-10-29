@@ -104,7 +104,48 @@ This is a fresh planning call after reviewers found no suitable reference PDBs. 
         const rows=results.map(hit=>({pdbId:hit.identifier,title:hit.name||'',species:hit.species||[],score:hit.score,searchMatches:hit.searchMatches||[],proteins:hit.mapping?.records||[],notes:hit.mapping?.notes||[]}));
         return parseDecision(await askJson(SYSTEM_PROMPT,{query:query||null,sequences:sequences||[],searches:searches||[],results:rows}),results);
     }
-    window.ModellerAI = {connected:()=>!!active,planSearches,retrySearches,summarizeSearchFailure,chooseReferences};
+    async function streamComplex({system,messages,tools=[],signal,onText=()=>{}}) {
+        const c=active,version=revision;
+        if(!c)throw Error('Connect an AI first.');
+        const anthropic=c.provider==='anthropic';
+        const body=anthropic?{model:c.model,max_tokens:4096,system,messages,stream:true,...(tools.length?{tools:tools.map(tool=>({name:tool.name,description:tool.description,input_schema:tool.parameters}))}:{})}
+            :{model:c.model,messages:[{role:'system',content:system},...messages],stream:true,...(tools.length?{tools:tools.map(tool=>({type:'function',function:tool}))}:{})};
+        const send=()=>fetch(c.apiBase+(anthropic?'/messages':'/chat/completions'),{method:'POST',headers:headers(c),body:JSON.stringify(body),signal:AbortSignal.any([signal,AbortSignal.timeout(180000)])});
+        let response=await send(),toolsUnavailable=false;
+        // Some connected models stream text but reject function/tool requests.
+        // Retry before any output, only when no tool exchange needs preserving.
+        if([400,422].includes(response.status)&&tools.length&&!messages.some(message=>message.role==='tool'||message.tool_calls||Array.isArray(message.content)&&message.content.some(part=>part.type==='tool_use'||part.type==='tool_result'))){
+            await response.body?.cancel();delete body.tools;toolsUnavailable=true;
+            const instruction='Native tools are unavailable. You can still request a PubMed search through the app. Return ONLY JSON: {"query":"PubMed search terms"} when published evidence or a literature search is needed, otherwise {"answer":"your answer"}. Do not claim to have searched PubMed until the app supplies results.';
+            if(anthropic)body.system+='\n'+instruction;else body.messages=[{role:'system',content:system+'\n'+instruction},...messages];
+            response=await send();
+        }
+        if(!response.ok)throw Error(`AI provider returned HTTP ${response.status}. Check the connection and model's streaming/tool support.`);
+        const reader=response.body.getReader(),decoder=new TextDecoder();let pending='',text='',finished=false;const calls=new Map();
+        function consume(event){
+            if(event==='[DONE]'){finished=true;return;}
+            const data=JSON.parse(event);if(data.error)throw Error(data.error.message||'AI stream failed.');
+            if(version!==revision)throw Error('AI connection changed. Refresh the summary.');
+            if(data.type==='message_stop')finished=true;
+            if(data.type==='content_block_start'&&data.content_block.type==='tool_use')calls.set(data.index,{id:data.content_block.id,name:data.content_block.name,arguments:''});
+            if(data.type==='content_block_delta'){
+                if(data.delta.text){text+=data.delta.text;if(!toolsUnavailable)onText(data.delta.text);}
+                if(data.delta.partial_json)calls.get(data.index).arguments+=data.delta.partial_json;
+            }
+            const choice=data.choices?.[0],delta=choice?.delta;
+            if(choice?.finish_reason==='length'||data.delta?.stop_reason==='max_tokens')throw Error('AI response reached its output limit. Try a shorter question.');
+            if(delta?.content){text+=delta.content;if(!toolsUnavailable)onText(delta.content);}
+            for(const part of delta?.tool_calls||[]){const call=calls.get(part.index)||{id:'',name:'',arguments:''};call.id+=part.id||'';call.name+=part.function?.name||'';call.arguments+=part.function?.arguments||'';calls.set(part.index,call);}
+        }
+        try{while(true){const {done,value}=await reader.read();pending+=done?decoder.decode():decoder.decode(value,{stream:true});pending=pending.replace(/\r\n/g,'\n');let end;
+            while((end=pending.indexOf('\n\n'))!==-1){const block=pending.slice(0,end);pending=pending.slice(end+2);const event=block.split('\n').filter(line=>line.startsWith('data:')).map(line=>line.slice(5).trimStart()).join('\n');if(event)consume(event);}
+            if(done)break;
+        }}finally{await reader.cancel().catch(()=>{});reader.releaseLock();}
+        if(!finished)throw Error('AI stream ended early. Please retry.');
+        return {text,calls:[...calls.values()],anthropic,toolsUnavailable};
+    }
+
+    window.ModellerAI = {streamComplex,connected:()=>!!active,planSearches,retrySearches,summarizeSearchFailure,chooseReferences};
     // Pure selection validation is also used by the offline regression suite.
     if (typeof module !== 'undefined') module.exports = {parseDecision,parseSearchPlan,searchRoundHistory,requestSearchPlan,SYSTEM_PROMPT,SEARCH_PROMPT,RETRY_PROMPT,SUMMARY_PROMPT};
     if (!el('Open')) return;
