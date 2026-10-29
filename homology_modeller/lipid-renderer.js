@@ -82,7 +82,7 @@ vec3 lipidNormal(vec3 n){
         const params=new THREE.InstancedBufferAttribute(new Float32Array(count*3),3);params.setUsage(THREE.DynamicDrawUsage);
         const variants=new Map();
         function level(segments){
-            if(!variants.has(segments))variants.set(segments,[geometry(atoms,bonds,segments,false,count,params,radii),geometry(atoms,bonds,segments,true,count,params,radii)]);
+            if(!variants.has(segments)){for(const pair of variants.values())for(const geo of pair)geo.dispose();variants.clear();variants.set(segments,[geometry(atoms,bonds,segments,false,count,params,radii),geometry(atoms,bonds,segments,true,count,params,radii)]);}
             return variants.get(segments);
         }
         const geos=level(6),atomMesh=new THREE.InstancedMesh(geos[0],material(uniforms,false),count),stickMesh=new THREE.InstancedMesh(geos[1],material(uniforms,true),count);
