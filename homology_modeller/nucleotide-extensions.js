@@ -14,6 +14,8 @@ function detectNucleicExtensionGroups(nodes,pairs){
         if(node.res.entityType!=='nucleotide'||node.idx2==null)return;
         if(!chains.has(node.blockIdx))chains.set(node.blockIdx,[]);chains.get(node.blockIdx).push(i);
     });
+    // Isolated nucleotides (including ATP/ADP ligands) are not extendable strands.
+    for(const [id,indices] of chains)if(indices.length<2)chains.delete(id);
     const contacts=new Map(),detectedPairs=pairs.slice();
     for(const {i,j} of pairs){
         const a=nodes[i]?.blockIdx,b=nodes[j]?.blockIdx;
@@ -54,7 +56,7 @@ function detectNucleicExtensionGroups(nodes,pairs){
         const indices=group.blocks.flatMap(id=>chains.get(id)),kinds=new Set(indices.map(i=>nucleicResidueKind(nodes[i].res.atoms2[nodes[i].idx2])).filter(Boolean));
         const kind=kinds.size===1?[...kinds][0]:null;
         const letters=group.blocks.map(id=>nodes[chains.get(id)[0]].res.c1||nodes[chains.get(id)[0]].res.c2||String(id));
-        return {...group,pairs:detectedPairs.filter(pair=>indices.includes(pair.i)&&indices.includes(pair.j)),chains:group.blocks.map(id=>chains.get(id)),kind,key:group.blocks.join(':'),label:`${group.paired?'Double':'Single'}-stranded ${kind||'DNA/RNA'} (${letters.join(', ')})`,mode:`${kind||'DNA'}:${group.paired?2:1}`,start:0,end:0,wiggle:0.6,guide:false,guideUserSet:false,status:''};
+        return {...group,pairs:detectedPairs.filter(pair=>indices.includes(pair.i)&&indices.includes(pair.j)),chains:group.blocks.map(id=>chains.get(id)),kind,animationKey:`nucleic:${JSON.stringify([...letters].sort())}`,key:group.blocks.join(':'),label:`${group.paired?'Double':'Single'}-stranded ${kind||'DNA/RNA'} (${letters.join(', ')})`,mode:`${kind||'DNA'}:${group.paired?2:1}`,start:0,end:0,wiggle:0.6,guide:false,guideUserSet:false,status:''};
     });
 }
 function disposeNucleicExtensionGeometry(){
@@ -86,7 +88,7 @@ function initializeNucleicExtensions(){
     for(const group of groups){
         const row=document.createElement('div');row.className='flex flex-wrap items-center gap-2';
         const name=document.createElement('span');name.textContent=group.label;row.append(name);
-        const mode=document.createElement('select');mode.className='hidden';mode.setAttribute('aria-label',`Generated strand type for ${group.label}`);
+        const mode=document.createElement('select');mode.className='hidden';mode.dataset.animationKey=`${group.animationKey}:mode`;mode.setAttribute('aria-label',`Generated strand type for ${group.label}`);
         for(const kind of ['DNA','RNA'])for(const strands of [1,2]){const option=document.createElement('option');option.value=`${kind}:${strands}`;option.textContent=`${strands===1?'Single':'Double'}-stranded ${kind}`;mode.append(option);}
         mode.value=group.mode;mode.title=group.kind?'Choose the generated strand type':'DNA/RNA chemistry is ambiguous in this input; choose the generated strand type';
         mode.addEventListener('change',()=>{group.mode=mode.value;changed();});row.append(mode,createNucleicTypeMenu(mode,group.label,nucleicExtensionState));
@@ -102,7 +104,7 @@ function initializeNucleicExtensions(){
             initializeNucleicLengthInput(input,()=>group[key],value=>{setNucleicExtensionLength(group,key,value,nucleicExtensionState);changed();});wrapper.append(input,document.createTextNode(' nt / bp'));row.append(wrapper);
         }
         const wave=document.createElement('label');wave.className='inline-flex items-center gap-1';wave.textContent='Wiggle ';
-        const slider=document.createElement('input');slider.type='range';slider.min='0';slider.max='1.5';slider.step='.1';slider.value=String(group.wiggle);slider.setAttribute('aria-label',`Guide wiggle for ${group.label}`);slider.style.width='5rem';slider.addEventListener('input',()=>{group.wiggle=Number(slider.value);changed();});wave.append(slider);row.append(wave);
+        const slider=document.createElement('input');slider.type='range';slider.dataset.animationKey=`${group.animationKey}:wiggle`;slider.min='0';slider.max='1.5';slider.step='.1';slider.value=String(group.wiggle);slider.setAttribute('aria-label',`Guide wiggle for ${group.label}`);slider.style.width='5rem';slider.addEventListener('input',()=>{group.wiggle=Number(slider.value);changed();});wave.append(slider);row.append(wave);
         const guide=document.createElement('label');guide.className='nucleic-guide-switch';const checkbox=document.createElement('input');checkbox.type='checkbox';checkbox.setAttribute('role','switch');checkbox.setAttribute('aria-label',`Show guide curves for ${group.label}`);checkbox.checked=group.guide;group.guideCheckbox=checkbox;checkbox.addEventListener('change',()=>{group.guideUserSet=true;group.guide=checkbox.checked;changed();});guide.append(document.createTextNode('Show guide curves'),checkbox);row.append(guide);
         const status=document.createElement('span');status.className='text-slate-400';status.setAttribute('role','status');group.statusElement=status;row.append(status);host.append(row);
     }
