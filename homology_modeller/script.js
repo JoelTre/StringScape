@@ -316,6 +316,8 @@
             for(const [accession,entry] of uniProtAnnotations){
                 const card=document.createElement('section');card.className='rounded-lg bg-slate-800/70 p-3 mb-3';
                 const title=document.createElement('h3');title.className='font-semibold text-sky-300';const name=document.createElement('button');name.type='button';name.className='about-protein-name';name.dataset.proteinAccession=accession;name.textContent=entry.name?`${entry.name} · ${accession}`:accession;name.title='Select this protein in the 3D viewer';name.addEventListener('click',()=>selectAboutProtein(accession));title.append(name);card.append(title);
+                const copies=proteinResultsForAccession(accession).length;
+                const quantity=document.createElement('p');quantity.className='mt-1 text-xs text-slate-400';quantity.textContent=`${copies} ${copies===1?'copy':'copies'} in model`;card.append(quantity);
                 if(entry.organism){const organism=document.createElement('p');organism.className='text-xs text-slate-400';organism.textContent=entry.organism;card.append(organism);}
                 for(const [type,label] of [['FUNCTION','Function'],['CATALYTIC ACTIVITY','Catalytic activity'],['SUBCELLULAR LOCATION','Subcellular location'],['TISSUE SPECIFICITY','Tissue specificity']]){
                     const values=entry.comments.filter(comment=>(comment.commentType||comment.type)===type).map(uniProtCommentText).filter(Boolean);
@@ -402,6 +404,7 @@
             uniProtLookupPending=false;updateUniProtFetchingBadge();
             uniProtAnnotations=new Map(results.filter(result=>result.status==='fulfilled').map(result=>result.value));
             rebuildTopologicalDomainColors();
+            globalThis.ChainMergingReport?.setAnnotations(uniProtAnnotations);
             uniProtUnavailable=accessions.filter((_,index)=>results[index].status==='rejected');
             for(const result of results)if(result.status==='rejected')console.warn('UniProt annotation unavailable:',result.reason);
             renderAboutProteinComplex();updateUniProtChainLabels();refreshMembranePresence();updateMembraneSideNames();updateSymmetryRotationControls();configureAutoSpinAnimation();
@@ -413,26 +416,32 @@
         const complexAiSelectionReasons=[];
         const complexAiReferenceOrigins=new Map();
         let complexAiModelOrigins=new Map();
+        let animationReadyGeneration=null;
         function complexAiReferenceSelection(file){
             const id=file.pdbId.toUpperCase(),origin=complexAiModelOrigins.get(id);
             if(origin?.source==='ai')return {...origin,pdbIds:[file.pdbId]};
             if(origin)return {...origin,pdbIds:[file.pdbId]};
             return {pdbIds:[file.pdbId],source:'manual',reason:'The user manually supplied this reference PDB. It was not selected by AI; no AI selection justification applies.'};
         }
-        window.getComplexAiState=()=>({generation:modelBuildGeneration,ready:modelBuildCompleted&&!uniProtLookupPending&&!patternVarianceJob&&patternDetectionSnapshot?.generation===modelBuildGeneration&&!animationPreparing,hasSubunits:alignmentResults.length>0});
+        window.getComplexAiState=()=>({generation:modelBuildGeneration,ready:modelBuildCompleted&&!uniProtLookupPending&&!patternVarianceJob&&patternDetectionSnapshot?.generation===modelBuildGeneration&&animationReadyGeneration===modelBuildGeneration&&!animationPreparing,hasSubunits:alignmentResults.length>0});
         window.getComplexAiContext=()=>({
             ...window.getComplexAiState(),
+            originalRequest:typeof document==='undefined'?'':document.getElementById('referenceSearchInput')?.value||'',
             proteins:[...new Set(alignmentResults.flatMap(result=>(result.atoms2||[]).map(atom=>uniProtAccession(atom.sourcePdbId))).filter(Boolean))].map(accession=>({
                 accession,subunitCount:proteinResultsForAccession(accession).length,uniProt:uniProtAnnotations.get(accession)||null
             })),
+            nucleicAcids:getNucleicAiContext(),
             unavailableUniProt:uniProtUnavailable,
             subunits:alignmentResults.map(result=>({chain:result.c1,accession:uniProtAccession(result.atoms2?.[0]?.sourcePdbId)})),
             references:referenceFiles.map(file=>({pdbId:file.pdbId,title:file.parsed?.title||referenceSearchResults.find(hit=>hit.identifier===file.pdbId)?.name||''})),
             selectionReasons:referenceFiles.map(complexAiReferenceSelection),
             patterns:detectedExtensionPatterns,
+            filamentExtensions:detectedExtensionPatterns.map(pattern=>({key:patternExtensionKey(pattern),label:patternExtensionLabel(pattern),units:patternExtensionCounts.get(patternExtensionKey(pattern))??0})),
+            filamentAssessment:window.biologicalMotionAssessments?.generation===modelBuildGeneration?window.biologicalMotionAssessments.filament:null,
+            animationAssessment:window.biologicalMotionAssessments?.generation===modelBuildGeneration?window.biologicalMotionAssessments.animation:null,
             rotationalSymmetries:rotationalSymmetryGroups.map(group=>({key:group.key,subunitBlocks:[...group.blockIds],origin:group.origin,axis:group.normal,angle:group.angle})),
             helicalSymmetries:helicalSymmetryGroups.map(group=>({key:group.key,subunitBlocks:[...group.blockIds],angle:group.angle})),
-            animations:[...animationLibrary.filter(entry=>entry.id!==animationActiveId),{title:animationTitle,frames:animationFrames}].map(entry=>({title:entry.title,conformationalChange:entry.conformationalChange,frames:(entry.frames||[]).map(frame=>({name:frame.name,framesToNext:frame.framesToNext,settings:frame.settings}))})),
+            animations:[...animationLibrary.filter(entry=>entry.id!==animationActiveId),...(animationFrames.length?[{...animationLibrary.find(entry=>entry.id===animationActiveId),title:animationTitle,frames:animationFrames}]:[])].map(entry=>({title:entry.title,loop:entry.loop,syncKeys:entry.syncKeys,interpolation:entry.interpolation,biologicalMotionReasons:entry.biologicalMotionReasons,conformationalChange:entry.conformationalChange,frames:(entry.frames||[]).map(frame=>({name:frame.name,framesToNext:frame.framesToNext,settings:frame.settings}))})),
             modelSettings:{morphAlpha,referenceInfluences,model1Influence,model2Influence,patternExtensionUnits}
         });
 // applicationStateAndSelection.js start
@@ -451,7 +460,7 @@
         const physicsNonSelectedOpacityUniform = {value:1};
         function updateSelectionGlow() {
             if (!selectionGlowMesh) return;
-            if(!homologyStructureVisible||linkedSelection?.mode==='atom'||!selectionGlowVisible||!selectedGlowIndices.length||physicsRepresentation==='ball-stick'||linkedSelection?.kind==='lipid'){selectionGlowMesh.count=0;selectionGlowMesh.visible=false;return;}
+            if(!homologyStructureVisible||linkedSelection?.mode==='atom'||!selectionGlowVisible||!selectedGlowIndices.length||['ball-stick','gaussian'].includes(physicsRepresentation)||linkedSelection?.kind==='lipid'){selectionGlowMesh.count=0;selectionGlowMesh.visible=false;return;}
             const dummy=new THREE.Object3D();let shown=0;
             for (const index of selectedGlowIndices) {
                 const node=physicsNodes[index];
@@ -582,6 +591,7 @@
             document.querySelectorAll('#alignmentCodeBox [data-linked-residue]').forEach(letter=>{
                 letter.classList.toggle('linked-selected',letter.dataset.linkedChain===chain && (mode==='chain'||Number(letter.dataset.linkedColumn)===column));
             });
+            globalThis.ChainMergingReport?.setSelection([linkedSelection,...additionalSelections].filter(item=>item?.kind==='model'&&item.mode==='chain').map(item=>item.chain));
             updateSelectionToggleVisibility();
             updatePhysicsSelectionInfo();
             refreshSelectedGlowIndices();
@@ -592,10 +602,44 @@
             updateSelectionDistance();
         }
 
+        // AI tools use the same model identifiers and selection logic as the viewer.
+        window.getAiChainSequences=()=>alignmentResults.map(result=>{
+            const atoms=result.atoms2?.length?result.atoms2:result.atoms1;
+            return {chain:result.c1,type:result.entityType,sequence:atoms.map(atom=>atom.singleChar||'X').join(''),
+                residues:atoms.map(atom=>({number:atom.resSeq,insertionCode:atom.sourceAtoms?.[0]?.insertionCode||'',name:atom.resName,code:atom.singleChar,atoms:Array.from(atom.sourceAtoms||[],source=>source.atomName)}))};
+        });
+        window.selectAiModelEntity=({mode,chain,residueNumber,insertionCode='',atomName,additive=false})=>{
+            if(!['atom','residue','chain','identical'].includes(mode)||typeof chain!=='string'||typeof additive!=='boolean')throw Error('Invalid selection parameters.');
+            const matches=alignmentResults.filter(result=>result.c1===chain);
+            if(matches.length!==1)throw Error('Chain identifier is missing or ambiguous; inspect the chain sequences.');
+            const result=matches[0],atoms=result.atoms2?.length?result.atoms2:result.atoms1;
+            let atom=null,sourceAtom=null;
+            if(mode==='atom'||mode==='residue'){
+                if(!Number.isInteger(residueNumber)||typeof insertionCode!=='string')throw Error('Supply an integer residueNumber and insertionCode from the sequence tool.');
+                const found=atoms.filter(item=>item.resSeq===residueNumber&&(item.sourceAtoms?.[0]?.insertionCode||'')===insertionCode);
+                if(found.length!==1)throw Error('Residue is missing or ambiguous; inspect the chain sequences.');
+                atom=found[0];
+                if(mode==='atom'){
+                    const foundAtoms=Array.from(atom.sourceAtoms||[]).filter(item=>item.atomName===atomName);
+                    if(foundAtoms.length!==1)throw Error('Atom name is missing or ambiguous; inspect the chain sequences.');
+                    sourceAtom=foundAtoms[0];
+                }
+            }
+            selectLinkedEntity(chain,atom?.resSeq??null,mode,atom,additive,sourceAtom);
+            return {selected:true,mode,chain,residueNumber:atom?.resSeq??null,insertionCode,atomName:sourceAtom?.atomName||null,additive,identicalChains:mode==='identical'?[...linkedSelection.identicalResults].map(item=>item.c1):undefined};
+        };
+
+        globalThis.ChainMergingReport?.setSelectHandler((chain,additive)=>{
+            if(!alignmentResults.some(result=>result.c1===chain))return;
+            selectLinkedEntity(chain,null,'chain',null,additive);
+            if(!additive)document.getElementById('physics3dCanvas')?.scrollIntoView({behavior:'smooth',block:'center'});
+        });
+
         function clearLinkedSelection() {
             if (!linkedSelection) return;
             linkedSelection=null;
             additionalSelections=[];
+            globalThis.ChainMergingReport?.setSelection([]);
             validationState.selected=null;
             selectedResiduesVisible=true;unselectedResiduesVisible=true;
             document.querySelectorAll('.linked-selected').forEach(element=>element.classList.remove('linked-selected'));
@@ -809,7 +853,7 @@
             const speed=state.lastPositions&&elapsed>0?distance/Math.max(1,residueCount)/elapsed:0;
             const speedText=document.getElementById('physicsSpeedText');
             if(speedText)speedText.textContent=`${speed.toFixed(2)} Å/s`;
-            state.samples.push({time:now,tm:metrics.tm,rmsd:metrics.rmsd,energy,speed,stepRate:updatePhysicsStepRate(now),dynamicResidueBudget:groupMaxSimulationResidues==='dynamic'?groupSimulation?.residueBudget??100:null,coreMaxSpeed:typeof groupSimulation==='undefined'?null:groupSimulation?.maxSpeed??null});
+            state.samples.push({time:now,tm:metrics.tm,rmsd:metrics.rmsd,energy,speed,stepRate:updatePhysicsStepRate(now),dynamicResidueBudget:groupMaxSimulationResidues==='dynamic'?groupSimulation?.residueBudget??10000:null,coreMaxSpeed:typeof groupSimulation==='undefined'?null:groupSimulation?.maxSpeed??null});
             if(state.samples.length>60000)state.samples=state.samples.filter((_,index)=>index%2===0);
             state.lastPositions=positions;state.lastSampleAt=now;
             scheduleValidationGraphSample(now);
@@ -844,15 +888,14 @@
         function physicsGraphWindow(now=performance.now()){
             if(groupSimulation?.complete&&Number.isFinite(groupSimulation.completedAt))now=groupSimulation.completedAt;
             const state=physicsGraphHistory,range=document.getElementById('physicsGraphRange')?.value||'all';
-            const start=range==='60s'?Math.max(state.startedAt??now,now-60000):range==='reset'?state.resetAt??now:
-                range==='change'?state.events.at(-1)?.time??state.startedAt??now:state.startedAt??now;
+            const start=range==='60s'?Math.max(state.startedAt??now,now-60000):range==='change'?state.events.at(-1)?.time??state.startedAt??now:state.startedAt??now;
             return {start,end:Math.max(now,start+1000),samples:state.samples.filter(sample=>sample.time>=start),
                 validationSamples:state.validationSamples.filter(sample=>sample.time>=start)};
         }
         let physicsGraphDrawTimer=null;
         function renderPhysicsGraph(){
             const panel=document.getElementById('physicsGraphPanel');
-            if(!panel||panel.classList.contains('hidden')||document.hidden)return;
+            if(!panel||!panel.open||document.hidden)return;
             const remaining=250-(performance.now()-physicsGraphHistory.lastDrawAt);
             if(remaining<=0){
                 clearTimeout(physicsGraphDrawTimer);physicsGraphDrawTimer=null;drawPhysicsGraph();
@@ -862,7 +905,7 @@
         }
         function drawPhysicsGraph(){
             const panel=document.getElementById('physicsGraphPanel'),canvas=document.getElementById('physicsGraphCanvas');
-            if(!panel||panel.classList.contains('hidden')||!canvas)return;
+            if(!panel||!panel.open||!canvas)return;
             const width=Math.max(320,canvas.clientWidth||canvas.parentElement?.clientWidth||700),compactLegend=width<850,
                 legendRows=compactLegend?PHYSICS_GRAPH_SERIES.length:Math.ceil(PHYSICS_GRAPH_SERIES.length/2),
                 graphTop=legendRows*18+120,height=graphTop+210,dpr=Math.min(2,window.devicePixelRatio||1);
@@ -942,7 +985,7 @@
                     const held=physicsGraphNormalized?(max>0?previousValue/max:0):previousValue;
                     ctx.lineTo(right,bottom-Math.min(1,graphFraction(held))*plotHeight);
                 }
-                if(started)ctx.stroke();
+                if(started){ctx.stroke();if(points.filter(sample=>Number.isFinite(sample[series.key])).length===1){ctx.beginPath();ctx.arc(lastPixel,bottom-Math.min(1,graphFraction(physicsGraphNormalized?(max>0?previousValue/max:0):previousValue))*plotHeight,3,0,Math.PI*2);ctx.fillStyle=series.color;ctx.fill();}}
             }
             if(!samples.length){ctx.fillStyle=light?'#475569':'#94a3b8';ctx.textAlign='center';ctx.font='12px sans-serif';ctx.fillText('Waiting for Phase 2 simulation samples…',(left+right)/2,(top+bottom)/2);}
             const status=document.getElementById('physicsGraphStatus');
@@ -1157,11 +1200,24 @@
             const distance=Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z);
             return distance<=cutoff?distance:-1;
         }
+        // Limit retained dense matrix buffers by bytes as well as entry count.
+        function cacheDistanceMatrix(cache,key,matrix){
+            const budget=16*1024*1024,bytes=value=>ArrayBuffer.isView(value)?value.byteLength:0;
+            let used=0;for(const value of cache.values())used+=bytes(value);
+            const size=bytes(matrix);
+            if(size>budget)return;
+            while(cache.size&&(cache.size>=8||used+size>budget)){
+                const oldest=cache.keys().next().value;used-=bytes(cache.get(oldest));cache.delete(oldest);
+            }
+            if(size<=budget)cache.set(key,matrix);
+        }
         function getOrComputeDistanceMatrix(modelData, chainKey, atoms) {
             const cacheKey = `${chainKey}:${springCutoffVal}`;
             const cutoff = springCutoffVal;
             if (modelData.matrixCache.has(cacheKey)) {
-                return modelData.matrixCache.get(cacheKey);
+                const cached=modelData.matrixCache.get(cacheKey);
+                modelData.matrixCache.delete(cacheKey);modelData.matrixCache.set(cacheKey,cached);
+                return cached;
             }
             PerfTracker.start(`distMat_${chainKey}`);
             const N = atoms.length;
@@ -1175,8 +1231,7 @@
                         return calculateLazyDistanceMatrixCell(atoms,cutoff,i,j);
                     }
                 });
-                if(modelData.matrixCache.size>=8)modelData.matrixCache.delete(modelData.matrixCache.keys().next().value);
-                modelData.matrixCache.set(cacheKey, matrix);
+                cacheDistanceMatrix(modelData.matrixCache,cacheKey,matrix);
                 PerfTracker.end(`distMat_${chainKey}`);
                 return matrix;
             }
@@ -1203,8 +1258,7 @@
                 }
             }
 
-            if(modelData.matrixCache.size>=8)modelData.matrixCache.delete(modelData.matrixCache.keys().next().value);
-                modelData.matrixCache.set(cacheKey, matrix);
+            cacheDistanceMatrix(modelData.matrixCache,cacheKey,matrix);
             PerfTracker.metrics.cachedCells += matrix.length;
             const elapsed = PerfTracker.end(`distMat_${chainKey}`);
             // console.log(`[StringScape Homology Modeller Perf] Matrix computed for ${chainKey} (${N} residues, ${N*N} cells) in ${elapsed.toFixed(1)}ms`);
@@ -1979,12 +2033,50 @@
                 }
                 const nodes=sequences.map(sequence=>({type:'terminal',service:'sequence',parameters:{sequence_type:'protein',value:sequence,identity_cutoff:0.3,evalue_cutoff:0.1}}));
                 referenceSearchHistory=[];
+                if(window.ModellerAI?.connected()&&window.ComplexPubMed){
+                    const controller=new AbortController();
+                    const searchPdb=async term=>{
+                        if(!isCurrent()){controller.abort();throw Error('Search cancelled');}
+                        const trimmed=String(term).trim();
+                        const node=trimmed?{type:'terminal',service:'full_text',parameters:{value:trimmed.split(/\s+/).join(' + ')}}:nodes.length===1?nodes[0]:{type:'group',logical_operator:'and',nodes};
+                        if(!trimmed&&!nodes.length)throw Error('Provide search terms.');
+                        const record={query:trimmed||'Input sequences',ids:[],error:null};referenceSearchHistory.push(record);
+                        try{
+                            const response=await fetch('https://search.rcsb.org/rcsbsearch/v2/query',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:filterReferenceSearchBySpecies(node,searchTaxon),return_type:'entry',request_options:{results_verbosity:'verbose',paginate:{start:0,rows:25}}}),signal:controller.signal});
+                            if(response.status===204)return [];
+                            if(!response.ok)throw Error(`RCSB Search API returned HTTP ${response.status}.`);
+                            const data=await response.json();
+                            const hits=(data.result_set||[]).filter(hit=>/^[0-9][A-Z0-9]{3}$/.test(hit.identifier)).slice(0,25).map(hit=>({...hit,searchMatches:[{query:record.query,score:Number(hit.score)||0}]}));
+                            record.ids=hits.map(hit=>hit.identifier);
+                            let next=0;await Promise.all(Array.from({length:Math.min(4,hits.length)},async()=>{while(next<hits.length&&isCurrent())await enrichReferenceSearchHit(hits[next++]);}));
+                            if(!isCurrent()){controller.abort();throw Error('Search cancelled');}
+                            return hits;
+                        }catch(error){record.error=error.message;throw error;}
+                    };
+                    const decision=await window.ModellerAI.searchReferences({query:searchQuery,sequences,searchPdb,signal:controller.signal,input:original,onStatus:message=>{if(isCurrent())report(message);}});
+                    if(!isCurrent())return;
+                    referenceSearchResults=decision.results;referenceSearchSequences=sequences;referenceSearchQuery=mode==='query'?searchQuery:null;
+                    referenceSearchSessionId ||= `search-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+                    document.getElementById('viewReferenceSearchResultsBtn').classList.remove('hidden');renderReferenceSearchResults();
+                    let groups=null;
+                    if(decision.pdbIds.length){
+                        report('AI is assigning the selected references to conformation groups…');
+                        try{groups=await window.ModellerAI.assignReferenceGroups(searchQuery,decision.results,decision);}catch(error){console.warn('Reference group assignment failed:',error);}
+                        if(!isCurrent())return;
+                    }
+                    referenceConformationPlan=groups?{pdbIds:decision.pdbIds.slice(),groups}:null;
+                    completedReferenceSearchKey=currentReferenceSearchKey();setReferenceSearchSelection(decision.pdbIds);
+                    complexAiSelectionReasons.push({query:searchQuery,pdbIds:decision.pdbIds,reason:decision.reason});
+                    for(const id of decision.pdbIds)complexAiReferenceOrigins.set(id,{source:'ai',query:searchQuery,reason:decision.reason});
+                    status.classList.add(decision.pdbIds.length?'search-success':'search-no-results');
+                    report(decision.reason);return;
+                }
                 let searches = mode === 'query' ? [searchQuery] : [null];
                 let planningNote = '';
                 if(mode==='query' && window.ModellerAI?.connected()) {
                     report('AI is planning PDB searches for your request…');
                     const queryTiming=globalThis.BuildTimeline?.start('AI processing query');
-                    try { searches=await window.ModellerAI.planSearches(searchQuery,message=>{if(isCurrent())report(message);}); }
+                    try { searches=await window.ModellerAI.planSearches(searchQuery,message=>{if(isCurrent())report(message);},original); }
                     catch(error) { planningNote=`AI search planning failed: ${error.message} Used your original query. `; }
                     finally {globalThis.BuildTimeline?.end(queryTiming);}
                     if(!isCurrent())return;
@@ -1994,7 +2086,7 @@
                 for(let round=1;round<=maxRounds;round++){
                     if(round>1){
                         report(`No suitable references yet. AI is trying different searches (round ${round} of 3)…`);
-                        searches=await window.ModellerAI.retrySearches(searchQuery||'Find reference structures for the supplied protein sequences.',aiRounds,message=>{if(isCurrent())report(message);});
+                        searches=await window.ModellerAI.retrySearches(searchQuery||'Find reference structures for the supplied protein sequences.',aiRounds,message=>{if(isCurrent())report(message);},original);
                         if(!isCurrent())return;
                     }
                 const fetchTiming=globalThis.BuildTimeline?.start('Fetching PDBs');
@@ -2069,7 +2161,7 @@
                     const selectionTiming=globalThis.BuildTimeline?.start('AI processing results table and choosing PDBs');
                     report('AI is reviewing the query, PDB titles and protein mappings…');
                     try {
-                        const decision = await window.ModellerAI.chooseReferences({query: searchQuery, sequences, results: hits, searches: searches.filter(Boolean)});
+                        const decision = await window.ModellerAI.chooseReferences({query: searchQuery, sequences, results: hits, searches: searches.filter(Boolean), input: original});
                         if(!isCurrent())return;
                         reviewerConclusion=decision.reason;
                         complexAiSelectionReasons.push({query:searchQuery,pdbIds:decision.pdbIds,reason:decision.reason});
@@ -4334,10 +4426,14 @@
             resetPhysicsCamera();
 
             try{physicsRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });}
-            catch(error){MolecularImpostors.gpuStatus(null);container.textContent='Molecular rendering requires WebGL. Enable hardware acceleration or software WebGL in your browser.';console.warn('WebGL unavailable',error);return;}
+            catch(error){
+                console.warn('High-performance WebGL initialization failed; retrying with default settings.',error);
+                try{physicsRenderer = new THREE.WebGLRenderer({ antialias: false, alpha: true });}
+                catch(fallbackError){MolecularImpostors.gpuStatus(null);container.textContent='Molecular rendering requires WebGL. Enable hardware acceleration or software WebGL in your browser.';console.warn('WebGL unavailable',fallbackError);return;}
+            }
             MolecularImpostors.gpuStatus(physicsRenderer);
             const renderPhysicsScene=physicsRenderer.render.bind(physicsRenderer);
-            physicsRenderer.render=(scene,camera)=>{syncPhysicsOrthographicCamera();syncPhysicsTransparency(scene);syncPhysicsMaterials(scene);updateSelectionDistance();syncProteinSlice(scene);updateSelectedResidueLabels();renderPhysicsScene(scene,camera);};
+            physicsRenderer.render=(scene,camera)=>{syncPhysicsOrthographicCamera();syncPhysicsTransparency(scene);syncPhysicsMaterials(scene);updateSelectionDistance();syncProteinSlice(scene);updateSelectedResidueLabels();MolecularImpostors.syncGaussianScene(scene,camera);renderPhysicsScene(scene,camera);};
             physicsRenderer.localClippingEnabled=true;
             physicsRenderer.setSize(width, height);
             physicsRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -4474,7 +4570,7 @@
                 const mouse=new THREE.Vector2((event.clientX-rect.left)/rect.width*2-1,-(event.clientY-rect.top)/rect.height*2+1);
                 const raycaster=new THREE.Raycaster();raycaster.setFromCamera(mouse,physicsCamera);
                 let picked=null,best=Infinity;
-                if(physicsRepresentation==='ball-stick'&&atomRepresentation?.balls?.visible){
+                if(['ball-stick','gaussian'].includes(physicsRepresentation)&&atomRepresentation?.balls?.visible){
                     const hit=firstVisiblePhysicsHit(raycaster.intersectObject(atomRepresentation.balls,false),item=>item.instanceId!==undefined&&isNodeVisibleInPhysics(physicsNodes[atomRepresentation.entries[item.instanceId]?.nodeIndex]));
                     if(hit){picked={kind:'node',node:physicsNodes[atomRepresentation.entries[hit.instanceId].nodeIndex],sourceAtom:atomRepresentation.entries[hit.instanceId].source};best=hit.distance;}
                 }
@@ -4576,7 +4672,7 @@
                     }
                     if(altDraggedSymmetryKey){
                         const group=allSymmetryRotationGroups().find(item=>item.key===altDraggedSymmetryKey);
-                        if(group){group.angle+=(e.clientX-prevMouse3dX)*.012;updateResetRotationButton();updateSymmetryRotationControls();}
+                        if(group){spinPhases.set(`group:${group.key}`,(spinPhases.get(`group:${group.key}`)||0)+(e.clientX-prevMouse3dX)*.012);updateResetRotationButton();updateSymmetryRotationControls();}
                         prevMouse3dX=e.clientX;prevMouse3dY=e.clientY;
                         return;
                     }
@@ -4756,12 +4852,64 @@
         }
         let helicalSymmetryGroups=[];
         function allSymmetryRotationGroups(){return [...helicalSymmetryGroups,...rotationalSymmetryGroups];}
+        // Axis fits determine a line, but its sign is arbitrary. Use one shared
+        // reference for rotational and helical axes, preferring labelled membrane topology.
+        function orientSymmetryAxes(){
+            const axes=allSymmetryRotationGroups().flatMap(group=>group.localAxes?[...group.localAxes.values()]:[group]).filter(axis=>axis.normal);
+            if(!axes.length)return;
+            let reference=null;
+            if(inferredMembrane && membraneSideNames.positive && membraneSideNames.negative){
+                const cytoplasmic=label=>/cytoplas|cytosol|intracellular|inside/i.test(label);
+                const positive=cytoplasmic(membraneSideNames.positive),negative=cytoplasmic(membraneSideNames.negative);
+                if(positive!==negative)reference=new THREE.Vector3(...inferredMembrane.normal).normalize().multiplyScalar(positive?-1:1);
+            }
+            if(!reference){
+                reference=axes[0].normal.clone();
+                // Pick a stable sign even when the first fit changes sign.
+                const components=[reference.x,reference.y,reference.z];
+                const dominant=components.reduce((a,b)=>Math.abs(b)>Math.abs(a)?b:a,0);
+                if(dominant<0)reference.multiplyScalar(-1);
+            }
+            for(const axis of axes)if(axis.normal.dot(reference)<0)axis.normal.multiplyScalar(-1);
+        }
         function localSymmetryRotation(group,block){
             const axis=group?.localAxes?.get(block);
-            return axis?{...axis,angle:group.angle}:group;
+            // Helical groups only define axes for their own member chains.
+            return axis?{...axis,angle:group.angle}:group?.localAxes?null:group;
         }
+        // Stored angle fields are angular velocities in radians per second.
+        // Display phases stay independent of keyframes and their interpolated rates.
         const singleChainRotations=new Map();
-        function chainRotationGroup(block){return allSymmetryRotationGroups().find(group=>group.blockIds.has(block));}
+        const spinPhases=new Map();
+        let spinPaused=false,spinLastTime=null;
+        function advanceProteinSpin(now){
+            const dt=spinLastTime===null?0:Math.min(.1,Math.max(0,(now-spinLastTime)/1000));
+            spinLastTime=now;
+            if(spinPaused)return;
+            const advance=(key,rate)=>spinPhases.set(key,((spinPhases.get(key)||0)+rate*dt)%(2*Math.PI));
+            for(const group of allSymmetryRotationGroups())advance(`group:${group.key}`,group.angle||0);
+            for(const [block,entry] of singleChainRotations)if(entry.overridden){
+                const key=`chain:${block}`;
+                if(!spinPhases.has(key))spinPhases.set(key,spinPhases.get(`group:${chainRotationGroup(block)?.key}`)||0);
+                advance(key,entry.angle||0);
+            }
+        }
+        document.getElementById('toggleProteinSpin')?.addEventListener('click',event=>{
+            spinPaused=!spinPaused;spinLastTime=null;
+            event.currentTarget.querySelector('span').textContent=spinPaused?'Play spin':'Pause spin';
+            event.currentTarget.classList.toggle('spin-paused',spinPaused);
+        });
+        document.getElementById('resetProteinSpin')?.addEventListener('click',()=>{
+            spinPhases.clear();spinLastTime=null;
+            requestVisualPhysicsMeshUpdate();
+        });
+        function chainRotationGroup(block){
+            // A chain may belong to both a helical repeat and a rotational group.
+            // A running rotational group must use its shared symmetry axis.
+            const rotational=rotationalSymmetryGroups.filter(group=>group.blockIds.has(block));
+            const helical=helicalSymmetryGroups.filter(group=>group.blockIds.has(block));
+            return rotational.find(group=>Math.abs(group.angle)>1e-12)||helical.find(group=>Math.abs(group.angle)>1e-12)||helical[0]||rotational[0];
+        }
         const physicsBlockIndices=new WeakMap();
         function physicsBlockNode(block){let map=physicsBlockIndices.get(physicsNodes);if(!map){map=new Map();for(const node of physicsNodes)if(!map.has(node.blockIdx))map.set(node.blockIdx,node);physicsBlockIndices.set(physicsNodes,map);}return map.get(block);}
         function chainProteinName(block){
@@ -4773,8 +4921,46 @@
             const letters=blocks.map(block=>physicsBlockNode(block)?.res?.c1||block).join(', ');
             return `${names.join(' / ')||'Rotation'} (${letters})`;
         }
+        function compactSymmetryCaption(caption,maxChainLength=36){
+            const start=caption.lastIndexOf(' (');
+            if(start<0||!caption.endsWith(')'))return caption;
+            const chains=caption.slice(start+2,-1);
+            if(chains.length<=maxChainLength)return caption;
+            const prefix=chains.slice(0,maxChainLength-3).replace(/[, +]+[^, +]*$/, '');
+            return `${caption.slice(0,start)} (${prefix}...)`;
+        }
+        function symmetryInputPointerOverText(input,clientX){
+            const style=getComputedStyle(input),rect=input.getBoundingClientRect();
+            const canvas=symmetryInputPointerOverText.canvas||(symmetryInputPointerOverText.canvas=document.createElement('canvas'));
+            const context=canvas.getContext('2d');context.font=style.font;
+            const width=context.measureText(input.value).width;
+            const left=rect.left+(parseFloat(style.borderLeftWidth)||0)+(parseFloat(style.paddingLeft)||0);
+            const right=rect.right-(parseFloat(style.borderRightWidth)||0)-(parseFloat(style.paddingRight)||0);
+            const align=style.textAlign;
+            const offset=align==='center'?(right-left-width)/2:align==='right'||(align==='end'&&style.direction!=='rtl')||(align==='start'&&style.direction==='rtl')?right-left-width:0;
+            const textLeft=left+offset-input.scrollLeft;
+            return clientX>=Math.max(left,textLeft-2)&&clientX<=Math.min(right,textLeft+width+2);
+        }
+        function symmetryRotationControlGroups(){
+            const controls=[],helicalByProtein=new Map();
+            for(const group of allSymmetryRotationGroups()){
+                const blocks=[...group.blockIds];
+                const names=[...new Set(blocks.map(chainProteinName).filter(Boolean))].sort();
+                // Keep unannotated groups separate to avoid combining unrelated proteins.
+                const proteinKey=group.localAxes&&names.length?JSON.stringify(names):null;
+                let control=proteinKey?helicalByProtein.get(proteinKey):null;
+                if(!control){
+                    control={...group,groups:[],patterns:[]};controls.push(control);
+                    if(proteinKey)helicalByProtein.set(proteinKey,control);
+                }
+                control.groups.push(group);
+                control.patterns.push(blocks.map(block=>physicsBlockNode(block)?.res?.c1||block).join(', '));
+                control.caption=group.localAxes?`${names.join(' / ')||'Rotation'} (${control.patterns.join(' + ')})`:symmetryGroupName(group);
+            }
+            return controls;
+        }
         function chainRotationAxis(block,key){
-            if(key?.startsWith('group:')){const group=allSymmetryRotationGroups().find(item=>item.key===key.slice(6));if(group)return localSymmetryRotation(group,block);}
+            if(key?.startsWith('group:')){const group=allSymmetryRotationGroups().find(item=>item.key===key.slice(6));const rotation=localSymmetryRotation(group,block);if(rotation)return rotation;}
             const nodes=physicsNodes.filter(node=>node.blockIdx===block);
             const origin=new THREE.Vector3();for(const node of nodes)origin.add(new THREE.Vector3(node.x,node.y,node.z));
             if(nodes.length)origin.multiplyScalar(1/nodes.length);
@@ -4783,8 +4969,9 @@
         }
         function visualRotationForNode(node){
             const entry=singleChainRotations.get(node.blockIdx);
-            if(entry?.overridden)return {...chainRotationAxis(node.blockIdx,entry.axisKey),angle:entry.angle};
-            return localSymmetryRotation(chainRotationGroup(node.blockIdx),node.blockIdx)||null;
+            if(entry?.overridden)return {...chainRotationAxis(node.blockIdx,entry.axisKey),angle:spinPhases.get(`chain:${node.blockIdx}`)||0};
+            const group=chainRotationGroup(node.blockIdx),rotation=localSymmetryRotation(group,node.blockIdx);
+            return rotation?{...rotation,angle:spinPhases.get(`group:${group.key}`)||0}:null;
         }
         function visualPointForNode(node){
             const point=new THREE.Vector3(node.x,node.y,node.z),rotation=visualRotationForNode(node);
@@ -4802,7 +4989,7 @@
                     const row=document.createElement('tr'),group=chainRotationGroup(block),node=physicsBlockNode(block);
                     row.dataset.block=block;row.className='border-t border-slate-700';
                     const name=document.createElement('td');name.className='p-2';name.textContent=chainProteinName(block)?`${chainProteinName(block)} (${node.res.c1})`:`Chain ${node.res.c1||block}`;
-                    const cell=document.createElement('td');cell.className='p-2';const input=document.createElement('input');input.type='number';input.step='any';input.className='w-24 rounded-lg bg-slate-900 px-2 py-1 text-white';input.setAttribute('aria-label',`Rotation for ${name.textContent}`);cell.append(input);
+                    const cell=document.createElement('td');cell.className='p-2';const input=document.createElement('input');input.type='number';input.step='any';input.className='w-24 rounded-lg bg-slate-900 px-2 py-1 text-white';input.setAttribute('aria-label',`Spin rate for ${name.textContent} in degrees per second`);cell.append(input);
                     const axisCell=document.createElement('td');axisCell.className='p-2';const select=document.createElement('select');select.className='rounded-lg bg-slate-900 px-2 py-1 text-white';
                     for(const [value,label] of [['self-x','Self X'],['self-y','Self Y'],['self-z','Self Z'],...groupOptions]){const option=document.createElement('option');option.value=value;option.textContent=label;select.append(option);}axisCell.append(select);
                     const syncCell=document.createElement('td');syncCell.className='p-2';const sync=document.createElement('button');sync.type='button';sync.textContent='Sync to group';sync.className='hidden rounded-lg bg-violet-600 px-2 py-1 text-white';syncCell.append(sync);
@@ -4818,12 +5005,20 @@
                 sync.classList.toggle('hidden',!entry?.overridden||!group);
             }
         }
-        document.getElementById('singleChainRotationsToggle')?.addEventListener('click',event=>{const panel=document.getElementById('singleChainRotationsPanel');panel.classList.toggle('hidden');event.currentTarget.setAttribute('aria-expanded',String(!panel.classList.contains('hidden')));updateSingleChainRotations();});
+        document.getElementById('singleChainRotationsToggle')?.addEventListener('click',event=>{const panel=document.getElementById('singleChainRotationsPanel');panel.classList.toggle('hidden');event.currentTarget.setAttribute('aria-expanded',String(!!panel.open));updateSingleChainRotations();});
         function updateResetRotationButton(){
             document.querySelectorAll('[data-reset-symmetry-rotation]').forEach(button=>{
-                const group=allSymmetryRotationGroups().find(item=>item.key===button.dataset.resetSymmetryRotation);
-                button.classList.toggle('hidden',!group||Math.abs(group.angle)<=1e-6);
+                const control=symmetryRotationControlGroups().find(item=>item.key===button.dataset.resetSymmetryRotation);
+                button.classList.toggle('hidden',!control||control.groups.every(group=>Math.abs(group.angle)<=1e-6));
             });
+        }
+        function updateProteinSpinButtonVisibility(){
+            const keys=new Set(allSymmetryRotationGroups().map(group=>group.key));
+            const currentHasSpin=allSymmetryRotationGroups().some(group=>Math.abs(group.angle)>0)||[...singleChainRotations.values()].some(item=>item.overridden&&Math.abs(item.angle)>0);
+            const keyframeHasSpin=animationFrames.some((frame,index)=>
+                (animationPlaying||index!==animationSelected)&&
+                (frame.settings?.symmetry?.some(item=>keys.has(item.key)&&Math.abs(Number(item.angle))>0)||frame.settings?.chainRotations?.some(item=>item.overridden&&Math.abs(Number(item.angle))>0)));
+            for(const id of ['toggleProteinSpin','resetProteinSpin'])document.getElementById(id)?.classList.toggle('hidden',!currentHasSpin&&!keyframeHasSpin);
         }
         function updateSymmetryRotationControls(){
             const host=document.getElementById('symmetryRotationControls');if(!host?.dataset)return;
@@ -4831,39 +5026,44 @@
             if(host.dataset.groupKeys!==keys){
                 host.replaceChildren();host.dataset.groupKeys=keys;
                 const rowsByType=new Map();
-                for(const [helical,title] of [[false,'Rotation of Rotational symmetry groups'],[true,'Rotation of Helical symmetry groups']]){
+                for(const [helical,title] of [[false,'Spin rate of Rotational symmetry groups'],[true,'Spin rate of Helical symmetry groups']]){
                     if(!allSymmetryRotationGroups().some(group=>!!group.localAxes===helical))continue;
                     const section=document.createElement('section');section.className='other-control-section';
                     const heading=document.createElement('h3');heading.className='other-control-heading';heading.textContent=title;
                     const rows=document.createElement('div');rows.className='flex flex-wrap items-center gap-3';
                     section.append(heading,rows);host.append(section);rowsByType.set(helical,rows);
                 }
-                allSymmetryRotationGroups().forEach((group,index)=>{
-                    const names=[...group.blockIds].map(block=>physicsBlockNode(block)?.res?.c1||block);
+                symmetryRotationControlGroups().forEach((group,index)=>{
+                    const currentGroups=()=>symmetryRotationControlGroups().find(item=>item.key===group.key)?.groups||[];
                     const label=document.createElement('label');label.className='inline-flex items-center gap-2 whitespace-nowrap text-xs text-slate-300';
-                    const caption=document.createElement('span');caption.textContent=symmetryGroupName(group);
+                    const caption=document.createElement('span');caption.textContent=compactSymmetryCaption(group.caption);caption.title=group.caption;
                     const input=document.createElement('input');input.type='text';input.inputMode='decimal';input.dataset.symmetryRotation=group.key;
-                    input.setAttribute('aria-label',`${group.localAxes?'Helical':'Rotational'} symmetry group ${index+1} angle in degrees`);
-                    input.title='Type any angle, or drag up/right to increase it';
-                    const unit=document.createElement('span');unit.className='text-violet-300';unit.textContent='°';
-                    const setAngle=value=>{if(!Number.isFinite(value))return;const current=allSymmetryRotationGroups().find(item=>item.key===input.dataset.symmetryRotation);if(!current)return;
-                        current.angle=value*Math.PI/180;updateResetRotationButton();scheduleAnimationCapture();};
+                    input.setAttribute('aria-label',`${group.localAxes?'Helical':'Rotational'} symmetry group ${index+1} spin rate in degrees per second`);
+                    input.title='Degrees per second; negative values reverse spin. Drag the empty space up/right to increase the rate; drag over the number to select text';
+                    const unit=document.createElement('span');unit.className='text-violet-300';unit.textContent='°/s';
+                    const setAngle=value=>{if(!Number.isFinite(value))return;const current=currentGroups();if(!current.length)return;
+                        for(const member of current)member.angle=value*Math.PI/180;updateResetRotationButton();updateProteinSpinButtonVisibility();scheduleAnimationCapture();};
                     input.addEventListener('input',()=>{const value=Number(input.value);if(input.value.trim()&&Number.isFinite(value))setAngle(value);});
                     input.addEventListener('change',()=>{const value=Number(input.value);if(input.value.trim()&&Number.isFinite(value))setAngle(value);else input.value=String(Math.round((allSymmetryRotationGroups().find(item=>item.key===input.dataset.symmetryRotation)?.angle||0)*180/Math.PI*100)/100);});
                     input.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();input.dispatchEvent(new Event('change'));input.blur();}});
                     let drag=null;
-                    input.addEventListener('pointerdown',event=>{if(event.button!==0)return;drag={x:event.clientX,y:event.clientY,start:Number(input.value)||0,moved:false};input.setPointerCapture(event.pointerId);});
-                    input.addEventListener('pointermove',event=>{if(!drag)return;const dx=event.clientX-drag.x,dy=event.clientY-drag.y;
+                    input.addEventListener('pointerdown',event=>{if(event.button!==0||symmetryInputPointerOverText(input,event.clientX))return;
+                        // Start on the number to select text, or in empty space to scrub.
+                        event.preventDefault();input.focus({preventScroll:true});
+                        input.setSelectionRange(input.value.length,input.value.length);
+                        drag={x:event.clientX,y:event.clientY,start:Number(input.value)||0,moved:false};input.setPointerCapture(event.pointerId);});
+                    input.addEventListener('pointermove',event=>{if(!drag){input.style.cursor=symmetryInputPointerOverText(input,event.clientX)?'text':'ew-resize';return;}const dx=event.clientX-drag.x,dy=event.clientY-drag.y;
                         if(!drag.moved&&Math.hypot(dx,dy)<4)return;drag.moved=true;
                         const value=Math.round((drag.start+(dx-dy)*.5)*100)/100;input.value=String(value);setAngle(value);event.preventDefault();});
                     input.addEventListener('pointerup',()=>{drag=null;});input.addEventListener('pointercancel',()=>{drag=null;});
                     const reset=document.createElement('button');reset.type='button';reset.dataset.resetSymmetryRotation=group.key;
-                    reset.className='rounded-lg bg-violet-600 px-2 py-1 text-white hover:bg-violet-500';reset.title='Reset rotation';reset.setAttribute('aria-label',`Reset rotation for symmetry group ${index+1}`);
+                    reset.className='rounded-lg bg-violet-600 px-2 py-1 text-white hover:bg-violet-500';reset.title='Reset spin rate';reset.setAttribute('aria-label',`Reset spin rate for symmetry group ${index+1}`);
                     reset.innerHTML='<i class="fa-solid fa-rotate-left" aria-hidden="true"></i>';
-                    reset.addEventListener('click',()=>{const current=allSymmetryRotationGroups().find(item=>item.key===reset.dataset.resetSymmetryRotation);if(!current)return;current.angle=0;updateResetRotationButton();updateSymmetryRotationControls();scheduleAnimationCapture();});
+                    reset.addEventListener('click',()=>{const current=currentGroups();if(!current.length)return;for(const member of current)member.angle=0;updateResetRotationButton();updateSymmetryRotationControls();scheduleAnimationCapture();});
                     label.append(caption,input,unit,reset);rowsByType.get(!!group.localAxes).append(label);
                 });
             }
+            updateProteinSpinButtonVisibility();
             host.classList.toggle('hidden',!allSymmetryRotationGroups().length);
             host.querySelectorAll('[data-symmetry-rotation]').forEach(input=>{
                 const group=allSymmetryRotationGroups().find(item=>item.key===input.dataset.symmetryRotation);if(!group)return;
@@ -4904,7 +5104,7 @@
         let atomVisualRotations=null;
         function applyVisualSymmetryRotation(){
             atomVisualRotations=null;
-            if(!allSymmetryRotationGroups().some(group=>Math.abs(group.angle)>1e-8)&&![...singleChainRotations.values()].some(entry=>entry.overridden&&Math.abs(entry.angle)>1e-8))return null;
+            if(![...spinPhases.values()].some(angle=>Math.abs(angle)>1e-8))return null;
             // Resolve self axes before temporarily moving any nodes for display.
             atomVisualRotations=new Map();
             for(const node of physicsNodes)if(!atomVisualRotations.has(node.blockIdx))atomVisualRotations.set(node.blockIdx,visualRotationForNode(node));
@@ -5485,6 +5685,7 @@
 
 // physicsSetup.js start
         function initPhysicsSimulation() {
+            if (!physicsRenderer || !backboneLinesGroup) throw new Error('Molecular rendering requires WebGL. Enable hardware acceleration or software WebGL in your browser, then reload the page.');
             resetNucleicExtensions();
             patternDetectionSnapshot=null;rotationalDetectionSnapshot=null;
             backgroundTasks.get('protein-pattern')?.cancel();patternVarianceJob=null;
@@ -5494,7 +5695,7 @@
             patternExtensionCounts.clear();patternExtensionUnits=0;detectedExtensionPatterns=[];
             disposePhysicsSimulationWorker();
             cancelPendingSimulationRender();
-            singleChainRotations.clear();document.getElementById('singleChainRotationsRows')?.removeAttribute('data-signature');
+            singleChainRotations.clear();spinPhases.clear();spinLastTime=null;document.getElementById('singleChainRotationsRows')?.removeAttribute('data-signature');
             disposeMembrane();
             disposeAtomRepresentation();
             disposeCartoonRepresentation();
@@ -6023,6 +6224,29 @@
             }
             return getChainColor(chainId,chainKeys);
         }
+        function physicsProteinToggleGroups() {
+            const groups = new Map();
+            morphMatrixBlocks.forEach((block, index) => {
+                const res = block.res;
+                const atoms = res.atoms2?.length ? res.atoms2 : res.atoms1 || [];
+                let key, name;
+                if (res.entityType === 'protein') {
+                    const accession = uniProtAccession(atoms[0]?.sourcePdbId || '');
+                    name = chainProteinName(index) || uniProtAnnotations.get(accession)?.name;
+                    const sequence = atoms.map(atom => atom.singleChar || atom.resName || '').join('');
+                    key = 'protein:' + (name?.toLowerCase() || accession || sequence || block.c1);
+                    name = name || accession || `Protein (${block.c1})`;
+                } else {
+                    name = isWaterChain(block.c1) ? 'Water' : res.entityType === 'nucleotide'
+                        ? (atoms.some(atom => /^(D[ACGTUI]|THY)$/.test(String(atom.resName).toUpperCase())) ? 'DNA' : 'RNA')
+                        : 'Other molecules';
+                    key = name;
+                }
+                if (!groups.has(key)) groups.set(key, {name, keys: []});
+                if (!groups.get(key).keys.includes(block.c1)) groups.get(key).keys.push(block.c1);
+            });
+            return [...groups.values()];
+        }
         function renderPhysicsChainToggles() {
             const proteinContainer = document.getElementById('physicsChainToggles');
             const nonProteinContainer = document.getElementById('physicsNonProteinToggles');
@@ -6031,6 +6255,19 @@
             proteinContainer.replaceChildren();
             nonProteinContainer.replaceChildren();
 
+            const groupedContainer = document.getElementById('physicsProteinToggles');
+            groupedContainer?.replaceChildren();
+            for (const {name, keys} of physicsProteinToggleGroups()) {
+                const visible = keys.every(key => chainVisibility[key] !== false);
+                const button = makeReferenceVisibilityButton(name, '#94a3b8', visible, () => {
+                    keys.forEach(key => { chainVisibility[key] = !visible; });
+                    renderPhysicsChainToggles();
+                    applyPhysicsVisibility();
+                });
+                if (!visible && keys.some(key => chainVisibility[key] !== false)) button.setAttribute('aria-pressed', 'mixed');
+                button.title = `${visible ? 'Hide' : 'Show'} all ${name} chains`;
+                groupedContainer?.append(button);
+            }
             const chainKeys = morphMatrixBlocks.map(b => b.c1);
             const proteinKeys = morphMatrixBlocks.filter(block => block.res.entityType === 'protein').map(block => block.c1);
             const nonProteinKeys = morphMatrixBlocks.filter(block => block.res.entityType !== 'protein').map(block => block.c1);
@@ -6048,6 +6285,7 @@
 
                 const btn = document.createElement('button');
                 btn.type = 'button';
+                btn.setAttribute('aria-pressed', String(isVis));
                 btn.className = isVis
                     ? 'flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-mono font-medium transition border shadow-sm bg-slate-900 border-slate-700 text-white hover:bg-slate-800 active:scale-95'
                     : 'flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-mono font-medium transition border border-dashed border-slate-800 text-slate-500 bg-slate-950/60 hover:text-slate-400 active:scale-95';
@@ -6170,11 +6408,11 @@
             const { cx, cy, cz } = physicsCenterOffset;
 
             let totalAtoms = 0;
-            chainIds.forEach(cid => { totalAtoms += sourceChains[cid].reduce((n, a) => n + (['ball-stick','surface','curves'].includes(physicsRepresentation) && a.sourceAtoms?.length ? a.sourceAtoms.length : 1), 0); });
+            chainIds.forEach(cid => { totalAtoms += sourceChains[cid].reduce((n, a) => n + (['ball-stick','gaussian','surface','curves'].includes(physicsRepresentation) && a.sourceAtoms?.length ? a.sourceAtoms.length : 1), 0); });
             if (!totalAtoms) return group;
 
             
-            const mesh = createMolecularInstances(totalAtoms,physicsRepresentation==='surface'?1:['ball-stick','curves'].includes(physicsRepresentation)?.34:.85);
+            const mesh = createMolecularInstances(totalAtoms,physicsRepresentation==='surface'?1:['ball-stick','gaussian','curves'].includes(physicsRepresentation)?.34:.85);
             const dummy = new THREE.Object3D();
 
             mesh.userData.residues = [];
@@ -6184,13 +6422,13 @@
                 const atoms = sourceChains[cid];
                 const colorHex = getChainColor(cid, chainKeys);
                 const color = new THREE.Color(colorHex);
-                if(['ball-stick','curves'].includes(physicsRepresentation))atoms.forEach((atom,atomIdx)=>{
+                if(['ball-stick','gaussian','curves'].includes(physicsRepresentation))atoms.forEach((atom,atomIdx)=>{
                     if(physicsRepresentation==='curves'&&['protein','nucleotide'].includes(atom.entityType))return;
                     const nodeIndex=referenceBondNodes.length;
                     referenceBondNodes.push({blockIdx,idx2:atomIdx,res:{entityType:atom.entityType}});
                     for(const source of atom.sourceAtoms?.length?atom.sourceAtoms:[atom])referenceAtomEntries.push({nodeIndex,source,chainId:cid,atomIdx});
                 });
-                const overlayAtoms = atoms.flatMap((a,atomIdx) => (['ball-stick','surface','curves'].includes(physicsRepresentation) && a.sourceAtoms?.length ? a.sourceAtoms : [{ atomName:'CA', element:'C', x:a.x, y:a.y, z:a.z }]).map(source=>({source,atomIdx})));
+                const overlayAtoms = atoms.flatMap((a,atomIdx) => (['ball-stick','gaussian','surface','curves'].includes(physicsRepresentation) && a.sourceAtoms?.length ? a.sourceAtoms : [{ atomName:'CA', element:'C', x:a.x, y:a.y, z:a.z }]).map(source=>({source,atomIdx})));
                 const positions = new Float32Array(atoms.length * 3);
 
                 for (let k = 0; k < overlayAtoms.length; k++) {
@@ -6200,7 +6438,7 @@
                     dummy.position.set(x, y, z);
                     const vdw={H:1.2,D:1.2,C:1.7,N:1.55,O:1.52,S:1.8,P:1.8,SE:1.9};
                     dummy.scale.setScalar(physicsRepresentation==='surface'?(vdw[a.element]||1.7)+viewerSizes.physics.surface:
-                        ['ball-stick','curves'].includes(physicsRepresentation)?viewerSizes.physics.atom*elementAtomScale(a.element):viewerSizes.physics.residue);
+                        ['ball-stick','gaussian','curves'].includes(physicsRepresentation)?viewerSizes.physics.atom*elementAtomScale(a.element):viewerSizes.physics.residue);
                     dummy.updateMatrix();
                     mesh.setMatrixAt(idx, dummy.matrix);
                     mesh.setColorAt(idx, color);
@@ -6226,7 +6464,7 @@
                 }
             });
 
-            if(['ball-stick','curves'].includes(physicsRepresentation)&&referenceAtomEntries.length){
+            if(['ball-stick','gaussian','curves'].includes(physicsRepresentation)&&referenceAtomEntries.length){
                 sourceAtomBondsAsync(referenceAtomEntries,referenceBondNodes).then(bonds=>{
                 if(generation!==modelBuildGeneration||group.userData.disposed)return;
                 const sticks=createMolecularInstances(bonds.length,1,true);
@@ -6586,11 +6824,11 @@
             groupMaxSimulationResidues=selectedBudget==='dynamic'||!selectedBudget?'dynamic':Math.max(1,Math.floor(Number(selectedBudget)||1));
             const polymers=physicsNodes.filter(node=>node.res.entityType==='protein'||node.res.entityType==='nucleotide');
             groupSimulation={nodes:physicsNodes,order:[...new Set((polymers.length?polymers:physicsNodes).map(node=>node.blockIdx))],index:-1,
-                active:new Set(),processed:new Set(),pass:1,passResults:[],complete:false,elapsed:0,lastTick:null,wasRunning:false,maxSpeed:null,results:[]};
+                active:new Set(),processed:new Set(),participated:new Set(),pass:1,passResults:[],complete:false,elapsed:0,lastTick:null,wasRunning:false,maxSpeed:null,results:[]};
             groupSimulation.originalOrder=groupSimulation.order.slice();
             groupSimulation.parallel=true;
             groupSimulation.groups=[];groupSimulation.nextIndex=0;
-            groupSimulation.residueBudget=groupMaxSimulationResidues==='dynamic'?100:groupMaxSimulationResidues;
+            groupSimulation.residueBudget=groupMaxSimulationResidues==='dynamic'?10000:groupMaxSimulationResidues;
             groupSimulation.budgetLag=null;
             updateDynamicResidueBudgetDisplay();
             const status=document.getElementById('groupSimulationStatusText');if(status)status.textContent='Preparing simulation and building the spring network…';
@@ -6599,7 +6837,7 @@
         }
         function updateDynamicResidueBudgetDisplay(){
             const display=document.getElementById('dynamicMaxSimResidueCount');
-            if(display)display.textContent=groupMaxSimulationResidues==='dynamic'?(groupSimulation?.residueBudget??100).toLocaleString():'Manual';
+            if(display)display.textContent=groupMaxSimulationResidues==='dynamic'?(groupSimulation?.residueBudget??10000).toLocaleString():'Manual';
         }
         let activeSimulationResidueCountUpdatedAt=-Infinity;
         function updateActiveSimulationResidueCount(now=performance.now()){
@@ -6613,30 +6851,25 @@
         function countSimulationResidues(blocks){
             return physicsNodes.reduce((count,node)=>count+(blocks.has(node.blockIdx)&&!node.referenceLockTarget?1:0),0);
         }
-        function sampleSimulationBudgetLag(now){
+        function sampleSimulationBudgetThroughput(durationMs,now){
             const state=groupSimulation;
-            if(!state||groupMaxSimulationResidues!=='dynamic')return;
-            if(document.visibilityState==='hidden'||!physicsRunning||simulationPhase!==2||modelLoading||!state.wasRunning||state.complete){state.budgetLag=null;return;}
-            const lag=state.budgetLag;
-            if(!lag){state.budgetLag={start:now,last:now,frames:0,slow:0,max:0};return;}
-            const interval=now-lag.last;
-            lag.last=now;lag.frames++;
-            if(interval>50)lag.slow++;
-            lag.max=Math.max(lag.max,interval);
+            if(!state||state.complete||groupMaxSimulationResidues!=='dynamic'||!Number.isFinite(durationMs)||durationMs<0)return;
+            const sample=state.budgetLag||(state.budgetLag={start:now,steps:0,totalMs:0});
+            sample.steps++;sample.totalMs+=durationMs;
         }
         function regulateSimulationResidueBudget(now,running){
             const state=groupSimulation;
             if(groupMaxSimulationResidues!=='dynamic')return false;
-            if(!running||document.visibilityState==='hidden'){state.budgetLag=null;return false;}
-            const lag=state.budgetLag;
-            if(!lag||lag.frames<1||now-lag.start<2000)return false;
-            const mean=(lag.last-lag.start)/lag.frames,slowFraction=lag.slow/lag.frames;
-            state.budgetLag={start:now,last:now,frames:0,slow:0,max:0};
-            // Measure UI frame delays, not worker throughput. Back off quickly,
-            // probe upward when smooth, and leave a dead band to avoid oscillation.
+            if(!running){state.budgetLag=null;return false;}
+            const sample=state.budgetLag;
+            if(!sample||!sample.steps||now-sample.start<2000)return false;
+            state.budgetLag=null;
+            // Use worker compute time per completed step, excluding rendering and
+            // message delays. The dead band limits repeated budget oscillation.
+            const mean=sample.totalMs/sample.steps;
             const previous=state.residueBudget,total=countSimulationResidues(new Set(physicsNodes.map(node=>node.blockIdx)));
-            if(mean>40||slowFraction>.1||lag.max>200)state.residueBudget=Math.max(1,Math.floor(previous*.7));
-            else if(mean<30&&slowFraction<.03&&lag.max<100)state.residueBudget=Math.min(Math.max(1,total),Math.ceil(previous*1.25));
+            if(mean>40)state.residueBudget=Math.max(1,Math.floor(previous*.7));
+            else if(mean<30)state.residueBudget=Math.min(Math.max(1,total),Math.ceil(previous*1.25));
             updateDynamicResidueBudgetDisplay();
             return previous!==state.residueBudget;
         }
@@ -6828,6 +7061,7 @@
         function recordGroupSimulationStep(unresolvedClashes=0,unresolvedClashBlocks=null){
             const state=groupSimulation;
             if(!state||state.complete||state.index<0)return;
+            for(const block of state.active)state.participated.add(block);
             if(state.parallel){recordParallelPhysicsGroupStep(unresolvedClashes,unresolvedClashBlocks);return;}
             state.unresolvedClashes=unresolvedClashes;state.sampleSteps++;
             state.coreIndices.forEach((index,local)=>{const node=physicsNodes[index],k=local*3;
@@ -6852,7 +7086,7 @@
             globalThis.BuildTimeline?.end(state.timelineRow);state.timelineRow=null;
             if(state.pass===1){
                 state.passResults.push(...state.results.map(result=>({...result,pass:1})));
-                state.pass=2;state.order=state.originalOrder.slice();state.processed.clear();state.active.clear();
+                state.pass=2;state.order=state.originalOrder.slice();state.processed.clear();state.participated.clear();state.active.clear();
                 state.results=[];state.groups=[];state.nextIndex=0;state.index=-1;state.core=null;
                 state.elapsed=0;state.lastTick=null;state.wasRunning=false;state.maxSpeed=null;state.converged=false;
                 state.budgetLastAt=null;physicsGraphHistory.lastPositions=null;
@@ -6868,7 +7102,7 @@
                 const build=multiReferenceBuild;void advanceStagedBuild().catch(error=>failStagedBuild(error,build));return;
             }
             if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.kind==='combined'){
-                multiReferenceBuild.done=true;renderStagedBuildControls();
+                multiReferenceBuild.done=true;renderStagedBuildControls();void offloadInactiveDraftSprings(multiReferenceBuild);
             }
             const unresolved=new Set(state.results.filter(result=>result.unresolvedClashes>0).map(result=>result.core)).size;
             document.getElementById('groupSimulationStatus').style.display='none';
@@ -6891,6 +7125,7 @@
                 if(!modelBuildCompleted||state!==groupSimulation)return;await updatePatternVariance(true);
                 if(state!==groupSimulation)return;await animationOnModelReady();
                 if(state===groupSimulation&&typeof createGroupedConformationAnimation==='function')await createGroupedConformationAnimation();
+                if(state===groupSimulation&&modelBuildCompleted)animationReadyGeneration=modelBuildGeneration;
             })().catch(reportBackgroundError);});
             if(modelBuildStartedAt!==null)document.getElementById('modelBuildTime').textContent=`Homology model built in ${((performance.now()-modelBuildStartedAt)/1000).toFixed(2)} seconds`;
             updateHomologyViewerToggle();
@@ -7470,9 +7705,11 @@
                         // Retain the numerical network here; send one compact copy for display/validation.
                         const packed={...physicsSprings,values:physicsSprings.values?.slice(),columns:physicsSprings.columns?Object.fromEntries(Object.entries(physicsSprings.columns).map(([key,value])=>[key,value.slice()])):undefined,
                             references:physicsSprings.references?.slice()||null,mergedTargets:physicsSprings.mergedTargets?.slice()||null,mergedWeights:physicsSprings.mergedWeights?.slice()||null};
-                        const transfer=packed.columns?Object.values(packed.columns).map(value=>value.buffer):[packed.values.buffer];if(packed.references)transfer.push(packed.references.buffer);
-                        self.postMessage({command:'springsBuilt',revision:data.revision,packed,
-                            buildMs:performance.now()-start},transfer);
+                        const transfer=packed.columns?Object.values(packed.columns).map(value=>value.buffer):[packed.values.buffer];for(const value of [packed.references,packed.mergedTargets,packed.mergedWeights])if(value)transfer.push(value.buffer);
+                        // One-shot draft workers return ownership of the input columns.
+                        if(data.returnInput&&data.input)for(const value of Object.values(data.input))if(ArrayBuffer.isView(value))transfer.push(value.buffer);
+                        self.postMessage({command:'springsBuilt',revision:data.revision,packed,input:data.returnInput?data.input:undefined,
+                            buildMs:performance.now()-start},[...new Set(transfer)]);
                         return;
                     }
                     ({mobilityVal,springStiffnessVal,springCutoffVal,otherConstraintsInfluence,stericClashRadius,
@@ -7671,8 +7908,10 @@
                 membraneRepulsionActive.clear();for(const index of data.membraneActive)membraneRepulsionActive.add(index);
                 state.forceDiagnostics=data.forceDiagnostics;
                 physicsWorkerStepCount++;
+                if(!conformationOptimization)sampleSimulationBudgetThroughput(data.durationMs,performance.now());
                 if(state.benchmark&&state.benchmark===window.__benchmarkRun)state.benchmark.steps++;
                 if(typeof groupSimulation!=='undefined'&&groupSimulation&&!conformationOptimization)recordGroupSimulationStep(data.unresolvedClashes,data.unresolvedClashBlocks);
+                recordPhysicsGraphSample(data.energy,performance.now());
                 observeHomologyEnergy(data.energy,performance.now());
                 scheduleSimulationAutoRender(data.energy);
                 pendingPhysicsVisual={energy:data.energy,durationMs:data.durationMs,nodes:physicsNodes,generation:modelBuildGeneration};
@@ -7996,7 +8235,6 @@
                 document.getElementById('physicsEnergyText').textContent = `${rmsdEnergy.toFixed(2)} a.u.`;
                 physicsTextUpdatedAt=performance.now();
             }
-            recordPhysicsGraphSample(rmsdEnergy,performance.now());
 
             PerfTracker.metrics.physicsStepTime = durationMs;
         }
@@ -8139,6 +8377,7 @@
                 const ordered=[...votes[side]].sort((a,b)=>b[1]-a[1]);
                 if(ordered.length&&ordered[0][1]>=2&&(!ordered[1]||ordered[0][1]>=ordered[1][1]*1.5))membraneSideNames[side]=ordered[0][0];
             }
+            orientSymmetryAxes();
         }
         function updateMembraneSideLabels(geometry){
             const canvas=physicsRenderer?.domElement;
@@ -8621,7 +8860,7 @@
                 if(candidate.insideDensity<.46)failures.push('inside density');
                 if(candidate.insideDensity-candidate.outsideDensity<.13)failures.push('enrichment');
                 if(candidate.insideHydro<candidate.insidePolar*.8)failures.push('polar penalty');
-                if(candidate.score<=0)failures.push('no gain over aqueous baseline');
+                if(candidate.score<.01)failures.push('insufficient gain over aqueous baseline');
                 const basis=membraneBasis(candidate.normal);
                 const geometry={...candidate,u:basis.u.toArray(),v:basis.v.toArray(),curvature:[0,0,0],extent:Infinity};
                 classifyTransmembraneSegments(geometry,physicsNodes);
@@ -8908,37 +9147,40 @@
                 const x=-extent+(column+.5)*spacing,y=-extent+(row+.5)*spacing;
                 if((nearestMembraneProtein(x,y,footprints)?.distance??Infinity)>=6.2)free++;
             }
-            return Math.min(420,Math.floor(free*spacing*spacing/28));
+            return Math.floor(free*spacing*spacing/28);
         }
         function seedMembraneLipids(geometry,footprints,rng=Math.random,desired=membraneLipidTargetCount(geometry,footprints),existing=[]){
             const particles=[],extent=geometry.extent-2;
             const cell=4,grid=new Map(),minGap=3.8;
+            const addToGrid=p=>{
+                const key=`${Math.floor(p.x/cell)}:${Math.floor(p.y/cell)}`;
+                if(!grid.has(key))grid.set(key,[]);grid.get(key).push(p);
+            };
+            for(const p of existing)addToGrid(p);
             for(let attempt=0;attempt<desired*22&&particles.length<desired;attempt++){
                 const x=(rng()*2-1)*extent,y=(rng()*2-1)*extent;
                 if(nearestMembraneProtein(x,y,footprints)?.distance<6.2)continue;
-                if(existing.some(other=>(x-other.x)**2+(y-other.y)**2<minGap**2))continue;
                 const gx=Math.floor(x/cell),gy=Math.floor(y/cell);
                 let crowded=false;
                 for(let dx=-1;dx<=1&&!crowded;dx++)for(let dy=-1;dy<=1&&!crowded;dy++)
-                    for(const index of grid.get(`${gx+dx}:${gy+dy}`)||[]){
-                        const other=particles[index];
+                    for(const other of grid.get(`${gx+dx}:${gy+dy}`)||[]){
                         if((x-other.x)**2+(y-other.y)**2<minGap**2){crowded=true;break;}
                     }
                 if(crowded)continue;
-                const index=particles.length;
-                particles.push({x,y,vx:(rng()-.5)*4,vy:(rng()-.5)*4,world:null});
-                const key=`${gx}:${gy}`;if(!grid.has(key))grid.set(key,[]);grid.get(key).push(index);
+                const particle={x,y,vx:(rng()-.5)*4,vy:(rng()-.5)*4,world:null};
+                particles.push(particle);addToGrid(particle);
             }
             return particles;
         }
         function disposeMembraneLipids(){
             if(!membraneLipids)return;
-            const system=membraneLipids;system.motion?.worker.terminate();
+            const system=membraneLipids;
             const geometries=new Set();
             for(const mesh of [system.mesh,system.atomMesh,system.stickMesh,system.glowMesh,system.atomGlowMesh]){
                 physicsScene?.remove(mesh);mesh.dispose?.();geometries.add(mesh.geometry);mesh.material.dispose();
             }
             for(const pair of system.gpu?.variants.values()||[])for(const geo of pair)geometries.add(geo);
+            system.gpu?.atomMaterial.dispose();system.gpu?.gaussianMaterial.dispose();
             for(const geo of geometries)geo.dispose();
             membraneLipids=null;
         }
@@ -9062,17 +9304,16 @@
             glowMesh.count=0;glowMesh.frustumCulled=false;glowMesh.renderOrder=15;
             for(const item of [mesh,atomMesh,stickMesh,glowMesh,atomGlowMesh])physicsScene.add(item);
             for(const p of particles){
-                p.lipidPhase??=Math.random()*Math.PI*2;p.lipidAngle??=Math.random()*Math.PI*2;p.lipidSpin??=(Math.random()-.5)*.5;
+                p.lipidPhase??=Math.random()*Math.PI*2;p.lipidAngle??=Math.random()*Math.PI*2;p.lipidSpin=0;
                 p.baseAngle=p.lipidAngle;p.renderX=p.x;p.renderY=p.y;
             }
             membraneLipids={mesh,atomMesh,stickMesh,glowMesh,atomGlowMesh,gpu,particles,leaves,dummy:new THREE.Object3D(),
                 lastFrame:now,lastFootprints:now,lastRecount:now,extent:previousExtent??geometry.extent,spinClock:0,
-                visibleParticles:[],motion:null,motionDt:0,footprintsRevision:0};
-            const status=document.getElementById('lipidMotionStatus');if(status)status.textContent='';
+                visibleParticles:[]};
             updateLipidColors();
         }
         function reconcileMembraneLipids(geometry,now,force=false){
-            const system=membraneLipids;if(!system||(!force&&now-system.lastRecount<10000))return;
+            const system=membraneLipids;if(!system||(!force&&now-system.lastRecount<250))return;
             system.lastRecount=now;
             const next=[];let changed=false;
             for(const leaf of system.leaves){
@@ -9099,50 +9340,10 @@
         function lipidMotionScale(speed=sideChainJiggleSpeed){
             return 1.8*Math.max(.5,Math.min(5,speed))/3;
         }
-        function dispatchLipidMotion(system,geometry,now,dt){
-            if(system.motionFailed)return;
-            system.motionDt=Math.min(.05,system.motionDt+dt);
-            if(!system.motion){
-                let worker;
-                try{worker=new Worker(new URL('lipid-motion-worker.js',document.baseURI));}catch(error){
-                    system.motionFailed=true;
-                    console.error('Could not start lipid motion worker:',error);
-                    const status=document.getElementById('lipidMotionStatus');if(status)status.textContent='Lipid motion paused: '+error.message;
-                    return;
-                }
-                const state={worker,pending:false,id:0,footprintsRevision:-1,recycle:null};system.motion=state;
-                const fail=message=>{
-                    if(membraneLipids!==system||system.motion!==state)return;
-                    worker.terminate();system.motion=null;system.motionFailed=true;
-                    console.error('Lipid motion worker stopped:',message);
-                    const status=document.getElementById('lipidMotionStatus');if(status)status.textContent='Lipid motion paused: '+message;
-                };
-                worker.onerror=event=>fail(event.message||'worker failure');
-                worker.onmessageerror=()=>fail('could not read worker response');
-                worker.onmessage=({data})=>{
-                    if(membraneLipids!==system||system.motion!==state||data.id!==state.id)return;
-                    state.pending=false;if(data.error){fail(data.error);return;}
-                    state.recycle=data.values.buffer;
-                    for(let i=0;i<system.particles.length;i++){
-                        const p=system.particles[i],j=i*4;p.fromX=p.renderX;p.fromY=p.renderY;
-                        p.x=data.values[j];p.y=data.values[j+1];p.vx=data.values[j+2];p.vy=data.values[j+3];
-                    }
-                    system.extent=data.extent;system.lastMotionAt=performance.now();system.motionIntervalMs=Math.max(16,data.dt*1000);
-                    globalThis.AppPerformanceDiagnostics?.record('lipid worker compute',data.durationMs);
-                };
-            }
-            if(system.motionFailed)return;
-            const state=system.motion;if(state.pending)return;
-            const packet={id:++state.id,dt:Math.max(.001,system.motionDt),motionScale:lipidMotionScale(),extent:geometry.extent},transfer=[];
-            if(state.id===1)packet.init={extent:system.extent,particles:system.particles.map(p=>({x:p.x,y:p.y,vx:p.vx,vy:p.vy,side:p.side}))};
-            if(state.footprintsRevision!==system.footprintsRevision){packet.leaves=system.leaves;state.footprintsRevision=system.footprintsRevision;}
-            if(state.recycle){packet.recycle=state.recycle;transfer.push(state.recycle);state.recycle=null;}
-            state.pending=true;system.motionDt=0;
-            try{state.worker.postMessage(packet,transfer);}catch(error){
-                state.worker.terminate();system.motion=null;system.motionFailed=true;
-                console.error('Could not send lipid motion data:',error);
-                const status=document.getElementById('lipidMotionStatus');if(status)status.textContent='Lipid motion paused: '+error.message;
-            }
+        function resizeMembraneLipids(system,extent){
+            const scale=Math.max(2,extent-2)/Math.max(2,system.extent-2);
+            if(scale!==1)for(const p of system.particles){p.x*=scale;p.y*=scale;}
+            system.extent=extent;
         }
         function lipidDetailLevel(system,geometry){
             if(!physicsCamera||!physicsRenderer)return 10;
@@ -9164,31 +9365,33 @@
             if(!lipidsVisible){
                 if(membraneLipids){
                     for(const mesh of [membraneLipids.mesh,membraneLipids.atomMesh,membraneLipids.stickMesh,membraneLipids.glowMesh,membraneLipids.atomGlowMesh])mesh.visible=false;
-                    membraneLipids.motion?.worker.terminate();membraneLipids.motion=null;membraneLipids.motionDt=0;
                     membraneLipids.lastFrame=now;
                 }
                 return;
             }
             if(!membraneLipids)createMembraneLipids(geometry,now);
+            if(membraneLipids)resizeMembraneLipids(membraneLipids,geometry.extent);
             reconcileMembraneLipids(geometry,now);
             const system=membraneLipids;if(!system)return;
-            const molecular=physicsRepresentation==='ball-stick';
-            system.mesh.visible=!molecular;system.atomMesh.visible=molecular;system.stickMesh.visible=molecular;
+            const molecular=['ball-stick','gaussian'].includes(physicsRepresentation);
+            system.mesh.visible=!molecular;system.atomMesh.visible=molecular;system.stickMesh.visible=molecular&&physicsRepresentation!=='gaussian';
             system.glowMesh.visible=!molecular;system.atomGlowMesh.visible=molecular;
             system.glowMesh.count=0;system.atomGlowMesh.count=0;
             const dt=Math.max(.001,Math.min(.05,(now-system.lastFrame)/1000||.016));system.lastFrame=now;
             if(sideChainJiggleEnabled)system.spinClock+=dt*lipidMotionScale();
             if(now-system.lastFootprints>400){
                 for(const leaf of system.leaves)leaf.footprints=membraneLipidFootprints(geometry,leaf.side);
-                system.lastFootprints=now;system.footprintsRevision++;
+                system.lastFootprints=now;
             }
-            if(!system.motionFailed)dispatchLipidMotion(system,geometry,now,dt);
             const selected=linkedSelection?.kind==='lipid'?linkedSelection.particle:null;
             if(selected&&!system.particles.includes(selected))clearLinkedSelection();
-            const gpu=system.gpu,level=lipidDetailLevel(system,geometry);
+            const gpu=system.gpu,level=lipidDetailLevel(system,geometry),gaussian=physicsRepresentation==='gaussian';
             if(molecular&&gpu.detail!==level){
-                const pair=gpu.level(level);system.atomMesh.geometry=pair[0];system.stickMesh.geometry=pair[1];gpu.detail=level;updateLipidColors();
+                const pair=gpu.level(level);system.stickMesh.geometry=pair[1];gpu.detail=level;updateLipidColors();
             }
+            system.atomMesh.geometry=gpu.level(gpu.detail)[gaussian?2:0];
+            system.atomMesh.material=gaussian?gpu.gaussianMaterial:gpu.atomMaterial;
+            system.atomMesh.renderOrder=gaussian?100001:2;
             Object.assign(gpu.uniforms.lipidTime,{value:now*.001});gpu.uniforms.lipidClock.value=system.spinClock;
             gpu.uniforms.lipidMotionScale.value=lipidMotionScale();gpu.uniforms.lipidJiggle.value=sideChainJiggleEnabled?1:0;
             gpu.uniforms.lipidDepth.value=Math.min(1,Math.max(.5,(geometry.halfThickness-1)/20));
@@ -9198,15 +9401,14 @@
             const axesBySide=flat?new Map([-1,1].map(side=>[side,lipidMoleculeAxes(geometry,0,0,side)])):null;
             const sliceCos=Math.cos(membraneSliceAngle),sliceSin=Math.sin(membraneSliceAngle);
             const sliceCutoff=membraneSliced?membraneSliceThreshold(membraneSliceAngle,64,membraneSlicePercent)*geometry.extent:0;
-            const alpha=system.lastMotionAt===undefined?1:Math.min(1,Math.max(0,(now-system.lastMotionAt)/system.motionIntervalMs));
             const follow=1-Math.exp(-dt/3);
             system.visibleParticles.length=0;
             const basis=system.basis||(system.basis=new THREE.Matrix4()),tangent=system.tangent||(system.tangent=new THREE.Vector3()),
                 bitangent=system.bitangent||(system.bitangent=new THREE.Vector3()),inward=system.inward||(system.inward=new THREE.Vector3());
             for(const p of system.particles){
                 const oldX=p.renderX,oldY=p.renderY;
-                p.renderX=p.fromX===undefined?p.x:p.fromX+(p.x-p.fromX)*alpha;
-                p.renderY=p.fromY===undefined?p.y:p.fromY+(p.y-p.fromY)*alpha;
+                p.renderX=p.x;
+                p.renderY=p.y;
                 p.lipidAngle=p.baseAngle+p.lipidSpin*system.spinClock;
                 // Hidden particles stay in the worker's collision system but do
                 // not get molecular transforms or occupy rendered instances.
@@ -9236,6 +9438,10 @@
                     system.dummy.position.copy(p.world).addScaledVector(inward.set(...axes.inward),bob);
                     basis.makeBasis(tangent.set(...axes.tangent),bitangent.set(...axes.bitangent),inward.set(...axes.inward));
                     system.dummy.quaternion.setFromRotationMatrix(basis);
+                    if(sideChainJiggleEnabled){
+                        system.dummy.rotateX(.10*Math.sin(now*.0021*lipidMotionScale()+p.lipidPhase*1.7));
+                        system.dummy.rotateY(.10*Math.sin(now*.0025*lipidMotionScale()+p.lipidPhase));
+                    }
                     system.dummy.rotateZ(p.lipidAngle);
                     system.dummy.scale.set(1,1,gpu.uniforms.lipidDepth.value);system.dummy.updateMatrix();system.mesh.setMatrixAt(index,system.dummy.matrix);
                     if(selectionGlowVisible&&p===selected){system.dummy.scale.multiplyScalar(1.16);system.dummy.updateMatrix();system.glowMesh.setMatrixAt(0,system.dummy.matrix);system.glowMesh.count=1;system.glowMesh.instanceMatrix.needsUpdate=true;}
@@ -9248,7 +9454,7 @@
         }
         function pickMembraneLipid(raycaster){
             const system=membraneLipids;if(!system||!lipidsVisible)return null;
-            if(physicsRepresentation!=='ball-stick'){
+            if(!['ball-stick','gaussian'].includes(physicsRepresentation)){
                 const hit=firstVisiblePhysicsHit(raycaster.intersectObject(system.mesh,false),item=>Boolean(system.visibleParticles[item.instanceId]));
                 return hit?{particle:system.visibleParticles[hit.instanceId],distance:hit.distance}:null;
             }
@@ -9501,7 +9707,6 @@
         function runBackgroundSimulationTick() {
             if(!document.hidden||window.__benchmarkRun)return;
             const now=performance.now();
-            sampleSimulationBudgetLag(now);
             stepPhysicsSimulation();
             advanceConformationOptimization(now);
         }
@@ -9511,8 +9716,6 @@
                 backgroundSimulationTimer=setInterval(runBackgroundSimulationTick,250);
                 runBackgroundSimulationTick();
             }else{
-                // Do not count the time spent hidden as a slow display frame.
-                if(groupSimulation)groupSimulation.budgetLag=null;
                 physicsMeshesDirty=true;
             }
         }
@@ -9557,7 +9760,7 @@
         }
         function renderGpuSpinAtoms(original){
             const state=atomRepresentation;
-            const eligible=animationPlaying&&physicsRepresentation==='ball-stick'&&original&&state&&
+            const eligible=animationPlaying&&['ball-stick','gaussian'].includes(physicsRepresentation)&&original&&state&&
                 !sideChainJiggleEnabled&&!linkedSelection&&!additionalSelections.length;
             if(!eligible||!updateGpuSpin(state,atomVisualRotations)){
                 if(state?.gpuSpinActive){state.balls.setSpinTransforms(null,1,null);state.sticks?.setSpinTransforms?.(null,1,null);state.gpuSpinActive=false;atomFrameData(state.entries).displayRotations=null;}
@@ -9572,8 +9775,7 @@
         // Render animation loop
         function animateLoop() {
             requestAnimationFrame(animateLoop);
-            if(document.hidden)return;
-            sampleSimulationBudgetLag(performance.now());
+            if(document.hidden){spinLastTime=null;return;}
             const physicsVisualUpdated=flushPendingPhysicsVisual();
             document.getElementById('groupSimulationRunningBadge')?.classList.toggle('hidden',
                 !groupSimulation||groupSimulation.complete||groupSimulation.index<0||!physicsRunning||simulationPhase!==2||modelLoading);
@@ -9586,6 +9788,7 @@
             physicsPulseUniform.value = physicsPulseOpacity(performance.now(), physicsOriginColorMode);
 
             advanceAnimation(performance.now());
+            advanceProteinSpin(performance.now());
             if (!window.__benchmarkRun) {
                 stepPhysicsSimulation();
                 advanceConformationOptimization(performance.now());
@@ -9730,9 +9933,200 @@
                     alignedPairs:atoms2.map((_,i)=>({idx1:null,idx2:i}))});
             }
         }
+        // Match outgoing to incoming fragment slots using minimum-cost maximum flow.
+        // Sequence order makes the resulting cover acyclic, even for non-bipartite
+        // undirected fragment graphs. Small length-constrained cases remain exact.
+        function mergeReferenceFragments(results,onProgress=()=>{}) {
+            onProgress({stage:'merge-graph',completed:0,total:1});
+            const mergeSegments=pairs=>{
+                const segments=[];
+                for(const pair of pairs){const last=segments[segments.length-1];if(last&&pair.idx2===last.last.idx2+1)last.last=pair;else segments.push({first:pair,last:pair});}
+                return segments;
+            };
+            for(const result of results)if(result.entityType==='protein'){
+                const pairs=result.alignedPairs.filter(p=>p.idx1!==null&&p.idx2!==null);
+                result.mergeFragments=[{chainId:result.c1,referenceLength:result.atoms1.length,alignedResidues:pairs.length,
+                    targetStart:pairs.length?pairs[0].idx2+1:null,targetEnd:pairs.length?pairs[pairs.length-1].idx2+1:null,
+                    segments:mergeSegments(pairs).map(segment=>({start:segment.first.idx2+1,end:segment.last.idx2+1}))}];
+            }
+            const candidates=[], edges=[], groups=new Map();
+            for(const result of results) {
+                if(result.referenceOnly||!result.isEquivalent||result.entityType!=='protein')continue;
+                const pairs=result.alignedPairs.filter(p=>p.idx1!==null&&p.idx2!==null);
+                if(!pairs.length||result.atoms2.some(a=>a.sequenceOnly))continue;
+                const first=pairs[0],last=pairs[pairs.length-1];
+                const entry={result,first,last,segments:mergeSegments(pairs),index:candidates.length};
+                candidates.push(entry);edges.push([]);
+                const key=JSON.stringify([result.c2,result.atoms1[0]?.fileIndex]);
+                if(!groups.has(key))groups.set(key,[]);
+                groups.get(key).push(entry);
+            }
+            for(const entries of groups.values()) {
+                const model=entries[0].result.atoms2, contour=[0];
+                for(let i=1;i<model.length;i++)contour[i]=contour[i-1]+dist3d(model[i-1],model[i]);
+                for(const a of entries)for(const b of entries) {
+                    if(b.first.idx2<=a.first.idx2)continue;
+                    let overlap=0;
+                    for(const x of a.segments)for(const y of b.segments)overlap+=Math.max(0,Math.min(x.last.idx2,y.last.idx2)-Math.max(x.first.idx2,y.first.idx2)+1);
+                    if(overlap>3)continue;
+                    let best=null;
+                    for(const x of a.segments)for(const y of b.segments){
+                        const earlier=x.first.idx2<y.first.idx2?x:y, later=earlier===x?y:x;
+                        const left=earlier.last,right=later.first;
+                        const leftResult=earlier===x?a.result:b.result,rightResult=earlier===x?b.result:a.result;
+                        const distance=dist3d(leftResult.atoms1[left.idx1],rightResult.atoms1[right.idx1]);
+                        const available=Math.abs(contour[right.idx2]-contour[left.idx2]);
+                        if(Number.isFinite(distance)&&Number.isFinite(available)&&distance<=available+1e-6&&(!best||distance<best.distance))
+                            best={to:b.index,distance,available,overlap,gapResidues:Math.max(0,right.idx2-left.idx2-1)};
+                    }
+                    if(best)edges[a.index].push(best);
+                }
+            }
+            onProgress({stage:'merge-graph',completed:1,total:1});
+            for(const entry of candidates)entry.result.mergeCandidates=edges[entry.index].map(edge=>({
+                from:entry.result.c1,to:candidates[edge.to].result.c1,distance:edge.distance,available:edge.available,
+                overlap:edge.overlap,gapResidues:edge.gapResidues}));
+            // Solve disconnected components independently. Only length-constrained
+            // components of at most twelve fragments may use subset search.
+            const neighbours=candidates.map(()=>new Set());
+            edges.forEach((list,i)=>list.forEach(e=>{neighbours[i].add(e.to);neighbours[e.to].add(i);}));
+            const scalableCover=component=>{
+                const n=component.length,local=new Map(component.map((v,i)=>[v,i]));
+                const source=2*n,sink=source+1,size=sink+1,network=Array.from({length:size},()=>[]);
+                const add=(a,b,cost,join=null)=>{
+                    const forward={to:b,reverse:network[b].length,capacity:1,cost,join};
+                    network[a].push(forward);network[b].push({to:a,reverse:network[a].length-1,capacity:0,cost:-cost});
+                    return forward;
+                };
+                const links=[];
+                for(let i=0;i<n;i++){
+                    add(source,i,0);add(n+i,sink,0);
+                    for(const edge of edges[component[i]])links.push({from:component[i],edge,arc:add(i,n+local.get(edge.to),edge.distance,edge)});
+                }
+                // Nonnegative reduced costs permit dense Dijkstra, O(n^3) overall.
+                // Augment to exhaustion for maximum cardinality; shortest augmenting
+                // paths (including reverse arcs) minimise total distance at that size.
+                const potential=new Float64Array(size);
+                while(true){
+                    const distance=new Float64Array(size).fill(Infinity),done=new Uint8Array(size),previous=new Array(size);
+                    distance[source]=0;
+                    for(let round=0;round<size;round++){
+                        let u=-1;for(let i=0;i<size;i++)if(!done[i]&&(u<0||distance[i]<distance[u]))u=i;
+                        if(u<0||!Number.isFinite(distance[u]))break;
+                        done[u]=1;
+                        for(let k=0;k<network[u].length;k++){
+                            const arc=network[u][k];if(!arc.capacity||done[arc.to])continue;
+                            const next=distance[u]+Math.max(0,arc.cost+potential[u]-potential[arc.to]);
+                            if(next<distance[arc.to]-1e-10){distance[arc.to]=next;previous[arc.to]=[u,k];}
+                        }
+                    }
+                    if(!Number.isFinite(distance[sink]))break;
+                    for(let i=0;i<size;i++)if(Number.isFinite(distance[i]))potential[i]+=distance[i];
+                    for(let v=sink;v!==source;){const [u,k]=previous[v],arc=network[u][k];arc.capacity--;network[v][arc.reverse].capacity++;v=u;}
+                }
+                const outgoing=new Map(),incoming=new Set();
+                for(const link of links)if(!link.arc.capacity){outgoing.set(link.from,link.edge);incoming.add(link.edge.to);}
+                const paths=[];
+                for(const start of component)if(!incoming.has(start)){
+                    const members=[start],joins=[];let current=start;
+                    while(outgoing.has(current)){const edge=outgoing.get(current);joins.push(edge);current=edge.to;members.push(current);}
+                    if(members.length>1)paths.push({members,joins,cost:joins.reduce((sum,e)=>sum+e.distance,0)});
+                }
+                return paths;
+            };
+            // If a large cover exceeds five fragments, optimally split each chosen
+            // path using DP. This bounded fallback preserves feasibility but cannot
+            // guarantee the globally optimal length-constrained cover; expose that
+            // qualification on the result rather than silently claiming optimality.
+            const splitCover=paths=>paths.flatMap(path=>{
+                if(path.members.length<=5)return [path];
+                const n=path.members.length,dp=[{count:0,cost:0,paths:[]}];
+                for(let end=1;end<=n;end++){
+                    let best=null;
+                    for(let length=1;length<=5&&length<=end;length++){
+                        const start=end-length,joins=path.joins.slice(start,end-1),cost=joins.reduce((sum,e)=>sum+e.distance,0);
+                        const prior=dp[start],candidate={count:prior.count+1,cost:prior.cost+cost,paths:[...prior.paths,...(length>1?[{members:path.members.slice(start,end),joins,cost,lengthConstrainedApproximation:true}]:[])]};
+                        if(!best||candidate.count<best.count||candidate.count===best.count&&candidate.cost<best.cost)best=candidate;
+                    }
+                    dp[end]=best;
+                }
+                return dp[n].paths;
+            });
+            const visited=new Set(),selected=[];
+            onProgress({stage:'merge-assignment',completed:0,total:candidates.length});
+            for(let root=0;root<candidates.length;root++) {
+                if(visited.has(root))continue;
+                const component=[],pending=[root];visited.add(root);
+                while(pending.length){const i=pending.pop();component.push(i);for(const j of neighbours[i])if(!visited.has(j)){visited.add(j);pending.push(j);}}
+                if(component.length<2){onProgress({stage:'merge-assignment',completed:visited.size,total:candidates.length});continue;}
+                const cover=scalableCover(component);
+                if(cover.every(path=>path.members.length<=5)||component.length>12){
+                    const approximate=cover.some(path=>path.members.length>5);
+                    if(approximate)for(const i of component)candidates[i].result.mergeAssignmentApproximate=true;
+                    selected.push(...splitCover(cover));
+                    onProgress({stage:'merge-assignment',completed:visited.size,total:candidates.length});
+                    continue;
+                }
+                const local=new Map(component.map((v,i)=>[v,i])),pathsByMember=component.map(()=>[]);
+                const enumerate=(members,joins,cost,mask)=>{
+                    if(members.length>1){const path={members:members.slice(),joins:joins.slice(),cost,mask};for(const i of members)pathsByMember[local.get(i)].push(path);}
+                    if(members.length===5)return;
+                    for(const edge of edges[members[members.length-1]]){
+                        const bit=1n<<BigInt(local.get(edge.to));
+                        if(!(mask&bit))enumerate([...members,edge.to],[...joins,edge],cost+edge.distance,mask|bit);
+                    }
+                };
+                for(const i of component)enumerate([i],[],0,1n<<BigInt(local.get(i)));
+                const memo=new Map();
+                const solve=mask=>{
+                    if(!mask)return {joins:0,cost:0,paths:[]};
+                    if(memo.has(mask))return memo.get(mask);
+                    let i=0;while(!(mask&(1n<<BigInt(i))))i++;
+                    let best=solve(mask&~(1n<<BigInt(i)));
+                    for(const path of pathsByMember[i])if((path.mask&mask)===path.mask){
+                        const tail=solve(mask&~path.mask),joins=tail.joins+path.members.length-1,cost=tail.cost+path.cost;
+                        if(joins>best.joins||joins===best.joins&&cost<best.cost-1e-9)best={joins,cost,paths:[path,...tail.paths]};
+                    }
+                    memo.set(mask,best);return best;
+                };
+                selected.push(...solve((1n<<BigInt(component.length))-1n).paths);
+                onProgress({stage:'merge-assignment',completed:visited.size,total:candidates.length});
+            }
+            if(!candidates.length)onProgress({stage:'merge-assignment',completed:0,total:0});
+            const replacements=new Map(),removed=new Set();
+            for(const path of selected){
+                const fragments=path.members.map(i=>candidates[i].result),base=fragments[0];
+                const atoms1=fragments.flatMap(r=>r.atoms1),seq1=atoms1.map(a=>a.singleChar).join(''),seq2=base.seq2;
+                const alignedPairs=[],used=new Set();let offset=0;
+                for(const fragment of fragments){
+                    for(const pair of fragment.alignedPairs)if(pair.idx1!==null){
+                        const idx2=pair.idx2!==null&&!used.has(pair.idx2)?pair.idx2:null;
+                        if(idx2!==null)used.add(idx2);
+                        alignedPairs.push({idx1:offset+pair.idx1,idx2});
+                    }
+                    offset+=fragment.atoms1.length;
+                }
+                // Order mapped residues by target position even when chains interleave.
+                alignedPairs.sort((a,b)=>(a.idx2??Infinity)-(b.idx2??Infinity));
+                // Insert every unobserved target residue exactly once, including the bridge.
+                let next=0;const union=[];
+                for(const pair of alignedPairs){if(pair.idx2!==null){while(next<pair.idx2){if(!used.has(next))union.push({idx1:null,idx2:next});next++;}next=Math.max(next,pair.idx2+1);}union.push(pair);}
+                while(next<base.atoms2.length)union.push({idx1:null,idx2:next++});
+                const mapped=union.filter(p=>p.idx1!==null&&p.idx2!==null),denominator=Math.min(atoms1.length,base.atoms2.length);
+                const merged={...base,c1:fragments.map(r=>r.c1).join(':'),sourceChains:fragments.map(r=>r.c1),atoms1,seq1,
+                    alignedPairs:union,mergeFragments:fragments.flatMap(r=>r.mergeFragments),mergeCandidates:fragments.flatMap(r=>r.mergeCandidates||[]),mergeConnections:path.joins.map((e,i)=>({from:fragments[i].c1,to:fragments[i+1].c1,...e})),
+                    map1To2:new Map(mapped.map(p=>[p.idx1,p.idx2])),map2To1:new Map(mapped.map(p=>[p.idx2,p.idx1])),
+                    align1:union.map(p=>p.idx1===null?'-':seq1[p.idx1]).join(''),align2:union.map(p=>p.idx2===null?'-':seq2[p.idx2]).join(''),
+                    identity:100*mapped.filter(p=>seq1[p.idx1]===seq2[p.idx2]).length/denominator,
+                    similarity:100*mapped.filter(p=>isSimilarAA(seq1[p.idx1],seq2[p.idx2])).length/denominator,
+                    score:fragments.reduce((sum,r)=>sum+r.score,0),editedMatch:fragments.some(r=>r.editedMatch)};
+                replacements.set(base,merged);for(const fragment of fragments.slice(1))removed.add(fragment);
+            }
+            return results.filter(r=>!removed.has(r)).map(r=>replacements.get(r)||r);
+        }
         function computeModellingAlignments(data,onProgress=()=>{}) {
             const modelData1={chains:data.chains1},modelData2={chains:data.chains2};
-            const alignmentResults=[],automaticChainMatches=new Map(),editedChainMatches=new Map(data.editedMatches);
+            let alignmentResults=[];const automaticChainMatches=new Map(),editedChainMatches=new Map(data.editedMatches);
             const threshold=data.threshold;
             let completed=0;const sequenceCache=new Map();
             const cachedAlignment=(a,b,nucleotide)=>{const key=JSON.stringify([alignmentMode,alignmentGapOpen,alignmentGapExtend,nucleotide,a,b]);if(!sequenceCache.has(key))sequenceCache.set(key,nucleotide?alignProteinSequences(a,b,alignmentMode,(x,y)=>x===y?4:-3):alignProteinSequences(a,b));return {...sequenceCache.get(key)};};
@@ -9795,6 +10189,7 @@
                 onProgress({stage:'alignments',completed:++completed,total:chains1.length});
             });
 
+            alignmentResults=mergeReferenceFragments(alignmentResults,onProgress);
             addNonPolymerAlignments(chains1,chains2,alignmentResults,modelData1.chains,modelData2.chains);
 
             for(let index=0;index<alignmentResults.length;index++){
@@ -9822,10 +10217,12 @@
                     alignmentGapOpen=data.settings.gapOpen;
                     alignmentGapExtend=data.settings.gapExtend;
                     const progress=value=>self.postMessage({id:data.id,progress:value});
+                    referenceAlignment.cache=data.operation==='drafts'?new Map():null;
                     const output=['reference','drafts'].includes(data.operation)
-                        ? {assembly:calculateReferenceAssembly(data.files,progress)}
+                        ? {assembly:calculateReferenceAssembly(data.files,progress,data.operation==='drafts')}
                         : computeModellingAlignments(data,progress);
-                    if(data.operation==='drafts')alignDraftAssembly(output.assembly);
+                    if(data.operation==='drafts')alignDraftAssembly(output.assembly,progress);
+                    referenceAlignment.cache=null;
                     const transfer=(output.results||[]).map(result=>result.initialCoordinates.buffer);
                     MemoryData.packAtoms(output);const encoded=MemoryData.wire({id:data.id,...output});
                     self.postMessage(encoded,MemoryData.buffers(encoded));
@@ -9845,7 +10242,7 @@
                 superposeWeightedIterative,scoreFitUnderTransform,isEquivalentPair,extractEquivalentPairs,
                 computeChainTmAlignment,nonPolymerAtomKey,nonPolymerSignature,nonPolymerPairs,
                 transformedPoint,referenceCenter,dist3d,addNonPolymerAlignments,
-                calculatePairTmMetrics,calculateAlignmentDistances,computeModellingAlignments,
+                calculatePairTmMetrics,calculateAlignmentDistances,mergeReferenceFragments,computeModellingAlignments,
                 referenceSequence,referenceIsWaterEntry,referenceAlignment,referenceTypeCompatible,
                 referenceFingerprint,referenceFingerprintCost,referenceAssign,refineReferenceChainAssignments,
                 referenceTransformPoint,calculateReferenceAssembly];
@@ -9936,7 +10333,9 @@
                 // Native reference IDs identify the source species. Manually selected targets
                 // can be homologs from another species (for example the MotAB preset).
                 // Explicit STRING target mappings, including unresolved ones, stay authoritative.
-                if(type==='protein'&&!candidates[chain].length&&(!records.length||chainRecords.length&&chainRecords.every(record=>['SIFTS','UniProt sequence search'].includes(record.origin)))){
+                const nativeMapping=record=>['SIFTS','UniProt sequence search'].includes(record.origin);
+                const relevantRecords=records.filter(record=>ids.includes(record.pdbId?.toUpperCase()));
+                if(type==='protein'&&!candidates[chain].length&&(!relevantRecords.length||(chainRecords.length?chainRecords:relevantRecords).every(nativeMapping))){
                     candidates[chain]=Object.keys(modelData2.chains).filter(key=>(modelData2.chains[key][0]?.entityType||'protein')===type);
                     sequenceFallbackChains.add(chain);
                 }
@@ -9953,6 +10352,7 @@
             const started=performance.now();
             const snapshot=chains=>Object.fromEntries(Object.entries(chains).map(([key,atoms])=>[key,atoms.map(modellingAtomSnapshot)]));
             const sequenceFallbackChains=new Set();
+            if(modelLoading)document.getElementById('modelBuildTime').textContent='Looking up reference chain mappings…';
             const chainCandidates=await mappedAlignmentCandidates(sequenceFallbackChains);
             if(generation!==modelBuildGeneration)return false;
             const data={id,chainCandidates,sequenceFallbackChains:[...sequenceFallbackChains],chains1:snapshot(referenceChains),chains2:snapshot(modelChains),
@@ -9962,19 +10362,23 @@
                 const output=await runModellingWorker(data,progress=>{
                     if(generation===modelBuildGeneration&&modelLoading){
                         const {stage,completed,total}=progress;
-                        updateProgressBar((stage==='fits'?89:85)+4*completed/Math.max(1,total));
-                        document.getElementById('modelBuildTime').textContent=
-                            `${stage==='fits'?'Fitting structures':'Aligning chains'} (${completed}/${total})…`;
+                        const stages={alignments:[85,2,'Aligning chains'],'merge-graph':[87,1,'Finding possible reference-fragment joins'],'merge-assignment':[88,1,'Joining reference fragments'],fits:[89,4,'Fitting structures']};
+                        const [base,span,label]=stages[stage]||[85,0,stage];
+                        updateProgressBar(base+span*completed/Math.max(1,total));
+                        document.getElementById('modelBuildTime').textContent=`${label} (${completed}/${total})…`;
                     }
                 });
                 if(id!==modellingCalculationVersion||generation!==modelBuildGeneration||
                     referenceChains!==modelData1.chains||modelChains!==modelData2.chains)return false;
                 // Restore the original atom objects used by rendering and export.
                 const results=output.results.map(result=>{
-                    const atoms1=referenceChains[result.c1]||[];
+                    const atoms1=result.sourceChains?result.sourceChains.flatMap(chain=>referenceChains[chain]||[]):referenceChains[result.c1]||[];
                     return {...result,atoms1,atoms2:result.referenceOnly?atoms1:modelChains[result.c2]||[]};
                 });
-                alignmentResults=results;PerfTracker.metrics.sequenceAlignments=output.sequenceAlignmentCount;automaticChainMatches.clear();
+                alignmentResults=results;
+                globalThis.ChainMergingReport?.setAnnotations(uniProtAnnotations);
+                globalThis.ChainMergingReport?.update(results,{modelChains,referenceChains,reference:referenceFiles.map(file=>file.pdbId).join(', '),accessionForId:uniProtAccession});
+                PerfTracker.metrics.sequenceAlignments=output.sequenceAlignmentCount;automaticChainMatches.clear();
                 for(const [chain,match] of output.automaticMatches)automaticChainMatches.set(chain,match);
                 matrixDataVersion++;
                 renderAlignmentTable();buildMorphMatrixBlocks();
@@ -9989,8 +10393,10 @@
             if(modelLoading)return;
             const previous = alignmentResults.find(result=>result.c1===chainId);
             if (!previous || !modelData2.chains[newChain] || modelData2.chains[newChain][0]?.entityType!==previous.entityType) return;
-            if(newChain===automaticChainMatches.get(chainId))editedChainMatches.delete(chainId);
-            else editedChainMatches.set(chainId,newChain);
+            for(const sourceChain of previous.sourceChains||[chainId]){
+                if(newChain===automaticChainMatches.get(sourceChain))editedChainMatches.delete(sourceChain);
+                else editedChainMatches.set(sourceChain,newChain);
+            }
             try{
                 if(!await computeAllChainAlignments())return;
                 renderChainLegends();
@@ -10015,6 +10421,7 @@
             return `rgb(${rgb.join(',')})`;
         }
         function renderAlignmentTable() {
+            renderAboutProteinComplex();
             const tbody = document.getElementById('alignmentTableBody');
             tbody.innerHTML = '';
 
@@ -10058,6 +10465,11 @@
                         </button>
                     </td>
                 `;
+                if(res.mergeCandidates?.length)tr.title=[
+                    res.sourceChains?`Merged fragments: ${res.sourceChains.join(' → ')}`:'Possible fragment connections',
+                    ...(res.mergeAssignmentApproximate?['Five-fragment limit: bounded assignment; global optimum is not guaranteed.']:[]),
+                    ...res.mergeCandidates.map(edge=>`${edge.from} → ${edge.to}: ${edge.distance.toFixed(1)} Å separation / ${edge.available.toFixed(1)} Å backbone; ${edge.gapResidues} intervening residues${edge.overlap?`; ${edge.overlap} overlapping residues`:''}${res.mergeConnections?.some(chosen=>chosen.from===edge.from&&chosen.to===edge.to)?' (selected)':''}`)
+                ].join('\n');
                 tr.dataset.alignmentIndex = String(idx);
                 tr.classList.toggle('linked-selected',linkedSelection?.chain===res.c1);
                 tbody.appendChild(tr);
@@ -10538,6 +10950,7 @@
         // ==========================================
         let modelBuildStartedAt = null;
         let modelBuildCompleted = false;
+        let buildSettingsChanged = false;
         let modelBuildInputKey = null;
         let completedModelInputKey = null;
         const uploadedStructureFiles = { reference: null, alphaFold: null };
@@ -10852,22 +11265,55 @@
                 } catch (_) { resolve(null); }
             });
         }
+        function recentFileEvictions(entries,currentKey,limit){
+            let total=entries.reduce((sum,entry)=>sum+entry.size,0);
+            const removed=[];
+            for(const entry of [...entries].sort((a,b)=>a.time-b.time)){
+                if(total<=limit)break;
+                if(entry.key===currentKey)continue;
+                removed.push(entry.key);total-=entry.size;
+            }
+            return removed;
+        }
         async function cacheRecentFile(slot,file) {
             const db=await recentFileDatabase();if(!db)return;
+            // Keep recent uploaded copies within a disk budget; the selected file
+            // is retained even when it alone exceeds that budget.
             try {await new Promise(resolve=>{
-                    const transaction=db.transaction('files','readwrite');
-                    transaction.objectStore('files').put(file,recentFileKey(slot,file));
-                    transaction.oncomplete=resolve;transaction.onerror=resolve;transaction.onabort=resolve;
-                });} catch (_) { /* Browser storage is optional. */ }
-            db.close();
+                const transaction=db.transaction('files','readwrite'),store=transaction.objectStore('files');
+                const key=recentFileKey(slot,file),limit=512*1024*1024,entries=[];
+                store.put({file,cachedAt:Date.now()},key);
+                const request=store.openCursor();request.onsuccess=()=>{
+                    const cursor=request.result;
+                    if(cursor){const value=cursor.value,stored=value?.file||value;entries.push({key:cursor.key,size:Number(stored?.size)||0,time:Number(value?.cachedAt)||0});cursor.continue();return;}
+                    for(const expired of recentFileEvictions(entries,key,limit))store.delete(expired);
+                };
+                transaction.oncomplete=resolve;transaction.onerror=resolve;transaction.onabort=resolve;
+            });} catch (_) { /* Browser storage is optional. */ }
+            db.close();void updateBrowserStorageStatus();
         }
+        async function updateBrowserStorageStatus(){
+            const status=document.getElementById('browserStorageStatus');if(!status)return;
+            if(!navigator.storage?.estimate){status.textContent='Browser storage usage is unavailable.';return;}
+            try{const estimate=await navigator.storage.estimate();
+                status.textContent=`Browser storage used by this site: ${(estimate.usage/1048576).toFixed(1)} MiB (estimated quota: ${(estimate.quota/1048576).toFixed(1)} MiB).`;
+            }catch(_){status.textContent='Browser storage usage is unavailable.';}
+        }
+        document.getElementById('clearRecentFileCache')?.addEventListener('click',async()=>{
+            const db=await recentFileDatabase(),status=document.getElementById('browserStorageStatus');
+            if(!db){status.textContent='Cached files could not be accessed.';return;}
+            try{await new Promise((resolve,reject)=>{const tx=db.transaction('files','readwrite');tx.objectStore('files').clear();tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});
+                await updateBrowserStorageStatus();status.textContent+=' Cached uploaded files cleared; recent builds may require those files again.';
+            }catch(_){status.textContent='Cached files could not be cleared.';}finally{db.close();}
+        });
+        void updateBrowserStorageStatus();
         async function cachedRecentFile(slot,info) {
             if(typeof info==='string')return null;
             const db=await recentFileDatabase();if(!db)return null;
             let file=null;
             try {file=await new Promise(resolve=>{
                     const request=db.transaction('files','readonly').objectStore('files').get(recentFileKey(slot,info));
-                    request.onsuccess=()=>resolve(request.result||null);request.onerror=()=>resolve(null);
+                    request.onsuccess=()=>resolve(request.result?.file||request.result||null);request.onerror=()=>resolve(null);
                 });} catch (_) { /* The cached file may have been evicted. */ }
             db.close();return file;
         }
@@ -11068,7 +11514,8 @@
             else if (!building) hidePhysicsViewerLoading();
             const built=modelBuildCompleted&&!building&&completedModelInputKey!==null&&completedModelInputKey===currentModelInputKey();
             document.getElementById('jumpToHomologyBtn')?.classList.toggle('hidden',!built);
-            button.disabled=Boolean(preparing);
+            button.disabled=Boolean(building);
+            document.getElementById('cancelBuildBtn')?.classList.toggle('hidden',!building);
             button.setAttribute('aria-busy',String(building));
             button.classList.toggle('homology-build-glow', building);
             if (building) {
@@ -11077,8 +11524,9 @@
                 spinner.className = 'fa-solid fa-circle-notch fa-spin';
                 spinner.setAttribute('aria-hidden', 'true');
                 button.append(spinner, document.createTextNode(' Building homology model...'));
-            } else button.textContent = built
-                ? 'Homology Model Built (see below)' : 'Build Homology Model';
+            } else button.textContent = buildSettingsChanged
+                ? 'Rebuild with new settings' : built
+                    ? 'Homology Model Built (see below)' : 'Build Homology Model';
         }
         let modelBuildGeneration = 0;
         let modelBuildAbortController = null;
@@ -11091,7 +11539,15 @@
         function showPhysicsViewerLoading(){document.getElementById('physicsInitialLoading')?.classList.remove('hidden');}
         function hidePhysicsViewerLoading(){document.getElementById('physicsInitialLoading')?.classList.add('hidden');}
         function cancelModelBuild() {
-            if (!modelLoading && !(modelBuildStartedAt!==null&&!modelBuildCompleted)) return;
+            if (!modelLoading && !(modelBuildStartedAt!==null&&!modelBuildCompleted) && !referenceSearchLoading && !siftsLookupLoading && !stringMatchingLoading) return;
+            if(referenceSearchLoading){
+                referenceSearchRequest++;
+                referenceSearchLoading=false;
+                updateReferenceSequenceSearchButton();
+                document.getElementById('referenceSequenceSearchStatus').textContent='Search cancelled.';
+            }
+            if(siftsLookupLoading){siftsRequestToken++;clearSiftsLookupLoading(true);}
+            if(stringMatchingLoading)cancelStringMatching();
             globalThis.BuildTimeline?.finish('Cancelled');
             ++modelBuildGeneration;
             modelBuildAbortController?.abort();
@@ -11132,6 +11588,7 @@
         }
 
         function clearModelUI() {
+            globalThis.ChainMergingReport?.clear();
             if(typeof clearStagedBuild==='function')clearStagedBuild();
             disposePhysicsSimulationWorker();
             cancelModellingCalculations();
@@ -11214,7 +11671,7 @@
             alphaFoldMolstarFiles = [];
             for (const canvas of [canvas1, canvas2, diffCanvas, morphCanvas]) if (canvas) canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);
             closeInspector(); inspectedAlignmentIndex = null; alignmentDistanceData = null;
-            for (const id of ['PDBLegend','AFLegend','PDBChainSelect','AFChainSelect','comparedPairSelect','alignmentTableBody','alignmentCodeBox','physicsChainToggles','physicsNonProteinToggles']) document.getElementById(id)?.replaceChildren();
+            for (const id of ['PDBLegend','AFLegend','PDBChainSelect','AFChainSelect','comparedPairSelect','alignmentTableBody','alignmentCodeBox','physicsChainToggles','physicsProteinToggles','physicsNonProteinToggles']) document.getElementById(id)?.replaceChildren();
             document.getElementById('physicsNonProteinToggleSection')?.classList.add('hidden');
             for (const id of ['tooltip1','tooltip2','diffTooltip','morphTooltip','PDBResolutionNotice','AFResolutionNotice','diffResolutionNotice','morphResolutionNotice','physicsChainDragBadge']) document.getElementById(id)?.classList.add('hidden');
             for (const id of ['PDBTitle','AFTitle','PDBResCount','AFResCount','physicsNodeCount','physicsSpringDisplay','physicsEnergyText','physicsSpeedText','tmScoreDisplay','tmRmsdDisplay']) {
@@ -11233,6 +11690,12 @@
             updateHomologyViewerToggle();
         }
         function loadModelPair(pdbId1, pdbId2Raw, referenceSource=null) {
+            if(referenceSource==='example' && pdbId1.trim().toUpperCase().replace(/\s/g,'')==='6IOK,6IOL'){
+                referenceConformationPlan={pdbIds:['6IOK','6IOL'],groups:[
+                    {name:'0-degree state',pdbIds:['6IOK']},
+                    {name:'60-degree state',pdbIds:['6IOL']}
+                ]};
+            }
             const previousReference = chainMappingReport?.referenceText ?? document.getElementById('pdbInput1').value;
             if (previousReference.trim().toUpperCase() !== pdbId1.trim().toUpperCase()) {
                 const status = document.getElementById('fetchSiftsStatus');
@@ -11276,6 +11739,7 @@
             }));}catch {/* Input validation is reported by the model loader. */}
             globalThis.BuildTimeline?.beginBuild();
             modelBuildStartedAt = performance.now();
+            buildSettingsChanged = false;
             modelBuildCompleted = false; modelLoading = true; simulationAutoRendered = false;
             for(const [lane,task] of backgroundTasks)if(lane.startsWith('matrix:')&&lane.endsWith(':range'))task.cancel();
             modelBuildInputKey = currentModelInputKey();
@@ -11302,9 +11766,10 @@
 
             try {
                 const entries1 = modelInputEntries(pdbId1, 'reference');
-                const entries2 = modelInputEntries(pdbId2Raw, 'alphaFold');
+                const directReferences = document.getElementById('useReferencesDirectly').checked;
+                const entries2 = directReferences ? [] : modelInputEntries(pdbId2Raw, 'alphaFold');
                 if (!entries1.length) throw new Error('Enter at least one Reference PDB ID.');
-                if (!entries2.length) throw new Error('Enter at least one AlphaFold ID or sequence.');
+                if (!directReferences && !entries2.length) throw new Error('Enter at least one AlphaFold ID or sequence.');
                 if (entries1.length > 1) document.getElementById('referenceStructureName').textContent = `Reference: ${entries1.map(entry=>entry.id).join(' + ')}`;
                 else if (entries1[0].uploadFile) document.getElementById('referenceStructureName').textContent = `Reference: ${entries1[0].id}`;
                 else void updateReferenceStructureName(entries1[0], modelBuildGeneration);
@@ -11329,7 +11794,34 @@
                 ]);
                 if (generation !== modelBuildGeneration) return;
                 globalThis.BuildTimeline?.end(filesTiming);
-                if(files1.length>1){beginStagedBuild(files1,fileResults2,generation);files1=[files1[0]];model1Influence=multiReferenceBuild.weights[0];}
+                let directAccessions=[];
+                if(directReferences){
+                    const ids=files1.map(file=>file.pdbId.toUpperCase()).filter(id=>/^[0-9][A-Z0-9]{3}$/.test(id));
+                    if(ids.length){
+                        setBuildStatus('Looking up reference chain UniProt IDs…');
+                        try {
+                            const mappings=await Promise.all(ids.map(id=>{
+                                const cached=referenceSearchResults.find(hit=>hit.identifier===id&&hit.mapping);
+                                return cached?cached.mapping:discoverReferenceMappings([id],AbortSignal.any([buildSignal,AbortSignal.timeout(180000)]));
+                            }));
+                            if(generation!==modelBuildGeneration)return;
+                            const records=mappings.flatMap(mapping=>mapping.records);
+                            directAccessions=[...new Set(mappings.flatMap(mapping=>mapping.accessions))];
+                            renderChainMappingReport({referenceText:document.getElementById('pdbInput1').value,targetText:pdbId2Raw,records,notes:mappings.flatMap(mapping=>mapping.notes)});
+                            for(const file of files1)for(const [chain,atoms] of Object.entries(file.parsed.chains)){
+                                const matches=records.filter(record=>record.pdbId?.toUpperCase()===file.pdbId.toUpperCase()&&
+                                    (record.chains||[]).includes(file.format==='mmcif'?chain:(record.chainAliases?.[chain]||chain)));
+                                const accessions=[...new Set(matches.flatMap(record=>record.accessions||[]))];
+                                if(accessions.length===1)for(const atom of atoms)if((atom.entityType||'protein')==='protein')atom.sourcePdbId=accessions[0];
+                            }
+                        } catch(error){
+                            if(buildSignal.aborted)throw error;
+                            console.warn('Reference UniProt discovery unavailable:',error);
+                            document.getElementById('fetchSiftsStatus').textContent='Reference chain UniProt lookup failed; the build will continue without those annotations.';
+                        }
+                    }
+                }
+                if(files1.length>1 || directReferences){beginStagedBuild(files1,fileResults2,generation);multiReferenceBuild.directReferences=directReferences;files1=[files1[0]];model1Influence=multiReferenceBuild.weights[0];}
                 const file1 = files1[0];
                 referenceFiles = files1;
                 // Reference coordinate locking is always enabled.
@@ -11380,7 +11872,7 @@
                     : `${referenceTypes.protein} Residues`;
 
                 // Parse AlphaFold
-                const built2 = buildModel2FromFiles(fileResults2);
+                const built2 = directReferences ? {chains:parsed1.chains,caAtoms:parsed1.allAtoms,files:directAccessions.map(pdbId=>({pdbId}))} : buildModel2FromFiles(fileResults2);
                 modelData2.pdbId = id2List.join(', ');
                 modelData2.chains = built2.chains;
                 modelData2.caAtoms = built2.caAtoms;
@@ -11420,7 +11912,8 @@
 
                 populateChainSelectors();
                 setBuildStatus('Mapping chains and aligning target sequences…');
-                if(!await computeAllChainAlignments()||generation!==modelBuildGeneration)return;
+                if(directReferences) setDirectReferenceAlignments(modelData1.chains);
+                else if(!await computeAllChainAlignments()||generation!==modelBuildGeneration)return;
 
                 resetCanvasViews();
                 renderChainLegends();
@@ -11430,14 +11923,18 @@
                 setBuildStatus('Preparing simulation and building the spring network…');
                 initPhysicsSimulation();
                 if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild){multiReferenceBuild.busy=false;renderStagedReferenceControls();renderStagedBuildControls();}
-                const accuracyWarning = [modelAccuracyWarning(physicsNodes),currentStringReviewValid()?stringPartialBuildWarning(stringMatchReview.response.matches):''].filter(Boolean).join('\n\n');
+                const accuracyWarning = [directReferences?'':modelAccuracyWarning(physicsNodes),currentStringReviewValid()?stringPartialBuildWarning(stringMatchReview.response.matches):''].filter(Boolean).join('\n\n');
                 if (accuracyWarning) showWarning(accuracyWarning);
                 if(!physicsNodes.length)hidePhysicsViewerLoading();
                 if (backboneLinesGroup) backboneLinesGroup.visible = true;
                 readyModelGeneration = generation;
                 modelLoading = false;
                 modelBuildAbortController = null;
-                void loadUniProtAnnotations(fileResults2,generation);
+                if(directReferences){
+                    await loadUniProtAnnotations(directAccessions.map(pdbId=>({pdbId})),generation);
+                    if(generation!==modelBuildGeneration)return;
+                    const build=multiReferenceBuild;void advanceStagedBuild().catch(error=>failStagedBuild(error,build));
+                } else void loadUniProtAnnotations(fileResults2,generation);
                 if(!multiReferenceBuild)animationOnModelReady();
                 updateBuildButtonState();
                 updateHomologyViewerToggle();
@@ -11829,12 +12326,8 @@
         // 14. EVENT LISTENERS SETUP
         // ==========================================
         function setupEventListeners() {
-            const graphButton=document.getElementById('physicsGraphToggle'),graphPanel=document.getElementById('physicsGraphPanel');
-            graphButton?.addEventListener('click',()=>{
-                const open=graphPanel.classList.toggle('hidden')===false;
-                graphButton.setAttribute('aria-expanded',String(open));
-                graphButton.querySelector('span').textContent=open?'Hide graph':'View graph';
-                if(open)renderPhysicsGraph();
+            document.getElementById('physicsGraphPanel')?.addEventListener('toggle',event=>{
+                if(event.currentTarget.open)renderPhysicsGraph();
             });
             document.getElementById('physicsGraphRange')?.addEventListener('change',renderPhysicsGraph);
             document.getElementById('physicsGraphLogScale')?.addEventListener('click',event=>{
@@ -11882,7 +12375,7 @@
                 const button=event.target.closest('button');if(!button||button.closest('#physicsGraphPanel'))return;
                 const viewer=document.getElementById('physicsContainer');
                 if(viewer&&(button.compareDocumentPosition(viewer)&Node.DOCUMENT_POSITION_FOLLOWING))return;
-                if(['physicsGraphToggle','resetPhysicsSimulationBtn','physicsControlsToggle','physicsMembraneDetailsButton','resetPhysicsViewBtn','createAnimationBtn','quickPlayAnimationBtn'].includes(button.id))return;
+                if(['resetPhysicsSimulationBtn','physicsControlsToggle','physicsMembraneDetailsButton','resetPhysicsViewBtn','createAnimationBtn','quickPlayAnimationBtn'].includes(button.id))return;
                 if(!button.closest('#physicsControlsPanel,.physics-toggle-row,[role="group"][aria-label="Physics representation"]'))return;
                 markPhysicsGraphControl(graphControlLabel(button),button.id||button.textContent.trim());
             });
@@ -11946,13 +12439,9 @@
             document.getElementById('membraneSizeSlider')?.addEventListener('input',event=>{
                 membraneSizeScale=Math.max(.5,Math.min(2,Number(event.target.value)||1));
                 document.getElementById('membraneSizeValue').textContent=`${membraneSizeScale.toFixed(2)}×`;
-                if(inferredMembrane){
-                    const targetGeometry={...inferredMembrane,extent:inferredMembrane.extent*membraneSizeScale};
-                    if(!membraneLipids)createMembraneLipids(targetGeometry,performance.now());
-                    else reconcileMembraneLipids(targetGeometry,performance.now(),true);
-                }
                 if(membraneMeshes)for(const mesh of membraneMeshes.children)mesh.userData.lastCutout=0;
             });
+            document.getElementById('cancelBuildBtn').addEventListener('click', cancelModelBuild);
             document.getElementById('dualPdbForm').addEventListener('submit', (e) => {
                 e.preventDefault();
                 if (modelLoading || (modelBuildStartedAt!==null&&!modelBuildCompleted&&!referenceSearchLoading&&!siftsLookupLoading&&!stringMatchingLoading)) { cancelModelBuild(); return; }
@@ -11978,6 +12467,7 @@
                         return;
                     }
                 }
+                if(document.getElementById('useReferencesDirectly').checked){loadModelPair(id1,id2);return;}
                 if(stringSequenceFile() || stringAliasesFile()) {
                     if(currentStringReviewValid()&&stringMatchesBuildable(stringMatchReview.response.matches))buildReviewedStringMatches();
                     else if(!stringMatchJob)void findStringReferenceMatches();
@@ -12004,6 +12494,15 @@
             document.getElementById('resetPDBZoomBtn').addEventListener('click', () => { resetPDBZoom(); drawIndividualMatrices(); });
             document.getElementById('resetAFZoomBtn').addEventListener('click', () => { resetAFZoom(); drawIndividualMatrices(); });
 
+            for (const eventType of ['input', 'change']) {
+                document.getElementById('buildSettingsContent').addEventListener(eventType, e => {
+                    if (!e.target.matches('input, select, textarea')) return;
+                    if (modelBuildCompleted || buildSettingsChanged) {
+                        buildSettingsChanged = true;
+                        updateBuildButtonState();
+                    }
+                });
+            }
             document.getElementById('alignmentModeInput').addEventListener('change', e => {
                 alignmentMode = e.target.value;
                 document.getElementById('similarityThreshold').dispatchEvent(new Event('change'));
@@ -12630,8 +13129,7 @@
         function updatePatternExtensionControls(patterns,templates,obstacles,copies){
             const host=document.getElementById('physicsPatternExtensionControl');if(!host)return;
             const available=availablePatternExtensions(patterns,templates,obstacles,copies);
-            const availableKeys=new Set(available.map(patternExtensionKey));
-            for(const key of patternExtensionCounts.keys())if(!availableKeys.has(key))patternExtensionCounts.delete(key);
+            for(const key of patternExtensionCounts.keys())if(!patterns.some(pattern=>patternExtensionKey(pattern)===key))patternExtensionCounts.delete(key);
             patternExtensionUnits=Math.max(0,...patternExtensionCounts.values());
             const signature=JSON.stringify(available.map(pattern=>[patternExtensionKey(pattern),patternExtensionLabel(pattern)]));
             host.classList.toggle('hidden',!available.length);
@@ -12705,7 +13203,7 @@
                 target.traverse(item=>{if(item.material){item.material.opacity=opacity;item.material.transparent=opacity<1;item.material.depthWrite=opacity>=1;}});
                 return;
             }
-            const atomStyle=physicsRepresentation==='ball-stick',sphereRadius=atomStyle ? .34 : .85;
+            const atomStyle=['ball-stick','gaussian'].includes(physicsRepresentation),sphereRadius=atomStyle ? .34 : .85;
 
             const renderGroup=patternExtensionGroup;
             if(atomStyle)try{
@@ -12865,6 +13363,7 @@
             const latestHelicalAngles=new Map(helicalSymmetryGroups.map(group=>[group.key,group.angle]));
             for(const group of helicalGroups)group.angle=latestHelicalAngles.get(group.key)??group.angle;
             helicalSymmetryGroups=helicalGroups;
+            orientSymmetryAxes();
             updateSymmetryRotationControls();
             detectedExtensionPatterns=extensionPatterns;
             patternDetectionSnapshot={nodes:physicsNodes,generation:modelBuildGeneration,provisional:job.provisional};
@@ -12882,6 +13381,128 @@
             const value=patternVarianceScores[index];
             if(value==null)return '#475569';
             return new THREE.Color('#38bdf8').lerp(new THREE.Color('#facc15'),Math.min(1,value/2.5)).lerp(new THREE.Color('#ef4444'),Math.max(0,Math.min(1,(value-2.5)/5)));
+        }
+        // Direct-reference chains may have different unresolved residues even when
+        // they represent the same protein. Compare them in a shared sequence frame.
+        function equivalentProteinGroups(blocks){
+            const grouped=new Map();
+            // Merged direct-reference chains can inherit accessions from different
+            // species. Their assembly type records the draft-matching decision.
+            const assemblyTypes=new Map(multiReferenceBuild?.directReferences&&multiReferenceBuild.kind==='combined'
+                ? (multiReferenceBuild.assembly?.groups||[]).map(group=>[group.key,group.type]) : []);
+            for(const block of blocks.values()){
+                if(block.nodes.length<12)continue;
+                const atoms=block.nodes.map(index=>physicsNodes[index].res.atoms2[physicsNodes[index].idx2]).filter(Boolean);
+                const sequence=atoms.map(atom=>atom.singleChar||'X').join('');
+                const accession=uniProtAccession(atoms[0]?.sourcePdbId);
+                const chain=physicsNodes[block.nodes[0]].res.c1;
+                const assemblyType=assemblyTypes.get(chain);
+                const key=assemblyType!=null?`assembly:${assemblyType}`:accession?`id:${accession}`:`sequence:${sequence}`;
+                if(assemblyType==null&&!accession&&!/[^X]/.test(sequence))continue;
+                if(!grouped.has(key))grouped.set(key,[]);
+                grouped.get(key).push({...block,comparisonAtoms:atoms,sequence});
+            }
+            return [...grouped.values()].filter(members=>members.length>1).map(members=>{
+                // Use the longest observed chain to minimize uncovered residues.
+                members.sort((a,b)=>b.comparisonAtoms.length-a.comparisonAtoms.length);
+                const reference=members[0];
+                const maps=members.map(member=>{
+                    const pairs=member.sequence===reference.sequence
+                        ? reference.comparisonAtoms.map((_,i)=>({idx1:i,idx2:i}))
+                        : referenceAlignment(reference.comparisonAtoms,member.comparisonAtoms)?.alignedPairs||[];
+                    return new Map(pairs.filter(pair=>pair.idx1!=null&&pair.idx2!=null).map(pair=>[pair.idx1,member.nodes[pair.idx2]]));
+                });
+                return {members,maps};
+            });
+        }
+        function fitRotationalRing(maps,common,centers){
+            const members=maps;
+                const origin=new THREE.Vector3();centers.forEach(center=>origin.add(center));origin.multiplyScalar(1/centers.length);
+                const offsets=centers.map(center=>center.clone().sub(origin));
+                let normal=new THREE.Vector3(),meanRadius;
+                if(members.length===2){
+                    const sampled=common.filter((_,index)=>index%Math.max(1,Math.floor(common.length/80))===0);
+                    const target=sampled.map(index=>physicsNodes[maps[0].get(index)]);
+                    const moving=sampled.map(index=>physicsNodes[maps[1].get(index)]);
+                    const fit=hornQuaternionSuperposition(target,moving);
+                    const R=fit.R,trace=R[0][0]+R[1][1]+R[2][2];
+                    if(trace>-.65)return null;
+                    const rmsd=Math.sqrt(target.reduce((sum,p,index)=>{
+                        const q=moving[index],dx=R[0][0]*q.x+R[0][1]*q.y+R[0][2]*q.z+fit.t[0]-p.x;
+                        const dy=R[1][0]*q.x+R[1][1]*q.y+R[1][2]*q.z+fit.t[1]-p.y;
+                        const dz=R[2][0]*q.x+R[2][1]*q.y+R[2][2]*q.z+fit.t[2]-p.z;
+                        return sum+dx*dx+dy*dy+dz*dz;
+                    },0)/sampled.length);
+                    if(rmsd>4)return null;
+                    const axisComponent=[0,1,2].sort((a,b)=>R[b][b]-R[a][a])[0];
+                    const components=[0,0,0];components[axisComponent]=Math.sqrt(Math.max(0,(R[axisComponent][axisComponent]+1)/2));
+                    if(components[axisComponent]<.2)return null;
+                    for(let k=0;k<3;k++)if(k!==axisComponent)components[k]=(R[k][axisComponent]+R[axisComponent][k])/(4*components[axisComponent]);
+                    normal.set(...components).normalize();
+                    const separation=centers[0].distanceTo(centers[1]);
+                    if(separation<6||Math.abs(offsets[0].dot(normal))>separation*.15)return null;
+                    meanRadius=separation/2;
+                }else{
+                    let bestCross=0;
+                    for(let i=0;i<offsets.length;i++)for(let j=i+1;j<offsets.length;j++){
+                        const cross=new THREE.Vector3().crossVectors(offsets[i],offsets[j]);
+                        if(cross.lengthSq()>bestCross){normal.copy(cross);bestCross=cross.lengthSq();}
+                    }
+                    if(bestCross<16)return null;
+                    normal.normalize();
+                    const radial=offsets.map(offset=>offset.clone().addScaledVector(normal,-offset.dot(normal)));
+                    meanRadius=radial.reduce((sum,point)=>sum+point.length(),0)/radial.length;
+                    if(meanRadius<3||radial.some(point=>Math.abs(point.length()-meanRadius)>meanRadius*.35)||offsets.some(offset=>Math.abs(offset.dot(normal))>meanRadius*.3))return null;
+                    const xAxis=radial[0].clone().normalize(),yAxis=new THREE.Vector3().crossVectors(normal,xAxis).normalize();
+                    const angles=radial.map(point=>Math.atan2(point.dot(yAxis),point.dot(xAxis))).sort((a,b)=>a-b);
+                    const ideal=2*Math.PI/angles.length;
+                    if(angles.some((angle,index)=>Math.abs(((angles[(index+1)%angles.length]+(index===angles.length-1?2*Math.PI:0))-angle)-ideal)>Math.max(.42,ideal*.3)))return null;
+                }
+            return {origin,normal,meanRadius};
+        }
+        // A deposited protein can contain several domain arrangements and short,
+        // overlapping fragments. Fit corresponding observed domains before allowing
+        // missing target coordinates or unequal whole-chain centres to veto its axis.
+        function fitObservedRotationalRing(members,maps){
+            const support=new Map();
+            maps.forEach((map,i)=>{
+                for(const [residue,index] of map){
+                    const node=physicsNodes[index];
+                    if(node.idx1==null||!node.res.atoms1?.[node.idx1]||node.res.atoms1[node.idx1].sequenceOnly)continue;
+                    if(!support.has(residue))support.set(residue,[]);
+                    support.get(residue).push(i);
+                }
+            });
+            const domains=new Map(),minimum=Math.max(3,Math.ceil(members.length*.6));
+            for(const [residue,indices] of support){
+                if(indices.length<minimum)continue;
+                // Keep separate reference structures from supplying one partial ring.
+                const files=new Map();
+                for(const i of indices){
+                    const node=physicsNodes[maps[i].get(residue)];
+                    const file=node.res.atoms1[node.idx1].fileIndex??'reference';
+                    if(!files.has(file))files.set(file,[]);
+                    files.get(file).push(i);
+                }
+                for(const [file,subset] of files){
+                    if(subset.length<minimum)continue;
+                    const key=JSON.stringify([file,subset]);
+                    if(!domains.has(key))domains.set(key,{indices:subset,residues:[]});
+                    domains.get(key).residues.push(residue);
+                }
+            }
+            const candidates=[...domains.values()].filter(d=>d.residues.length>=12)
+                .sort((a,b)=>b.indices.length-a.indices.length||b.residues.length-a.residues.length);
+            for(const {indices,residues} of candidates){
+                const centers=indices.map(i=>{
+                    const center=new THREE.Vector3();
+                    for(const residue of residues){const node=physicsNodes[maps[i].get(residue)];center.add(new THREE.Vector3(node.x,node.y,node.z));}
+                    return center.multiplyScalar(1/residues.length);
+                });
+                const fit=fitRotationalRing(indices.map(i=>maps[i]),residues,centers);
+                if(fit)return fit;
+            }
+            return null;
         }
         function updateRotationalSymmetry(force=false) {
             if(!physicsScene||!physicsNodes.length)return;
@@ -12905,66 +13526,16 @@
                 if(!blocks.has(node.blockIdx))blocks.set(node.blockIdx,{res:node.res,nodes:[]});
                 blocks.get(node.blockIdx).nodes.push(index);
             });
-            const byProtein=new Map();
-            for(const block of blocks.values()){
-                if(block.nodes.length<12)continue;
-                const atoms=block.res.atoms2;
-                const sequence=atoms.map(atom=>atom.singleChar||'X').join('');
-                const key=/[^X]/.test(sequence)?sequence:atoms[0]?.sourcePdbId||sequence;
-                if(!byProtein.has(key))byProtein.set(key,[]);
-                byProtein.get(key).push(block);
-            }
-            for(const members of byProtein.values()){
-                if(members.length<2)continue;
-                const maps=members.map(block=>new Map(block.nodes.map(index=>[physicsNodes[index].idx2,index])));
+            for(const {members,maps} of equivalentProteinGroups(blocks)){
                 const common=[...maps[0].keys()].filter(index=>maps.every(map=>map.has(index))).sort((a,b)=>a-b);
-                if(common.length<12)continue;
-                const centers=members.map(block=>{
+                const centers=maps.map(map=>{
                     const center=new THREE.Vector3();
-                    for(const index of block.nodes){const node=physicsNodes[index];center.add(new THREE.Vector3(node.x,node.y,node.z));}
-                    return center.multiplyScalar(1/block.nodes.length);
+                    for(const residue of common){const node=physicsNodes[map.get(residue)];center.add(new THREE.Vector3(node.x,node.y,node.z));}
+                    return center.multiplyScalar(1/(common.length||1));
                 });
-                const origin=new THREE.Vector3();centers.forEach(center=>origin.add(center));origin.multiplyScalar(1/centers.length);
-                const offsets=centers.map(center=>center.clone().sub(origin));
-                let normal=new THREE.Vector3(),meanRadius;
-                if(members.length===2){
-                    const sampled=common.filter((_,index)=>index%Math.max(1,Math.floor(common.length/80))===0);
-                    const target=sampled.map(index=>physicsNodes[maps[0].get(index)]);
-                    const moving=sampled.map(index=>physicsNodes[maps[1].get(index)]);
-                    const fit=hornQuaternionSuperposition(target,moving);
-                    const R=fit.R,trace=R[0][0]+R[1][1]+R[2][2];
-                    if(trace>-.65)continue;
-                    const rmsd=Math.sqrt(target.reduce((sum,p,index)=>{
-                        const q=moving[index],dx=R[0][0]*q.x+R[0][1]*q.y+R[0][2]*q.z+fit.t[0]-p.x;
-                        const dy=R[1][0]*q.x+R[1][1]*q.y+R[1][2]*q.z+fit.t[1]-p.y;
-                        const dz=R[2][0]*q.x+R[2][1]*q.y+R[2][2]*q.z+fit.t[2]-p.z;
-                        return sum+dx*dx+dy*dy+dz*dz;
-                    },0)/sampled.length);
-                    if(rmsd>4)continue;
-                    const axisComponent=[0,1,2].sort((a,b)=>R[b][b]-R[a][a])[0];
-                    const components=[0,0,0];components[axisComponent]=Math.sqrt(Math.max(0,(R[axisComponent][axisComponent]+1)/2));
-                    if(components[axisComponent]<.2)continue;
-                    for(let k=0;k<3;k++)if(k!==axisComponent)components[k]=(R[k][axisComponent]+R[axisComponent][k])/(4*components[axisComponent]);
-                    normal.set(...components).normalize();
-                    const separation=centers[0].distanceTo(centers[1]);
-                    if(separation<6||Math.abs(offsets[0].dot(normal))>separation*.15)continue;
-                    meanRadius=separation/2;
-                }else{
-                    let bestCross=0;
-                    for(let i=0;i<offsets.length;i++)for(let j=i+1;j<offsets.length;j++){
-                        const cross=new THREE.Vector3().crossVectors(offsets[i],offsets[j]);
-                        if(cross.lengthSq()>bestCross){normal.copy(cross);bestCross=cross.lengthSq();}
-                    }
-                    if(bestCross<16)continue;
-                    normal.normalize();
-                    const radial=offsets.map(offset=>offset.clone().addScaledVector(normal,-offset.dot(normal)));
-                    meanRadius=radial.reduce((sum,point)=>sum+point.length(),0)/radial.length;
-                    if(meanRadius<3||radial.some(point=>Math.abs(point.length()-meanRadius)>meanRadius*.35)||offsets.some(offset=>Math.abs(offset.dot(normal))>meanRadius*.3))continue;
-                    const xAxis=radial[0].clone().normalize(),yAxis=new THREE.Vector3().crossVectors(normal,xAxis).normalize();
-                    const angles=radial.map(point=>Math.atan2(point.dot(yAxis),point.dot(xAxis))).sort((a,b)=>a-b);
-                    const ideal=2*Math.PI/angles.length;
-                    if(angles.some((angle,index)=>Math.abs(((angles[(index+1)%angles.length]+(index===angles.length-1?2*Math.PI:0))-angle)-ideal)>Math.max(.42,ideal*.3)))continue;
-                }
+                const ring=(common.length>=12?fitRotationalRing(maps,common,centers):null)||fitObservedRotationalRing(members,maps);
+                if(!ring)continue;
+                const {origin,normal,meanRadius}=ring;
                 const anchors=common.filter((_,index)=>index%Math.max(1,Math.floor(common.length/32))===0);
                 for(const residueIndex of common){
                     const differences=[];
@@ -12990,6 +13561,7 @@
                 const key=blockIds.slice().sort((a,b)=>a-b).join(',');
                 rotationalSymmetryGroups.push({key,blockIds:new Set(blockIds),origin:origin.clone(),normal:normal.clone(),angle:previousAngles.get(key)||0});
             }
+            orientSymmetryAxes();
             rotationalSymmetryAxes.visible=rotationalAxesVisible&&physicsColorMode==='rotational-symmetry';
             rotationalDetectionSnapshot={nodes:physicsNodes,generation:modelBuildGeneration,provisional:!modelBuildCompleted};
             const toggle=document.getElementById('toggleSymmetryAxes');
@@ -13015,18 +13587,7 @@
                 if(!blocks.has(node.blockIdx))blocks.set(node.blockIdx,{nodes:[]});
                 blocks.get(node.blockIdx).nodes.push(index);
             });
-            const byProtein=new Map();
-            for(const block of blocks.values()){
-                if(block.nodes.length<12)continue;
-                const atoms=block.nodes.map(index=>physicsNodes[index].res.atoms2[physicsNodes[index].idx2]).filter(Boolean);
-                const sequence=atoms.map(atom=>atom.singleChar||'X').join('');
-                const key=/[^X]/.test(sequence)?sequence:atoms[0]?.sourcePdbId||sequence;
-                if(!byProtein.has(key))byProtein.set(key,[]);
-                byProtein.get(key).push(block);
-            }
-            for(const members of byProtein.values()){
-                if(members.length<2)continue;
-                const maps=members.map(block=>new Map(block.nodes.map(index=>[physicsNodes[index].idx2,index])));
+            for(const {members,maps} of equivalentProteinGroups(blocks)){
                 const common=[...maps[0].keys()].filter(index=>maps.every(map=>map.has(index))).sort((a,b)=>a-b);
                 if(common.length<12)continue;
                 const anchors=common.filter((_,index)=>index%Math.max(1,Math.floor(common.length/32))===0);
@@ -13293,6 +13854,16 @@
             }
             return accessibleSurfaceCache.values;
         }
+        function runningSimulationStatus(state,block){
+            if(state.active.has(block))return (state.parallel?state.cores.has(block):block===state.core)?'Active core':'Active neighbour';
+            if(state.processed.has(block))return 'Processed';
+            if(state.participated?.has(block))return 'Previous neighbour';
+            return 'Waiting';
+        }
+        function runningSimulationIdleColor(state,block){
+            const status=runningSimulationStatus(state,block);
+            return status==='Processed'?'#166534':status==='Previous neighbour'?'#8eafbd':state.pass===2?'#a4bca2':'#d1d5db';
+        }
         function updatePhysicsNodeColors() {
             if (!instancedNodeMesh || !physicsNodes.length) { updatePhysicsSequences(); return; }
             const N = physicsNodes.length;
@@ -13309,7 +13880,7 @@
                 const node = physicsNodes[i];
                 let color;
                 if(physicsColorMode==='running-simulation'&&groupSimulation&&groupSimulation.index>=0){
-                    color=new THREE.Color(groupSimulation.active.has(node.blockIdx)?residueSpeedColor(i):groupSimulation.processed.has(node.blockIdx)?'#166534':'#d1d5db');
+                    color=new THREE.Color(groupSimulation.active.has(node.blockIdx)?residueSpeedColor(i):runningSimulationIdleColor(groupSimulation,node.blockIdx));
                     if(groupSimulation.active.has(node.blockIdx)&&!(groupSimulation.parallel?groupSimulation.cores.has(node.blockIdx):node.blockIdx===groupSimulation.core))color.multiplyScalar(.55);
                 } else if (physicsDifferenceMode) {
                     color = new THREE.Color(alignmentDistanceColor(physicsReferenceDistance(node)));
@@ -13412,7 +13983,7 @@
         let sequenceResidueButtons = [];
         function updatePhysicsSequences() {
             const panel=document.getElementById('physicsSequencePanel');
-            if(!panel||panel.classList.contains('hidden'))return;
+            if(!panel||!panel.open)return;
             const nodes=physicsNodes.filter(node=>node.res.entityType==='protein');
             const content=document.getElementById('physicsSequenceContent');
             const menu=document.getElementById('sequenceChainMenu');
@@ -13649,7 +14220,7 @@
                 'equivalent-protein-shape':'Equivalent protein shape: <span style="color:#38bdf8">low difference</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">high</span>; each residue is scored by deviations in its distances to other residues from the across-chain average; dark grey: no equivalent protein comparison.',
                 'keyframe-difference':`Keyframe conformation difference: <span style="color:#38bdf8">little change</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">large change</span> in distances to sampled residues across saved keyframes. ${keyframeDifferenceNormalized?'Colours are scaled to the current model’s 95th percentile.':'Medium change: 2.5 Å; large change: 5 Å or more (mean variation).'} Grey: unavailable. <button id="keyframeDifferenceNormalize" type="button" aria-pressed="${keyframeDifferenceNormalized}" class="bg-slate-800 rounded-lg px-2 py-1">Normalised: ${keyframeDifferenceNormalized?'True':'False'}</button>`,
                 'steric-clashes':'Steric clashes: grey means no clash; yellow → red shows increasing overlap relative to the simulation’s steric exclusion distance. Each residue shows its worst overlap. Bonded neighbours and rigid internal contacts are excluded. This is a residue-level check, not an all-atom clash score.',
-                'running-simulation':'Running simulation: cores use residue speed (<span style="color:#38bdf8">blue</span> → <span style="color:#facc15">yellow</span> → <span style="color:#ef4444">red</span>); active neighbours use darker speed colours · <span style="color:#166534">Dark green: processed core</span> · <span style="color:#d1d5db">Light grey: waiting</span>. Progress resets for pass 2.',
+                'running-simulation':'Running simulation: cores use residue speed (<span style="color:#38bdf8">blue</span> → <span style="color:#facc15">yellow</span> → <span style="color:#ef4444">red</span>); active neighbours use darker speed colours · <span style="color:#166534">Dark green: processed core</span> · <span style="color:#8eafbd">Dull light blue: previously active neighbour</span> · <span style="color:#d1d5db">Grey: waiting in pass 1</span> · <span style="color:#a4bca2">Dull light green: waiting in pass 2</span>. Progress resets for pass 2.',
                 'residue-speed':'Residue speed: <span style="color:#38bdf8">stationary or slow</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">fast</span>. Colours use smoothed movement in Å/s; non-protein atoms are grey. The scale is fixed unless normalisation is enabled.',
                 'binding-sites':'Binding sites: each distinct inter-protein contact patch has its own colour; grey residues are outside binding sites.',
                 'binding-site-type':'Binding site type: contact patches between the same pair of protein types share a colour; grey residues are outside binding sites.',
@@ -13778,11 +14349,11 @@
             syncSurfacePhysicsPause();
             if (mode !== 'surface') document.getElementById('probeSurfaceLoading')?.classList.add('hidden');
             syncPhysicsRepresentationMenu();
-            document.getElementById('atomRepresentationNotice').classList.toggle('hidden', mode !== 'ball-stick');
+            document.getElementById('atomRepresentationNotice').classList.toggle('hidden', !['ball-stick','gaussian'].includes(mode));
             const jiggleControls = document.getElementById('sideChainJiggleControls');
-            jiggleControls.classList.toggle('hidden', mode !== 'ball-stick');
-            jiggleControls.classList.toggle('flex', mode === 'ball-stick');
-            for(const [id,visible] of [['physicsResidueSizeControl',mode==='backbone'],['physicsBackboneSizeControl',mode==='backbone'||mode==='cartoon'],['physicsAtomSizeControl',mode==='ball-stick'||mode==='curves'],['physicsElementSizeControl',mode==='ball-stick'||mode==='curves'],['physicsStickSizeControl',mode==='ball-stick'||mode==='curves'],['physicsSurfaceSizeControl',mode==='surface'],['physicsCurveSizeControl',mode==='curves']])document.getElementById(id).classList.toggle('hidden',!visible);
+            jiggleControls.classList.toggle('hidden', !['ball-stick','gaussian'].includes(mode));
+            jiggleControls.classList.toggle('flex', ['ball-stick','gaussian'].includes(mode));
+            for(const [id,visible] of [['physicsResidueSizeControl',mode==='backbone'],['physicsBackboneSizeControl',mode==='backbone'||mode==='cartoon'],['physicsAtomSizeControl',['ball-stick','gaussian'].includes(mode)||mode==='curves'],['physicsElementSizeControl',['ball-stick','gaussian'].includes(mode)||mode==='curves'],['physicsStickSizeControl',mode==='ball-stick'||mode==='curves'],['physicsSurfaceSizeControl',mode==='surface'],['physicsCurveSizeControl',mode==='curves']])document.getElementById(id).classList.toggle('hidden',!visible);
             if (atomRepresentation && atomRepresentation.mode !== mode) disposeAtomRepresentation();
             lastSurfaceUpdate = -Infinity;
             updateAtomRepresentation();
@@ -14318,11 +14889,26 @@
             const animatedOffsets=typeof animationAtomOffsets==='undefined'?null:animationAtomOffsets;
             const visualRotation=typeof atomVisualRotations==='undefined'?null:atomVisualRotations;
             if(coords&&!jiggleTime&&!visualRotation?.size&&data.displayAnimatedOffsets===animatedOffsets&&data.displayRotations===rotations&&data.displayLockRevision===physicsLockTargetRevision)return coords;
+            const previousSignature=data.displaySignature,signature=atomOrientationCache?.signature;
+            const canUpdatePartially=forDisplay&&coords&&data.displayRotations&&previousSignature&&signature&&previousSignature.length===signature.length&&
+                !jiggleTime&&!visualRotation?.size&&!data.sequenceOnly&&data.displayAnimatedOffsets===animatedOffsets&&data.displayLockRevision===physicsLockTargetRevision;
+            const dirty=new Uint8Array(physicsNodes.length);
+            if(canUpdatePartially){
+                const changed=new Uint8Array(physicsNodes.length),offset=physicsNodes.length*7;
+                for(let n=0;n<physicsNodes.length;n++)for(let k=n*7;k<n*7+7;k++)if(!Object.is(signature[k],previousSignature[k])){changed[n]=1;break;}
+                const blocks=new Uint8Array(morphMatrixBlocks.length);
+                for(let b=0;b<blocks.length;b++)for(let k=offset+b*9;k<offset+b*9+9;k++)if(!Object.is(signature[k],previousSignature[k])){blocks[b]=1;break;}
+                for(let n=0;n<physicsNodes.length;n++){
+                    if(blocks[physicsNodes[n].blockIdx]){dirty[n]=1;continue;}
+                    for(let j=Math.max(0,n-2);j<=Math.min(physicsNodes.length-1,n+2);j++)if(changed[j]){dirty[n]=1;break;}
+                }
+            }else dirty.fill(1);
             if(!coords||coords.length!==entries.length){coords=MemoryData.coordinates(entries.length);if(forDisplay)atomDisplayCoordinateCache.set(entries,coords);}
             const columns=MemoryData.descriptor(coords)?.table.columns,pointScratch={x:0,y:0,z:0};
             const jiggles=[],sequenceFrames=new Map(),atomNodes=data.sequenceOnly?sequenceAtomScaffold(physicsNodes):physicsNodes;
             for(let i=0;i<entries.length;i++){
-                const nodeIndex=data.nodeIndices[i],sourceName=data.names[data.nameCodes[i]],point=columns?pointScratch:coords[i],k=i*3;
+                const nodeIndex=data.nodeIndices[i];if(!dirty[nodeIndex])continue;
+                const sourceName=data.names[data.nameCodes[i]],point=columns?pointScratch:coords[i],k=i*3;
                 const node = physicsNodes[nodeIndex], ca = node.res.atoms2[node.idx2], R = rotations[nodeIndex];
                 const animated = typeof animationAtomOffsets !== 'undefined' && animationAtomOffsets?.[nodeIndex]?.[sourceName];
                 const lockView=!animated&&lockAlignedResiduesToReference?node.referenceLockAtoms:null;
@@ -14387,7 +14973,12 @@
                 }
                 if(columns){columns.x.values[i]=point.x;columns.y.values[i]=point.y;columns.z.values[i]=point.z;}
             }
-            if(forDisplay){data.displayRotations=rotations;data.displayAnimatedOffsets=animatedOffsets;data.displayLockRevision=physicsLockTargetRevision;data.coordinateRevision++;}
+            if(forDisplay){
+                data.displayRotations=rotations;data.displayAnimatedOffsets=animatedOffsets;data.displayLockRevision=physicsLockTargetRevision;
+                data.displaySignature=signature?.slice();data.coordinateDirty??=new Uint8Array(physicsNodes.length);
+                for(let n=0;n<dirty.length;n++)if(dirty[n])data.coordinateDirty[n]=1;
+                data.coordinateRevision++;
+            }
             return coords;
         }
 
@@ -14634,7 +15225,7 @@
 
         function updateAtomRepresentation() {
             if (physicsRepresentation === 'curves' || curveRepresentation) updateCurveRepresentation();
-            const active = physicsRepresentation === 'ball-stick' || physicsRepresentation === 'surface' || physicsRepresentation === 'curves';
+            const active = ['ball-stick','gaussian'].includes(physicsRepresentation) || physicsRepresentation === 'surface' || physicsRepresentation === 'curves';
             if (physicsRepresentation === 'surface') {
                 if(backboneLinesGroup)backboneLinesGroup.visible=false;
                 updateProbeSurface();
@@ -14664,16 +15255,17 @@
                 balls.frustumCulled = false;if(sticks)sticks.frustumCulled=false;
                 physicsScene.add(balls);if(sticks)physicsScene.add(sticks);
                 atomRepresentation = {entries,bonds,balls,sticks,atomGlow,mode:physicsRepresentation};
-                if(!surface)requestMolecularBonds(atomRepresentation);
+                if(!surface&&physicsRepresentation!=='gaussian')requestMolecularBonds(atomRepresentation);
             }
             const state=atomRepresentation,{entries,bonds,balls,sticks,atomGlow}=state;
-            balls.visible=entries.length>0;if(sticks)sticks.visible=true;
+            balls.visible=entries.length>0;if(sticks)sticks.visible=physicsRepresentation!=='gaussian';
             const coords=simulationAtomCoordinates(entries,true),data=atomFrameData(entries),columns=MemoryData.descriptor(coords)?.table.columns;
             const tools=state.drawTools||(state.drawTools={dummy:new THREE.Object3D(),color:new THREE.Color(),otherColor:new THREE.Color(),selectedColor:new THREE.Color('#fff176'),sideColor:new THREE.Color(),a:new THREE.Vector3(),b:new THREE.Vector3(),direction:new THREE.Vector3(),up:new THREE.Vector3(0,1,0)});
             const {dummy,color,otherColor,selectedColor,sideColor,a,b,direction,up}=tools;
             const key=[physicsColorMode,viewerSizes.physics.atom,viewerSizes.physics.stick,atomSizeByElement,selectionGlowVisible,additionalSelections.length].join(':');
-            let changed=state.frameData!==data||state.appearanceKey!==key||state.selection!==linkedSelection||state.additional!==additionalSelections;
-            const N=physicsNodes.length;
+            const globalChanged=state.frameData!==data||state.appearanceKey!==key||state.selection!==linkedSelection||state.additional!==additionalSelections;
+            let changed=globalChanged;
+            const N=physicsNodes.length,colorDirty=new Uint8Array(N),positionDirty=new Uint8Array(N);
             const appearance=state.appearance??(state.appearance={visible:new Uint8Array(N),highlight:new Uint8Array(N),glow:new Uint8Array(N),atomSelection:new Uint8Array(N),colors:new Float64Array(N*3),shades:new Float64Array(N),sideColors:new Float64Array(N*3)});
             const hasSelection=Boolean(linkedSelection||additionalSelections.length),nodeIndices=data.nodeIndices,atomSelections=[linkedSelection,...additionalSelections].filter(selection=>selection?.mode==='atom');
             for(let n=0;n<N;n++){
@@ -14681,13 +15273,17 @@
                 const glow=selectionGlowVisible&&hasSelection&&atomEntrySelected({nodeIndex:n,source:null})?1:0;
                 const shade=1-(1-(physicsOcclusionFactors[n]??1))*physicsMaterialSettings.occlusion;
                 instancedNodeMesh.getColorAt(n,color);const k=n*3;
-                if(appearance.visible[n]!==visible||appearance.highlight[n]!==highlight||appearance.glow[n]!==glow||appearance.shades[n]!==shade||appearance.colors[k]!==color.r||appearance.colors[k+1]!==color.g||appearance.colors[k+2]!==color.b)changed=true;
+                const visibilityChanged=appearance.visible[n]!==visible;
+                const nodeChanged=visibilityChanged||appearance.highlight[n]!==highlight||appearance.glow[n]!==glow||appearance.shades[n]!==shade||appearance.colors[k]!==color.r||appearance.colors[k+1]!==color.g||appearance.colors[k+2]!==color.b;
+                if(nodeChanged)changed=true;
+                colorDirty[n]=globalChanged||nodeChanged?1:0;
+                positionDirty[n]=globalChanged||visibilityChanged||data.coordinateDirty?.[n]?1:0;
                 appearance.visible[n]=visible;appearance.highlight[n]=highlight;appearance.glow[n]=glow;appearance.atomSelection[n]=atomSelections.some(selection=>selectionMatchesOne(node,selection))?1:0;appearance.shades[n]=shade;
                 appearance.colors[k]=color.r;appearance.colors[k+1]=color.g;appearance.colors[k+2]=color.b;
                 if(physicsColorMode==='side-chains'){sideColor.set(SIDE_CHAIN_TYPE_COLORS[node.res.atoms2[node.idx2]?.singleChar]||'#94a3b8').multiplyScalar(shade);appearance.sideColors[k]=sideColor.r;appearance.sideColors[k+1]=sideColor.g;appearance.sideColors[k+2]=sideColor.b;}
             }
             if(!changed&&state.coordinateRevision===data.coordinateRevision)return;
-            const colorChanged=changed,positionChanged=changed||state.coordinateRevision!==data.coordinateRevision;
+            const colorChanged=changed,positionChanged=positionDirty.some(Boolean);
             state.frameData=data;state.appearanceKey=key;state.selection=linkedSelection;state.additional=additionalSelections;state.coordinateRevision=data.coordinateRevision;
             const palette=state.elementPalette??(state.elementPalette=data.elements.map(element=>new THREE.Color(ELEMENT_COLORS[String(element||'C').toUpperCase()]||'#aeb7c4')));
             let glowing=0;
@@ -14695,11 +15291,11 @@
                 const n=nodeIndices[i],k=n*3,point=columns?null:coords[i];
                 const x=columns?columns.x.values[i]:point.x,y=columns?columns.y.values[i]:point.y,z=columns?columns.z.values[i]:point.z;
                 const radius=viewerSizes.physics.atom*(1+atomSizeByElement*(data.elementRatios[i]-1)),visible=appearance.visible[n];
-                if(positionChanged){
+                if(positionDirty[n]){
                     if(balls.setPositionAt)balls.setPositionAt(i,x,y,z,visible ? .34*radius : 0);
                     else{dummy.position.set(x,y,z);dummy.quaternion.identity();dummy.scale.setScalar(visible?radius:0);dummy.updateMatrix();balls.setMatrixAt(i,dummy.matrix);}
                 }
-                if(colorChanged){
+                if(colorDirty[n]){
                     color.setRGB(appearance.colors[k],appearance.colors[k+1],appearance.colors[k+2]);
                     if(appearance.highlight[n])color.copy(selectedColor);
                     else if(physicsColorMode==='element')color.copy(palette[data.elementCodes[i]]).multiplyScalar(appearance.shades[n]);
@@ -14715,17 +15311,18 @@
             const pairs=MemoryData.descriptor(bonds)?.values;
             for(let i=0;sticks&&i<bonds.length;i++){
                 const pair=pairs?null:bonds[i],ia=pairs?pairs[i*2]:pair[0],ib=pairs?pairs[i*2+1]:pair[1];
-                if(positionChanged){
+                if(positionDirty[nodeIndices[ia]]||positionDirty[nodeIndices[ib]]){
                     if(columns){a.set(columns.x.values[ia],columns.y.values[ia],columns.z.values[ia]);b.set(columns.x.values[ib],columns.y.values[ib],columns.z.values[ib]);}
                     else{a.set(coords[ia].x,coords[ia].y,coords[ia].z);b.set(coords[ib].x,coords[ib].y,coords[ib].z);}
                     const radius=appearance.visible[nodeIndices[ia]]&&appearance.visible[nodeIndices[ib]] ? .07*viewerSizes.physics.stick : 0;
                     if(sticks.setBondAt)sticks.setBondAt(i,a,b,radius);
                     else{direction.subVectors(b,a);const length=direction.length();dummy.position.copy(a).add(b).multiplyScalar(.5);dummy.quaternion.setFromUnitVectors(up,length?direction.divideScalar(length):up);dummy.scale.set(radius,length,radius);dummy.updateMatrix();sticks.setMatrixAt(i,dummy.matrix);}
                 }
-                if(colorChanged){balls.getColorAt(ia,color);balls.getColorAt(ib,otherColor);sticks.setColorAt(i,color.lerp(otherColor,.5));}
+                if(colorDirty[nodeIndices[ia]]||colorDirty[nodeIndices[ib]]){balls.getColorAt(ia,color);balls.getColorAt(ib,otherColor);sticks.setColorAt(i,color.lerp(otherColor,.5));}
             }
             if(positionChanged){balls.instanceMatrix.needsUpdate=true;if(sticks)sticks.instanceMatrix.needsUpdate=true;}
             if(colorChanged){if(balls.instanceColor)balls.instanceColor.needsUpdate=true;if(sticks?.instanceColor)sticks.instanceColor.needsUpdate=true;}
+            data.coordinateDirty?.fill(0);
 
         }
 
@@ -14742,7 +15339,7 @@
             if(primary)primary.secondGeometry=copy(secondMembrane);
             return primary;
         }
-        function generateSimulationMmCifString(membraneGeometry = simulationMembraneSnapshot()) {
+        function generateSimulationMmCifString(membraneGeometry = simulationMembraneSnapshot(), selectionOnly = false, visibleOnly = false) {
             if (!physicsNodes || !physicsNodes.length) return null;
 
             const lines = [];
@@ -14793,6 +15390,7 @@
                 if (nodeIndex !== previousNode && (node.res.entityType!=='other'||resSeqInChain===0)) resSeqInChain++;
                 previousNode = nodeIndex;
 
+                if ((selectionOnly && !atomEntrySelected(entries[k])) || (visibleOnly && !isNodeVisibleInPhysics(node))) continue;
                 const atomId = k + 1;
                 const groupPdb = node.res.entityType==='other'?'HETATM':(source.groupPdb||'ATOM');
                 const typeSymbol = source.element || 'C';
@@ -14821,7 +15419,7 @@
             }
 
             lines.push(`#`);
-            if(membraneGeometry){
+            if(membraneGeometry && !selectionOnly && (!visibleOnly || membraneVisible)){
                 // Non-atomic membrane geometry lives in its own category. It must
                 // never be mistaken for simulated atoms or chemical bonds.
                 const geometries=[membraneGeometry,membraneGeometry.secondGeometry].filter(Boolean);
@@ -14856,8 +15454,10 @@
 
         window.generateSimulationMmCifString = generateSimulationMmCifString;
 
-        function downloadSimulationAsMmCif() {
-            const cifContent = generateSimulationMmCifString();
+        function downloadSimulationAsMmCif(selectionOnly = false, visibleOnly = false) {
+            if (selectionOnly && !simulationAtomEntries().some(atomEntrySelected)) { showError("Select model atoms or residues to download."); return; }
+            if (visibleOnly && !simulationAtomEntries().some(entry => (!selectionOnly || atomEntrySelected(entry)) && isNodeVisibleInPhysics(physicsNodes[entry.nodeIndex]))) { showError("No matching model atoms are visible to download."); return; }
+            const cifContent = generateSimulationMmCifString(undefined, selectionOnly, visibleOnly);
             if (!cifContent) {
                 showError('No simulation structure available to download. Please load a structure first.');
                 return;
@@ -14877,6 +15477,61 @@
             URL.revokeObjectURL(url);
         }
 
+        function saveSurfaceBlob(data, format, type) {
+            const url=URL.createObjectURL(new Blob([data],{type})), link=document.createElement('a');
+            link.href=url; link.download=`simulation_surface.${format}`; link.click();
+            setTimeout(()=>URL.revokeObjectURL(url),30000);
+        }
+        function encodeSurface(geometry, format) {
+            const p=geometry.getAttribute('position').array, n=geometry.getAttribute('normal').array, c=geometry.getAttribute('color').array;
+            if(format==='obj') {
+                const lines=['# StringScape surface; vertex colours are RGB'];
+                for(let i=0;i<p.length;i+=3) lines.push(`v ${p[i]} ${p[i+1]} ${p[i+2]} ${c[i]} ${c[i+1]} ${c[i+2]}`);
+                for(let i=0;i<n.length;i+=3) lines.push(`vn ${n[i]} ${n[i+1]} ${n[i+2]}`);
+                for(let i=1;i<=p.length/3;i+=3) lines.push(`f ${i}//${i} ${i+1}//${i+1} ${i+2}//${i+2}`);
+                return lines.join('\n');
+            }
+            if(format==='stl') {
+                const buffer=new ArrayBuffer(84+p.length/9*50), view=new DataView(buffer); view.setUint32(80,p.length/9,true);
+                for(let i=0;i<p.length/9;i++){let o=84+i*50; for(let k=0;k<3;k++)view.setFloat32(o+k*4,n[i*9+k],true); for(let k=0;k<9;k++)view.setFloat32(o+12+k*4,p[i*9+k],true);}
+                return buffer;
+            }
+            const bytes=p.byteLength, min=[Infinity,Infinity,Infinity], max=[-Infinity,-Infinity,-Infinity];
+            for(let i=0;i<p.length;i++) {const k=i%3;min[k]=Math.min(min[k],p[i]);max[k]=Math.max(max[k],p[i]);}
+            const json={asset:{version:'2.0',generator:'StringScape'},scene:0,scenes:[{nodes:[0]}],nodes:[{mesh:0}],meshes:[{primitives:[{attributes:{POSITION:0,NORMAL:1,COLOR_0:2},material:0}]}],materials:[{pbrMetallicRoughness:{metallicFactor:0,roughnessFactor:0.8},doubleSided:true}],buffers:[{byteLength:bytes*3}],bufferViews:[0,1,2].map(i=>({buffer:0,byteOffset:i*bytes,byteLength:bytes,target:34962})),accessors:[{bufferView:0,componentType:5126,count:p.length/3,type:'VEC3',min,max},{bufferView:1,componentType:5126,count:p.length/3,type:'VEC3'},{bufferView:2,componentType:5126,count:p.length/3,type:'VEC3'}]};
+            let text=JSON.stringify(json); while(text.length%4)text+=' ';
+            const jsonBytes=new TextEncoder().encode(text), buffer=new ArrayBuffer(28+jsonBytes.length+bytes*3), view=new DataView(buffer), out=new Uint8Array(buffer);
+            view.setUint32(0,0x46546c67,true);view.setUint32(4,2,true);view.setUint32(8,buffer.byteLength,true);view.setUint32(12,jsonBytes.length,true);view.setUint32(16,0x4e4f534a,true);out.set(jsonBytes,20);let o=20+jsonBytes.length;view.setUint32(o,bytes*3,true);view.setUint32(o+4,0x004e4942,true);o+=8;out.set(new Uint8Array(p.buffer,p.byteOffset,bytes),o);out.set(new Uint8Array(n.buffer,n.byteOffset,bytes),o+bytes);out.set(new Uint8Array(c.buffer,c.byteOffset,bytes),o+bytes*2);return buffer;
+        }
+        async function downloadSurface(format, selectionOnly, visibleOnly) {
+            if(!physicsNodes?.length){showError('No simulation structure available to download.');return;}
+            if(selectionOnly&&!simulationAtomEntries().some(atomEntrySelected)){showError('Select model atoms or residues to download.');return;}
+            if(visibleOnly&&!simulationAtomEntries().some(entry=>(!selectionOnly||atomEntrySelected(entry))&&isNodeVisibleInPhysics(physicsNodes[entry.nodeIndex]))){showError('No matching model atoms are visible to download.');return;}
+            setPhysicsRepresentation('surface');
+            const state=atomRepresentation, start=Date.now();
+            while(homologyStructureVisible && state && !state.ready && !state.failed && atomRepresentation===state && Date.now()-start<120000) await new Promise(resolve=>setTimeout(resolve,100));
+            if(homologyStructureVisible && (!state?.ready || atomRepresentation!==state)){showError('The surface could not be loaded for download.');return;}
+            let geometry=state?.balls.geometry;
+            const rebuildWithoutHighlight=!visibleOnly || selectionOnly || ((format==='glb'||format==='obj') && selectionGlowVisible && !!linkedSelection);
+            if(rebuildWithoutHighlight){
+                const entries=state?.entries || simulationAtomEntries(), coords=simulationAtomCoordinates(entries,false), chains=new Map(), vdw={H:1.2,D:1.2,C:1.7,N:1.55,O:1.52,S:1.8,P:1.8,SE:1.9}, color=new THREE.Color();
+                for(let i=0;i<entries.length;i++){const entry=entries[i],node=physicsNodes[entry.nodeIndex],p=coords[i];if((selectionOnly&&!atomEntrySelected(entry))||(visibleOnly&&!isNodeVisibleInPhysics(node))||!Number.isFinite(p.x+p.y+p.z))continue;color.set(sequenceBaseColors.get(node)||'#94a3b8');const atomColor=physicsAtomColor(physicsColorMode,entry.source,node.res.atoms2[node.idx2],color,1);if(!chains.has(node.blockIdx))chains.set(node.blockIdx,[]);chains.get(node.blockIdx).push({x:p.x,y:p.y,z:p.z,nodeIndex:entry.nodeIndex,r:(vdw[entry.source.element]||1.7)+viewerSizes.physics.surface,c:[atomColor.r,atomColor.g,atomColor.b]});}
+                if(!chains.size){showError('No matching atoms are available for the surface.');return;}
+                geometry=await new Promise(resolve=>buildSeparatedProbeSurfaceGeometry([...chains.values()],()=>false,resolve));
+                if(!geometry){showError('The selected surface could not be generated.');return;}
+            }
+            try {saveSurfaceBlob(encodeSurface(geometry,format),format,format==='glb'?'model/gltf-binary':format==='stl'?'model/stl':'text/plain');} finally {if(rebuildWithoutHighlight)geometry.dispose();}
+        }
+        const downloadMenu=document.getElementById('downloadMenu'), downloadButton=document.getElementById('downloadMmCifBtn');
+        downloadButton.addEventListener('click',()=>{const open=downloadMenu.classList.toggle('hidden')===false;downloadButton.setAttribute('aria-expanded',String(open));});
+        document.addEventListener('click',event=>{if(!downloadMenu.contains(event.target)&&!downloadButton.contains(event.target)){downloadMenu.classList.add('hidden');downloadButton.setAttribute('aria-expanded','false');}});
+        document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!downloadMenu.classList.contains('hidden')){downloadMenu.classList.add('hidden');downloadButton.setAttribute('aria-expanded','false');downloadButton.focus();}});
+        downloadMenu.addEventListener('click',async event=>{const button=event.target.closest('[data-download-format]');if(!button)return;const format=button.dataset.downloadFormat, selected=document.getElementById('downloadSelectionOnly').checked, visible=document.getElementById('downloadVisibleOnly').checked;downloadMenu.classList.add('hidden');downloadButton.setAttribute('aria-expanded','false');if(format==='session'){document.getElementById('sessionDownload').click();return;}if(format==='cif'){downloadSimulationAsMmCif(selected,visible);return;}const badge=document.getElementById('surfaceDownloadLoading'), viewer=document.getElementById('physicsContainer');
+            if(!badge.classList.contains('hidden'))return;
+            viewer.scrollIntoView({behavior:'smooth',block:'center'});
+            badge.querySelector('span').textContent=`Loading surface to download .${format}`;
+            badge.classList.remove('hidden');
+            try{await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));await downloadSurface(format,selected,visible);}catch(error){showError('Surface download failed: '+error.message);}finally{badge.classList.add('hidden');}});
         window.downloadSimulationAsMmCif = downloadSimulationAsMmCif;
 
         function shareableModelParts() {
@@ -15907,9 +16562,10 @@
             const referenceInput=document.getElementById('referenceSearchInput');
             const alphaFoldInput=document.getElementById('pdbInput2');
             const referenceSuggestions=[
-                'Human aquaporin-7','4F5S, 45FT, 45FU, 45FV','SEQUENCELETTERS, GEAHKSEIAHRFKD','E. coli RecA','5IUO',
+                'Human aquaporin-7', 'flagellar motor with rotational reversal animation','4F5S, 45FT, 45FU, 45FV','SEQUENCELETTERS, GEAHKSEIAHRFKD', 'ATP synthase animated',
+                'E. coli RecA','5IUO',
                 '>Sequences in FASTA format','Rubisco from Arabidopsis thaliana','11BB','Bovine Serum Albumin',
-                '10IE, 10IF','Human UroD','10YL','Bovine Rhodopsin','23SH','Human Potassium channel 7.1',
+                '10IE, 10IF','Channel with animation of open and closed state','10YL','Bovine Rhodopsin','23SH','Human Potassium channel 7.1',
                 'Duck RIG-I','Duck MHC Class I','Duck Ovotransferrin','Ducks are so funny...',
                 'Waddle, waddle!','Quack, quack!','Oh dear, I got distracted','We better start over'
             ];
@@ -15940,6 +16596,34 @@
             initCanvases();
             initThreeJSPhysicsScene();
             setupEventListeners();
+            for (const [rowId, label] of [['physicsStructureToggleRow','structure'],['physicsProteinToggleRow','protein'],['physicsResidueToggleRow','residue']]) {
+                const row=document.getElementById(rowId);
+                const controls=document.createElement('div');
+                controls.className='flex items-center gap-1.5 ml-auto';
+                for (const visible of [true,false]) {
+                    const button=document.createElement('button');
+                    button.type='button';
+                    button.className='bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-slate-200 px-2.5 py-1 rounded text-[11px] border border-slate-700';
+                    button.textContent=visible?'Show All':'Hide All';
+                    button.setAttribute('aria-label',`${visible?'Show':'Hide'} all ${label} toggles`);
+                    button.addEventListener('click',()=>{
+                        if(rowId==='physicsProteinToggleRow'){
+                            for(const {keys} of physicsProteinToggleGroups())for(const key of keys)chainVisibility[key]=visible;
+                            renderPhysicsChainToggles();
+                            applyPhysicsVisibility();
+                            return;
+                        }
+                        const toggles=[...row.querySelectorAll('button')].filter(toggle=>!controls.contains(toggle)&&!toggle.closest('.hidden'));
+                        for(const toggle of toggles){
+                            const state=toggle.getAttribute('aria-pressed');
+                            const isVisible=state===null?!toggle.querySelector('.fa-eye-slash'):state==='true';
+                            if(isVisible!==visible)toggle.click();
+                        }
+                    });
+                    controls.append(button);
+                }
+                row.append(controls);
+            }
             updateExampleSelection();
             document.getElementById('showAllNonProteinBtn').addEventListener('click',()=>setAllChainsVisibility(true,false));
             document.getElementById('hideAllNonProteinBtn').addEventListener('click',()=>setAllChainsVisibility(false,false));
@@ -15977,7 +16661,12 @@
         function referenceAlignment(a,b) {
             const type=a[0]?.entityType;
             if (!type || type==='other' || type!==b[0]?.entityType) return null;
-            return alignProteinSequences(referenceSequence(a),referenceSequence(b),'semiglobal',type==='nucleotide'?(x,y)=>x===y?4:-3:getBLOSUM62Score);
+            const seqA=referenceSequence(a),seqB=referenceSequence(b);
+            const key=JSON.stringify([type,seqA,seqB]);
+            if(referenceAlignment.cache?.has(key))return referenceAlignment.cache.get(key);
+            const alignment=alignProteinSequences(seqA,seqB,'semiglobal',type==='nucleotide'?(x,y)=>x===y?4:-3:getBLOSUM62Score);
+            referenceAlignment.cache?.set(key,alignment);
+            return alignment;
         }
         function referenceTypeCompatible(a,b) {
             const alignment=referenceAlignment(a,b);
@@ -16102,8 +16791,23 @@
         function referenceTransformPoint(p,fit) {
             const {R,t}=fit;return {x:R[0][0]*p.x+R[0][1]*p.y+R[0][2]*p.z+t[0],y:R[1][0]*p.x+R[1][1]*p.y+R[1][2]*p.z+t[1],z:R[2][0]*p.x+R[2][1]*p.y+R[2][2]*p.z+t[2]};
         }
-        function calculateReferenceAssembly(files,onProgress=()=>{}) {
+        function calculateReferenceAssembly(files,onProgress=()=>{},draftMode=false) {
             const structures=files.map((file,fileIndex)=>({file,fileIndex,entries:Object.entries(file.parsed.chains).map(([chain,atoms])=>({chain,atoms,center:referenceCenter(atoms),type:-1,entityType:atoms[0]?.entityType}))}));
+            // Shared identities restrict draft comparisons before any sequence alignment.
+            // Identity-less chains (or identities absent from other drafts) retain sequence fallback.
+            if(draftMode){
+                const entries=structures.flatMap((structure,index)=>structure.entries.map(entry=>{
+                    entry.draftIndex=index;entry.identity=files[index].chainIdentities?.[entry.chain]||{ids:[],names:[]};return entry;
+                })).filter(entry=>entry.entityType==='protein');
+                const shared=(a,b)=>['ids','names'].some(field=>(a.identity[field]||[]).some(value=>(b.identity[field]||[]).includes(value)));
+                const parents=entries.map((_,i)=>i),root=i=>parents[i]===i?i:(parents[i]=root(parents[i]));
+                const matched=new Set();
+                for(let i=0;i<entries.length;i++)for(let j=i+1;j<entries.length;j++){
+                    if(entries[i].draftIndex===entries[j].draftIndex||!shared(entries[i],entries[j]))continue;
+                    parents[root(j)]=root(i);matched.add(i);matched.add(j);
+                }
+                entries.forEach((entry,i)=>{if(matched.has(i))entry.identityGroup=root(i);});
+            }
             const prototypes=[];
             for(const structure of structures)for(const entry of structure.entries) {
                 if(referenceIsWaterEntry(entry)) {
@@ -16115,7 +16819,11 @@
                     let type=prototypes.findIndex(proto=>proto.entityType==='other'&&nonPolymerSignature(proto.atoms)===nonPolymerSignature(entry.atoms));
                     if(type<0){type=prototypes.length;prototypes.push(entry);}entry.type=type;continue;
                 }
-                let type=prototypes.findIndex(proto=>referenceTypeCompatible(proto.atoms,entry.atoms));
+                let type=prototypes.findIndex(proto=>{
+                    if(draftMode&&(proto.identityGroup!==undefined||entry.identityGroup!==undefined))
+                        return proto.identityGroup!==undefined&&proto.identityGroup===entry.identityGroup;
+                    return referenceTypeCompatible(proto.atoms,entry.atoms);
+                });
                 if(type<0){type=prototypes.length;prototypes.push(entry);}entry.type=type;
             }
             for(const structure of structures)for(const entry of structure.entries)entry.fingerprint=referenceFingerprint(entry,structure.entries);
@@ -16615,9 +17323,9 @@
             if(!inferredMembrane)return;
             lipidsVisible=!lipidsVisible;
             if(membraneLipids){
-                const molecular=lipidsVisible&&physicsRepresentation==='ball-stick';
+                const molecular=lipidsVisible&&['ball-stick','gaussian'].includes(physicsRepresentation);
                 membraneLipids.mesh.visible=lipidsVisible&&!molecular;
-                membraneLipids.atomMesh.visible=molecular;membraneLipids.stickMesh.visible=molecular;
+                membraneLipids.atomMesh.visible=molecular;membraneLipids.stickMesh.visible=molecular&&physicsRepresentation!=='gaussian';
             }
             updateMembraneToggleUI();
         });
@@ -16670,12 +17378,12 @@
                 ...['animationSyncToggle','duplicateAnimationKeyframe','deleteAnimationKeyframe','showAnimationTable','recordAnimation','loopAnimation','deleteAnimation'].map(animationEl)]
                 .filter(Boolean).forEach(element=>element.classList.add('animation-editor-lockable'));
             animationPanel.addEventListener('click',event=>{
-                if((animationPlaying||animationPreparing)&&event.isTrusted&&event.target.closest('.animation-lockable,.animation-editor-lockable,#physicsViewerKey button,#physicsSelectionInfo button')&&!event.target.closest('#quickPlayAnimationBtn,#conformationGroupSection,#physicsVisibilityButton,#stagedModelButtons')){
+                if((animationPlaying||animationPreparing)&&event.isTrusted&&event.target.closest('.animation-lockable,.animation-editor-lockable,#physicsViewerKey button,#physicsSelectionInfo button')&&!event.target.closest('#quickPlayAnimationBtn,#toggleProteinSpin,#resetProteinSpin,#conformationGroupSection,#physicsVisibilityButton,#stagedModelButtons')){
                     event.preventDefault();event.stopPropagation();
                 }
             },true);
             animationPanel.addEventListener('keydown',event=>{
-                if((animationPlaying||animationPreparing)&&event.isTrusted&&event.target.closest('.animation-lockable,.animation-editor-lockable')&&!event.target.closest('#quickPlayAnimationBtn,#conformationGroupSection,#physicsVisibilityButton,#stagedModelButtons')){
+                if((animationPlaying||animationPreparing)&&event.isTrusted&&event.target.closest('.animation-lockable,.animation-editor-lockable')&&!event.target.closest('#quickPlayAnimationBtn,#toggleProteinSpin,#resetProteinSpin,#conformationGroupSection,#physicsVisibilityButton,#stagedModelButtons')){
                     event.preventDefault();event.stopPropagation();
                 }
             },true);
@@ -16747,7 +17455,7 @@
                     lipidsVisible,membraneVisible,showSprings,rigidBodySimulation,sideChainJiggleEnabled,
                     rotationalAxesVisible,physicsPulsePaused,keyframeDifferenceNormalized},
                 buttonStates:Object.fromEntries(Array.from(document.querySelectorAll('.physics-simulation-panel button[id][aria-pressed]'))
-                    .filter(button=>!animationEl('animationEditor')?.contains(button)&&!button.closest('#physicsGraphPanel')&&!['pausePhysicsPulseBtn','keyframeDifferenceNormalize'].includes(button.id)).map(button=>[button.id,button.getAttribute('aria-pressed')])),
+                    .filter(button=>!animationEl('animationEditor')?.contains(button)&&!button.closest('#physicsGraphPanel')&&!['pausePhysicsPulseBtn','keyframeDifferenceNormalize','toggleProteinSpin','resetProteinSpin'].includes(button.id)).map(button=>[button.id,button.getAttribute('aria-pressed')])),
                 chainVisibility:{...chainVisibility},referenceOverlayVisibility:[...referenceOverlayVisibility],
                 symmetry:allSymmetryRotationGroups().map(group=>({key:group.key,angle:group.angle})),
                 chainRotations:[...singleChainRotations].map(([block,entry])=>({block,...entry}))
@@ -16800,7 +17508,68 @@
             const entry=animationLibrary.find(item=>item.id===animationActiveId);
             if(entry)Object.assign(entry,{title:animationTitle,frames:animationFrames,loop:animationLoop,syncKeys:[...animationSyncKeys],interpolation:{...animationInterpolation}});
         }
+        // Inactive ordinary animations keep their editable metadata in memory.
+        // Their coordinate payloads are evicted only after a successful IndexedDB write.
+        const animationGeometryFields=['coords','displayCoords','atomOffsets','groupPresence'];
+        async function animationEntryWithGeometry(entry){
+            if(!entry.storageFrameKey)return entry;
+            let saved=await AnimationStorage.read(entry.storageFrameKey);
+            if(!saved){const library=await AnimationStorage.read(animationModelStorageKey||animationSessionKey());saved=library?.animations?.find(item=>item.id===entry.id);}
+            if(!saved||!Array.isArray(saved.frames)||saved.frames.length!==entry.frames.length)throw Error('Stored animation keyframes are unavailable.');
+            const frames=entry.frames.map((frame,index)=>{
+                const stored=saved.frames[index];if(!stored||stored.id!==frame.id)throw Error('Stored animation keyframes do not match.');
+                const result={...frame};for(const field of animationGeometryFields)if(Object.hasOwn(stored,field))result[field]=stored[field];return result;
+            });
+            const result={...entry,frames};delete result.storageFrameKey;return result;
+        }
+        async function animationLibraryForStorage(){
+            const output=[];for(const entry of animationLibrary)output.push(await animationEntryWithGeometry(entry));return output;
+        }
+        async function loadAnimationGeometry(entry){
+            if(!entry?.storageFrameKey)return entry;
+            const full=await animationEntryWithGeometry(entry);
+            if(!animationLibrary.includes(entry))throw Error('Animation is no longer available.');
+            entry.frames=full.frames;delete entry.storageFrameKey;return entry;
+        }
+        async function offloadInactiveAnimations(){
+            if(animationPlaying||animationPreparing)return;
+            for(const entry of animationLibrary){
+                if(entry.id===animationActiveId||entry.storageFrameKey||entry.autoGenerated||entry.conformationalChange||entry.groupConformations||!entry.frames?.length)continue;
+                const frames=entry.frames,key=`stringscape-inactive:${animationModelStorageKey||animationSessionKey()}:${entry.id}`;
+                const saved={frames:frames.map(frame=>Object.fromEntries(['id',...animationGeometryFields].filter(field=>Object.hasOwn(frame,field)).map(field=>[field,frame[field]])))};
+                try{await AnimationStorage.write(key,saved);}catch(error){console.warn('Could not offload inactive animation:',error);continue;}
+                if(animationPlaying||animationPreparing||entry.id===animationActiveId||!animationLibrary.includes(entry)||entry.frames!==frames)continue;
+                entry.frames=frames.map(frame=>{const copy={...frame};for(const field of animationGeometryFields)delete copy[field];return copy;});
+                entry.storageFrameKey=key;
+            }
+        }
+        function renderAnimationAiReasons(){
+            const box=animationEl('animationAiReasons'),content=animationEl('animationAiReasonsContent');
+            if(!box||!content)return;
+            const reasons=animationLibrary.find(entry=>entry.id===animationActiveId)?.biologicalMotionReasons;
+            const sections=[
+                ['Pattern and symmetry assessment',reasons?.groupSummary,reasons?.groups,reasons?.extensions],
+                ['Individual protein and axis assessment',reasons?.axisSummary,reasons?.rotations]
+            ];
+            content.replaceChildren();
+            const hasContent=sections.some(([,summary,...lists])=>typeof summary==='string'&&summary.trim()||lists.some(list=>Array.isArray(list)&&list.length));
+            box.classList.toggle('hidden',!hasContent);
+            if(!hasContent)return;
+            for(const [title,summary,...lists] of sections){
+                const items=lists.flatMap(list=>Array.isArray(list)?list:[]);
+                if(!(typeof summary==='string'&&summary.trim())&&!items.length)continue;
+                const section=document.createElement('div'),heading=document.createElement('h4');
+                heading.className='font-semibold text-slate-100';heading.textContent=title;section.append(heading);
+                if(typeof summary==='string'&&summary.trim()){const paragraph=document.createElement('p');paragraph.className='mt-1 whitespace-pre-wrap';paragraph.textContent=summary;section.append(paragraph);}
+                if(items.length){const list=document.createElement('ul');list.className='mt-1 list-disc space-y-1 pl-5';
+                    for(const item of items){if(typeof item?.reason!=='string'||!item.reason.trim())continue;const row=document.createElement('li');row.textContent=`${item.label}: ${item.reason}`;list.append(row);}
+                    section.append(list);
+                }
+                content.append(section);
+            }
+        }
         function renderAnimationSelector(){
+            renderAnimationAiReasons();
             const select=animationEl('animationSelector'),title=animationEl('animationTitle');if(!select||!title)return;
             select.replaceChildren();
             for(const entry of animationLibrary)select.add(new Option(entry.title,entry.id));
@@ -16824,23 +17593,49 @@
             renderAnimationTimeline();renderAnimationSelector();
             if(physicsNodes.length&&animationFrames[0]?.coords?.length===physicsNodes.length)showAnimationFrame(0);
         }
+        window.replaceAnimationFromAi=(generation,originalId,plan)=>{
+            if(generation!==modelBuildGeneration||animationPlaying||animationPreparing||animationActiveId!==originalId)throw Error('The model or active animation changed; retry the edit after stopping playback.');
+            const existing=animationLibrary.find(item=>item.id===originalId);
+            const source=existing?animationFrames:[captureAnimationFrame(null,{deferAtoms:true})];
+            if(!plan||typeof plan.title!=='string'||!Array.isArray(plan.frames)||!plan.frames.length||plan.frames.length>100||typeof plan.loop!=='boolean')throw Error('Invalid replacement animation.');
+            const frames=plan.frames.map((item,index)=>{
+                if(!Number.isInteger(item.sourceFrame)||item.sourceFrame<0||item.sourceFrame>=source.length||typeof item.name!=='string'||!Number.isInteger(item.framesToNext)||item.framesToNext<0||item.framesToNext>10000||!item.settings||typeof item.settings!=='object'||Array.isArray(item.settings))throw Error('Invalid replacement keyframe '+(index+1));
+                const frame=MemoryData.clone(source[item.sourceFrame]);
+                // Only existing settings can be changed, retaining the model's geometry.
+                for(const [key,value] of Object.entries(item.settings)){if(!Object.hasOwn(frame.settings,key))throw Error('Unknown animation setting: '+key);frame.settings[key]=value;}
+                frame.id=animationId();frame.name=item.name.slice(0,80);frame.framesToNext=item.framesToNext;return frame;
+            });
+            const entry=existing||{id:animationId(),syncKeys:[],interpolation:{}};
+            Object.assign(entry,{title:plan.title.slice(0,100),frames,loop:plan.loop,autoGenerated:false,biologicalMotionReasons:{axisSummary:String(plan.reason||'AI-edited animation')}});
+            if(!existing)animationLibrary.push(entry);
+            activateAnimation(entry);saveAnimation();return {title:entry.title,keyframes:frames.length};
+        };
+        window.getAnimationEditSnapshot=()=>({generation:modelBuildGeneration,activeId:animationActiveId,animation:animationFrames.length?{title:animationTitle,loop:animationLoop,frames:animationFrames.map(frame=>({name:frame.name,framesToNext:frame.framesToNext,settings:frame.settings}))}:null,defaultSettings:animationFrames.length?null:captureAnimationFrame(null,{deferAtoms:true}).settings});
         function addAnimation(title='New animation'){
             const first=captureAnimationFrame();
             const entry={id:animationId(),title,frames:[first,sharedAnimationFrame(first)],loop:true,syncKeys:[],interpolation:{}};
             animationLibrary.push(entry);activateAnimation(entry);saveAnimation();return entry;
         }
-        async function saveAnimation(){
-            syncActiveAnimation();const key=animationModelStorageKey||animationSessionKey();
-            try{await AnimationStorage.write(key,{signature:animationNodeSignature(),animations:animationLibrary,activeId:animationActiveId,autoSpinDismissed:animationAutoSpinDismissed});
+        let animationSaveQueue=Promise.resolve();
+        function saveAnimation(){
+            syncActiveAnimation();const key=animationModelStorageKey||animationSessionKey(),generation=modelBuildGeneration;
+            animationSaveQueue=animationSaveQueue.catch(()=>{}).then(async()=>{
+                if(generation!==modelBuildGeneration)return false;
+                const animations=await animationLibraryForStorage();
+                if(generation!==modelBuildGeneration)return false;
+                await AnimationStorage.write(key,{signature:animationNodeSignature(),animations,activeId:animationActiveId,autoSpinDismissed:animationAutoSpinDismissed});
                 if(key===animationModelStorageKey)animationEl('animationStatus').textContent='Animation saved in this browser.';
-            }catch(error){animationEl('animationStatus').textContent='Could not save the animation in browser storage (storage may be full).';console.warn('Animation storage:',error);}
+                return true;
+            }).catch(error=>{animationEl('animationStatus').textContent='Could not save the animation in browser storage (storage may be full).';console.warn('Animation storage:',error);return false;});
+            return animationSaveQueue;
         }
         function scheduleAnimationSave(){keyframeDifferenceCache=null;if(physicsColorMode==='keyframe-difference')updatePhysicsNodeColors();clearTimeout(animationSaveTimer);animationSaveTimer=setTimeout(saveAnimation,300);}
         function saveSelectedAnimationFrame(){
-            if(!animationFrames.length||animationPlaying||animationApplying||!physicsNodes.length)return;
+            if(!animationFrames.length||animationPlaying||animationApplying||(typeof conformationSelectionMorph!=='undefined'&&conformationSelectionMorph)||!physicsNodes.length)return;
             clearTimeout(animationCaptureTimer);
             animationFrames[animationSelected]=captureAnimationFrame(animationFrames[animationSelected]);
             syncAnimationVariables(animationFrames[animationSelected]);
+            updateProteinSpinButtonVisibility();
             scheduleAnimationSave();
         }
         function scheduleAnimationCapture(){clearTimeout(animationCaptureTimer);animationCaptureTimer=setTimeout(saveSelectedAnimationFrame,120);}
@@ -16890,7 +17685,7 @@
                 if(typeof flags.physicsPulsePaused==='boolean'&&flags.physicsPulsePaused!==physicsPulsePaused)togglePhysicsPulse();
                 for(const [id,pressed] of Object.entries(settings.buttonStates||{})){
                     const button=animationEl(id);
-                    if(button?.closest('#physicsGraphPanel')||['pausePhysicsPulseBtn','keyframeDifferenceNormalize'].includes(id))continue;
+                    if(button?.closest('#physicsGraphPanel')||['pausePhysicsPulseBtn','keyframeDifferenceNormalize','toggleProteinSpin','resetProteinSpin'].includes(id))continue;
                     if(button&&button.getAttribute('aria-pressed')!==null&&button.getAttribute('aria-pressed')!==pressed)button.click();
                 }
                 if(settings.chainVisibility)for(const [chain,visible] of Object.entries(settings.chainVisibility))if(chainVisibility[chain]!==visible)chainVisibility[chain]=visible;
@@ -16933,8 +17728,11 @@
         }
         function updateAnimationButtons(){
             const exists=animationFrames.length>0;
-            animationEl('conformationAnimationBtn')?.classList.toggle('hidden',referenceFiles.length<2||!physicsNodes.length);
-            animationEl('createAnimationBtn')?.querySelector('span')?.replaceChildren(document.createTextNode(exists?'Edit animation':'Create animation'));
+            const createButton=animationEl('createAnimationBtn');
+            if(createButton){
+                createButton.dataset.animationLabel=exists?'Edit animation':'Create animation';
+                createButton.querySelector('span')?.replaceChildren(document.createTextNode(createButton.dataset.aiCreating==='true'?'AI planning animation...':createButton.dataset.animationLabel));
+            }
             animationEl('quickPlayAnimationBtn')?.classList.toggle('hidden',!exists);
             for(const id of ['quickPlayAnimationBtn','animationPlay']){
                 const button=animationEl(id);if(!button)continue;
@@ -16996,6 +17794,7 @@
             renderAnimationTimeline();scheduleAnimationSave();
         }
         function renderAnimationTimeline(){
+            updateProteinSpinButtonVisibility();
             const host=animationEl('animationTimeline');if(!host)return;host.replaceChildren();
             animationFrames.forEach((frame,index)=>{
                 const key=document.createElement('button');key.type='button';key.dataset.keyframe=String(index);
@@ -17073,6 +17872,7 @@
             });
             const change={id:animationId(),title:'Conformational change using PDBs',frames,loop:true,syncKeys:[],interpolation:{},conformationalChange:true,optimized:false};
             animationLibrary.push(blank,change);
+            configureAutoSpinAnimation();
             activateAnimation(change);
             animationSyncKeys=new Set(animationSyncDefinitions().filter(row=>row.category==='Visual variables').map(row=>row.key));
             change.syncKeys=[...animationSyncKeys];
@@ -17167,9 +17967,10 @@
             updateAnimationButtons();
         }
         async function playAnimation(record=false){
+            if(typeof cancelConformationSelectionMorph==='function')cancelConformationSelectionMorph();
             if(animationPreparing){if(conformationOptimization)stopAnimation();return;}
             if(animationPlaying){stopAnimation(true);if(!record)return;}
-            if(animationFrames.length<2||!physicsNodes.length){animationEl('animationStatus').textContent='Add at least two keyframes to play an animation.';return;}
+            if(!animationFrames.length||!physicsNodes.length){animationEl('animationStatus').textContent='Add a keyframe to play an animation.';return;}
             const currentEntry=animationLibrary.find(item=>item.id===animationActiveId);
             if(!currentEntry?.autoGenerated)saveSelectedAnimationFrame();
             if(currentEntry?.groupConformations&&multiReferenceBuild?.groupAnimation===currentEntry){multiReferenceBuild.view=multiReferenceBuild.current='combined';renderStagedBuildControls();}
@@ -17223,7 +18024,7 @@
             showAnimationFrame(0);animationStartTime=performance.now();updateAnimationButtons();
         }
         function advanceAnimation(now){
-            if(!animationPlaying||animationFrames.length<2)return;
+            if(!animationPlaying||!animationFrames.length)return;
             const total=animationDurationFrames();
             if(animationRecording&&animationFinalHoldUntil){if(now>=animationFinalHoldUntil)stopAnimation();return;}
             if(animationRecording&&now-animationLastRecordStep>=1000/30){animationRecordedFrame++;animationLastRecordStep=now;}
@@ -17267,9 +18068,99 @@
         function applyAnimationDisplayCoordinates(){
             return applyVisualSymmetryRotation();
         }
+        // Candidate IDs come from the same collision-tested controls used by the UI.
+        window.getBiologicalMotionContext=()=>{
+            const context=window.getComplexAiContext();
+            const allBlocks=[...new Set(physicsNodes.map(node=>node.blockIdx))].map(block=>{
+                const node=physicsBlockNode(block),accession=uniProtAccession(node?.res?.atoms2?.[0]?.sourcePdbId||'');
+                return {block,chain:node?.res?.c1,accession,name:chainProteinName(block),uniProt:uniProtAnnotations.get(accession)||null};
+            });
+            const fixedBlocks=new Set(allBlocks.filter(item=>/atp synthase/i.test(item.name)).map(item=>item.block));
+            return {...context,blocks:allBlocks.filter(item=>!fixedBlocks.has(item.block)),
+                patterns:[...document.querySelectorAll('[data-pattern-extension]')].map(input=>({key:input.dataset.patternExtension,blocks:input.dataset.patternExtension.split(',').map(Number),label:input.getAttribute('aria-label')})).filter(item=>!item.blocks.some(block=>fixedBlocks.has(block))),
+                groups:allSymmetryRotationGroups().filter(group=>![...group.blockIds].some(block=>fixedBlocks.has(block))).map(group=>({key:group.key,blocks:[...group.blockIds],type:group.localAxes?'helical':'rotational'})),
+                axes:[...allSymmetryRotationGroups().map(group=>({key:`group:${group.key}`,name:symmetryGroupName(group),blocks:[...group.blockIds],type:group.localAxes?'helical':'rotational',origin:group.origin,normal:group.normal,
+                    ...(group.localAxes?{localAxes:[...group.localAxes].map(([block,axis])=>({block,origin:axis.origin,normal:axis.normal}))}:{} )})),...['x','y','z'].map(axis=>({key:`self-${axis}`,name:`Each selected protein's own ${axis.toUpperCase()} axis`}))],
+                drafts:(multiReferenceBuild?.files||[]).map(file=>({pdbId:file.pdbId.toUpperCase(),title:file.parsed?.title||''})),
+                conformationGroups:(multiReferenceBuild?.conformationGroups||[]).map((group,index)=>({index,name:group.name,pdbIds:group.pdbIds})),
+                animationIds:animationLibrary.map(entry=>entry.id),playing:animationPlaying};
+        };
+        window.applyBiologicalMotion=(generation,decision,{createSpinAnimation=true}={})=>{
+            if(generation!==modelBuildGeneration||animationPlaying||animationPreparing)return false;
+            const context=window.getBiologicalMotionContext(),groupKeys=new Set(context.groups.map(item=>item.key));
+            const patternKeys=new Set(context.patterns.map(item=>item.key)),blockIds=new Set(context.blocks.map(item=>item.block)),axisKeys=new Set(context.axes.map(item=>item.key));
+            const groupRates=new Map((decision.groups||[]).map(item=>typeof item==='string'?{key:item,rate:108}:item).filter(item=>groupKeys.has(item.key)&&Number.isFinite(item.rate)).map(item=>[item.key,item.rate*Math.PI/180]));
+            const selected=new Set(groupRates.keys());
+            const selectedBlocks=new Set(context.groups.filter(group=>selected.has(group.key)).flatMap(group=>group.blocks));
+            // Group decisions own their members' axes. The separate per-protein
+            // decision is only applied to blocks outside those selected groups.
+            const rotations=(decision.rotations||[]).filter(item=>blockIds.has(item.block)&&axisKeys.has(item.axis)&&!selectedBlocks.has(item.block));
+            let motionReasons=null;
+            if(decision.reasons&&(selected.size||rotations.length)){
+                const blockLabel=block=>{const item=context.blocks.find(candidate=>candidate.block===block);return item?[item.name||'Protein',item.chain?`(${item.chain})`:`(block ${block})`].join(' '):`Block ${block}`;};
+                const groupLabel=key=>{const group=context.groups.find(item=>item.key===key);return group?.blocks?.map(blockLabel).join(', ')||key;};
+                const axisLabel=key=>context.axes.find(item=>item.key===key)?.name||key;
+                motionReasons={groupSummary:decision.reasons.groupSummary||'',axisSummary:decision.reasons.axisSummary||'',
+                    groups:(decision.reasons.groups||[]).filter(item=>selected.has(item.key)).map(item=>({label:groupLabel(item.key),reason:item.reason})),
+                    rotations:(decision.reasons.rotations||[]).filter(item=>rotations.some(rotation=>rotation.block===item.block&&rotation.axis===item.axis)).map(item=>({label:`${blockLabel(item.block)} around ${axisLabel(item.axis)}`,reason:item.reason})),
+                    extensions:(decision.reasons.extensions||[]).filter(item=>patternKeys.has(item.key)).map(item=>({label:context.patterns.find(pattern=>pattern.key===item.key)?.label||item.key,reason:item.reason}))};
+            }
+            for(const item of decision.extensions||[])if(patternKeys.has(item.key)&&Number.isInteger(item.units)&&item.units>=0&&item.units<=100)patternExtensionCounts.set(item.key,item.units);
+            patternExtensionUnits=Math.max(0,...patternExtensionCounts.values());
+            for(const group of allSymmetryRotationGroups())if(groupKeys.has(group.key))group.angle=groupRates.get(group.key)||0;
+            for(const block of selectedBlocks)singleChainRotations.delete(block);
+            for(const item of rotations)singleChainRotations.set(item.block,{angle:(Number.isFinite(item.rate)?item.rate:108)*Math.PI/180,axisKey:item.axis,overridden:true});
+            // Preserve existing animations, including previously edited automatic
+            // spins. Create a separate one-keyframe animation only for AI spin.
+            let newSpin=null;
+            const hasConformationAnimation=animationLibrary.some(entry=>entry.conformationalChange||entry.groupConformations);
+            const existingSpin=animationLibrary.find(entry=>entry.aiSpinGenerated&&entry.frames?.length);
+            if((selected.size||rotations.length)&&!hasConformationAnimation&&!existingSpin&&createSpinAnimation){
+                syncActiveAnimation();
+                const frame=captureAnimationFrame(null,{deferAtoms:true});frame.framesToNext=100;
+                newSpin={id:animationId(),title:'AI-generated spin animation',frames:[frame],loop:true,syncKeys:[],interpolation:{},autoGenerated:true,aiSpinGenerated:true};
+                animationLibrary.push(newSpin);
+            }
+            if(decision.keyframes?.length&&multiReferenceBuild?.groupAnimation){
+                const entry=multiReferenceBuild.groupAnimation;
+                const ordered=decision.keyframes.map(item=>entry.frames.find(frame=>frame.conformationGroup===item.group));
+                if(ordered.length===entry.frames.length&&ordered.every(Boolean)&&new Set(ordered).size===ordered.length){
+                    const activeFrame=entry.id===animationActiveId?animationFrames[animationSelected]:null;
+                    entry.frames.splice(0,entry.frames.length,...ordered);
+                    if(activeFrame){animationFrames=entry.frames;animationSelected=Math.max(0,entry.frames.indexOf(activeFrame));}
+                }
+            }
+            // Extensions remain shared across all conformations; the renderer checks
+            // collisions against the current coordinates whenever the model changes.
+            for(const entry of animationLibrary){
+                if(motionReasons&&(entry.autoGenerated||entry.conformationalChange||entry.groupConformations))entry.biologicalMotionReasons=motionReasons;
+                for(const frame of entry.frames){
+                frame.settings.symmetry??=[];
+                for(const group of allSymmetryRotationGroups())if(groupKeys.has(group.key)){
+                    const old=frame.settings.symmetry.find(item=>item.key===group.key);
+                    if(old)old.angle=groupRates.get(group.key)||0;else frame.settings.symmetry.push({key:group.key,angle:groupRates.get(group.key)||0});
+                }
+                frame.settings.chainRotations=(frame.settings.chainRotations||[]).filter(item=>!selectedBlocks.has(Number(item.block)));
+                for(const item of rotations){frame.settings.chainRotations=frame.settings.chainRotations.filter(old=>old.block!==item.block);frame.settings.chainRotations.push({block:item.block,angle:(Number.isFinite(item.rate)?item.rate:108)*Math.PI/180,axisKey:item.axis,overridden:true});}
+                }
+            }
+            if(newSpin)activateAnimation(newSpin);
+            else if(existingSpin&&!animationActiveId&&(selected.size||rotations.length))activateAnimation(existingSpin);
+            if(animationActiveId)applyAnimationSettings(animationFrames[animationSelected]?.settings);
+            void renderPatternExtensions(detectedExtensionPatterns);updateSymmetryRotationControls();saveAnimation();renderAnimationTimeline();renderAnimationAiReasons();
+            return true;
+        };
+        window.playBiologicalMotion=async generation=>{
+            if(generation!==modelBuildGeneration||animationPlaying||animationPreparing)return false;
+            const entry=multiReferenceBuild?.groupAnimation||animationLibrary.find(item=>item.aiSpinGenerated)||animationLibrary.find(item=>item.id===animationActiveId);
+            if(!entry?.frames?.length)return false;
+            if(animationActiveId!==entry.id)activateAnimation(entry);
+            await playAnimation();
+            return animationPlaying;
+        };
         function configureAutoSpinAnimation(){
-            const entry=animationLibrary.find(item=>item.autoGenerated||item.title==='Auto-generated spin animation');
-            if(!entry||entry.frames.length<2||animationPlaying)return;
+            const entries=animationLibrary.filter(item=>item.autoGenerated||item.conformationalChange||item.title==='Auto-generated spin animation');
+            if(!entries.length||animationPlaying)return;
             const names=[...new Set(physicsNodes.map(node=>node.blockIdx))].map(block=>[block,chainProteinName(block).toLowerCase()]);
             if(!names.some(([,name])=>name))return;
             const excluded=name=>['atp synthase subunit alpha','atp synthase subunit beta','atp synthase subunit b'].some(item=>name===item);
@@ -17294,13 +18185,19 @@
                 'flagella accessory protein j'
             ].some(item=>name.includes(item))||/\bflagellin\b/.test(name);
             const cGroup=allSymmetryRotationGroups().find(group=>[...group.blockIds].some(block=>names.find(item=>item[0]===block)?.[1]?.includes('atp synthase subunit c')));
-            for(let index=0;index<2;index++){
+            const connected=!!window.ModellerAI?.connected();
+            for(const entry of entries)for(let index=0;index<entry.frames.length;index++){
                 const settings=entry.frames[index].settings;if(!settings)continue;
-                settings.symmetry=allSymmetryRotationGroups().map(group=>({key:group.key,angle:[...group.blockIds].some(block=>autoSpinProtein(names.find(item=>item[0]===block)?.[1]||'')&&!excluded(names.find(item=>item[0]===block)?.[1]||''))?index?359*Math.PI/180:0:0}));
+                settings.symmetry=allSymmetryRotationGroups().map(group=>{
+                    const groupNames=[...group.blockIds].map(block=>names.find(item=>item[0]===block)?.[1]||'');
+                    const atp=groupNames.some(name=>name.includes('atp synthase'));
+                    const rotate=groupNames.some(name=>autoSpinProtein(name)&&!excluded(name));
+                    return {key:group.key,angle:atp||!connected?(rotate?108*Math.PI/180:0):(settings.symmetry?.find(item=>item.key===group.key)?.angle||0)};
+                });
                 const special=names.filter(([,name])=>name.includes('atp synthase gamma chain')||name.includes('atp synthase epsilon chain'));
-                settings.chainRotations=special.length&&cGroup?special.map(([block])=>({block,angle:index?359*Math.PI/180:0,axisKey:`group:${cGroup.key}`,overridden:true})):[];
+                settings.chainRotations=[...(settings.chainRotations||[]).filter(item=>!special.some(([block])=>block===item.block)),...(special.length&&cGroup?special.map(([block])=>({block,angle:108*Math.PI/180,axisKey:`group:${cGroup.key}`,overridden:true})):[])];
             }
-            if(animationActiveId===entry.id)applyAnimationSettings(entry.frames[animationSelected]?.settings);
+            if(entries.some(entry=>entry.id===animationActiveId))applyAnimationSettings(animationFrames[animationSelected]?.settings);
             saveAnimation();
         }
         async function animationOnModelReady(){
@@ -17339,7 +18236,7 @@
                 const first=captureAnimationFrame(null,{deferAtoms:true}),second=sharedAnimationFrame(first);
                 first.framesToNext=100;second.framesToNext=0;
                 first.settings.symmetry=allSymmetryRotationGroups().map(group=>({key:group.key,angle:0}));
-                second.settings.symmetry=allSymmetryRotationGroups().map(group=>({key:group.key,angle:359*Math.PI/180}));
+                second.settings.symmetry=allSymmetryRotationGroups().map(group=>({key:group.key,angle:0}));
                 const entry={id:animationId(),title:'Auto-generated spin animation',frames:[first,second],loop:true,syncKeys:['conformation'],autoGenerated:true};
                 animationLibrary.push(entry);
                 if(!animationActiveId)activateAnimation(entry);
@@ -17352,6 +18249,7 @@
             }
             configureAutoSpinAnimation();
             renderAnimationTimeline();
+            void offloadInactiveAnimations();
         }
         function animationRowDefinitions(){
             const rows=[];
@@ -17373,19 +18271,16 @@
             for(const chain of Object.keys(first.settings.chainVisibility||{}))rows.push({key:`chain:${chain}`,category:'Visual variables',label:`${displayChainName(chain)} visible`,get:frame=>String(frame.settings.chainVisibility?.[chain]!==false),set:(frame,value)=>{frame.settings.chainVisibility[chain]=value==='true';}});
             first.settings.referenceOverlayVisibility?.forEach((_,index)=>rows.push({key:`reference:${index}`,category:'Visual variables',label:`Reference PDB ${index+1} visible`,get:frame=>String(frame.settings.referenceOverlayVisibility?.[index]===true),set:(frame,value)=>{frame.settings.referenceOverlayVisibility[index]=value==='true';}}));
             for(const id of Object.keys(first.settings.buttonStates||{})){
-                if(animationEl(id)?.closest('#physicsGraphPanel')||['pausePhysicsPulseBtn','keyframeDifferenceNormalize'].includes(id))continue;
+                if(animationEl(id)?.closest('#physicsGraphPanel')||['pausePhysicsPulseBtn','keyframeDifferenceNormalize','toggleProteinSpin','resetProteinSpin'].includes(id))continue;
                 rows.push({key:`button:${id}`,category:animationEl(id)?.closest('#physicsControlsPanel')?'Physics variables':'Visual variables',label:id.replace(/([A-Z])/g,' $1'),get:frame=>frame.settings.buttonStates?.[id],set:(frame,value)=>{frame.settings.buttonStates[id]=value==='true'?'true':'false';}});
             }
             for(const property of ['representation','color','referenceColor','springColor'])rows.push({key:`property:${property}`,category:'Visual variables',label:property.replace(/([A-Z])/g,' $1'),get:frame=>frame.settings[property],set:(frame,value)=>{frame.settings[property]=value;}});
-            for(const group of allSymmetryRotationGroups())rows.push({key:`symmetry:${group.key}`,category:'Visual variables',label:`Rotation of ${symmetryGroupName(group)} (°)`,graphable:true,step:1,
+            for(const group of allSymmetryRotationGroups())rows.push({key:`symmetry:${group.key}`,category:'Visual variables',label:`Spin rate of ${symmetryGroupName(group)} (°/s)`,graphable:true,step:1,
                 get:frame=>String(Math.round((frame.settings.symmetry?.find(item=>item.key===group.key)?.angle||0)*180/Math.PI)),
-                set:(frame,value)=>{const degrees=Number(value);if(!Number.isFinite(degrees))throw Error('Rotation must be a number of degrees.');
+                set:(frame,value)=>{const degrees=Number(value);if(!Number.isFinite(degrees))throw Error('Spin rate must be a number of degrees per second.');
                     const angle=degrees*Math.PI/180;
                     const item=frame.settings.symmetry.find(entry=>entry.key===group.key);
                     if(item)item.angle=angle;else frame.settings.symmetry.push({key:group.key,angle});
-                    group.blockIds.forEach(block=>physicsNodes.forEach((node,index)=>{if(node.blockIdx!==block)return;
-                        const p=rotateVisualPoint(new THREE.Vector3(...frame.coords[index]),localSymmetryRotation(group,block),angle);
-                        frame.displayCoords[index]=[p.x,p.y,p.z];}));
                 }});
             return rows;
         }
@@ -17518,6 +18413,7 @@
             const metadata={version:2,signature:animationCsvModelSignature(),references:referenceFiles.map(file=>file.pdbId),title:animationTitle,loop:animationLoop,
                 syncKeys:[...animationSyncKeys],interpolation:{...animationInterpolation},
                 conformationalChange:animationLibrary.find(item=>item.id===animationActiveId)?.conformationalChange===true,
+                biologicalMotionReasons:animationLibrary.find(item=>item.id===animationActiveId)?.biologicalMotionReasons||null,
                 optimized:animationLibrary.find(item=>item.id===animationActiveId)?.optimized===true};
             const values=(key,label,cells,sync='',interpolate='')=>[key,label,...cells,sync,interpolate];
             const lines=[['Key','Setting',...animationFrames.map((_,index)=>`Keyframe ${index+1}`),'Sync','Interpolate'],
@@ -17554,7 +18450,7 @@
             if(header?.[0]?.replace(/^\uFEFF/,'')!=='Key'||header[1]!=='Setting'||header.at(-2)!=='Sync'||header.at(-1)!=='Interpolate')
                 throw Error('Upload a CSV saved with “Save animation table”.');
             const count=header.length-4;
-            if(count<2||count>100)throw Error('The CSV must contain 2–100 keyframes.');
+            if(count<1||count>100)throw Error('The CSV must contain 1–100 keyframes.');
             const byKey=new Map();
             for(const record of rows){if(record.length!==header.length)throw Error(`CSV row “${record[0]}” has the wrong number of columns.`);
                 if(byKey.has(record[0]))throw Error(`Duplicate CSV row “${record[0]}”.`);byKey.set(record[0],record);}
@@ -17602,7 +18498,8 @@
             }
             if(syncKeys.has('conformation'))for(const definition of definitions)if(definition.category==='Physics variables')syncKeys.add(definition.key);
             const imported={frames,title:String(metadata.title||animationTitle).slice(0,100),loop:metadata.loop!==false,
-                syncKeys:[...syncKeys],interpolation,conformationalChange:metadata.conformationalChange===true,optimized:metadata.optimized===true};
+                syncKeys:[...syncKeys],interpolation,conformationalChange:metadata.conformationalChange===true,optimized:metadata.optimized===true,
+                biologicalMotionReasons:metadata.biologicalMotionReasons&&typeof metadata.biologicalMotionReasons==='object'&&!Array.isArray(metadata.biologicalMotionReasons)?metadata.biologicalMotionReasons:null};
             stripAnimationGraphMetadata(imported);
             return imported;
         }
@@ -17692,13 +18589,19 @@
             animationEl('animationEditor').classList.toggle('hidden');
             if(!animationEl('animationEditor').classList.contains('hidden'))animationEl('animationEditor').scrollIntoView({behavior:'smooth',block:'start'});
         });
-        animationEl('conformationAnimationBtn')?.addEventListener('click',createConformationAnimations);
-        animationEl('animationSelector')?.addEventListener('change',event=>{
+        animationEl('animationSelector')?.addEventListener('change',async event=>{
             if(!physicsNodes.length)return;
-            if(animationPlaying||animationPreparing)stopAnimation(true);
-            saveSelectedAnimationFrame();saveAnimation();
-            if(event.target.value==='new')addAnimation(`Animation ${animationLibrary.length+1}`);
-            else activateAnimation(animationLibrary.find(item=>item.id===event.target.value));
+            const selector=event.target,requested=selector.value,generation=modelBuildGeneration;
+            selector.disabled=true;
+            try{
+                if(animationPlaying||animationPreparing)stopAnimation(true);
+                saveSelectedAnimationFrame();await saveAnimation();
+                if(generation!==modelBuildGeneration)return;
+                if(requested==='new')addAnimation(`Animation ${animationLibrary.length+1}`);
+                else {const entry=animationLibrary.find(item=>item.id===requested);if(entry){await loadAnimationGeometry(entry);if(generation!==modelBuildGeneration)return;activateAnimation(entry);}}
+                if(await saveAnimation())await offloadInactiveAnimations();
+            }catch(error){animationEl('animationStatus').textContent='Could not load the selected animation: '+error.message;renderAnimationSelector();}
+            finally{selector.disabled=false;}
         });
         animationEl('animationTitle')?.addEventListener('input',event=>{
             if(!animationActiveId)return;
@@ -17722,7 +18625,7 @@
         animationEl('closeAnimationEditor')?.addEventListener('click',()=>animationEl('animationEditor').classList.add('hidden'));
         animationEl('quickPlayAnimationBtn')?.addEventListener('click',()=>playAnimation());
         animationEl('animationPlay')?.addEventListener('click',()=>{
-            if(!animationPlaying&&!animationPreparing&&animationFrames.length>=2&&physicsNodes.length)
+            if(!animationPlaying&&!animationPreparing&&animationFrames.length&&physicsNodes.length)
                 animationEl('physicsContainer')?.scrollIntoView({behavior:'smooth',block:'start'});
             playAnimation();
         });
@@ -17742,13 +18645,16 @@
             showAnimationFrame(nextIndex);saveAnimation();return true;
         }
         animationEl('deleteAnimationKeyframe')?.addEventListener('click',deleteSelectedAnimationKeyframe);
-        animationEl('deleteAnimation')?.addEventListener('click',()=>{
+        animationEl('deleteAnimation')?.addEventListener('click',async()=>{
             stopAnimation();clearTimeout(animationCaptureTimer);clearTimeout(animationSaveTimer);
-            if(animationLibrary.find(entry=>entry.id===animationActiveId)?.autoGenerated)animationAutoSpinDismissed=true;
-            animationLibrary=animationLibrary.filter(entry=>entry.id!==animationActiveId);
+            const deleting=animationActiveId,generation=modelBuildGeneration,next=animationLibrary.find(entry=>entry.id!==deleting);
+            try{if(next)await loadAnimationGeometry(next);}catch(error){animationEl('animationStatus').textContent='Could not load the remaining animation: '+error.message;return;}
+            if(generation!==modelBuildGeneration||animationActiveId!==deleting)return;
+            if(animationLibrary.find(entry=>entry.id===deleting)?.autoGenerated)animationAutoSpinDismissed=true;
+            animationLibrary=animationLibrary.filter(entry=>entry.id!==deleting);
             animationFrames=[];animationSelected=0;animationTableRows=null;animationDisplayOverride=null;
             animationActiveId=null;
-            if(animationLibrary.length)activateAnimation(animationLibrary[0]);
+            if(next)activateAnimation(next);
             saveAnimation();
             closeAnimationTable();animationEl('animationEditor').classList.add('hidden');renderAnimationTimeline();renderAnimationSelector();
         });
@@ -18257,8 +19163,8 @@
         document.querySelectorAll('.validation-score-graph').forEach(button=>button.addEventListener('click',()=>{
             const controls=document.getElementById('physicsControlsToggle');
             if(controls?.getAttribute('aria-expanded')!=='true')controls?.click();
-            const graph=document.getElementById('physicsGraphToggle');
-            if(graph?.getAttribute('aria-expanded')!=='true')graph?.click();
+            const graph=document.getElementById('physicsGraphPanel');
+            if(graph)graph.open=true;
             controls?.scrollIntoView({behavior:'smooth',block:'start'});
         }));
         validationElement('validationReport')?.querySelectorAll('.validation-matrix-reset').forEach(button=>button.addEventListener('click',()=>{
@@ -18758,8 +19664,7 @@ function physicsComparisonValues(mode){
         switch(mode){
             case 'running-simulation':{
                 if(!groupSimulation||groupSimulation.index<0)return null;
-                if(groupSimulation.active.has(node.blockIdx))return (groupSimulation.parallel?groupSimulation.cores.has(node.blockIdx):node.blockIdx===groupSimulation.core)?'Active core':'Active neighbour';
-                return groupSimulation.processed.has(node.blockIdx)?'Processed':'Waiting';
+                return runningSimulationStatus(groupSimulation,node.blockIdx);
             }
             case 'chain':return displayChainName(node.res.c1||node.res.c2||'A');
             case 'protein-id':return source?.sourcePdbId||null;
@@ -18908,10 +19813,16 @@ if(globalThis.BuildTimeline){
 }
 
 function createMolecularInstances(count,radius=1,rod=false,options={}){
-    if(MolecularImpostors.supported(physicsRenderer))return MolecularImpostors.create(count,radius,rod,options);
+    options={...options,gaussian:physicsRepresentation==='gaussian'&&!options.glow};
+    if(MolecularImpostors.supported(physicsRenderer)){
+        const mesh=MolecularImpostors.create(count,radius,rod,options);
+        if(options.gaussian&&rod)mesh.geometry.setDrawRange(0,0);
+        return mesh;
+    }
     // Old WebGL implementations without fragment depth retain ordinary meshes.
     const fallbackCapacity=Math.max(1,count,options.dynamic?radius===.40?physicsNodes.reduce((n,node)=>n+(node.res.atoms2[node.idx2].sourceAtoms?.length||1),0):physicsNodes.length:0);
     const mesh=new THREE.InstancedMesh(rod?new THREE.CylinderGeometry(1,1,1,6):new THREE.SphereGeometry(radius,10,8),options.glow?new THREE.MeshBasicMaterial({color:options.color,transparent:true,opacity:options.opacity,depthWrite:false,blending:THREE.AdditiveBlending}):new THREE.MeshPhongMaterial({shininess:options.shininess??6}),fallbackCapacity);
+    if(options.gaussian&&rod)mesh.geometry.setDrawRange(0,0);
     mesh.count=count;return mesh;
 }
 

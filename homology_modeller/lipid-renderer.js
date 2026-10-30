@@ -1,5 +1,5 @@
 // Whole-molecule instancing: two draw calls, one transform per visible lipid.
-// Atom/bond template geometry is static; spin, bob and tail deformation run on GPU.
+// Atom/bond template geometry is static; orientation, bobbing and tail wiggle run on GPU.
 (function(){
     const shader=`
 attribute vec3 lipidAnchor;
@@ -57,8 +57,38 @@ vec3 lipidNormal(vec3 n){
         mat.customProgramCacheKey=()=>`lipid-molecule-v1-${bond}-${glow}`;
         return mat;
     }
+    function gaussianMaterial(uniforms){
+        return new THREE.ShaderMaterial({uniforms,transparent:true,depthWrite:false,clipping:true,
+            vertexShader:shader+`
+                attribute vec3 color;
+                varying vec2 gaussianOffset;
+                varying vec3 gaussianTint;
+                #include <clipping_planes_pars_vertex>
+                void main(){
+                    float radius=.34*lipidAtomSize*(1.0+lipidElementSize*(lipidRadius-1.0));
+                    vec4 mvPosition=modelViewMatrix*instanceMatrix*vec4(lipidPosition(vec3(0.)),1.);
+                    gaussianOffset=position.xy*2.5;gaussianTint=color;
+                    mvPosition.xy+=gaussianOffset*radius;
+                    gl_Position=projectionMatrix*mvPosition;
+                    #include <clipping_planes_vertex>
+                }`,
+            fragmentShader:`
+                varying vec2 gaussianOffset;
+                varying vec3 gaussianTint;
+                #include <clipping_planes_pars_fragment>
+                void main(){
+                    #include <clipping_planes_fragment>
+                    float r2=dot(gaussianOffset,gaussianOffset);
+                    if(r2>6.25)discard;
+                    // Match the sharper fourth-power atom falloff.
+                    float alpha=.88*exp(-r2*r2);
+                    gl_FragColor=vec4(gaussianTint,alpha);
+                    #include <tonemapping_fragment>
+                    #include <encodings_fragment>
+                }`});
+    }
     function geometry(atoms,bonds,segments,bond,count,params,radii){
-        const template=bond?new THREE.CylinderGeometry(1,1,1,segments,1):new THREE.SphereGeometry(1,segments,Math.max(3,segments-2));
+        const template=segments===0?new THREE.PlaneGeometry(2,2):bond?new THREE.CylinderGeometry(1,1,1,segments,1):new THREE.SphereGeometry(1,segments,Math.max(3,segments-2));
         const base=template.toNonIndexed(),length=base.attributes.position.count,n=bond?bonds.length:atoms.length;
         const pos=new Float32Array(length*n*3),norm=new Float32Array(pos.length),anchors=new Float32Array(pos.length),ends=new Float32Array(pos.length),colors=new Float32Array(pos.length),radius=new Float32Array(length*n);
         for(let i=0;i<n;i++){
@@ -82,10 +112,11 @@ vec3 lipidNormal(vec3 n){
         const params=new THREE.InstancedBufferAttribute(new Float32Array(count*3),3);params.setUsage(THREE.DynamicDrawUsage);
         const variants=new Map();
         function level(segments){
-            if(!variants.has(segments)){for(const pair of variants.values())for(const geo of pair)geo.dispose();variants.clear();variants.set(segments,[geometry(atoms,bonds,segments,false,count,params,radii),geometry(atoms,bonds,segments,true,count,params,radii)]);}
+            if(!variants.has(segments)){for(const pair of variants.values())for(const geo of pair)geo.dispose();variants.clear();variants.set(segments,[geometry(atoms,bonds,segments,false,count,params,radii),geometry(atoms,bonds,segments,true,count,params,radii),geometry(atoms,bonds,0,false,count,params,radii)]);}
             return variants.get(segments);
         }
         const geos=level(6),atomMesh=new THREE.InstancedMesh(geos[0],material(uniforms,false),count),stickMesh=new THREE.InstancedMesh(geos[1],material(uniforms,true),count);
+        const atomMaterial=atomMesh.material,gaussian=gaussianMaterial(uniforms);
         const glowUniforms={...uniforms,lipidGlow:{value:1.24}};
         // Selection copies one particle's parameters into an independent buffer.
         const glowParams=new THREE.InstancedBufferAttribute(new Float32Array(3),3);
@@ -93,10 +124,12 @@ vec3 lipidNormal(vec3 n){
         const atomGlowMesh=new THREE.InstancedMesh(glowGeo,material(glowUniforms,false,true),1);
         for(const mesh of [atomMesh,stickMesh,atomGlowMesh]){mesh.count=0;mesh.frustumCulled=false;mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);mesh.raycast=()=>{};}
         atomGlowMesh.renderOrder=15;atomMesh.renderOrder=2;stickMesh.renderOrder=2;
-        return {atomMesh,stickMesh,atomGlowMesh,uniforms,params,glowParams,variants,level,detail:6};
+        const render={atomMesh,stickMesh,atomGlowMesh,atomMaterial,gaussianMaterial:gaussian,uniforms,params,glowParams,variants,level,detail:6,atoms,radii};
+        atomMesh.userData.gaussianLipid=render;
+        return render;
     }
     function colors(render,atoms,bonds,colorAt){
-        const palette=atoms.map(colorAt);
+        const palette=atoms.map(colorAt);render.palette=palette;
         for(const geos of render.variants.values())for(const geo of geos){
             const values=geo.attributes.color.array,len=geo.userData.verticesPerPart;
             for(let i=0;i<(geo.userData.bond?bonds.length:atoms.length);i++){
@@ -106,5 +139,22 @@ vec3 lipidNormal(vec3 n){
             geo.attributes.color.needsUpdate=true;
         }
     }
-    window.LipidRenderer={create,colors,shader};
+    function collectGaussianAtoms(render,emit){
+        const {atomMesh,atoms,radii,params,uniforms:u,palette}=render;
+        const matrix=new THREE.Matrix4(),point=new THREE.Vector3();
+        const time=u.lipidTime.value,scale=u.lipidMotionScale.value,jiggle=u.lipidJiggle.value;
+        for(let i=0;i<atomMesh.count;i++){
+            atomMesh.getMatrixAt(i,matrix);matrix.premultiply(atomMesh.matrixWorld);
+            const phase=params.getX(i),angle=params.getY(i)+params.getZ(i)*u.lipidClock.value,c=Math.cos(angle),s=Math.sin(angle);
+            const tx=jiggle*.10*Math.sin(time*2.5*scale+phase),ty=jiggle*.10*Math.sin(time*2.1*scale+phase*1.7);
+            const bob=jiggle*.85*Math.sin(time*1.5*scale+phase);
+            atoms.forEach((atom,index)=>{
+                const z=atom.z*u.lipidDepth.value,x=atom.x+tx*Math.max(0,z),y=atom.y+ty*Math.max(0,z);
+                point.set(c*x-s*y,s*x+c*y,z+bob).applyMatrix4(matrix);
+                const radius=.34*u.lipidAtomSize.value*(1+u.lipidElementSize.value*((radii[atom.element]??1)-1));
+                emit(point.x,point.y,point.z,radius,palette[index],atomMesh.material.opacity);
+            });
+        }
+    }
+    window.LipidRenderer={create,colors,collectGaussianAtoms,shader};
 })();

@@ -11,6 +11,7 @@ uniProtUnavailable:{get:()=>uniProtUnavailable,set:v=>{uniProtUnavailable=v;}},
 referenceFiles:{get:()=>referenceFiles,set:v=>{referenceFiles=v;}},
 referenceAssembly:{get:()=>referenceAssembly,set:v=>{referenceAssembly=v;}},
 referenceInfluences:{get:()=>referenceInfluences,set:v=>{referenceInfluences=v;}},
+chainMergingData:{get:()=>globalThis.ChainMergingReport?.snapshot()||[],set:v=>globalThis.ChainMergingReport?.restore(v)},
 alignmentResults:{get:()=>alignmentResults,set:v=>{alignmentResults=v;}},
 selectionMode:{get:()=>selectionMode,set:v=>{selectionMode=v;}},
 linkedSelection:{get:()=>linkedSelection,set:v=>{linkedSelection=v;}},
@@ -209,7 +210,7 @@ function decodeSessionGraph(graph,binaryFiles={}){
     if(!graph||!Array.isArray(graph.records))throw Error('Invalid session data.');
     const types={Float32Array,Float64Array,Int32Array,Uint32Array,Int16Array,Uint16Array,Int8Array,Uint8Array,Uint8ClampedArray};
     const objects=graph.records.map(r=>{
-        if(r.type==='Binary'){const data=binaryFiles[r.name];if(!(data instanceof Uint8Array)||data.byteLength!==r.length)throw Error('Missing session buffer: '+r.name);return data.buffer.slice(data.byteOffset,data.byteOffset+data.byteLength);}
+        if(r.type==='Binary'){const data=binaryFiles[r.name];if(!(data instanceof Uint8Array)||data.byteLength!==r.length)throw Error('Missing session buffer: '+r.name);return data.byteOffset===0&&data.byteLength===data.buffer.byteLength?data.buffer:data.buffer.slice(data.byteOffset,data.byteOffset+data.byteLength);}
         if(r.type==='TypedView')return null;
         if(r.type==='MemoryView')return {};
         if(r.type==='Map')return new Map();if(r.type==='Set')return new Set();
@@ -226,37 +227,57 @@ function decodeSessionGraph(graph,binaryFiles={}){
     return MemoryData.wire(decode(graph.root),true);
 }
 // Standard uncompressed ZIP: readable without a network dependency.
-function sessionZip(files){
-    const encoder=new TextEncoder(),parts=[],directory=[];let offset=0;
+function* sessionZipChunks(files){
+    const encoder=new TextEncoder(),directory=[];let offset=0;
     const crc=bytes=>{let c=0xffffffff;for(const b of bytes){c^=b;for(let j=0;j<8;j++)c=(c>>>1)^((c&1)?0xedb88320:0);}return (c^0xffffffff)>>>0;};
     for(const [name,text] of (files[Symbol.iterator]?files:Object.entries(files))){
         const n=encoder.encode(name),data=typeof text==='string'?encoder.encode(text):text;
         if(!(data instanceof Uint8Array))throw Error('Invalid session entry');
         if(n.length>65535||directory.length>=65535||offset+30+n.length+data.length>0xffffffff)throw Error('Session exceeds ZIP32 limits; save to a local folder instead.');
         const sum=crc(data),header=new Uint8Array(30+n.length),v=new DataView(header.buffer);
-        v.setUint32(0,0x04034b50,true);v.setUint16(4,20,true);v.setUint32(14,sum,true);v.setUint32(18,data.length,true);v.setUint32(22,data.length,true);v.setUint16(26,n.length,true);header.set(n,30);parts.push(header,data);
+        v.setUint32(0,0x04034b50,true);v.setUint16(4,20,true);v.setUint32(14,sum,true);v.setUint32(18,data.length,true);v.setUint32(22,data.length,true);v.setUint16(26,n.length,true);header.set(n,30);yield header;yield data;
         const central=new Uint8Array(46+n.length),c=new DataView(central.buffer);c.setUint32(0,0x02014b50,true);c.setUint16(4,20,true);c.setUint16(6,20,true);c.setUint32(16,sum,true);c.setUint32(20,data.length,true);c.setUint32(24,data.length,true);c.setUint16(28,n.length,true);c.setUint32(42,offset,true);central.set(n,46);directory.push(central);offset+=header.length+data.length;
     }
     const size=directory.reduce((n,b)=>n+b.length,0);if(offset+size+22>0xffffffff)throw Error('Session exceeds ZIP32 limits; save to a local folder instead.');
     const end=new Uint8Array(22),e=new DataView(end.buffer);e.setUint32(0,0x06054b50,true);e.setUint16(8,directory.length,true);e.setUint16(10,directory.length,true);e.setUint32(12,size,true);e.setUint32(16,offset,true);
-    return new Blob([...parts,...directory,end],{type:'application/zip'});
+    yield* directory;yield end;
+}
+function sessionZip(files){return new Blob([...sessionZipChunks(files)],{type:'application/zip'});}
+// Stream file attachments in bounded chunks, retaining the ordinary ZIP32 format.
+async function* sessionStreamingZip(files){
+    const encoder=new TextEncoder(),directory=[];let offset=0;
+    for(const [name,value] of files){
+        const n=encoder.encode(name),data=typeof value==='string'?encoder.encode(value):value;
+        if(!(data instanceof Uint8Array)&&!(data instanceof Blob))throw Error('Invalid session entry');
+        const length=data instanceof Blob?data.size:data.byteLength;
+        if(n.length>65535||directory.length>=65535||offset+30+n.length+length>0xffffffff)throw Error('Session exceeds ZIP32 limits; save to a local folder instead.');
+        async function* chunks(){if(data instanceof Blob){for(let i=0;i<length;i+=1048576)yield new Uint8Array(await data.slice(i,i+1048576).arrayBuffer());}else yield data;}
+        let crc=0xffffffff;for await(const bytes of chunks())for(const b of bytes){crc^=b;for(let j=0;j<8;j++)crc=(crc>>>1)^((crc&1)?0xedb88320:0);}crc=(crc^0xffffffff)>>>0;
+        const header=new Uint8Array(30+n.length),v=new DataView(header.buffer);v.setUint32(0,0x04034b50,true);v.setUint16(4,20,true);v.setUint32(14,crc,true);v.setUint32(18,length,true);v.setUint32(22,length,true);v.setUint16(26,n.length,true);header.set(n,30);yield header;yield* chunks();
+        const central=new Uint8Array(46+n.length),c=new DataView(central.buffer);c.setUint32(0,0x02014b50,true);c.setUint16(4,20,true);c.setUint16(6,20,true);c.setUint32(16,crc,true);c.setUint32(20,length,true);c.setUint32(24,length,true);c.setUint16(28,n.length,true);c.setUint32(42,offset,true);central.set(n,46);directory.push(central);offset+=header.length+length;
+    }
+    const size=directory.reduce((n,b)=>n+b.length,0);if(offset+size+22>0xffffffff)throw Error('Session exceeds ZIP32 limits; save to a local folder instead.');
+    const end=new Uint8Array(22),e=new DataView(end.buffer);e.setUint32(0,0x06054b50,true);e.setUint16(8,directory.length,true);e.setUint16(10,directory.length,true);e.setUint32(12,size,true);e.setUint32(16,offset,true);yield* directory;yield end;
 }
 async function readSessionFile(file){
-    const bytes=new Uint8Array(await file.arrayBuffer()),view=new DataView(bytes.buffer),decoder=new TextDecoder();
-    if(view.byteLength>=4&&view.getUint32(0,true)===0x04034b50){
-        let offset=0,session=null;const binaryFiles={};
-        while(offset+30<=bytes.length&&view.getUint32(offset,true)===0x04034b50){
-            const flags=view.getUint16(offset+6,true),method=view.getUint16(offset+8,true),size=view.getUint32(offset+18,true),length=view.getUint16(offset+26,true),extra=view.getUint16(offset+28,true),start=offset+30+length+extra;
-            if(flags&8||method!==0||start+size>bytes.length)throw Error('Upload an original StringScape session ZIP.');
-            const name=decoder.decode(bytes.subarray(offset+30,offset+30+length));
-            if(name==='session.json')session=JSON.parse(decoder.decode(bytes.subarray(start,start+size)));
-            else if(/^buffer-\d+\.bin$/.test(name))binaryFiles[name]=bytes.subarray(start,start+size);
+    const decoder=new TextDecoder(),first=new Uint8Array(await file.slice(0,4).arrayBuffer());
+    if(first.length===4&&new DataView(first.buffer).getUint32(0,true)===0x04034b50){
+        let offset=0,session=null;const binaryFiles={},attachments={};
+        while(offset+30<=file.size){
+            const header=new DataView(await file.slice(offset,offset+30).arrayBuffer());
+            if(header.getUint32(0,true)!==0x04034b50)break;
+            const flags=header.getUint16(6,true),method=header.getUint16(8,true),size=header.getUint32(18,true),length=header.getUint16(26,true),extra=header.getUint16(28,true),start=offset+30+length+extra;
+            if(flags&8||method!==0||start+size>file.size)throw Error('Upload an original StringScape session ZIP.');
+            const name=decoder.decode(await file.slice(offset+30,offset+30+length).arrayBuffer());
+            if(name==='session.json')session=JSON.parse(await file.slice(start,start+size).text());
+            else if(/^buffer-\d+\.bin$/.test(name))binaryFiles[name]=new Uint8Array(await file.slice(start,start+size).arrayBuffer());
+            else if(/^input-\d+\.bin$/.test(name))attachments[name]=file.slice(start,start+size);
             offset=start+size;
         }
         if(!session)throw Error('No session.json found in this archive.');
-        session.binaryFiles=binaryFiles;return session;
+        session.binaryFiles=binaryFiles;session.attachments=attachments;return session;
     }
-    return JSON.parse(decoder.decode(bytes));
+    return JSON.parse(await file.text());
 }
 
 function sessionDom(){
@@ -264,13 +285,26 @@ function sessionDom(){
 }
 async function sessionCapture(){
     const state={},binaryFiles={};for(const [key,binding] of Object.entries(sessionBindings))state[key]=binding.get();
+    // A portable session includes inactive keyframe geometry, even when evicted.
+    if(typeof animationLibraryForStorage==='function')state.animationLibrary=await animationLibraryForStorage();
+    if(state.multiReferenceBuild?.drafts){
+        const build=state.multiReferenceBuild,drafts=[];
+        for(const draft of build.drafts){
+            if(draft.viewState){const springs=draft.viewState.springs||(draft.springCacheKey?await stagedDraftSprings(draft):null);
+                const copy={...draft,viewState:{...draft.viewState,springs}};delete copy.springCacheKey;drafts.push(copy);
+            }else drafts.push(draft);
+        }
+        state.multiReferenceBuild={...build,drafts};delete state.multiReferenceBuild.pendingDraftRequest;delete state.multiReferenceBuild.pendingDraftView;
+    }
     // Derived validation and distance/render caches are rebuilt after loading.
     state.validationState={...validationState,pairs:[],byPair:new Map(),nodeColors:null,matrixOverviews:new Map(),selected:null};
     state.modelData1={...modelData1,matrixCache:new Map()};state.modelData2={...modelData2,matrixCache:new Map()};
     // File handles, provider credentials and GPU resources are deliberately not portable.
-    const uploads={};for(const [slot,upload] of Object.entries(uploadedStructureFiles)){uploads[slot]=upload?{...upload,file:null,files:await Promise.all(upload.files.map(async file=>({name:file.name,type:file.type,text:await file.text()})))}:null;}
-    const stringFiles={};for(const [key,file] of Object.entries(selectedStringFiles))stringFiles[key]=file?{name:file.name,type:file.type,text:await file.text()}:null;
-    return {binaryFiles,uploads,stringFiles,lightMode:document.body.classList.contains('light-mode'),timeline:encodeSessionGraph(globalThis.BuildTimeline?.state||{},binaryFiles),format:'StringScape session',version:2,savedAt:new Date().toISOString(),graph:encodeSessionGraph(state,binaryFiles),camera:physicsCamera?{position:physicsCamera.position.toArray(),quaternion:physicsCamera.quaternion.toArray(),up:physicsCamera.up.toArray(),zoom:physicsCamera.zoom,orthographic:!!physicsCamera.isOrthographicCamera}:null,dom:sessionDom(),scroll:[scrollX,scrollY]};
+    const attachments={};let nextInput=0;
+    const saveFile=file=>{const entry=`input-${nextInput++}.bin`;attachments[entry]=file;return {name:file.name,type:file.type,entry};};
+    const uploads={};for(const [slot,upload] of Object.entries(uploadedStructureFiles))uploads[slot]=upload?{...upload,file:null,files:upload.files.map(saveFile)}:null;
+    const stringFiles={};for(const [key,file] of Object.entries(selectedStringFiles))stringFiles[key]=file?saveFile(file):null;
+    return {binaryFiles,attachments,uploads,stringFiles,lightMode:document.body.classList.contains('light-mode'),timeline:encodeSessionGraph(globalThis.BuildTimeline?.state||{},binaryFiles),format:'StringScape session',version:3,savedAt:new Date().toISOString(),graph:encodeSessionGraph(state,binaryFiles),camera:physicsCamera?{position:physicsCamera.position.toArray(),quaternion:physicsCamera.quaternion.toArray(),up:physicsCamera.up.toArray(),zoom:physicsCamera.zoom,orthographic:!!physicsCamera.isOrthographicCamera}:null,dom:sessionDom(),scroll:[scrollX,scrollY]};
 }
 function* sessionModelFiles(){
     const final=generateSimulationMmCifString();if(final)yield ['final-model.cif',final];
@@ -286,12 +320,13 @@ function* sessionModelFiles(){
 }
 
 async function restoreSession(session){
-    if(session.format!=='StringScape session'||![1,2].includes(session.version)||!Array.isArray(session.dom))throw Error('This is not a supported StringScape session.');
+    if(session.format!=='StringScape session'||![1,2,3].includes(session.version)||!Array.isArray(session.dom))throw Error('This is not a supported StringScape session.');
     const state=decodeSessionGraph(session.graph,session.binaryFiles);
     if(!state||!Array.isArray(state.physicsNodes)||!state.modelData1||!state.modelData2)throw Error('The session is incomplete.');
     if(modelLoading||multiReferenceBuild?.busy)throw Error('Wait for the current model calculation to finish before loading.');
-    for(const [slot,upload] of Object.entries(session.uploads||{})){if(!['reference','alphaFold'].includes(slot))continue;if(!upload){uploadedStructureFiles[slot]=null;continue;}const files=upload.files.map(f=>new File([f.text],f.name,{type:f.type}));uploadedStructureFiles[slot]={...upload,files,file:files[0]};}
-    for(const [key,file] of Object.entries(session.stringFiles||{}))if(['sequence','aliases'].includes(key))selectedStringFiles[key]=file?new File([file.text],file.name,{type:file.type}):null;
+    const restoreFile=f=>{const data=f.entry?session.attachments?.[f.entry]:f.text;if(data===undefined||data===null)throw Error('Missing session input file: '+(f.entry||f.name));return new File([data],f.name,{type:f.type});};
+    for(const [slot,upload] of Object.entries(session.uploads||{})){if(!['reference','alphaFold'].includes(slot))continue;if(!upload){uploadedStructureFiles[slot]=null;continue;}const files=upload.files.map(restoreFile);uploadedStructureFiles[slot]={...upload,files,file:files[0]};}
+    for(const [key,file] of Object.entries(session.stringFiles||{}))if(['sequence','aliases'].includes(key))selectedStringFiles[key]=file?restoreFile(file):null;
     stopAnimation();resetNucleicExtensions();disposePhysicsSimulationWorker();cancelPendingSimulationRender();disposeStagedPreview();
     modelBuildAbortController?.abort();modelBuildGeneration++;readyModelGeneration=modelBuildGeneration;
     disposeAtomRepresentation();disposeCartoonRepresentation();disposeBasePairLines();disposeMembrane();disposePatternExtensions();disposePatternMarkers();
@@ -299,7 +334,10 @@ async function restoreSession(session){
     if(model1OverlayGroup){physicsScene.remove(model1OverlayGroup);disposeModel1Overlay(model1OverlayGroup);model1OverlayGroup=null;}
     if(selectionGlowMesh){physicsScene.remove(selectionGlowMesh);selectionGlowMesh.dispose?.();selectionGlowMesh.geometry.dispose();selectionGlowMesh.material.dispose();selectionGlowMesh=null;}
     if(springDisplay){physicsScene.remove(springDisplay);springDisplay.dispose?.();springDisplay.geometry.dispose();springDisplay.material.dispose();springDisplay=null;}
+    globalThis.ChainMergingReport?.clear();
     for(const [key,binding] of Object.entries(sessionBindings))if(Object.hasOwn(state,key))binding.set(state[key]);
+    globalThis.ChainMergingReport?.setAnnotations(uniProtAnnotations);
+    if(!Object.hasOwn(state,'chainMergingData'))globalThis.ChainMergingReport?.update(alignmentResults,{modelChains:modelData2.chains,referenceChains:modelData1.chains,reference:referenceFiles.map(file=>file.pdbId).join(', '),accessionForId:uniProtAccession});
     if(physicsSprings.packed)physicsSprings=physicsSpringNetworkView(physicsSprings);
     for(const draft of multiReferenceBuild?.drafts||[])if(draft.viewState?.springs?.packed)draft.viewState.springs=physicsSpringNetworkView(draft.viewState.springs);
     physicsRunning=false;animationPlaying=false;animationPreparing=false;validationState.paeLoading=false;validationState.qmeanBusy=false;
@@ -349,14 +387,15 @@ async function restoreSession(session){
         if(handle.kind!=='directory')continue;
         try{await handle.getFileHandle('session.json');}catch{continue;}
         const button=document.createElement('button');button.type='button';button.className='model-download-button';button.textContent='Open '+name;
-        button.addEventListener('click',()=>run(async()=>{const file=await (await handle.getFileHandle('session.json')).getFile();const session=JSON.parse(await file.text());session.binaryFiles={};for(const record of [...session.graph.records,...(session.timeline?.records||[])])if(record.type==='Binary'&&/^buffer-\d+\.bin$/.test(record.name))session.binaryFiles[record.name]=new Uint8Array(await (await (await handle.getFileHandle(record.name)).getFile()).arrayBuffer());await restoreSession(session);status('Session opened: '+name);}));el('List').append(button);
+        button.addEventListener('click',()=>run(async()=>{const file=await (await handle.getFileHandle('session.json')).getFile();const session=JSON.parse(await file.text());session.binaryFiles={};for(const record of [...session.graph.records,...(session.timeline?.records||[])])if(record.type==='Binary'&&/^buffer-\d+\.bin$/.test(record.name))session.binaryFiles[record.name]=new Uint8Array(await (await (await handle.getFileHandle(record.name)).getFile()).arrayBuffer());session.attachments={};for(const f of [...Object.values(session.uploads||{}).flatMap(upload=>upload?.files||[]),...Object.values(session.stringFiles||{}).filter(Boolean)])if(f.entry&&/^input-\d+\.bin$/.test(f.entry))session.attachments[f.entry]=await (await handle.getFileHandle(f.entry)).getFile();await restoreSession(session);status('Session opened: '+name);}));el('List').append(button);
     }}
     el('Folder').addEventListener('click',()=>run(async()=>{
         if(!window.showDirectoryPicker){status('Folder connection requires a browser supporting local folder access (such as Chrome or Edge). Download and upload are available.');return;}
         folder=await window.showDirectoryPicker({mode:'readwrite'});el('Folder').textContent='Connected: '+folder.name;status('Folder connected.');await list();
     }));
-    const bundle=async()=>{const {binaryFiles,...session}=await sessionCapture(),files=(function*(){yield ['session.json',JSON.stringify(session)];yield* Object.entries(binaryFiles);yield* sessionModelFiles();})(),label=(modelData1.pdbId||document.getElementById('referenceSearchInput').value||'empty-session').replace(/[^a-z0-9_-]+/gi,'-').slice(0,65),name=`StringScape_Homology_modeller-${label}-${new Date().toISOString().replace(/[:.]/g,'-')}`;return {files,name};};
+    const bundle=async()=>{const {binaryFiles,attachments,...session}=await sessionCapture(),files=(function*(){yield ['session.json',JSON.stringify(session)];yield* Object.entries(binaryFiles);yield* Object.entries(attachments);yield* sessionModelFiles();})(),label=(modelData1.pdbId||document.getElementById('referenceSearchInput').value||'empty-session').replace(/[^a-z0-9_-]+/gi,'-').slice(0,65),name=`StringScape_Homology_modeller-${label}-${new Date().toISOString().replace(/[:.]/g,'-')}`;return {files,name};};
     el('Save').addEventListener('click',()=>run(async()=>{if(!folder)return;const {files,name}=await bundle(),directory=await folder.getDirectoryHandle(name,{create:true});for(const [filename,data] of files){const writable=await (await directory.getFileHandle(filename,{create:true})).createWritable();try{await writable.write(data);await writable.close();}catch(error){await writable.abort();throw error;}}status('Session saved: '+name);await list();}));
-    el('Download').addEventListener('click',()=>run(async()=>{const {files,name}=await bundle(),url=URL.createObjectURL(sessionZip(files)),a=document.createElement('a');a.href=url;a.download=name+'.zip';a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);status('Session downloaded with model mmCIF files.');}));
+    el('Download').addEventListener('click',()=>run(async()=>{const {files,name}=await bundle(),parts=[];for await(const chunk of sessionStreamingZip(files))parts.push(chunk);const url=URL.createObjectURL(new Blob(parts,{type:'application/zip'})),a=document.createElement('a');a.href=url;a.download=name+'.zip';a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);status('Session downloaded with model mmCIF files.');}));
+    el('Stream').addEventListener('click',()=>run(async()=>{if(!window.showSaveFilePicker){status('Streaming archive save requires a browser supporting file access. Use Save session to a connected folder or Download session.');return;}const handle=await window.showSaveFilePicker({suggestedName:'StringScape-session.zip',types:[{description:'Session archive',accept:{'application/zip':['.zip']}}]});const writable=await handle.createWritable();try{const {files}=await bundle();for await(const chunk of sessionStreamingZip(files))await writable.write(chunk);await writable.close();status('Session archive saved.');}catch(error){await writable.abort();throw error;}}));
     el('Upload').addEventListener('click',()=>el('File').click());el('File').addEventListener('change',()=>run(async()=>{const file=el('File').files[0];el('File').value='';if(!file)return;await restoreSession(await readSessionFile(file));status('Session opened: '+file.name);}));
 })();

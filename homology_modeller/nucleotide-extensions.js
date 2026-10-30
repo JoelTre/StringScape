@@ -59,6 +59,28 @@ function detectNucleicExtensionGroups(nodes,pairs){
         return {...group,pairs:detectedPairs.filter(pair=>indices.includes(pair.i)&&indices.includes(pair.j)),chains:group.blocks.map(id=>chains.get(id)),kind,animationKey:`nucleic:${JSON.stringify([...letters].sort())}`,key:group.blocks.join(':'),label:`${group.paired?'Double':'Single'}-stranded ${kind||'DNA/RNA'} (${letters.join(', ')})`,mode:`${kind||'DNA'}:${group.paired?2:1}`,start:0,end:0,wiggle:0.6,guide:false,guideUserSet:false,status:''};
     });
 }
+// Read current controls for every AI request; generated ends are visual geometry.
+function getNucleicAiContext(){
+    const state=nucleicExtensionState;
+    if(!state||state.nodes!==physicsNodes)return {available:false};
+    const strands=state.groups.map(group=>{
+        const [chemistry,strandCount]=group.mode.split(':');
+        return {
+            chains:group.chains.map(indices=>{const node=state.nodes[indices[0]];return node.res.c1||node.res.c2||String(node.blockIdx);}),
+            detectedChemistry:group.kind||'unknown DNA/RNA',
+            detectedStrandCount:group.chains.length,
+            originalResidueCounts:group.chains.map(indices=>indices.length),
+            extended:group.start>0||group.end>0,
+            extensions:{firstEnd:group.start,lastEnd:group.end,units:Number(strandCount)===2?'base pairs':'nucleotides',generatedChemistry:chemistry,generatedStrandCount:Number(strandCount)}
+        };
+    });
+    return {available:true,containsNucleicAcidStrands:strands.length>0,
+        containsDNA:strands.some(s=>s.detectedChemistry==='DNA'),
+        containsRNA:strands.some(s=>s.detectedChemistry==='RNA'),
+        hasAmbiguousChemistry:strands.some(s=>s.detectedChemistry==='unknown DNA/RNA'),
+        anyEndsExtended:strands.some(s=>s.extended),strands,
+        interpretation:'Detected strands exclude isolated nucleotide ligands such as ATP/ADP. Unknown chemistry is not evidence of absence. Extension lengths describe current procedural visual additions, not deposited residues or experimentally determined structure.'};
+}
 function disposeNucleicExtensionGeometry(){
     const state=nucleicExtensionState;if(!state?.object)return;
     state.lifecycle.cancelled=true;physicsScene?.remove(state.object);
@@ -335,10 +357,7 @@ function createNucleicTypeMenu(select,label,state){
 }
 function setNucleicExtensionLength(group,key,value,state){
     group[key]=value;
-    if(value<=0)return;
-    // Auto-enable untouched defaults; explicit user choices survive later edits.
-    if(!group.guideUserSet){group.guide=true;if(group.guideCheckbox)group.guideCheckbox.checked=true;}
-    if(!state.curvesUserSet){state.curvesVisible=true;updatePhysicsToggleButton('toggleNucleotideCurves',true);}
+
 }
 function initializeNucleicLengthInput(input,getValue,setValue){
     const apply=value=>{if(!Number.isFinite(value))return;const units=Math.max(0,Math.min(300,Math.round(value)));if(units!==getValue())setValue(units);};
