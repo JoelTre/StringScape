@@ -644,7 +644,7 @@ function renderStagedPreview(){
         else{pivot.rotation.y+=dx*.008;pivot.rotation.x+=dy*.008;}render();});
     canvas.addEventListener('pointerup',()=>{drag=null;});canvas.addEventListener('pointercancel',()=>{drag=null;});
     canvas.addEventListener('wheel',event=>{event.preventDefault();camera.position.z=Math.max(radius*.1,Math.min(radius*6,camera.position.z*Math.exp(event.deltaY*.001)));render();},{passive:false});
-    stagedPreview={scene,renderer,observer,lifecycle,render,camera,pivot,state,view:state.view,structureObjects};
+    stagedPreview={scene,renderer,observer,lifecycle,render,resize,camera,pivot,state,view:state.view,structureObjects};
     if(previewing)state.alignmentPreview.fits.forEach((fit,index)=>applyStagedPreviewFit(index,fit));
     if(aligned){
         const key=document.getElementById('physicsColourKey');key.replaceChildren();

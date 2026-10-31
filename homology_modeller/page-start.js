@@ -1,3 +1,9 @@
+// Hide the source layout until the paged interface has been assembled.
+document.documentElement.classList.add('app-layout-loading');
+document.addEventListener('error', event => {
+    if (event.target instanceof HTMLScriptElement && /\/app-pages\.js(?:\?|$)/.test(event.target.src)) document.documentElement.classList.remove('app-layout-loading');
+}, true);
+
 // Disable the browser's saved scroll position before it restores the page.
 if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 window.addEventListener('pageshow', () => {

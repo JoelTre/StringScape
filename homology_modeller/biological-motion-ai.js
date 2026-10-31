@@ -124,7 +124,7 @@
         try{
             const state=window.getComplexAiState?.();
             if(!state)return;
-            if(model!==state.generation){task?.abort();task=null;setCreatingAnimation(false);setFilamentStatus('reset');resetAnimationResult();model=state.generation;window.biologicalMotionAssessments={generation:model,filament:null,animation:null};decision=null;applied='';attempted=false;status('');}
+            if(model!==state.generation){task?.abort();task=null;setCreatingAnimation(false);setFilamentStatus('reset');resetAnimationResult();model=state.generation;window.biologicalMotionAssessments={generation:model,filament:null,animation:null};window.complexAiMotionSummary=null;decision=null;applied='';attempted=false;status('');}
             if(!window.ModellerAI?.connected()){task?.abort();task=null;setCreatingAnimation(false);if(filamentButton?.dataset.aiCreating==='true')setFilamentStatus('reset');attempted=false;return;}
             if(!state.ready||!state.hasSubunits||!window.ComplexPubMed||task)return;
             const context=window.getBiologicalMotionContext?.();if(!context||context.playing)return;
@@ -141,11 +141,12 @@
             // UniProt records can be large. Send each protein record once, with
             // accession IDs linking it to all of its subunit blocks.
             const input={originalRequest:`For some context, here is what the user originally asked this app to make a model of: ${context.originalRequest||''}`,proteins:context.proteins||[],blocks:context.blocks.map(({uniProt,...block})=>block),references:context.references,patterns:context.patterns,groups:context.groups,axes:context.axes,drafts:context.drafts||[],conformationGroups:context.conformationGroups};
-            let first,second;
+            let first,second,extensionApplied=false,animationApplied=false;
             try{
                 first=await decide(groupPrompt,input,controller.signal,data=>{if(!Array.isArray(data.extensions))throw Error('Missing extensions');const keys=new Set(context.patterns.map(item=>item.key));if(data.extensions.some(item=>!keys.has(item.key)||!Number.isInteger(item.units)||item.units<0||item.units>100||typeof item.reason!=='string'||!item.reason.trim()))throw Error('Invalid filament extension');checkAssessmentReason(data);});
                 if(controller.signal.aborted||generation!==model)return;
                 if(!window.applyBiologicalMotion(generation,{extensions:first.extensions,groups:[],rotations:[]},{createSpinAnimation:false}))throw Error('Could not apply filament extension assessment');
+                extensionApplied=first.extensions.some(item=>item.units>0);
                 window.biologicalMotionAssessments={generation,filament:first,animation:null};
                 setFilamentStatus('complete',first);
                 setCreatingAnimation(true);
@@ -162,6 +163,7 @@
                 if(window.applyBiologicalMotion(generation,result)){
                     applied=signature;showAnimationResult(result,second);
                     const hasAnimation=result.keyframes.length>1||result.groups.some(item=>item.rate!==0)||result.rotations.some(item=>item.rate!==0);
+                    animationApplied=hasAnimation;
                     if(hasAnimation)await window.playBiologicalMotion?.(generation);
                 }
                 if(!result.groups.length&&!result.rotations.length){
@@ -169,7 +171,7 @@
                 }
                 status('AI biological motions applied. '+[...first.extensions,...second.groups,...result.rotations].map(item=>item.reason).join(' '));
             }catch(error){if(!controller.signal.aborted){if(filamentButton?.dataset.aiCreating==='true')setFilamentStatus('failed');status('Biological motion assessment failed: '+error.message+'. Reconnect AI to retry.');console.warn('Biological motion AI:',error,{patternAndSymmetryReason:first?.reason||'The first assessment did not complete.',proteinAndAxisReason:second?.reason||'The second assessment did not complete.'});}}
-            finally{if(task===controller){task=null;setCreatingAnimation(false);}}
+            finally{if(!controller.signal.aborted&&generation===model&&(extensionApplied||animationApplied))window.complexAiMotionSummary={generation,extensionApplied,animationApplied,filament:extensionApplied?first:null,animation:animationApplied?second:null};if(task===controller){task=null;setCreatingAnimation(false);}}
         }catch(error){console.warn('Biological motion state:',error);}
     },1500);
 })();

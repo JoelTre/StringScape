@@ -2,7 +2,7 @@
 (function(root){
     const metadata={};
     const add=(names,type,level,unit='')=>names.split(' ').forEach(name=>metadata[name]={id:name,type,level,unit});
-    add('chain protein-id uniform','categorical','chain');
+    add('chain chain-random protein-id uniform','categorical','chain');
     add('element side-chains','categorical','atom');
     add('origin aligned membrane membrane-repelled charge secondary binding-sites binding-site-type','categorical','residue');
     add('residue-index','continuous','residue','zero-based');

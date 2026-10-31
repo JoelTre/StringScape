@@ -325,7 +325,30 @@
                     const row=document.createElement('p');row.className='mt-2 leading-relaxed';
                     const strong=document.createElement('strong');strong.textContent=`${label}: `;row.append(strong);appendProteinCitations(row,values.join(' '),citations);card.append(row);
                 }
-                const count=document.createElement('p');count.className='mt-2 text-xs text-slate-400';count.textContent=`${entry.features.length} UniProt positional annotations`;card.append(count);
+                const featureTypes=[...new Set(Object.values(UNI_PROT_FEATURE_MODES))];
+                const colouringFeatures=entry.features.filter(feature=>featureTypes.includes(feature.type));
+                const details=document.createElement('details');details.className='mt-2';
+                const summary=document.createElement('summary');summary.className='cursor-pointer font-semibold';
+                summary.append(document.createTextNode(`UniProt colouring annotations (${colouringFeatures.length}) `));
+                const chevron=document.createElement('i');chevron.className='fa-solid fa-chevron-down uniprot-annotations-chevron';chevron.setAttribute('aria-hidden','true');summary.append(chevron);details.append(summary);
+                const note=document.createElement('p');note.className='mt-1 text-xs text-slate-400';
+                note.textContent='Positions refer to the canonical UniProt sequence. Select an annotation to highlight its residues in the model.';details.append(note);
+                if(!colouringFeatures.length){const empty=document.createElement('p');empty.className='mt-2 text-xs text-slate-400';empty.textContent='No annotations are available for the UniProt colouring options.';details.append(empty);}
+                for(const type of featureTypes){
+                    const features=colouringFeatures.filter(feature=>feature.type===type);
+                    if(!features.length)continue;
+                    const group=document.createElement('div');group.className='mt-2';
+                    const label=document.createElement('strong');label.textContent=`${type} (${features.length})`;group.append(label);
+                    const list=document.createElement('div');list.className='uniprot-feature-list mt-1 flex flex-wrap gap-1.5';
+                    for(const feature of features){
+                        const button=document.createElement('button');button.type='button';button.title='Select annotated residues in the 3D structure';
+                        const dot=document.createElement('span');dot.className='inline-block w-2 h-2 rounded-full';dot.style.backgroundColor=uniProtFeatureShade(accession,feature);
+                        button.append(dot,document.createTextNode(`${feature.description||type} · ${feature.start}${feature.end!==feature.start?'–'+feature.end:''}`));
+                        button.addEventListener('click',()=>selectUniProtFeature(accession,feature));list.append(button);
+                    }
+                    group.append(list);details.append(group);
+                }
+                card.append(details);
                 host.append(card);
             }
             updateAboutProteinSelection();
@@ -424,6 +447,7 @@
             return {pdbIds:[file.pdbId],source:'manual',reason:'The user manually supplied this reference PDB. It was not selected by AI; no AI selection justification applies.'};
         }
         window.getComplexAiState=()=>({generation:modelBuildGeneration,ready:modelBuildCompleted&&!uniProtLookupPending&&!patternVarianceJob&&patternDetectionSnapshot?.generation===modelBuildGeneration&&animationReadyGeneration===modelBuildGeneration&&!animationPreparing,hasSubunits:alignmentResults.length>0});
+        window.isComplexAiOverviewReady=()=>readyModelGeneration===modelBuildGeneration&&!uniProtLookupPending&&alignmentResults.length>0;
         window.getComplexAiContext=()=>({
             ...window.getComplexAiState(),
             originalRequest:typeof document==='undefined'?'':document.getElementById('referenceSearchInput')?.value||'',
@@ -651,6 +675,22 @@
             alignmentTmViewer?.updateColors();
             drawIndividualMatrices();drawDifferenceMatrix();drawMorphMatrix();
         }
+        function selectionInfoLabel(selection) {
+            const chain=displayChainName(selection.chain);
+            if(selection.mode==='chain'||selection.mode==='identical')return chain;
+            const atom=selection.atom||selection.referenceAtom||selection.alphaAtom;
+            const residue=`${atom?.resName||'Residue'} ${atom?.resSeq??''}`.trim();
+            return selection.mode==='atom'?`${selection.sourceAtom?.atomName||atom?.atomName||'Atom'} · ${residue} · ${chain}`:`${residue} · ${chain}`;
+        }
+        function additionalSelectionSummary(selections) {
+            if(!selections.length)return '';
+            if(selections.length<=5)return `Also selected: ${selections.map(selectionInfoLabel).join('; ')}`;
+            const types={atom:'atoms',residue:'residues/nucleotides',chain:'chains/molecules',identical:'types of molecules'};
+            const counts=new Map();
+            for(const selection of selections){const type=types[selection.mode]||'items';counts.set(type,(counts.get(type)||0)+1);}
+            if(counts.size===1)return `There are ${selections.length} other ${counts.keys().next().value} selected.`;
+            return `There are ${[...counts].map(([type,count])=>`${count} ${type}`).join(', ')} selected.`;
+        }
         function updatePhysicsSelectionInfo() {
             updateAboutProteinSelection();
             const box=document.getElementById('physicsSelectionInfo');
@@ -688,14 +728,14 @@
             }
             const {chain,mode,referenceAtom,alphaAtom,atom}=linkedSelection;
             const selected=atom||referenceAtom||alphaAtom;
-            const heading=document.createElement('strong');heading.textContent=['HOH','WAT','H2O','DOD'].includes(String(selected?.resName||'').toUpperCase())?`Water · ${displayChainName(chain)}`:mode==='identical'?'Identical molecules':mode==='atom'?`${linkedSelection.sourceAtom?.atomName||selected?.atomName||'Atom'} · ${selected?.resName||''} ${selected?.resSeq??''} · ${displayChainName(chain)}`:mode==='chain'?displayChainName(chain):`${selected?.resName||'Atom'} ${selected?.resSeq??''} · ${displayChainName(chain)}`;
+            const heading=document.createElement('strong');heading.textContent=mode==='identical'?'Identical molecules':['HOH','WAT','H2O','DOD'].includes(String(selected?.resName||'').toUpperCase())?`Water · ${displayChainName(chain)}`:mode==='atom'?`${linkedSelection.sourceAtom?.atomName||selected?.atomName||'Atom'} · ${selected?.resName||''} ${selected?.resSeq??''} · ${displayChainName(chain)}`:mode==='chain'?displayChainName(chain):`${selected?.resName||'Atom'} ${selected?.resSeq??''} · ${displayChainName(chain)}`;
             const detail=document.createElement('div');
-            detail.textContent=mode==='chain'
+            detail.textContent=mode==='identical' ? displayChainName(chain) : mode==='chain'
                 ? `${linkedSelection.res?.entityType==='nucleotide'?'Polynucleotide':linkedSelection.res?.entityType==='other'?'Non-protein molecule':'Protein'} · ${linkedSelection.res?.atoms1.length||linkedSelection.res?.atoms2.length||0} ${linkedSelection.res?.entityType==='other'?'atoms':'residues'}`
                 : `${selected?.entityType==='nucleotide'?'Nucleotide':selected?.entityType==='other'?'Non-protein atom':'Residue'} · ${referenceAtom&&alphaAtom?'Reference PDB & AlphaFold':referenceAtom?'Reference PDB':alphaAtom?'AlphaFold':''}`;
             const headingRow=document.createElement('div');headingRow.className='selection-info-heading';headingRow.append(heading,glowButton);
             box.replaceChildren(headingRow,detail);box.classList.remove('hidden');
-            if(additionalSelections.length){const list=document.createElement('div');list.className='mt-1';list.textContent=`Also selected: ${additionalSelections.map(selection=>selection.mode==='chain'?displayChainName(selection.chain):`${selection.atom?.resName||'Residue'} ${selection.atom?.resSeq??''} · ${displayChainName(selection.chain)}`).join('; ')}`;box.append(list);}
+            if(additionalSelections.length){const list=document.createElement('div');list.className='mt-1';list.textContent=additionalSelectionSummary(additionalSelections);box.append(list);}
         }
         function updateSelectionToggleVisibility() {
             document.getElementById('selectedResidueToggles')?.classList.toggle('hidden',!linkedSelection);
@@ -787,20 +827,35 @@
 // applicationStateAndSelection.js end
 
 // physicsHistoryGraph.js start
+        const buildMemoryMonitor=MemoryMonitor.create(performance,globalThis.crossOriginIsolated===true,state=>{
+            const format=bytes=>Number.isFinite(bytes)?`${(bytes/1048576).toFixed(1)} MiB`:'Unavailable';
+            for(const [id,value] of [['buildPageMemory',state.pageBytes],['buildHeapMemory',state.heapUsedBytes],['buildHeapHeadroom',state.heapHeadroomBytes]]){
+                const element=document.getElementById(id);if(element)element.textContent=format(value);
+            }
+        });
+        buildMemoryMonitor.update();
+        setInterval(()=>buildMemoryMonitor.update(),1000);
         const PHYSICS_GRAPH_SERIES=[
             {key:'tm',label:'TM-score (Phase 2)',color:'#38bdf8',unit:''},
             {key:'rmsd',label:'RMSD (Phase 2)',color:'#a78bfa',unit:' Å'},
             {key:'energy',label:'Weighted spring-length error',color:'#4ade80',unit:' a.u.'},
             {key:'speed',label:'Average residue speed',color:'#fbbf24',unit:' Å/s'},
             {key:'stepRate',label:'Simulation step rate',color:'#60a5fa',unit:' steps/s'},
+            {key:'pageMemory',label:'Estimated page memory',color:'#22d3ee',unit:' MiB'},
+            {key:'heapMemory',label:'JavaScript heap in use',color:'#a3e635',unit:' MiB'},
+            {key:'heapHeadroom',label:'Estimated heap headroom',color:'#fb7185',unit:' MiB'},
             {key:'dynamicResidueBudget',label:'Dynamic max sim residue count',color:'#e879f9',unit:' residues'},
-            {key:'coreMaxSpeed',label:'Max residue speed of the core subunit',color:'#f87171',unit:' Å/s'},
+            {key:'coreMaxSpeed',label:'Max residue speed of the core subunit(s)',color:'#f87171',unit:' Å/s'},
             {key:'satisfaction',label:'Restraint satisfaction',color:'#fb923c',unit:''},
             {key:'modelConfidence',label:'Overall model confidence',color:'#f472b6',unit:''},
             {key:'membranePlacement',label:'Membrane placement confidence',color:'#2dd4bf',unit:''}
         ];
+        const hiddenPhysicsGraphSeries=new Set();
+        let highlightedPhysicsGraphSeries=null;
+        let physicsGraphHitPoints=[];
         function resetPhysicsGraphHistory(){
             Object.assign(physicsGraphHistory,{startedAt:null,resetAt:null,samples:[],validationSamples:[],events:[],lastSampleAt:0,lastValidationAt:0,lastValidationAttemptAt:0,validationPending:false,lastPositions:null,lastDrawAt:0,validationCacheKey:null});
+            const trimStart=document.getElementById('physicsGraphTrimStart'),trimEnd=document.getElementById('physicsGraphTrimEnd');if(trimStart)trimStart.value='0';if(trimEnd)trimEnd.value='1000';
             renderPhysicsGraph();
         }
         function startPhysicsGraphHistory(){
@@ -840,20 +895,24 @@
             const state=physicsGraphHistory;
             if(state.startedAt===null||now-state.lastSampleAt<250)return;
             const metrics=currentPhase2StructureMetrics(),positions=new Float32Array(physicsNodes.length*3);
-            let distance=0,residueCount=0;
+            let distance=0,maxDistance=0,residueCount=0;
             for(let i=0;i<physicsNodes.length;i++){
                 const node=physicsNodes[i],offset=i*3;
                 positions[offset]=node.x;positions[offset+1]=node.y;positions[offset+2]=node.z;
                 if(node.res.entityType==='protein'||node.res.entityType==='nucleotide')residueCount++;
                 if(state.lastPositions?.length===positions.length&&(node.res.entityType==='protein'||node.res.entityType==='nucleotide')){
-                    distance+=Math.hypot(node.x-state.lastPositions[offset],node.y-state.lastPositions[offset+1],node.z-state.lastPositions[offset+2]);
+                    const displacement=Math.hypot(node.x-state.lastPositions[offset],node.y-state.lastPositions[offset+1],node.z-state.lastPositions[offset+2]);
+                    distance+=displacement;maxDistance=Math.max(maxDistance,displacement);
                 }
             }
             const elapsed=(now-state.lastSampleAt)/1000;
             const speed=state.lastPositions&&elapsed>0?distance/Math.max(1,residueCount)/elapsed:0;
             const speedText=document.getElementById('physicsSpeedText');
             if(speedText)speedText.textContent=`${speed.toFixed(2)} Å/s`;
-            state.samples.push({time:now,tm:metrics.tm,rmsd:metrics.rmsd,energy,speed,stepRate:updatePhysicsStepRate(now),dynamicResidueBudget:groupMaxSimulationResidues==='dynamic'?groupSimulation?.residueBudget??10000:null,coreMaxSpeed:typeof groupSimulation==='undefined'?null:groupSimulation?.maxSpeed??null});
+            const maxSpeedText=document.getElementById('physicsMaxResidueSpeedText');
+            if(maxSpeedText)maxSpeedText.textContent=state.lastPositions&&elapsed>0?`${(maxDistance/elapsed).toFixed(2)} Å/s`:'— Å/s';
+            const memory=buildMemoryMonitor.state,miB=bytes=>Number.isFinite(bytes)?bytes/1048576:null;
+            state.samples.push({time:now,pageMemory:miB(memory.pageBytes),heapMemory:miB(memory.heapUsedBytes),heapHeadroom:miB(memory.heapHeadroomBytes),tm:metrics.tm,rmsd:metrics.rmsd,energy,speed,stepRate:updatePhysicsStepRate(now),dynamicResidueBudget:groupMaxSimulationResidues==='dynamic'?groupSimulation?.residueBudget??10000:null,coreMaxSpeed:typeof groupSimulation==='undefined'?null:groupSimulation?.maxSpeed??null});
             if(state.samples.length>60000)state.samples=state.samples.filter((_,index)=>index%2===0);
             state.lastPositions=positions;state.lastSampleAt=now;
             scheduleValidationGraphSample(now);
@@ -888,9 +947,18 @@
         function physicsGraphWindow(now=performance.now()){
             if(groupSimulation?.complete&&Number.isFinite(groupSimulation.completedAt))now=groupSimulation.completedAt;
             const state=physicsGraphHistory,range=document.getElementById('physicsGraphRange')?.value||'all';
-            const start=range==='60s'?Math.max(state.startedAt??now,now-60000):range==='change'?state.events.at(-1)?.time??state.startedAt??now:state.startedAt??now;
-            return {start,end:Math.max(now,start+1000),samples:state.samples.filter(sample=>sample.time>=start),
-                validationSamples:state.validationSamples.filter(sample=>sample.time>=start)};
+            const baseStart=range==='60s'?Math.max(state.startedAt??now,now-60000):range==='change'?state.events.at(-1)?.time??state.startedAt??now:state.startedAt??now;
+            const baseEnd=Math.max(now,baseStart+1000),span=baseEnd-baseStart;
+            const lower=Math.max(0,Math.min(999,Number(document.getElementById('physicsGraphTrimStart')?.value??0)))/1000;
+            const upper=Math.max(lower+.001,Math.min(1,Number(document.getElementById('physicsGraphTrimEnd')?.value??1000)/1000));
+            const start=baseStart+span*lower,end=baseStart+span*upper;
+            const samples=state.samples.filter(sample=>sample.time>=start&&sample.time<=end);
+            const validationSamples=state.validationSamples.filter(sample=>sample.time>=start&&sample.time<=end);
+            const previous=state.validationSamples.findLast(sample=>sample.time<start);
+            if(previous)validationSamples.unshift({...previous,time:start});
+            const label=document.getElementById('physicsGraphTrimLabel'),origin=state.startedAt??baseStart;
+            if(label)label.textContent=`${Math.max(0,(start-origin)/1000).toFixed(1)}–${Math.max(0,(end-origin)/1000).toFixed(1)} s`;
+            return {start,end,samples,validationSamples};
         }
         let physicsGraphDrawTimer=null;
         function renderPhysicsGraph(){
@@ -906,9 +974,8 @@
         function drawPhysicsGraph(){
             const panel=document.getElementById('physicsGraphPanel'),canvas=document.getElementById('physicsGraphCanvas');
             if(!panel||!panel.open||!canvas)return;
-            const width=Math.max(320,canvas.clientWidth||canvas.parentElement?.clientWidth||700),compactLegend=width<850,
-                legendRows=compactLegend?PHYSICS_GRAPH_SERIES.length:Math.ceil(PHYSICS_GRAPH_SERIES.length/2),
-                graphTop=legendRows*18+120,height=graphTop+210,dpr=Math.min(2,window.devicePixelRatio||1);
+            const width=Math.max(320,canvas.clientWidth||canvas.parentElement?.clientWidth||700),
+                graphTop=120,height=graphTop+210,dpr=Math.min(2,window.devicePixelRatio||1);
             canvas.style.height=`${height}px`;
             if(canvas.width!==Math.round(width*dpr)||canvas.height!==Math.round(height*dpr)){
                 canvas.width=Math.round(width*dpr);canvas.height=Math.round(height*dpr);
@@ -921,10 +988,12 @@
             const xFor=time=>left+(time-start)/(end-start)*plotWidth;
             const seriesSamples=series=>['modelConfidence','membranePlacement','satisfaction'].includes(series.key)?validationSamples:samples;
             const maxValues=Object.fromEntries(PHYSICS_GRAPH_SERIES.map(series=>[series.key,seriesSamples(series).reduce((max,sample)=>Math.max(max,Number.isFinite(sample[series.key])?sample[series.key]:0),0)]));
-            const rawMax=Math.max(1e-6,...Object.values(maxValues));
+            for(const series of PHYSICS_GRAPH_SERIES){const label=document.querySelector(`#physicsGraphLegend [data-graph-series="${series.key}"]`);if(label){const precision=['tm','modelConfidence','membranePlacement','satisfaction'].includes(series.key)?3:2;label.textContent=seriesSamples(series).some(sample=>Number.isFinite(sample[series.key]))?`${series.label} (max ${maxValues[series.key].toFixed(precision)}${series.unit})`:`${series.label} (unavailable)`;}}
+            const visibleSeries=PHYSICS_GRAPH_SERIES.filter(series=>!hiddenPhysicsGraphSeries.has(series.key));
+            const rawMax=Math.max(1e-6,...visibleSeries.map(series=>maxValues[series.key]));
             const axisMax=physicsGraphNormalized?1:rawMax;
             let minPositive=Infinity;
-            for(const series of PHYSICS_GRAPH_SERIES)for(const sample of seriesSamples(series)){
+            for(const series of visibleSeries)for(const sample of seriesSamples(series)){
                 const value=sample[series.key],scale=physicsGraphNormalized?maxValues[series.key]:1;
                 if(Number.isFinite(value)&&value>0&&scale>0)minPositive=Math.min(minPositive,value/scale);
             }
@@ -940,6 +1009,7 @@
             const axisLabel=value=>value===0?'0':value<.001||value>=10000?value.toExponential(1)
                 :value.toFixed(physicsGraphNormalized?value<.01?4:value<.1?3:2:rawMax<1?3:rawMax<10?2:1);
             ctx.font='11px sans-serif';ctx.textBaseline='middle';
+            ctx.fillStyle=light?'#475569':'#cbd5e1';ctx.textAlign='left';ctx.fillText(physicsGraphNormalized?'Y axis: normalised (fraction of each series maximum)':'Y axis: raw values',left,top-12);
             for(let tick=0;tick<=4;tick++){
                 const y=bottom-tick/4*plotHeight;
                 ctx.strokeStyle=light?'#cbd5e1':'#334155';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(right,y);ctx.stroke();
@@ -948,13 +1018,6 @@
                 const x=left+tick/4*plotWidth,seconds=(start+(end-start)*tick/4-(physicsGraphHistory.startedAt??start))/1000;
                 ctx.textAlign='center';ctx.fillText(`${Math.max(0,seconds).toFixed(0)} s`,x,bottom+17);
             }
-            PHYSICS_GRAPH_SERIES.forEach((series,index)=>{
-                const compact=compactLegend,column=compact?0:index%2,row=compact?index:Math.floor(index/2),x=left+column*Math.max(140,(plotWidth/2)),y=17+row*18;
-                ctx.fillStyle=series.color;ctx.fillRect(x,y-5,9,9);
-                ctx.textAlign='left';ctx.fillStyle=series.key==='energy'?series.color:light?'#334155':'#cbd5e1';
-                const max=maxValues[series.key],precision=['tm','modelConfidence','membranePlacement','satisfaction'].includes(series.key)?3:2;
-                ctx.fillText(`${series.label} (max ${max.toFixed(precision)}${series.unit})`,x+14,y);
-            });
             const events=physicsGraphHistory.events.filter(event=>event.time>=start&&event.time<=end);
             let lastLabelX=-Infinity;
             for(const event of events){
@@ -962,8 +1025,13 @@
                 if(x-lastLabelX<13)continue;lastLabelX=x;
                 ctx.save();ctx.translate(x+3,top-4);ctx.rotate(-Math.PI/2);ctx.fillStyle=light?'#6b21a8':'#ddd6fe';ctx.textAlign='left';ctx.font='10px sans-serif';ctx.fillText(event.label.slice(0,18),0,0);ctx.restore();
             }
-            for(const series of PHYSICS_GRAPH_SERIES){
-                const max=maxValues[series.key];ctx.strokeStyle=series.color;ctx.lineWidth=2;ctx.lineJoin='round';ctx.beginPath();
+            physicsGraphHitPoints=[];
+            const drawingSeries=visibleSeries.filter(series=>series.key!==highlightedPhysicsGraphSeries);
+            const highlighted=visibleSeries.find(series=>series.key===highlightedPhysicsGraphSeries);if(highlighted)drawingSeries.push(highlighted);
+            for(const series of drawingSeries){
+                const glow=series.key===highlightedPhysicsGraphSeries;ctx.save();
+                if(glow){ctx.shadowColor=series.color;ctx.shadowBlur=12;}
+                const max=maxValues[series.key];ctx.strokeStyle=series.color;ctx.lineWidth=glow?3.5:2;ctx.lineJoin='round';ctx.beginPath();
                 let started=false,lastPixel=-Infinity;
                 const points=seriesSamples(series);
                 let previousValue=null;
@@ -971,6 +1039,7 @@
                     if(x-lastPixel<.7&&sample!==points.at(-1))continue;lastPixel=x;
                     const scaledValue=physicsGraphNormalized?(max>0?value/max:0):value;
                     const y=bottom-Math.min(1,graphFraction(scaledValue))*plotHeight;
+                    physicsGraphHitPoints.push({x,y,series,value,normalised:max>0?value/max:0,time:sample.time});
                     if(!started){ctx.moveTo(x,y);started=true;}
                     else{
                         if(['modelConfidence','membranePlacement','satisfaction'].includes(series.key)){
@@ -986,6 +1055,7 @@
                     ctx.lineTo(right,bottom-Math.min(1,graphFraction(held))*plotHeight);
                 }
                 if(started){ctx.stroke();if(points.filter(sample=>Number.isFinite(sample[series.key])).length===1){ctx.beginPath();ctx.arc(lastPixel,bottom-Math.min(1,graphFraction(physicsGraphNormalized?(max>0?previousValue/max:0):previousValue))*plotHeight,3,0,Math.PI*2);ctx.fillStyle=series.color;ctx.fill();}}
+                ctx.restore();
             }
             if(!samples.length){ctx.fillStyle=light?'#475569':'#94a3b8';ctx.textAlign='center';ctx.font='12px sans-serif';ctx.fillText('Waiting for Phase 2 simulation samples…',(left+right)/2,(top+bottom)/2);}
             const status=document.getElementById('physicsGraphStatus');
@@ -993,10 +1063,10 @@
             const explanation=document.getElementById('physicsGraphScaleExplanation');
             if(explanation)explanation.textContent=(physicsGraphNormalized
                 ? 'Each line is divided by its own maximum in the displayed time window, so 1.0 is that line’s current window maximum. '
-                : 'Raw values share one numeric y-axis even though their units differ; use each series’ legend maximum to interpret its scale. ')
+                : 'Visible raw values share one numeric y-axis even though their units differ; use each series’ legend maximum to interpret its scale. ')
                 +(physicsGraphLogScale?'The logarithmic y-axis spreads out small positive values; zero remains at the baseline. ':'')
                 +'Confidence and membrane scores hold their last measured value between intermittent updates. Vertical lines mark group starts and changes to build controls; their labels are rotated to fit.';
-            canvas.setAttribute('aria-label',`Live ${physicsGraphNormalized?'normalised':'raw'} TM-score, RMSD, weighted spring-length error, average residue speed, simulation step rate, dynamic max sim residue count, max residue speed of the core subunit, restraint satisfaction, overall model confidence, and membrane placement confidence over Phase 2 time on a ${physicsGraphLogScale?'logarithmic':'linear'} y-axis`);
+            canvas.setAttribute('aria-label',`Live ${physicsGraphNormalized?'normalised':'raw'} plot of ${visibleSeries.map(series=>series.label).join(', ')||'no visible series'} over Phase 2 time on a ${physicsGraphLogScale?'logarithmic':'linear'} y-axis`);
             physicsGraphHistory.lastDrawAt=performance.now();
         }
 // physicsHistoryGraph.js end
@@ -1009,6 +1079,7 @@
 
         // Three.js 3D Physics Scene Objects
         let physicsScene, physicsCamera, physicsRenderer;
+        let physicsWebGLContextLost=false;
         let instancedNodeMesh = null;
         let nodeDummy = null;
         let backboneLinesGroup = null;
@@ -1795,6 +1866,7 @@
         function setReferenceSearchSelection(ids) {
             const input = document.getElementById('pdbInput1');
             input.value = [...new Set(ids)].join(', ');
+            window.requestComplexTitle?.(ids.map(id=>({id,name:referenceSearchResults.find(hit=>hit.identifier.toUpperCase()===id.toUpperCase())?.name||''})));
             input.classList.remove('string-id-glow'); void input.offsetWidth; input.classList.add('string-id-glow');
             setTimeout(() => input.classList.remove('string-id-glow'), 3100);
             clearUploadedStructure('reference');
@@ -4412,12 +4484,16 @@
             physicsRenderer?.render(physicsScene, physicsCamera);
         }
 
+        function installPhysicsContextRecovery(canvas, onLost, onRestored) {
+            canvas.addEventListener('webglcontextlost', event=>{event.preventDefault();onLost();});
+            canvas.addEventListener('webglcontextrestored', onRestored);
+        }
         function initThreeJSPhysicsScene() {
             const container = document.getElementById('physics3dCanvas');
             if (!container) return;
 
             physicsScene = new THREE.Scene();
-            physicsScene.background = physicsBackgroundHidden ? null : new THREE.Color(document.body.classList.contains('light-mode') ? 0xffffff : 0x020617);
+            physicsScene.background = physicsBackgroundHidden ? null : new THREE.Color(document.body.classList.contains('light-mode') ? 0xffffff : 0x01030a);
 
             const width = container.clientWidth || 1230;
             const height = container.clientHeight || 520;
@@ -4433,7 +4509,7 @@
             }
             MolecularImpostors.gpuStatus(physicsRenderer);
             const renderPhysicsScene=physicsRenderer.render.bind(physicsRenderer);
-            physicsRenderer.render=(scene,camera)=>{syncPhysicsOrthographicCamera();syncPhysicsTransparency(scene);syncPhysicsMaterials(scene);updateSelectionDistance();syncProteinSlice(scene);updateSelectedResidueLabels();MolecularImpostors.syncGaussianScene(scene,camera);renderPhysicsScene(scene,camera);};
+            physicsRenderer.render=(scene,camera)=>{if(physicsWebGLContextLost)return;syncPhysicsOrthographicCamera();syncPhysicsTransparency(scene);syncPhysicsMaterials(scene);updateSelectionDistance();syncProteinSlice(scene);updateSelectedResidueLabels();MolecularImpostors.syncGaussianScene(scene,camera);renderPhysicsScene(scene,camera);};
             physicsRenderer.localClippingEnabled=true;
             physicsRenderer.setSize(width, height);
             physicsRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -4447,8 +4523,21 @@
             nodeDummy = new THREE.Object3D();
 
             const el = physicsRenderer.domElement;
-            el.style.cursor = 'grab';
+            const webglStatus=document.getElementById('physicsWebGLStatus');
+            let webglRecoveryTimer=null;
+            installPhysicsContextRecovery(el,()=>{
+                physicsWebGLContextLost=true;
+                if(webglStatus){webglStatus.hidden=false;webglStatus.textContent='The 3D viewer lost its graphics connection. Waiting for the browser to restore it…';}
+                clearTimeout(webglRecoveryTimer);
+                webglRecoveryTimer=setTimeout(()=>{if(physicsWebGLContextLost&&webglStatus)webglStatus.textContent='The 3D viewer could not be restored yet. Your build can continue; save your session before reloading if needed.';},10000);
+            },()=>{
+                clearTimeout(webglRecoveryTimer);physicsWebGLContextLost=false;
+                if(webglStatus){webglStatus.hidden=true;webglStatus.textContent='';}
+                resizePhysicsScene();requestVisualPhysicsMeshUpdate();
+            });
+            el.style.cursor = 'default';
             el.style.touchAction = 'none';
+            let cursorDragStart=null;
             let touchView = null;
             const touchPoint = touch => ({x:touch.clientX,y:touch.clientY});
             const touchGesture = touches => {
@@ -4507,6 +4596,7 @@
                 mouse3dButton = e.button;
                 prevMouse3dX = e.clientX;
                 prevMouse3dY = e.clientY;
+                cursorDragStart={x:e.clientX,y:e.clientY};
 
                 if(!animationPlaying&&!animationPreparing&&e.button===0&&(e.shiftKey||mobilePhysicsDragMode==='residue')&&physicsNodes.length){
                     const picked=pickPhysicsObject(e);
@@ -4516,7 +4606,7 @@
                         const normal=new THREE.Vector3();physicsCamera.getWorldDirection(normal).negate();
                         dragPlane=new THREE.Plane().setFromNormalAndCoplanarPoint(normal,visible);
                         draggedResidue={index,target:new THREE.Vector3(picked.node.x,picked.node.y,picked.node.z)};
-                        el.style.cursor='move';return;
+                        return;
                     }
                 }
                 if(!animationPlaying&&!animationPreparing&&e.button===0&&e.altKey&&physicsNodes.length){
@@ -4524,7 +4614,7 @@
                     if(picked?.kind==='node'){
                         updateRotationalSymmetry(true);
                         const group=allSymmetryRotationGroups().find(item=>item.blockIds.has(picked.node.blockIdx));
-                        if(group){e.preventDefault();altDraggedSymmetryKey=group.key;el.style.cursor='ew-resize';return;}
+                        if(group){e.preventDefault();altDraggedSymmetryKey=group.key;return;}
                     }
                 }
 
@@ -4554,14 +4644,12 @@
                             prevDragWorldPos.copy(planePoint);
                         }
 
-                        el.style.cursor = 'move';
                         setDragChainBadge(true, draggedChainId);
                         return;
                     }
                 }
 
                 isDraggingChain = false;
-                el.style.cursor = e.button === 2 ? 'move' : 'grabbing';
             });
             let selectionPointer=null;
             function pickPhysicsObject(event) {
@@ -4624,7 +4712,7 @@
             el.addEventListener('pointermove',event=>{
                 if(event.pointerType==='touch'||event.buttons||isDraggingChain)return;
                 const now=performance.now();if(now-lastSelectionHover<45)return;lastSelectionHover=now;
-                el.style.cursor=pickPhysicsObject(event)?'pointer':'grab';
+                el.style.cursor=pickPhysicsObject(event)?'pointer':'default';
             });
             el.addEventListener('pointerdown',event=>{ if(event.button===0&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!mobilePhysicsDragMode) selectionPointer={x:event.clientX,y:event.clientY}; });
             el.addEventListener('pointerup',event=>{
@@ -4651,12 +4739,15 @@
                     }
                     draggedResidue=null;
                     altDraggedSymmetryKey=null;
-                    if (el) el.style.cursor = 'grab';
+                    cursorDragStart=null;
+                    if (el) el.style.cursor = 'default';
                 }
             });
 
             window.addEventListener('mousemove', (e) => {
                 if (is3dMouseDown) {
+                    if(cursorDragStart&&(e.clientX!==cursorDragStart.x||e.clientY!==cursorDragStart.y))
+                        el.style.cursor=altDraggedSymmetryKey?'ew-resize':(draggedResidue||isDraggingChain||mouse3dButton===2)?'move':'grabbing';
                     if(draggedResidue){
                         const rect=el.getBoundingClientRect();
                         const mouse=new THREE.Vector2((e.clientX-rect.left)/rect.width*2-1,-(e.clientY-rect.top)/rect.height*2+1);
@@ -4725,6 +4816,7 @@
             window.addEventListener('resize', () => {
                 if (!physicsRenderer || !container) return;
                 const w = container.clientWidth, h = container.clientHeight;
+                if(!w||!h||physicsWebGLContextLost)return;
                 physicsCamera.aspect = w / h;
                 physicsCamera.updateProjectionMatrix();
                 physicsRenderer.setSize(w, h);
@@ -5377,7 +5469,7 @@
         function isModel2Only(node) { return node.idx1 === null && node.idx2 !== null && !node.res.referenceOnly; }
         function physicsPulseOpacity(timeMs, originMode) {
             if (physicsPulsePaused) return 1;
-            return originMode && !physicsDifferenceMode ? 1 : 0.60 + 0.4 * Math.cos(timeMs * Math.PI / 1000);
+            return originMode && !physicsDifferenceMode ? 1 : 0.60 + 0.4 * Math.cos(timeMs * Math.PI / 2000);
         }
         function togglePhysicsPulse() {
             physicsPulsePaused = !physicsPulsePaused;
@@ -5719,6 +5811,7 @@
 
             physicsNodes = [];
             physicsSprings = [];
+            renderSpringCullingStats(null,'Culling results appear when the spring network is built.');
 
             const N = physicsPositions.length;
             const chainKeys = morphMatrixBlocks.map(b => b.c1);
@@ -5937,6 +6030,62 @@
             }
             return 20;
         }
+        function springCullingSettings(){
+            return ['cullAfLow','cullAfHigh','cullRefIntra','cullRefInter'].map((id,i)=>{
+                const value=Number(document.getElementById(id)?.value);return Number.isFinite(value)?Math.max(0,Math.min(100,value)):[90,30,30,10][i];
+            });
+        }
+        function cullPhysicsSpringNetwork(network,input,influences,settings){
+            if(!settings)return network;
+            const {values,references,length,referenceCount}=network,nodes=input.nodes,N=nodes.length;
+            const sources=referenceCount||1;
+            const cullingStats={groups:Array.from({length:4},()=>({eligible:0,removed:0})),missingPlddt:0};
+            const afFiles=[...new Set(nodes.filter(node=>node.af).map(node=>node.af.fileIndex))];
+            const sourceList=afFiles.map(file=>({source:-1,file})).concat(Array.from({length:sources},(_,source)=>({source})));
+            for(const {source,file} of sourceList){
+                const degree=new Uint32Array(N),adj=Array.from({length:N},()=>[]),category=new Int8Array(length);category.fill(-1);
+                const present=new Uint8Array(length),count=[0,0],removed=[0,0];
+                const distance=k=>source<0?values[k*7+3]:referenceCount?references[k*referenceCount+source]:values[k*7+2];
+                for(let k=0;k<length;k++){
+                    const o=k*7,flags=values[o+4],d=distance(k);if((flags&24)||!Number.isFinite(d))continue;
+                    const i=values[o],j=values[o+1];if(source<0&&nodes[i].af?.fileIndex!==file)continue;
+                    if(d>network.cutoff){if(source<0)values[o+3]=NaN;else if(referenceCount)references[k*referenceCount+source]=NaN;else values[o+2]=NaN;continue;}present[k]=1;degree[i]++;degree[j]++;adj[i].push(k);adj[j].push(k);
+                    let c;if(source<0){const a=nodes[i].af?.plddt,b=nodes[j].af?.plddt;c=Number.isFinite(a)&&Number.isFinite(b)?(a<50||b<50?0:1):-1;}else c=nodes[i].blockIdx===nodes[j].blockIdx?0:1;
+                    category[k]=c;if(c>=0)count[c]++;else if(source<0)cullingStats.missingPlddt++;
+                }
+                const target=count.map((n,c)=>Math.round(n*(source<0?settings[c]:settings[c+2])/100));
+                const heap=[],version=new Uint32Array(length);
+                const better=(a,b)=>a.score!==b.score?a.score>b.score:a.i!==b.i?a.i<b.i:a.j<b.j;
+                const push=k=>{if(!present[k]||category[k]<0||removed[category[k]]>=target[category[k]])return;const o=k*7,i=values[o],j=values[o+1],item={k,i,j,score:degree[i]+degree[j],v:++version[k]};let x=heap.length;heap.push(item);while(x){let p=(x-1)>>1;if(!better(item,heap[p]))break;heap[x]=heap[p];x=p;}heap[x]=item;};
+                const pop=()=>{const top=heap[0],last=heap.pop();if(heap.length){let x=0;while(true){let l=x*2+1;if(l>=heap.length)break;let r=l+1,b=r<heap.length&&better(heap[r],heap[l])?r:l;if(!better(heap[b],last))break;heap[x]=heap[b];x=b;}heap[x]=last;}return top;};
+                for(let k=0;k<length;k++)push(k);
+                while(heap.length&&(removed[0]<target[0]||removed[1]<target[1])){
+                    const e=pop(),k=e.k,c=category[k];if(!present[k]||e.v!==version[k]||removed[c]>=target[c])continue;
+                    present[k]=0;removed[c]++;degree[e.i]--;degree[e.j]--;
+                    if(source<0)values[k*7+3]=NaN;else if(referenceCount)references[k*referenceCount+source]=NaN;else values[k*7+2]=NaN;
+                    for(const t of adj[e.i])push(t);for(const t of adj[e.j])push(t);
+                }
+                for(let c=0;c<2;c++){const group=cullingStats.groups[source<0?c:c+2];group.eligible+=count[c];group.removed+=removed[c];}
+            }
+            let write=0;
+            for(let k=0;k<length;k++){
+                const o=k*7,flags=values[o+4];let d1=values[o+2],d2=values[o+3];
+                if(referenceCount&&!(flags&24)){let sum=0,w=0,first=NaN;for(let r=0;r<referenceCount;r++){const d=references[k*referenceCount+r];if(Number.isFinite(d)){if(!Number.isFinite(first))first=d;const weight=influences[r]??1;sum+=d*weight;w+=weight;}}d1=w?sum/w:first;}
+                if(!Number.isFinite(d1)&&!Number.isFinite(d2))continue;
+                if(write!==k){values.copyWithin(write*7,o,o+7);if(references)references.copyWithin(write*referenceCount,k*referenceCount,(k+1)*referenceCount);}
+                const dest=write*7;values[dest+2]=d1;values[dest+4]=(flags&~3)|(flags&8?3:Number.isFinite(d1)&&Number.isFinite(d2)?0:Number.isFinite(d2)?1:2);write++;
+            }
+            return {...network,cullingStats,length:write,values:values.slice(0,write*7),references:references?.slice(0,write*referenceCount)||null};
+        }
+        function renderSpringCullingStats(stats, message){
+            const host=document.getElementById('springCullingSummary');if(!host)return;
+            host.replaceChildren();
+            if(!stats?.groups){const text=document.createElement('p');text.className='text-xs text-slate-400';text.textContent=message||'Culling results are unavailable for this model.';host.append(text);return;}
+            const labels=['AlphaFold · pLDDT below 50 at either end','AlphaFold · pLDDT 50 or above at both ends','Reference · intra-chain','Reference · inter-chain / inter-molecule'];
+            const grid=document.createElement('dl');grid.className='build-stats-grid';
+            stats.groups.forEach((group,i)=>{const card=document.createElement('div');card.className='build-stat';const title=document.createElement('dt');title.textContent=labels[i];const value=document.createElement('dd');value.className='text-violet-400';value.textContent=group.eligible?`${(100*group.removed/group.eligible).toFixed(1)}%`:'—';const detail=document.createElement('p');detail.textContent=`${group.removed.toLocaleString()} removed of ${group.eligible.toLocaleString()} eligible`;card.append(title,value,detail);grid.append(card);});
+            const note=document.createElement('p');note.className='text-xs text-slate-400 mt-3';note.textContent=`Backbone and base-pair springs are retained and excluded. ${stats.missingPlddt.toLocaleString()} AlphaFold extra spring contributions with missing pLDDT were retained. Counts are summed across sources; a residue pair supported by multiple sources can be counted more than once.`;host.append(grid,note);
+        }
         function buildPhysicsSpringNetwork(input,cutoff,influences,progress,activeBlocks=null){
             if(!Number.isFinite(cutoff)||cutoff<=0)throw new Error('Spring cutoff must be positive and finite');
             const nodes=input.nodes,N=nodes.length,referenceCount=input.referenceCount;
@@ -6048,17 +6197,19 @@
                 // Cache original source coordinates once for this model, including future cutoff changes.
                 if(!state.springInput)state.springInput=physicsSpringInputSnapshot();
                 const lockKey=physicsNodes.map(node=>node.referenceLockTarget?1:0).join('');
-                if(state.buildCutoff===springCutoffVal && state.buildLockKey===lockKey)return;
+                const cullingKey=JSON.stringify(springCullingSettings());
+                if(state.buildCutoff===springCutoffVal && state.buildLockKey===lockKey && state.buildCullingKey===cullingKey)return;
+                state.buildCullingKey=cullingKey;
                 state.buildLockKey=lockKey;
                 const locked=Uint8Array.from(physicsNodes,node=>node.referenceLockTarget?1:0);
                 state.buildCutoff=springCutoffVal;
                 const revision=(state.buildRevision||0)+1;state.buildRevision=revision;state.buildPending=true;
-                state.buildInfluences=referenceInfluences.slice();
+                state.buildInfluences=referenceInfluences.slice();state.buildCulling=springCullingSettings();
                 const display=document.getElementById('physicsSpringDisplay');if(display)display.textContent='Building springs…';
                 const input=state.inputSent?undefined:state.springInput;
                 const transfer=input?Object.values(input).filter(ArrayBuffer.isView).map(column=>column.buffer):[];
                 state.fullWorker?.terminate();state.fullWorker=null;state.fullResult=null;state.parallelSpringBuild=false;
-                if(input&&modelLoading&&physicsNodes.length>=1000&&!(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild)){
+                if(false&&input&&modelLoading&&physicsNodes.length>=1000&&!(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild)){
                     const url=URL.createObjectURL(new Blob([physicsSimulationWorkerSource()],{type:'text/javascript'}));
                     try{state.fullWorker=new Worker(url);}finally{URL.revokeObjectURL(url);}
                     const fullWorker=state.fullWorker;state.parallelSpringBuild=true;state.partialRequested=false;state.partialReady=false;
@@ -6073,9 +6224,9 @@
                         state.fullResult=data;queueFullSpringInstall(state);
                     };
                     fullWorker.onerror=event=>{if(physicsSimulationWorkerState!==state||state.fullWorker!==fullWorker)return;disposePhysicsSimulationWorker();physicsRunning=false;showError('Could not build physics springs: '+(event.message||'worker failed'));};
-                    fullWorker.postMessage({command:'buildSprings',revision,cutoff:springCutoffVal,input,locked,influences:state.buildInfluences},transfer);
+                    fullWorker.postMessage({command:'buildSprings',revision,cutoff:springCutoffVal,input,locked,influences:state.buildInfluences,culling:state.buildCulling},transfer);
                 }else{
-                    state.worker.postMessage({command:'buildSprings',revision,cutoff:springCutoffVal,input,locked,influences:state.buildInfluences},transfer);
+                    state.worker.postMessage({command:'buildSprings',revision,cutoff:springCutoffVal,input,locked,influences:state.buildInfluences,culling:state.buildCulling},transfer);
                 }
                 state.inputSent=true;
             }catch(error){physicsRunning=false;showError('Could not build physics springs: '+error.message);}
@@ -6218,6 +6369,7 @@
         // Interactive chain visibility toggles for physics 3D view
         function physicsToggleColor(chainId,chainKeys) {
             if(physicsColorMode==='uniform')return '#94a3b8';
+            if(physicsColorMode==='chain')return buildProteinChainColors().get(chainId) || getChainColor(chainId,chainKeys);
             if(physicsColorMode==='protein-id'){
                 const node=physicsNodes.find(candidate=>candidate.res?.c1===chainId&&candidate.idx2!==null&&!candidate.res.referenceOnly);
                 return getProteinIdColor(node?.res.atoms2[node.idx2]?.sourcePdbId);
@@ -6609,6 +6761,7 @@
             }
             const chainKeys = Object.keys(sourceChains || {});
             const mode = referenceColorMode === 'same' ? physicsColorMode : referenceColorMode;
+            const proteinChainColors = mode === 'chain' ? buildProteinChainColors() : null;
             const referenceAFDistances=mode==='af-difference'?afHomologyDistances():null;
             const referenceKeyframeColors=mode==='keyframe-difference'?keyframeDifferenceColors():null;
             const referenceSiteColors=mode==='binding-sites'||mode==='binding-site-type'?bindingSiteColors(mode==='binding-site-type'):null;
@@ -6625,7 +6778,8 @@
                     : mode==='residue-speed' ? residueSpeedColor(referenceNodeIndex)
                     : ['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','qmeandisco'].includes(mode) ? validationNodeColor(referenceNodeIndex,mode)
                     : mode === 'residue-index' ? residueIndexColor(physicsNodes[referenceNodeIndex], atomIdx)
-                    : mode === 'chain' || mode === 'side-chains' ? getChainColor(chainId, chainKeys)
+                    : mode === 'chain' ? (proteinChainColors.get(groupKeyByChain.get(chainId)) || getChainColor(chainId, chainKeys))
+                    : mode === 'chain-random' || mode === 'side-chains' ? getChainColor(chainId, chainKeys)
                     : mode === 'membrane' ? membraneResidueDisplayColor(referenceNodeIndex)
                     : mode === 'membrane-placement' ? membranePlacementResidueColor(referenceNodeIndex,atom)
                     : mode === 'element' ? ELEMENT_COLORS.C
@@ -6676,7 +6830,7 @@
             }
         }
         function setReferenceColorMode(mode) {
-            if (!['same','chain','uniform','protein-id','element','side-chains','origin','aligned','membrane','membrane-placement','charge','hydrophobicity','secondary','plddt','difference'].includes(mode)) return;
+            if (!['same','chain','chain-random','uniform','protein-id','element','side-chains','origin','aligned','membrane','membrane-placement','charge','hydrophobicity','secondary','plddt','difference'].includes(mode)) return;
             referenceColorMode = mode;
             updateModel1AlignmentColors();
             if (physicsRenderer && physicsScene && physicsCamera) physicsRenderer.render(physicsScene, physicsCamera);
@@ -6812,7 +6966,7 @@
 // referenceOverlay.js end
 
 // physicsDynamics.js start
-        let groupNeighbourDistance=30,groupMaxResidueSpeed=.03,groupMaxWaitingTime=10,groupMaxSimulationResidues='dynamic';
+        let groupNeighbourDistance=30,groupMaxResidueSpeed=2.3,groupMaxWaitingTime=10,groupMaxSimulationResidues='dynamic';
         let groupSimulation=null;
         function resetGroupSimulation(){
             for(const [id,assign,minimum] of [
@@ -6824,15 +6978,19 @@
             groupMaxSimulationResidues=selectedBudget==='dynamic'||!selectedBudget?'dynamic':Math.max(1,Math.floor(Number(selectedBudget)||1));
             const polymers=physicsNodes.filter(node=>node.res.entityType==='protein'||node.res.entityType==='nucleotide');
             groupSimulation={nodes:physicsNodes,order:[...new Set((polymers.length?polymers:physicsNodes).map(node=>node.blockIdx))],index:-1,
-                active:new Set(),processed:new Set(),participated:new Set(),pass:1,passResults:[],complete:false,elapsed:0,lastTick:null,wasRunning:false,maxSpeed:null,results:[]};
+                active:new Set(),processed:new Set(),participated:new Set(),pass:1,passResults:[],complete:false,elapsed:0,lastTick:null,wasRunning:false,maxSpeed:null,results:[],totalRunningMs:0,completedSteps:0};
             groupSimulation.originalOrder=groupSimulation.order.slice();
             groupSimulation.parallel=true;
             groupSimulation.groups=[];groupSimulation.nextIndex=0;
             groupSimulation.residueBudget=groupMaxSimulationResidues==='dynamic'?10000:groupMaxSimulationResidues;
             groupSimulation.budgetLag=null;
             updateDynamicResidueBudgetDisplay();
-            const status=document.getElementById('groupSimulationStatusText');if(status)status.textContent='Preparing simulation and building the spring network…';
-            document.getElementById('groupSimulationStatus').style.display='flex';
+            updateAveragePhysicsStepRate();
+            if(physicsNodes.length){
+                const status=document.getElementById('groupSimulationStatusText');if(status)status.textContent='Preparing simulation and building the spring network…';
+                document.getElementById('groupSimulationStatus').style.display='flex';
+            }
+            updateGroupTimeLimitCount();
             const summary=document.getElementById('buildCompletionSummary');if(summary){summary.textContent='';summary.hidden=true;}
         }
         function updateDynamicResidueBudgetDisplay(){
@@ -6946,7 +7104,7 @@
             }
             const running=physicsRunning&&simulationPhase===2&&!modelLoading&&readyModelGeneration===modelBuildGeneration&&!animationPlaying&&!workerState?.buildPending&&!workerState?.partialBlocked;
             if(state.lastTick!==null&&state.wasRunning&&running){
-                const elapsed=Math.max(0,now-state.lastTick);for(const group of state.groups)group.elapsed+=elapsed;
+                const elapsed=Math.max(0,now-state.lastTick);state.totalRunningMs+=elapsed;for(const group of state.groups)group.elapsed+=elapsed;
             }
             if(state.wasRunning!==running)resetParallelPhysicsSampling();
             state.lastTick=now;state.wasRunning=running;
@@ -7027,17 +7185,28 @@
             if(!state.colourInitialized){state.colourInitialized=true;setPhysicsColorMode(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.liveColorMode?multiReferenceBuild.liveColorMode:'running-simulation');}
             updateGroupSimulationStatus();
         }
+        function updateGroupTimeLimitCount(){
+            const display=document.getElementById('groupTimeLimitCount'),average=document.getElementById('groupTimeLimitAverageSpeed'),detail=document.getElementById('groupTimeLimitAverageDetail'),state=groupSimulation;
+            const results=state?(state.complete?state.results:[...(state.passResults||[]),...(state.results||[])]):[];
+            const limited=results.filter(result=>result.reason==='time limit'),measured=limited.filter(result=>Number.isFinite(result.maxSpeed));
+            if(display)display.textContent=limited.length.toLocaleString();
+            if(average)average.textContent=measured.length?`${(measured.reduce((sum,result)=>sum+result.maxSpeed,0)/measured.length).toFixed(3)} Å/s`:'— Å/s';
+            if(detail)detail.textContent=measured.length?`${measured.length.toLocaleString()} of ${limited.length.toLocaleString()} timed-out group runs had a speed measurement · both passes`:'No measured groups at the limit yet';
+        }
         function updateGroupSimulationStatus(){
+            updateGroupTimeLimitCount();
             const state=groupSimulation,status=document.getElementById('groupSimulationStatusText');
             if(!state||!status||state.complete)return;
             if(state.parallel){
                 const names=state.groups.slice(0,4).map(group=>morphMatrixBlocks[group.core]?.c1??String(group.core+1));
                 if(state.groups.length>4)names.push(`+${state.groups.length-4} more`);
-                status.textContent=`Pass ${state.pass}/2 · ${state.groups.length} concurrent groups · ${state.processed.size}/${state.order.length} processed · cores ${names.join(', ')} · ${state.order.filter(block=>state.active.has(block)).length} active subunits · max core speed ${state.maxSpeed===null?'measuring…':state.maxSpeed.toFixed(3)+' Å/s'} · ${(state.elapsed/1000).toFixed(1)} s`;
+                const blocked=state.groups.filter(group=>Number.isFinite(group.maxSpeed)&&group.maxSpeed<groupMaxResidueSpeed&&group.unresolvedClashes>0).length;
+                status.textContent=`Pass ${state.pass}/2 · ${state.groups.length} concurrent groups · ${state.processed.size}/${state.order.length} processed · cores ${names.join(', ')} · ${state.order.filter(block=>state.active.has(block)).length} active subunits · max core speed ${state.maxSpeed===null?'measuring…':state.maxSpeed.toFixed(3)+' Å/s'}${blocked?` · ${blocked} below stopping speed but waiting for clashes`:''} · ${(state.elapsed/1000).toFixed(1)} s`;
                 return;
             }
             const name=morphMatrixBlocks[state.core]?.c1??String(state.core+1);
-            status.textContent=`Pass ${state.pass}/2 · Group ${state.index+1}/${state.order.length} · core ${name} · ${state.order.filter(block=>state.active.has(block)).length} active subunits · max core speed ${state.maxSpeed===null?'measuring…':state.maxSpeed.toFixed(3)+' Å/s'} · ${(state.elapsed/1000).toFixed(1)} s`;
+            const blocked=Number.isFinite(state.maxSpeed)&&state.maxSpeed<groupMaxResidueSpeed&&state.unresolvedClashes>0;
+            status.textContent=`Pass ${state.pass}/2 · Group ${state.index+1}/${state.order.length} · core ${name} · ${state.order.filter(block=>state.active.has(block)).length} active subunits · max core speed ${state.maxSpeed===null?'measuring…':state.maxSpeed.toFixed(3)+' Å/s'}${blocked?' · below stopping speed but waiting for clashes':''} · ${(state.elapsed/1000).toFixed(1)} s`;
         }
         function tickGroupSimulation(now){
             if(!groupSimulation||groupSimulation.nodes!==physicsNodes)resetGroupSimulation();
@@ -7046,7 +7215,7 @@
             if(state.parallel){tickParallelPhysicsGroups(now);return;}
             const workerState=typeof physicsSimulationWorkerState==='undefined'?null:physicsSimulationWorkerState;
             const running=physicsRunning&&simulationPhase===2&&!modelLoading&&readyModelGeneration===modelBuildGeneration&&!animationPlaying&&!workerState?.buildPending;
-            if(state.lastTick!==null&&state.wasRunning&&running)state.elapsed+=Math.max(0,now-state.lastTick);
+            if(state.lastTick!==null&&state.wasRunning&&running){const elapsed=Math.max(0,now-state.lastTick);state.elapsed+=elapsed;state.totalRunningMs+=elapsed;}
             if(state.wasRunning!==running){
                 state.sampleElapsed=state.elapsed;state.sampleSteps=0;state.coreDistances=state.coreIndices?.map(()=>0)||[];
                 state.corePositions=state.coreIndices?.flatMap(index=>{const n=physicsNodes[index];return [n.x,n.y,n.z];})||[];
@@ -7096,7 +7265,7 @@
             }
             globalThis.BuildTimeline?.completeCalculations();
             state.results=[...state.passResults,...state.results.map(result=>({...result,pass:2}))];
-            state.complete=true;state.completedAt=performance.now();state.active.clear();physicsRunning=false;
+            state.complete=true;state.completedAt=performance.now();state.active.clear();physicsRunning=false;updateGroupTimeLimitCount();updateAveragePhysicsStepRate();
             if(typeof updateStagedBuildETC==='function')updateStagedBuildETC(performance.now(),true);
             if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.kind==='draft'&&!multiReferenceBuild.done){
                 const build=multiReferenceBuild;void advanceStagedBuild().catch(error=>failStagedBuild(error,build));return;
@@ -7390,6 +7559,21 @@
             }
         }
 
+        // Reuse the previous projection's neighbour list when its skin still
+        // covers all node movement. Fixed/fixed forces cannot move this group.
+        function forEachSharedStericPair(nodes,radius,visit,group){
+            const cache=group?.clashNeighbours;
+            if(!group||!cache||cache.nodes!==group.nodes||cache.radius!==radius||cache.rigid!==rigidBodySimulation)return forEachNearbyPhysicsPair(nodes,radius,visit);
+            const positions=cache.positions,full=group.nodes,halfSkin=1;
+            for(let i=0;i<full.length;i++){const n=full[i],k=i*3,dx=n.x-positions[k],dy=n.y-positions[k+1],dz=n.z-positions[k+2];
+                if(dx*dx+dy*dy+dz*dz>=halfSkin*halfSkin)return forEachNearbyPhysicsPair(nodes,radius,visit);}
+            const pairs=cache.pairs,local=group.map;
+            for(let k=0;k<pairs.length;k+=2){let i=local.get(pairs[k]),j=local.get(pairs[k+1]);if(i===undefined||j===undefined)continue;
+                if(i>j)[i,j]=[j,i];const a=nodes[i],b=nodes[j];let dx=b.x-a.x,dy=b.y-a.y,dz=b.z-a.z,distance=Math.hypot(dx,dy,dz);
+                if(distance>=radius)continue;if(distance<1e-6){dx=.001;dy=0;dz=0;distance=.001;}visit(i,j,distance,dx,dy,dz);
+            }
+        }
+
         function caPseudoAngle(a,b,c){
             const ux=a.x-b.x,uy=a.y-b.y,uz=a.z-b.z,vx=c.x-b.x,vy=c.y-b.y,vz=c.z-b.z;
             return Math.atan2(Math.hypot(uy*vz-uz*vy,uz*vx-ux*vz,ux*vy-uy*vx),ux*vx+uy*vy+uz*vz);
@@ -7628,13 +7812,79 @@
             physicsNodes=group.localNodes;physicsSprings=group.localSprings;localGeometryRestraints=group.localRestraints;resolvedCrossLinks=group.links;
             if(draggedResidue)draggedResidue={...draggedResidue,index:group.map.get(draggedResidue.index)};
             let metrics;
-            try{metrics=integratePhysicsWorkerStep();}
+            try{metrics=integratePhysicsWorkerStep(true,group);}
             finally{physicsNodes=full.nodes;physicsSprings=full.springs;localGeometryRestraints=full.restraints;resolvedCrossLinks=full.links;draggedResidue=full.drag;}
             metrics.unresolvedClashes=projectPhysicsGroupClashes(group);
             metrics.unresolvedClashBlocks=group.unresolvedClashBlocks;
             return metrics;
         }
         function projectPhysicsGroupClashes(group) {
+            const nodes=physicsNodes,skin=2,halfSkin=skin/2;
+            const radiusFor=(a,b)=>a.res.entityType==='other'||b.res.entityType==='other'?stericClashRadius*(2.2/MIN_RESIDUE_DIST):stericClashRadius;
+            const eligible=(i,j)=>{const a=nodes[i],b=nodes[j],moving=group.movableSet.has(j);
+                return i!==j&&!(moving&&j<i)&&!(a.blockIdx===b.blockIdx&&(Math.abs(i-j)===1||rigidBodySimulation||a.res.entityType==='other'));};
+            // A candidate list remains complete while every node is within half
+            // the skin of its build position, including projection movements.
+            const stale=()=>{const cache=group.clashNeighbours;if(!cache||cache.nodes!==nodes||cache.radius!==stericClashRadius||cache.rigid!==rigidBodySimulation)return true;
+                for(let i=0;i<nodes.length;i++){const n=nodes[i],k=i*3,dx=n.x-cache.positions[k],dy=n.y-cache.positions[k+1],dz=n.z-cache.positions[k+2];if(dx*dx+dy*dy+dz*dz>=halfSkin*halfSkin)return true;}return false;};
+            const build=()=>{
+                const reach=Math.max(stericClashRadius,stericClashRadius*(2.2/MIN_RESIDUE_DIST))+skin,grid=new Map(),positions=new Float64Array(nodes.length*3),pairs=[];
+                const key=(x,y,z)=>`${x},${y},${z}`;
+                nodes.forEach((node,i)=>{const k=i*3;positions[k]=node.x;positions[k+1]=node.y;positions[k+2]=node.z;
+                    const cell=key(Math.floor(node.x/reach),Math.floor(node.y/reach),Math.floor(node.z/reach));let bucket=grid.get(cell);if(!bucket)grid.set(cell,bucket=[]);bucket.push(i);});
+                for(const i of group.movable){const a=nodes[i],x=Math.floor(a.x/reach),y=Math.floor(a.y/reach),z=Math.floor(a.z/reach),candidates=[];
+                    for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)for(let dz=-1;dz<=1;dz++)for(const j of grid.get(key(x+dx,y+dy,z+dz))||[]){
+                        if(i===j||(group.movableSet.has(j)&&j<i))continue;const b=nodes[j],limit=radiusFor(a,b)+skin;
+                        if((a.x-b.x)**2+(a.y-b.y)**2+(a.z-b.z)**2<=limit*limit)candidates.push(j);}
+                    candidates.sort((a,b)=>a-b);for(const j of candidates)pairs.push(i,j);
+                }
+                return group.clashNeighbours={nodes,radius:stericClashRadius,rigid:rigidBodySimulation,positions,pairs:Uint32Array.from(pairs)};
+            };
+            const finalClashes=()=>{let count=0;const blocks=new Set(),pairs=group.clashNeighbours.pairs;
+                for(let k=0;k<pairs.length;k+=2){if(!eligible(pairs[k],pairs[k+1]))continue;const a=nodes[pairs[k]],b=nodes[pairs[k+1]];if(Math.hypot(b.x-a.x,b.y-a.y,b.z-a.z)<radiusFor(a,b)-.001){count++;blocks.add(a.blockIdx);blocks.add(b.blockIdx);}}
+                group.unresolvedClashBlocks=[...blocks];return count;
+            };
+            let invalid=false;
+            const shift=(index,x,y,z)=>{
+                const node=nodes[index],indices=rigidBodySimulation||node.res.entityType==='other'?group.blocks.get(node.blockIdx):null;
+                if(indices&&indices.some(i=>!group.movableSet.has(i)))return;
+                for(const i of indices||[index]){const n=nodes[i];n.x+=x;n.y+=y;n.z+=z;
+                    const pos=group.clashNeighbours.positions,k=i*3,dx=n.x-pos[k],dy=n.y-pos[k+1],dz=n.z-pos[k+2];
+                    if(dx*dx+dy*dy+dz*dz>=halfSkin*halfSkin)invalid=true;}
+            };
+            let clashes=0;const clashBlocks=new Set();
+            for(let iteration=0;iteration<24;iteration++){
+                if(stale())build();invalid=false;clashBlocks.clear();let bondError=0;
+                if(!rigidBodySimulation)for(const i of group.bonds){
+                    const a=nodes[i],b=nodes[i+1],first=group.movableSet.has(i),second=group.movableSet.has(i+1);
+                    let dx=b.x-a.x,dy=b.y-a.y,dz=b.z-a.z,d=Math.hypot(dx,dy,dz);
+                    const target=a.res.entityType==='nucleotide'?backboneRestLength(i):BACKBONE_BOND_LEN;
+                    bondError=Math.max(bondError,Math.abs(d-target));if(d<1e-9){dx=1;dy=0;dz=0;d=1;}
+                    const amount=(Math.hypot(b.x-a.x,b.y-a.y,b.z-a.z)-target)/d,share=first&&second?.5:1;
+                    if(first)shift(i,dx*amount*share,dy*amount*share,dz*amount*share);
+                    if(second)shift(i+1,-dx*amount*share,-dy*amount*share,-dz*amount*share);
+                }
+                if(invalid){build();invalid=false;}
+                clashes=0;let restarts=0;
+                for(let k=0;k<group.clashNeighbours.pairs.length;k+=2){
+                    const pairs=group.clashNeighbours.pairs,i=pairs[k],j=pairs[k+1];if(!eligible(i,j))continue;const a=nodes[i],b=nodes[j],moving=group.movableSet.has(j),radius=radiusFor(a,b);
+                    let vx=b.x-a.x,vy=b.y-a.y,vz=b.z-a.z,d=Math.hypot(vx,vy,vz);if(d>=radius-.001)continue;
+                    clashes++;clashBlocks.add(a.blockIdx);clashBlocks.add(b.blockIdx);if(d<1e-9){vx=1;vy=0;vz=0;d=1;}
+                    const amount=(radius-Math.hypot(b.x-a.x,b.y-a.y,b.z-a.z)+.001)/d,share=moving?.5:1;
+                    shift(i,-vx*amount*share,-vy*amount*share,-vz*amount*share);if(moving)shift(j,vx*amount*.5,vy*amount*.5,vz*amount*.5);
+                    if(invalid){if(++restarts>1){
+                        const cell=Math.max(2,stericClashRadius);group.fixedGrid=new Map();
+                        for(let n=0;n<nodes.length;n++)if(!group.movableSet.has(n)){const p=nodes[n],key=`${Math.floor(p.x/cell)},${Math.floor(p.y/cell)},${Math.floor(p.z/cell)}`;let bucket=group.fixedGrid.get(key);if(!bucket)group.fixedGrid.set(key,bucket=[]);bucket.push(n);}
+                        projectPhysicsGroupClashesUncached(group);build();return finalClashes();}build();invalid=false;k=-2;}
+                }
+                if(!invalid&&!clashes&&bondError<.005)break;
+            }
+            // Count final unresolved overlaps from a current complete list, so a
+            // late displacement cannot hide a clash from the stopping rule.
+            if(stale())build();return finalClashes();
+        }
+
+        function projectPhysicsGroupClashesUncached(group) {
             const nodes=physicsNodes,cell=Math.max(2,stericClashRadius);
             // Fixed obstacles are indexed once per group; only movable positions change.
             const shift=(index,x,y,z)=>{
@@ -7698,8 +7948,16 @@
                         const start=performance.now();
                         const cutoff=resolvePhysicsSpringCutoff(data.cutoff,data.settings?.springCutoffVal??springCutoffVal);
                         springCutoffVal=cutoff;
-                        retainedSpringNetwork=data.command==='installSprings'?data.packed:compactPhysicsSpringNetwork(buildPhysicsSpringNetwork(springInput,cutoff,data.influences||referenceInfluences||[],
-                            (done,total,count)=>self.postMessage({command:'springProgress',revision:data.revision,done,total,count}),data.activeBlocks??null));
+                        let constructionMs=null,cullingMs=null;
+                        if(data.command==='installSprings')retainedSpringNetwork=data.packed;
+                        else{
+                            let mark=performance.now();
+                            const built=buildPhysicsSpringNetwork(springInput,cutoff,data.influences||referenceInfluences||[],
+                                (done,total,count)=>self.postMessage({command:'springProgress',revision:data.revision,done,total,count}),data.activeBlocks??null);
+                            constructionMs=performance.now()-mark;mark=performance.now();
+                            const culled=cullPhysicsSpringNetwork(built,springInput,data.influences||[],data.culling);
+                            cullingMs=performance.now()-mark;retainedSpringNetwork=compactPhysicsSpringNetwork(culled);
+                        }
                         retainedSpringRevision=data.revision;physicsSprings=retainedSpringNetwork;
                         springConfidenceRevision=null;
                         // Retain the numerical network here; send one compact copy for display/validation.
@@ -7709,7 +7967,7 @@
                         // One-shot draft workers return ownership of the input columns.
                         if(data.returnInput&&data.input)for(const value of Object.values(data.input))if(ArrayBuffer.isView(value))transfer.push(value.buffer);
                         self.postMessage({command:'springsBuilt',revision:data.revision,packed,input:data.returnInput?data.input:undefined,
-                            buildMs:performance.now()-start},[...new Set(transfer)]);
+                            constructionMs,cullingMs,buildMs:performance.now()-start},[...new Set(transfer)]);
                         return;
                     }
                     ({mobilityVal,springStiffnessVal,springCutoffVal,otherConstraintsInfluence,stericClashRadius,
@@ -7752,7 +8010,9 @@
                     if(data.springNetwork&&(data.springNetwork.revision!==retainedSpringRevision||
                         data.springNetwork.count!==physicsSprings.length))
                         throw new Error('Physics spring network does not match the displayed network. Reload the model.');
+                    const groupStepStarted=performance.now();
                     const metrics=runPhysicsGroupStep(data.settings.activeBlocks);
+                    metrics.groupStepMs=performance.now()-groupStepStarted;
                     const coordinates=data.recycleBuffer&&data.recycleBuffer.byteLength===physicsNodes.length*24
                         ?new Float64Array(data.recycleBuffer):new Float64Array(physicsNodes.length*3);
                     for(let i=0;i<physicsNodes.length;i++){
@@ -7768,7 +8028,7 @@
         // Keep this dependency list explicit: numerical helpers must be worker-safe
         // (no DOM, Three.js objects, or references to the main-thread atom arrays).
         function physicsSimulationWorkerSource(){
-            const functions=[runPhysicsGroupStep,projectPhysicsGroupClashes,hydratePhysicsSpringInput,resolvePhysicsSpringCutoff,physicsSpringDistance,physicsSpringAfDistance,buildPhysicsSpringNetwork,compactPhysicsSpringNetwork,updatePhysicsSpringConfidence,physicsWorkerSpringAt,rotatePhysicsOffset,moveRigidAtomicEntity,forEachNearbyPhysicsPair,caPseudoAngle,
+            const functions=[runPhysicsGroupStep,projectPhysicsGroupClashes,projectPhysicsGroupClashesUncached,forEachSharedStericPair,hydratePhysicsSpringInput,resolvePhysicsSpringCutoff,physicsSpringDistance,physicsSpringAfDistance,buildPhysicsSpringNetwork,cullPhysicsSpringNetwork,compactPhysicsSpringNetwork,updatePhysicsSpringConfidence,physicsWorkerSpringAt,rotatePhysicsOffset,moveRigidAtomicEntity,forEachNearbyPhysicsPair,caPseudoAngle,
                 caPseudoDihedral,applyLocalGeometryRestraints,getActiveSpring,getMorphMMSI,blendedReferenceDistance,
                 blendAvailableReferenceAndAlphaFold,physicsWorkerSpringConfidence,physicsWorkerBackboneRestLength,
                 physicsWorkerReferenceNode,enforceDraggedBackboneContinuity,pinDraggedResidue,
@@ -7795,7 +8055,13 @@
         const physicsStepRateSamples=[];
         let physicsStepRateWasRunning=false;
         let physicsStepRateTextUpdatedAt=-Infinity;
+        function updateAveragePhysicsStepRate(){
+            const display=document.getElementById('physicsAverageStepRateText');if(!display)return;
+            const state=groupSimulation;
+            display.textContent=state?.totalRunningMs>0?`${(state.completedSteps*1000/state.totalRunningMs).toFixed(1)} steps/s`:'— steps/s';
+        }
         function updatePhysicsStepRate(now=performance.now()){
+            updateAveragePhysicsStepRate();
             const running=physicsRunning&&simulationPhase===2&&!modelLoading&&
                 readyModelGeneration===modelBuildGeneration&&!animationPlaying&&physicsRepresentation!=='surface'&&
                 !(typeof groupSimulation!=='undefined'&&groupSimulation?.complete);
@@ -7876,7 +8142,10 @@
                     if(data.revision!==state.buildRevision)return;
                     state.buildPending=false;
                     if(data.error){fail(data.error);return;}
+                    if(Number.isFinite(data.constructionMs))globalThis.BuildTimeline?.recordDuration('Spring network construction (worker)',data.constructionMs);
+                    if(Number.isFinite(data.cullingMs))globalThis.BuildTimeline?.recordDuration('Spring culling (worker)',data.cullingMs);
                     physicsSprings=physicsSpringNetworkView(data.packed);
+                    renderSpringCullingStats(data.packed.cullingStats);
                     if(state.parallelSpringBuild){
                         if(state.installingFull){state.installingFull=false;state.parallelSpringBuild=false;state.partialBlocked=false;state.partialRequested=false;state.partialReady=false;}
                         else if(state.partialRequested)state.partialReady=true;
@@ -7892,7 +8161,8 @@
                 if(data.id!==state.id)return;
                 state.pending=false;
                 globalThis.AppPerformanceDiagnostics?.record('physics worker round trip (wall)',performance.now()-state.sentAt,state.sentAt);
-                globalThis.AppPerformanceDiagnostics?.record('physics worker compute',data.durationMs);
+                globalThis.AppPerformanceDiagnostics?.record('physics worker integration',data.durationMs);
+                globalThis.AppPerformanceDiagnostics?.record('physics worker group step',data.groupStepMs);
                 if(data.error){fail(data.error);return;}
                 state.recycleBuffer=data.coordinates.buffer;
                 // Controls and direct edits can change while the calculation runs.
@@ -7908,6 +8178,7 @@
                 membraneRepulsionActive.clear();for(const index of data.membraneActive)membraneRepulsionActive.add(index);
                 state.forceDiagnostics=data.forceDiagnostics;
                 physicsWorkerStepCount++;
+                if(groupSimulation&&!groupSimulation.complete&&!conformationOptimization)groupSimulation.completedSteps++;
                 if(!conformationOptimization)sampleSimulationBudgetThroughput(data.durationMs,performance.now());
                 if(state.benchmark&&state.benchmark===window.__benchmarkRun)state.benchmark.steps++;
                 if(typeof groupSimulation!=='undefined'&&groupSimulation&&!conformationOptimization)recordGroupSimulationStep(data.unresolvedClashes,data.unresolvedClashBlocks);
@@ -7982,7 +8253,7 @@
             }
         }
 
-        function integratePhysicsWorkerStep() {
+        function integratePhysicsWorkerStep(skipBackboneProjection=false,stericGroup=null) {
             pinDraggedResidue();
             const t0 = performance.now();
 
@@ -8041,7 +8312,7 @@
 
             // 2. Steric exclusion radius, independent of the backbone constraint strength.
             if (otherConstraintsInfluence > 0.0001) {
-                forEachNearbyPhysicsPair(physicsNodes, stericClashRadius, (i,j,dist,dx,dy,dz) => {
+                forEachSharedStericPair(physicsNodes, stericClashRadius, (i,j,dist,dx,dy,dz) => {
                     const nI = physicsNodes[i], nJ = physicsNodes[j];
                     if (j === i + 1 && nI.blockIdx === nJ.blockIdx) return;
                     if (nI.res.entityType === 'other' && nI.blockIdx === nJ.blockIdx) return;
@@ -8052,7 +8323,7 @@
                     const repelForce = kBase * 15.0 * ((stericLimit - dist) / dist) * otherConstraintsInfluence;
                     fx[i] -= repelForce * dx; fy[i] -= repelForce * dy; fz[i] -= repelForce * dz;
                     fx[j] += repelForce * dx; fy[j] += repelForce * dy; fz[j] += repelForce * dz;
-                });
+                },stericGroup);
             }
 
             // Synthetic sequence-only coordinates do not provide reliable
@@ -8173,8 +8444,9 @@
                 }
                 for(const indices of atomicEntities.values())moveRigidAtomicEntity(indices,fx,fy,fz,mobility);
 
-                // 4. Rigid Adjacent Backbone Constraint (only active if otherConstraintsInfluence > 0)
-                if (otherConstraintsInfluence > 0.0001) {
+                // Group simulation projects backbone bonds with clashes afterwards;
+                // retain this fallback when no group projection is performed.
+                if (!skipBackboneProjection && otherConstraintsInfluence > 0.0001) {
                     // Repeated projection holds polymer bonds firmly without stiff-force overshoot.
                     const backboneCorrection=1-Math.pow(1-otherConstraintsInfluence,4);
                     for (let iter = 0; iter < 16; iter++) {
@@ -9824,7 +10096,7 @@
                 updateBasePairLines();
                 updateNucleicExtensions();
                 updateSelectionGlow();
-                if (physicsRenderer && physicsScene && physicsCamera) {
+                if (physicsRenderer && physicsScene && physicsCamera && !physicsWebGLContextLost) {
                     for (const chain of backboneChains) if(homologyStructureVisible&&physicsRepresentation==='backbone'&&chain.line.visible)chain.line.userData.syncBackbone?.();
                     const gpuSubmissionStarted=globalThis.AppPerformanceDiagnostics?.active?performance.now():null;
                     physicsRenderer.render(physicsScene, physicsCamera);
@@ -10847,6 +11119,42 @@
             document.getElementById('alignmentInspector').classList.add('hidden');
         }
 
+        // Keep randomly assigned shades stable for each model and group membership.
+        let chainShadeGeneration=null;
+        const chainShadeAssignments=new Map();
+        function buildProteinChainColors() {
+            const groups = new Map(), colors = new Map();
+            for (const block of morphMatrixBlocks) {
+                const atoms = block.res.atoms2?.length ? block.res.atoms2 : block.res.atoms1 || [];
+                const id = atoms[0]?.sourcePdbId;
+                const fallback = block.res.entityType === 'protein'
+                    ? atoms.map(atom => atom.singleChar || atom.resName || '').join('')
+                    : atoms[0]?.resName;
+                const key = id ? `id:${String(id).toUpperCase()}` : `${block.res.entityType || 'molecule'}:${fallback || block.c1}`;
+                if (!groups.has(key)) groups.set(key, []);
+                if (!groups.get(key).includes(block.c1)) groups.get(key).push(block.c1);
+            }
+            if(chainShadeGeneration!==modelBuildGeneration){chainShadeGeneration=modelBuildGeneration;chainShadeAssignments.clear();}
+            let groupIndex = 0;
+            for (const [key,chains] of groups) {
+                const hue = (0.08 + groupIndex++ * 0.61803398875) % 1;
+                const membership=JSON.stringify([...chains].sort());
+                let assignment=chainShadeAssignments.get(key);
+                if(!assignment||assignment.membership!==membership){
+                    const shuffled=[...chains].sort();
+                    for(let i=shuffled.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[shuffled[i],shuffled[j]]=[shuffled[j],shuffled[i]];}
+                    assignment={membership,indices:new Map(shuffled.map((chain,index)=>[chain,index]))};
+                    chainShadeAssignments.set(key,assignment);
+                }
+                chains.forEach(chain => {
+                    const index=assignment.indices.get(chain);
+                    const lightness = chains.length === 1 ? 0.52 : 0.35 + 0.37 * index / (chains.length - 1);
+                    colors.set(chain, '#' + new THREE.Color().setHSL(hue, 0.75, lightness).getHexString());
+                });
+            }
+            return colors;
+        }
+
         function getChainColor(chainId, chainKeys) {
             if (isWaterChain(chainId)) return '#7dd3fc';
             const idx = chainKeys.indexOf(chainId);
@@ -11540,6 +11848,7 @@
         function hidePhysicsViewerLoading(){document.getElementById('physicsInitialLoading')?.classList.add('hidden');}
         function cancelModelBuild() {
             if (!modelLoading && !(modelBuildStartedAt!==null&&!modelBuildCompleted) && !referenceSearchLoading && !siftsLookupLoading && !stringMatchingLoading) return;
+            window.invalidateComplexTitle?.();
             if(referenceSearchLoading){
                 referenceSearchRequest++;
                 referenceSearchLoading=false;
@@ -11569,9 +11878,9 @@
             document.getElementById('stringFinderChevron').className = 'fa-solid fa-chevron-' + (expanded ? 'up' : 'down');
         }
         function resizeStructureIdInputs() {
-            for(const id of ['pdbInput1','pdbInput2']){
+            for(const id of ['referenceSearchInput','pdbInput1','pdbInput2']){
                 const input=document.getElementById(id);
-                if(input){input.style.height='auto';input.style.height=Math.max(56,input.scrollHeight)+'px';}
+                if(input){input.style.height='auto';input.style.height=Math.max(id==='referenceSearchInput'?80:56,input.scrollHeight+2)+'px';}
             }
         }
         function updateExampleSelection() {
@@ -11674,7 +11983,7 @@
             for (const id of ['PDBLegend','AFLegend','PDBChainSelect','AFChainSelect','comparedPairSelect','alignmentTableBody','alignmentCodeBox','physicsChainToggles','physicsProteinToggles','physicsNonProteinToggles']) document.getElementById(id)?.replaceChildren();
             document.getElementById('physicsNonProteinToggleSection')?.classList.add('hidden');
             for (const id of ['tooltip1','tooltip2','diffTooltip','morphTooltip','PDBResolutionNotice','AFResolutionNotice','diffResolutionNotice','morphResolutionNotice','physicsChainDragBadge']) document.getElementById(id)?.classList.add('hidden');
-            for (const id of ['PDBTitle','AFTitle','PDBResCount','AFResCount','physicsNodeCount','physicsSpringDisplay','physicsEnergyText','physicsSpeedText','tmScoreDisplay','tmRmsdDisplay']) {
+            for (const id of ['PDBTitle','AFTitle','PDBResCount','AFResCount','physicsNodeCount','physicsSpringDisplay','physicsEnergyText','physicsSpeedText','physicsAverageStepRateText','physicsMaxResidueSpeedText','groupTimeLimitAverageSpeed','tmScoreDisplay','tmRmsdDisplay']) {
                 const el = document.getElementById(id); if (el) el.textContent = '—';
             }
             if (instancedNodeMesh) instancedNodeMesh.visible = false;
@@ -11707,6 +12016,7 @@
             if (uploadedStructureFiles.alphaFold && pdbId2Raw.toUpperCase() !== uploadedStructureFiles.alphaFold.inputValue) clearUploadedStructure('alphaFold');
             if(chainMappingReport && (chainMappingReport.referenceText!==pdbId1 || chainMappingReport.targetText!==pdbId2Raw))renderChainMappingReport(null);
             document.getElementById('pdbInput1').value = pdbId1;
+            window.requestComplexTitle?.(selectedReferencePdbIds().map(id=>({id,name:referenceSearchResults.find(hit=>hit.identifier.toUpperCase()===id.toUpperCase())?.name||''})));
             renderChosenReferences();
             updateReferenceSequenceSearchButton();
             let currentSequences=[]; try { currentSequences=referenceInputParts(pdbId1).sequences; } catch (_) {}
@@ -11921,6 +12231,7 @@
                 drawDifferenceMatrix();
 
                 setBuildStatus('Preparing simulation and building the spring network…');
+                window.appNavigateWhenSimulationStarts?.();
                 initPhysicsSimulation();
                 if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild){multiReferenceBuild.busy=false;renderStagedReferenceControls();renderStagedBuildControls();}
                 const accuracyWarning = [directReferences?'':modelAccuracyWarning(physicsNodes),currentStringReviewValid()?stringPartialBuildWarning(stringMatchReview.response.matches):''].filter(Boolean).join('\n\n');
@@ -12326,10 +12637,27 @@
         // 14. EVENT LISTENERS SETUP
         // ==========================================
         function setupEventListeners() {
+            const graphLegend=document.getElementById('physicsGraphLegend');
+            if(graphLegend)for(const series of PHYSICS_GRAPH_SERIES){
+                const button=document.createElement('button');button.type='button';button.className='flex items-center gap-2 text-left rounded px-1 py-1 hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal-400';
+                button.setAttribute('aria-pressed','true');button.setAttribute('aria-label',`Hide ${series.label}`);
+                const icon=document.createElement('i');icon.className='fa-solid fa-eye';icon.setAttribute('aria-hidden','true');
+                const swatch=document.createElement('span');swatch.style.cssText=`background:${series.color};width:9px;height:9px;flex:none`;swatch.setAttribute('aria-hidden','true');
+                const label=document.createElement('span');label.textContent=series.label;label.dataset.graphSeries=series.key;button.append(icon,swatch,label);
+                button.addEventListener('pointerenter',()=>{highlightedPhysicsGraphSeries=series.key;renderPhysicsGraph();});
+                button.addEventListener('pointerleave',()=>{if(highlightedPhysicsGraphSeries===series.key){highlightedPhysicsGraphSeries=null;renderPhysicsGraph();}});
+                button.addEventListener('focus',()=>{highlightedPhysicsGraphSeries=series.key;renderPhysicsGraph();});
+                button.addEventListener('blur',()=>{if(highlightedPhysicsGraphSeries===series.key){highlightedPhysicsGraphSeries=null;renderPhysicsGraph();}});
+                button.addEventListener('click',()=>{const visible=hiddenPhysicsGraphSeries.has(series.key);if(visible)hiddenPhysicsGraphSeries.delete(series.key);else hiddenPhysicsGraphSeries.add(series.key);button.setAttribute('aria-pressed',String(visible));button.setAttribute('aria-label',`${visible?'Hide':'Show'} ${series.label}`);icon.className=`fa-solid ${visible?'fa-eye':'fa-eye-slash'}`;label.style.opacity=visible?'1':'.5';renderPhysicsGraph();});graphLegend.append(button);
+            }
             document.getElementById('physicsGraphPanel')?.addEventListener('toggle',event=>{
                 if(event.currentTarget.open)renderPhysicsGraph();
             });
-            document.getElementById('physicsGraphRange')?.addEventListener('change',renderPhysicsGraph);
+            const trimStart=document.getElementById('physicsGraphTrimStart'),trimEnd=document.getElementById('physicsGraphTrimEnd');
+            const resetTrim=()=>{if(trimStart)trimStart.value='0';if(trimEnd)trimEnd.value='1000';};
+            trimStart?.addEventListener('input',()=>{if(Number(trimStart.value)>=Number(trimEnd.value))trimStart.value=String(Number(trimEnd.value)-1);renderPhysicsGraph();});
+            trimEnd?.addEventListener('input',()=>{if(Number(trimEnd.value)<=Number(trimStart.value))trimEnd.value=String(Number(trimStart.value)+1);renderPhysicsGraph();});
+            document.getElementById('physicsGraphRange')?.addEventListener('change',()=>{resetTrim();renderPhysicsGraph();});
             document.getElementById('physicsGraphLogScale')?.addEventListener('click',event=>{
                 physicsGraphLogScale=!physicsGraphLogScale;
                 event.currentTarget.textContent=`Log scale: ${physicsGraphLogScale?'True':'False'}`;
@@ -12343,8 +12671,15 @@
                 renderPhysicsGraph();
             });
             document.getElementById('physicsGraphDownload')?.addEventListener('click',()=>{
-                renderPhysicsGraph();
-                document.getElementById('physicsGraphCanvas')?.toBlob(blob=>{
+                drawPhysicsGraph();
+                const source=document.getElementById('physicsGraphCanvas');if(!source)return;
+                const visible=PHYSICS_GRAPH_SERIES.filter(series=>!hiddenPhysicsGraphSeries.has(series.key));
+                const scale=source.width/(source.clientWidth||source.width),legendHeight=Math.ceil(visible.length/2)*22*scale;
+                const output=document.createElement('canvas');output.width=source.width;output.height=source.height+legendHeight;
+                const ctx=output.getContext('2d'),light=document.body.classList.contains('light-mode');ctx.fillStyle=light?'#f8fafc':'#0f172a';ctx.fillRect(0,0,output.width,output.height);
+                ctx.font=`${11*scale}px sans-serif`;ctx.textBaseline='middle';visible.forEach((series,i)=>{const x=(12+(i%2)*(source.width/scale/2))*scale,y=(12+Math.floor(i/2)*22)*scale;ctx.fillStyle=series.color;ctx.fillRect(x,y-4*scale,8*scale,8*scale);ctx.fillStyle=light?'#334155':'#cbd5e1';ctx.fillText(series.label,x+13*scale,y);});
+                ctx.drawImage(source,0,legendHeight);
+                output.toBlob(blob=>{
                     if(!blob)return;
                     const url=URL.createObjectURL(blob),link=document.createElement('a');
                     link.href=url;link.download='phase-2-simulation-graph.png';document.body.append(link);link.click();link.remove();
@@ -12352,6 +12687,20 @@
                 },'image/png');
             });
             const graphCanvas=document.getElementById('physicsGraphCanvas');
+            const graphTooltip=document.getElementById('physicsGraphTooltip');
+            const clearGraphHover=()=>{if(graphTooltip)graphTooltip.hidden=true;if(highlightedPhysicsGraphSeries!==null){highlightedPhysicsGraphSeries=null;renderPhysicsGraph();}};
+            graphCanvas?.addEventListener('pointermove',event=>{
+                const rect=graphCanvas.getBoundingClientRect(),x=(event.clientX-rect.left)*(graphCanvas.clientWidth/rect.width),y=(event.clientY-rect.top)*(graphCanvas.clientHeight/rect.height);
+                let nearest=null,best=100;for(const point of physicsGraphHitPoints){if(hiddenPhysicsGraphSeries.has(point.series.key))continue;const distance=(point.x-x)**2+(point.y-y)**2;if(distance<best){best=distance;nearest=point;}}
+                if(!nearest){clearGraphHover();return;}
+                if(highlightedPhysicsGraphSeries!==nearest.series.key){highlightedPhysicsGraphSeries=nearest.series.key;renderPhysicsGraph();}
+                if(graphTooltip){const precision=['tm','modelConfidence','membranePlacement','satisfaction'].includes(nearest.series.key)?3:2;
+                    graphTooltip.textContent=`${nearest.series.label}: ${nearest.value.toFixed(precision)}${nearest.series.unit}${physicsGraphNormalized?` (normalised: ${nearest.normalised.toFixed(3)})`:''} · ${Math.max(0,(nearest.time-(physicsGraphHistory.startedAt??nearest.time))/1000).toFixed(1)} s`;
+                    graphTooltip.hidden=false;const parent=graphCanvas.parentElement,localX=event.clientX-parent.getBoundingClientRect().left,localY=event.clientY-parent.getBoundingClientRect().top;
+                    graphTooltip.style.left=`${Math.max(0,Math.min(parent.clientWidth-graphTooltip.offsetWidth,localX+12))}px`;graphTooltip.style.top=`${Math.max(0,localY-graphTooltip.offsetHeight-8)}px`;
+                }
+            });
+            graphCanvas?.addEventListener('pointerleave',clearGraphHover);
             if(graphCanvas&&typeof ResizeObserver!=='undefined')new ResizeObserver(renderPhysicsGraph).observe(graphCanvas.parentElement);
             const physicsPanel=document.querySelector('.physics-simulation-panel');
             const graphControlLabel=control=>{
@@ -13868,6 +14217,7 @@
             if (!instancedNodeMesh || !physicsNodes.length) { updatePhysicsSequences(); return; }
             const N = physicsNodes.length;
             const chainKeys = morphMatrixBlocks.map(b => b.c1);
+            const proteinChainColors = physicsColorMode === 'chain' ? buildProteinChainColors() : null;
 
             const accessibleAreas=physicsColorMode==='accessible-surface-area'?accessibleSurfaceValues():null;
             const AFColor = new THREE.Color('#2eccbf');
@@ -13907,9 +14257,9 @@
                     if(value!==undefined)color.lerp(new THREE.Color('#f97316'),Math.max(0,Math.min(1,value)));
                 } else if (physicsColorMode === 'residue-index') {
                     color = new THREE.Color(residueIndexColor(node));
-                } else if (physicsColorMode === 'chain' || physicsColorMode === 'side-chains') {
+                } else if (physicsColorMode === 'chain' || physicsColorMode === 'chain-random' || physicsColorMode === 'side-chains') {
                     const chainId = (node.res && (node.res.c1 || node.res.c2)) || 'A';
-                    color = new THREE.Color(getChainColor(chainId, chainKeys));
+                    color = new THREE.Color(proteinChainColors?.get(chainId) || getChainColor(chainId, chainKeys));
                 } else if (physicsColorMode === 'element') {
                     color = new THREE.Color(ELEMENT_COLORS.C);
                 } else if (physicsColorMode === 'uniform') {
@@ -13983,7 +14333,7 @@
         let sequenceResidueButtons = [];
         function updatePhysicsSequences() {
             const panel=document.getElementById('physicsSequencePanel');
-            if(!panel||!panel.open)return;
+            if(!panel||panel.classList.contains('hidden'))return;
             const nodes=physicsNodes.filter(node=>node.res.entityType==='protein');
             const content=document.getElementById('physicsSequenceContent');
             const menu=document.getElementById('sequenceChainMenu');
@@ -14188,7 +14538,7 @@
             if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.view==='aligned'){
                 if(['reference','chain','protein','equivalent','aligned','distance'].includes(mode)){multiReferenceBuild.alignedMode=mode;physicsColorMode=mode;syncPhysicsColorMenu();renderStagedPreview();}return;
             }
-            if (!['chain','residue-index','uniform','protein-id','rotational-symmetry','pattern-variance','equivalent-protein-shape','keyframe-difference','residue-speed','running-simulation','steric-clashes','binding-sites','binding-site-type','mutation-effect-basic','constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','qmeandisco','element','side-chains','origin','aligned','membrane','membrane-placement','charge','hydrophobicity','accessible-surface-area','secondary','plddt','difference','af-difference',...Object.keys(UNI_PROT_FEATURE_MODES)].includes(mode)) return;
+            if (!['chain','chain-random','residue-index','uniform','protein-id','rotational-symmetry','pattern-variance','equivalent-protein-shape','keyframe-difference','residue-speed','running-simulation','steric-clashes','binding-sites','binding-site-type','mutation-effect-basic','constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','qmeandisco','element','side-chains','origin','aligned','membrane','membrane-placement','charge','hydrophobicity','accessible-surface-area','secondary','plddt','difference','af-difference',...Object.keys(UNI_PROT_FEATURE_MODES)].includes(mode)) return;
             if(['residue-speed','running-simulation'].includes(mode)&&!['residue-speed','running-simulation'].includes(physicsColorMode))resetResidueSpeedTracking();
             if(mode==='accessible-surface-area')accessibleSurfaceCache=null;
             physicsColorMode = mode;
@@ -14211,7 +14561,8 @@
             document.getElementById('physicsColourKey')?.classList.toggle('hidden', physicsDifferenceMode);
             document.getElementById('originFilterBtns')?.classList.toggle('hidden', !physicsOriginColorMode);
             const keys = {
-                chain:'Chain: each protein chain has a distinct colour.',
+                chain:'Chain: chains with the same protein ID share a colour family, with a different shade for each chain.',
+                'chain-random':'Chain (random): each chain has a distinct colour.',
                 'residue-index':'Residue index: residues are coloured from <span style="color:#0000ff">blue</span> at the start of each protein to <span style="color:#ff0000">red</span> at the shared maximum protein length.',
                 uniform:'Uniform: all homology-model chains share one colour.',
                 'protein-id':'Protein ID: chains from the same AlphaFold structure share one colour.',
@@ -15580,9 +15931,30 @@
         function resizePhysicsScene() {
             if (!physicsRenderer || !physicsCamera) return;
             const c=document.getElementById('physicsContainer'); if (!c) return;
-            const w=Math.max(1,c.clientWidth), h=Math.max(1,c.clientHeight);
-            physicsRenderer.setSize(w,h,false); physicsCamera.aspect=w/h; physicsCamera.updateProjectionMatrix();
+            const w=c.clientWidth, h=c.clientHeight;
+            if(!w||!h||physicsWebGLContextLost)return;
+            physicsRenderer.setSize(w,h); physicsCamera.aspect=w/h; physicsCamera.updateProjectionMatrix();
         }
+
+        function refreshPhysicsViewer() {
+            if(physicsWebGLContextLost||!physicsRenderer||!physicsScene||!physicsCamera)return;
+            const container=document.getElementById('physicsContainer');
+            if(!container?.clientWidth||!container.clientHeight)return;
+            if(typeof stagedPreview!=='undefined'&&stagedPreview&&typeof stagedLiveView==='function'&&!stagedLiveView()){
+                stagedPreview.resize();
+                return;
+            }
+            resizePhysicsScene();
+            requestVisualPhysicsMeshUpdate();
+            if(physicsNodes.length){
+                updatePhysicsNodeColors();
+                updateAtomRepresentation();
+                updateCartoonRepresentation();
+                applyPhysicsVisibility();
+            }
+            physicsRenderer.render(physicsScene,physicsCamera);
+        }
+        window.addEventListener('stringscape-physics-page-visible',refreshPhysicsViewer);
 
         function toggleDetailsPanels() {
             const panels = document.getElementById('detailsPanels');
@@ -16109,12 +16481,15 @@
             }
         });
         document.getElementById('stringFiles')?.addEventListener('change',event=>selectStringFiles(event.currentTarget));
-        document.getElementById('pdbInput1')?.addEventListener('input',()=>{complexAiReferenceOrigins.clear();renderChosenReferences();});
+        document.getElementById('pdbInput1')?.addEventListener('input',()=>{window.invalidateComplexTitle?.();complexAiReferenceOrigins.clear();renderChosenReferences();});
         document.getElementById('referenceSearchInput')?.addEventListener('input',()=>{
+            window.invalidateComplexTitle?.();
+            resizeStructureIdInputs();
             cancelStringMatching();
             referenceSearchRequest++;referenceSearchLoading=false;
             document.getElementById('referenceSequenceSearchStatus').textContent='';updateBuildButtonState();
         });
+        window.addEventListener('resize',resizeStructureIdInputs);
         document.getElementById('fetchReferenceSequencesBtn')?.addEventListener('click',()=>fetchReferencePdbsForSequences('sequence'));
         document.getElementById('fetchReferenceQueryBtn')?.addEventListener('click',()=>fetchReferencePdbsForSequences('query'));
         document.getElementById('viewReferenceSearchResultsBtn')?.addEventListener('click',event=>{
@@ -16152,7 +16527,7 @@
             physicsBackgroundHidden = !physicsBackgroundHidden;
             event.currentTarget.textContent = physicsBackgroundHidden ? 'Show background' : 'Hide background';
             event.currentTarget.setAttribute('aria-pressed', String(physicsBackgroundHidden));
-            if (physicsScene) physicsScene.background = physicsBackgroundHidden ? null : new THREE.Color(document.body.classList.contains('light-mode') ? 0xffffff : 0x020617);
+            if (physicsScene) physicsScene.background = physicsBackgroundHidden ? null : new THREE.Color(document.body.classList.contains('light-mode') ? 0xffffff : 0x01030a);
             physicsRenderer?.render(physicsScene, physicsCamera);
             if(typeof stagedPreview!=='undefined')stagedPreview?.render();
         });
@@ -16323,7 +16698,7 @@
         if (physicsColorSelect && physicsColorMenu && physicsColorMenuButton) {
             const colorOptions=new Map([...physicsColorSelect.options].map(option=>[option.value,option]));
             const colorColumns=[
-                [['Main',['running-simulation','chain','protein-id','residue-index','secondary','model-confidence','uniform']],
+                [['Main',['running-simulation','chain','chain-random','protein-id','residue-index','secondary','model-confidence','uniform']],
                  ['Properties',['steric-clashes','side-chains','element','charge','hydrophobicity','accessible-surface-area','mutation-effect-basic','residue-speed']]],
                 [['Regions',['binding-sites','binding-site-type','aligned','origin']],
                  ['Comparison',['rotational-symmetry','pattern-variance','equivalent-protein-shape','keyframe-difference','difference','af-difference']],
@@ -16532,7 +16907,7 @@
         function setLightMode(enabled) {
             document.body.classList.toggle('light-mode',enabled);
             window.refreshPhysicsComparisonSelection?.(true);
-            if (physicsScene) physicsScene.background = physicsBackgroundHidden ? null : new THREE.Color(enabled ? 0xffffff : 0x020617);
+            if (physicsScene) physicsScene.background = physicsBackgroundHidden ? null : new THREE.Color(enabled ? 0xffffff : 0x01030a);
             if(typeof stagedPreview!=='undefined')stagedPreview?.render();
             if (referenceComparisonScene?.scene) {
                 referenceComparisonScene.scene.background = new THREE.Color(enabled ? 0xffffff : 0x020617);
@@ -17575,6 +17950,7 @@
             for(const entry of animationLibrary)select.add(new Option(entry.title,entry.id));
             select.add(new Option('+ New','new'));
             select.value=animationActiveId||'new';
+            syncAnimationSelectorMenu();
             title.value=animationActiveId?animationTitle:'';
             title.disabled=!animationActiveId;
             animationEl('conformationAnimationNote')?.classList.toggle('hidden',!animationLibrary.find(item=>item.id===animationActiveId)?.conformationalChange);
@@ -17629,7 +18005,7 @@
             }).catch(error=>{animationEl('animationStatus').textContent='Could not save the animation in browser storage (storage may be full).';console.warn('Animation storage:',error);return false;});
             return animationSaveQueue;
         }
-        function scheduleAnimationSave(){keyframeDifferenceCache=null;if(physicsColorMode==='keyframe-difference')updatePhysicsNodeColors();clearTimeout(animationSaveTimer);animationSaveTimer=setTimeout(saveAnimation,300);}
+        function scheduleAnimationSave(){updateQuickPlayVisibility();keyframeDifferenceCache=null;if(physicsColorMode==='keyframe-difference')updatePhysicsNodeColors();clearTimeout(animationSaveTimer);animationSaveTimer=setTimeout(saveAnimation,300);}
         function saveSelectedAnimationFrame(){
             if(!animationFrames.length||animationPlaying||animationApplying||(typeof conformationSelectionMorph!=='undefined'&&conformationSelectionMorph)||!physicsNodes.length)return;
             clearTimeout(animationCaptureTimer);
@@ -17726,6 +18102,41 @@
                 applyAnimationControlValue(input,value);
             });
         }
+        function animationValuesEqual(a,b){
+            if(Object.is(a,b))return true;
+            if(a==null||b==null||typeof a!=='object'||typeof b!=='object')return false;
+            const da=MemoryData.descriptor(a),db=MemoryData.descriptor(b);
+            if(da?.memoryKind==='vectors'&&db?.memoryKind==='vectors'){
+                if(da.width!==db.width||da.values.length!==db.values.length)return false;
+                for(let i=0;i<da.values.length;i++)if(!Object.is(da.values[i],db.values[i]))return false;
+                return true;
+            }
+            if(da?.memoryKind==='offsets'&&db?.memoryKind==='offsets'){
+                return animationValuesEqual(da.starts,db.starts)&&animationValuesEqual(da.names,db.names)&&animationValuesEqual(da.dictionary,db.dictionary)&&animationValuesEqual(da.values,db.values);
+            }
+            if(Array.isArray(a)||ArrayBuffer.isView(a)){
+                if(!(Array.isArray(b)||ArrayBuffer.isView(b))||a.length!==b.length)return false;
+                for(let i=0;i<a.length;i++)if(!animationValuesEqual(a[i],b[i]))return false;
+                return true;
+            }
+            const keys=Object.keys(a),other=Object.keys(b);
+            if(keys.length!==other.length)return false;
+            return keys.every(key=>Object.hasOwn(b,key)&&animationValuesEqual(a[key],b[key]));
+        }
+        function animationHasKeyframeDifferences(frames){
+            if(frames.length<2)return false;
+            const first=frames[0];
+            return frames.slice(1).some(frame=>
+                !animationValuesEqual(first.settings,frame.settings)||
+                !animationValuesEqual(first.conformationGroup,frame.conformationGroup)||
+                !animationValuesEqual(first.groupPresence,frame.groupPresence)||
+                !animationValuesEqual(first.coords,frame.coords)||
+                !animationValuesEqual(first.displayCoords,frame.displayCoords)||
+                (first.atomOffsets!=null&&frame.atomOffsets!=null&&!animationValuesEqual(first.atomOffsets,frame.atomOffsets)));
+        }
+        function updateQuickPlayVisibility(){
+            animationEl('quickPlayAnimationBtn')?.classList.toggle('hidden',!(animationPlaying||animationPreparing||conformationOptimization||animationHasKeyframeDifferences(animationFrames)));
+        }
         function updateAnimationButtons(){
             const exists=animationFrames.length>0;
             const createButton=animationEl('createAnimationBtn');
@@ -17733,7 +18144,7 @@
                 createButton.dataset.animationLabel=exists?'Edit animation':'Create animation';
                 createButton.querySelector('span')?.replaceChildren(document.createTextNode(createButton.dataset.aiCreating==='true'?'AI planning animation...':createButton.dataset.animationLabel));
             }
-            animationEl('quickPlayAnimationBtn')?.classList.toggle('hidden',!exists);
+            updateQuickPlayVisibility();
             for(const id of ['quickPlayAnimationBtn','animationPlay']){
                 const button=animationEl(id);if(!button)continue;
                 const icon=document.createElement('i');icon.className=`fa-solid ${conformationOptimization?'fa-stop':animationPlaying?'fa-pause':'fa-play'} mr-1`;icon.setAttribute('aria-hidden','true');
@@ -18583,16 +18994,49 @@
                 redraw();block.append(svg);host.append(block);
             });
         }
-        animationEl('createAnimationBtn')?.addEventListener('click',()=>{
-            if(!physicsNodes.length){animationEl('animationStatus').textContent='Build a homology model before creating an animation.';animationEl('animationEditor').classList.remove('hidden');animationEl('animationEditor').scrollIntoView({behavior:'smooth',block:'start'});return;}
-            if(!animationFrames.length)addAnimation();
-            animationEl('animationEditor').classList.toggle('hidden');
-            if(!animationEl('animationEditor').classList.contains('hidden'))animationEl('animationEditor').scrollIntoView({behavior:'smooth',block:'start'});
+        const animationEditorToggle=animationEl('createAnimationBtn'),animationEditorPanel=animationEl('animationEditor');
+        function syncAnimationEditorToggle(){animationEditorToggle?.setAttribute('aria-expanded',String(!animationEditorPanel.classList.contains('hidden')));}
+        if(animationEditorPanel){new MutationObserver(syncAnimationEditorToggle).observe(animationEditorPanel,{attributes:true,attributeFilter:['class']});syncAnimationEditorToggle();}
+        animationEditorToggle?.addEventListener('click',()=>{
+            const opening=animationEditorPanel.classList.contains('hidden');
+            if(opening&&!physicsNodes.length)animationEl('animationStatus').textContent='Build a homology model before creating an animation.';
+            else if(opening&&!animationFrames.length)addAnimation();
+            animationEditorPanel.classList.toggle('hidden',!opening);
+            syncAnimationEditorToggle();
         });
+        const animationSelector=animationEl('animationSelector'),animationSelectorButton=animationEl('animationSelectorButton'),animationSelectorMenu=animationEl('animationSelectorMenu');
+        function syncAnimationSelectorMenu(){
+            const select=animationEl('animationSelector'),button=animationEl('animationSelectorButton'),menu=animationEl('animationSelectorMenu');
+            if(!select||!button||!menu)return;
+            const label=select.selectedOptions[0]?.textContent||'New animation';
+            button.replaceChildren(document.createTextNode(label+' '));
+            const icon=document.createElement('i');icon.className='fa-solid fa-chevron-down ml-1';icon.setAttribute('aria-hidden','true');button.append(icon);
+            button.disabled=select.disabled;menu.replaceChildren();
+            for(const option of select.options){
+                const item=document.createElement('button');item.type='button';item.textContent=option.textContent;
+                item.setAttribute('aria-pressed',String(option.value===select.value));
+                item.addEventListener('click',()=>{if(select.disabled)return;select.value=option.value;closeAnimationSelectorMenu();select.dispatchEvent(new Event('change',{bubbles:true}));button.focus();});
+                menu.append(item);
+            }
+        }
+        function closeAnimationSelectorMenu(){animationSelectorMenu?.classList.add('hidden');animationSelectorButton?.setAttribute('aria-expanded','false');}
+        function placeAnimationSelectorMenu(){
+            const rect=animationSelectorButton.getBoundingClientRect(),width=Math.min(240,window.innerWidth-16);
+            animationSelectorMenu.style.left=`${window.scrollX+Math.max(8,Math.min(rect.left,window.innerWidth-width-8))}px`;
+            animationSelectorMenu.style.top=`${window.scrollY+Math.max(8,Math.min(rect.bottom+6,window.innerHeight-animationSelectorMenu.offsetHeight-8))}px`;
+        }
+        if(animationSelector&&animationSelectorButton&&animationSelectorMenu){
+            document.body.append(animationSelectorMenu);
+            animationSelectorButton.addEventListener('click',()=>{const opening=animationSelectorMenu.classList.toggle('hidden')===false;animationSelectorButton.setAttribute('aria-expanded',String(opening));if(opening){syncAnimationSelectorMenu();placeAnimationSelectorMenu();}});
+            document.addEventListener('click',event=>{if(!animationSelectorMenu.contains(event.target)&&!animationSelectorButton.contains(event.target))closeAnimationSelectorMenu();});
+            document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!animationSelectorMenu.classList.contains('hidden')){closeAnimationSelectorMenu();animationSelectorButton.focus();}});
+            window.addEventListener('resize',()=>{if(!animationSelectorMenu.classList.contains('hidden'))placeAnimationSelectorMenu();});
+            document.addEventListener('scroll',event=>{if(event.target?.classList?.contains('app-page-content'))closeAnimationSelectorMenu();},true);
+        }
         animationEl('animationSelector')?.addEventListener('change',async event=>{
             if(!physicsNodes.length)return;
             const selector=event.target,requested=selector.value,generation=modelBuildGeneration;
-            selector.disabled=true;
+            selector.disabled=true;syncAnimationSelectorMenu();
             try{
                 if(animationPlaying||animationPreparing)stopAnimation(true);
                 saveSelectedAnimationFrame();await saveAnimation();
@@ -18601,7 +19045,7 @@
                 else {const entry=animationLibrary.find(item=>item.id===requested);if(entry){await loadAnimationGeometry(entry);if(generation!==modelBuildGeneration)return;activateAnimation(entry);}}
                 if(await saveAnimation())await offloadInactiveAnimations();
             }catch(error){animationEl('animationStatus').textContent='Could not load the selected animation: '+error.message;renderAnimationSelector();}
-            finally{selector.disabled=false;}
+            finally{selector.disabled=false;syncAnimationSelectorMenu();}
         });
         animationEl('animationTitle')?.addEventListener('input',event=>{
             if(!animationActiveId)return;
@@ -18609,6 +19053,7 @@
             syncActiveAnimation();
             const option=[...animationEl('animationSelector').options].find(item=>item.value===animationActiveId);
             if(option)option.textContent=animationTitle||'Untitled animation';
+            syncAnimationSelectorMenu();
             scheduleAnimationSave();
         });
         animationEl('animationTitle')?.addEventListener('blur',event=>{
@@ -19157,7 +19602,7 @@
         validationElement('validationReport')?.addEventListener('toggle',event=>{
             if(!event.currentTarget.open){validationState.reportVisible=false;return;}
             validationState.reportVisible=true;
-            event.currentTarget.scrollIntoView({block:'start'});
+            if(!event.currentTarget.closest('.app-page[data-page="9"]'))event.currentTarget.scrollIntoView({block:'start'});
             renderValidationReport(true);void loadValidationPae();
         });
         document.querySelectorAll('.validation-score-graph').forEach(button=>button.addEventListener('click',()=>{
