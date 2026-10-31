@@ -1,5 +1,22 @@
 (() => {
     'use strict';
+    // Keep the actual request and response payloads for this page session. Headers
+    // are deliberately excluded so API credentials are never added to the report.
+    const dialogue = [];
+    function recordRequest(c, body) {
+        const entry = {time:new Date().toISOString(), provider:c.provider, model:c.model, request:JSON.parse(JSON.stringify(body)), response:null};
+        dialogue.push(entry);
+        return entry;
+    }
+    function downloadDialogue() {
+        const escape = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+        const show = value => escape(typeof value === 'string' ? value : JSON.stringify(value, null, 2));
+        const cards = dialogue.map((entry, i) => `<article><header><span class="number">${String(i+1).padStart(2,'0')}</span><div><h2>AI exchange ${i+1}</h2><p>${escape(entry.provider)} · ${escape(entry.model)} · ${escape(entry.time)}</p></div></header><section><h3>Sent to AI</h3><pre>${show(entry.request)}</pre></section><section><h3>Received from AI</h3><pre>${show(entry.response ?? 'Response pending or unavailable.')}</pre></section></article>`).join('');
+        const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>All AI dialogue</title><style>body{margin:0;background:#0b1220;color:#e2e8f0;font:15px/1.6 system-ui,sans-serif}main{max-width:1000px;margin:auto;padding:3rem 1.5rem}h1{font-size:2.3rem;margin:.2rem 0}h2,h3,p{margin:0} .intro{color:#94a3b8;margin-bottom:2rem}.eyebrow{color:#5eead4;text-transform:uppercase;letter-spacing:.14em;font-weight:700;font-size:.75rem}article{background:#111e30;border:1px solid #293b52;border-radius:16px;margin:1rem 0;overflow:hidden}header{display:flex;gap:1rem;align-items:center;padding:1.2rem 1.4rem;background:#17283c}header p{color:#94a3b8;font-size:.8rem}.number{color:#5eead4;font-size:1.5rem;font-weight:700}h2{font-size:1rem}h3{font-size:.75rem;letter-spacing:.08em;text-transform:uppercase;color:#5eead4;margin-bottom:.6rem}section{padding:1.2rem 1.4rem;border-top:1px solid #293b52}pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;color:#dbeafe;font:12px/1.6 ui-monospace,monospace}@media print{body{background:white;color:#111}article{break-inside:avoid;background:white;border-color:#ccc}header{background:#eee}pre{color:#111}}</style></head><body><main><div class="eyebrow">Homology modeller · session report</div><h1>All AI dialogue</h1><p class="intro">Generated ${escape(new Date().toLocaleString())} · ${dialogue.length} exchanges. Each request includes the conversation history and any tool results sent to the AI. Responses include tool calls. Repeated history reflects what was sent on each request.</p>${cards || '<p>No AI exchanges have been recorded in this page session.</p>'}</main></body></html>`;
+        const url=URL.createObjectURL(new Blob([html],{type:'text/html;charset=utf-8'}));
+        const link=document.createElement('a');link.href=url;link.download='all-ai-dialogue.html';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    }
+    document.getElementById('downloadAiDialogue')?.addEventListener('click',downloadDialogue);
     const SYSTEM_PROMPT = `You select experimental PDB reference structures for homology modelling of a protein complex.
 Use only the supplied rows; never invent IDs or metadata.
 First identify the protein or complex the user actually requested. Compare PDB titles, chain/protein names, UniProt IDs and mapping details. Reject unrelated enzymes, similarly named proteins, and isolated domains/subunits when the requested intact complex is represented. Search score is supporting evidence, not proof of identity. Respect explicit species, composition, ligand or state requirements; homologous species can be useful when the query allows them. If identity is ambiguous or no row is suitable, return no IDs and explain the uncertainty.
@@ -126,9 +143,10 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
         return {'Content-Type':'application/json',...(c.apiKey ? {Authorization:`Bearer ${c.apiKey}`} : {})};
     }
     async function request(c, path, body) {
+        const entry=body?recordRequest(c,body):null;
         const response = await fetch(c.apiBase+path,{method:body?'POST':'GET',headers:headers(c),...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(90000)});
-        if (!response.ok) throw new Error(`AI provider returned HTTP ${response.status}. Check your key, model and server CORS settings.`);
-        return response.json();
+        if (!response.ok) {if(entry)entry.response={error:`HTTP ${response.status}`};throw new Error(`AI provider returned HTTP ${response.status}. Check your key, model and server CORS settings.`);}
+        const data=await response.json();if(entry)entry.response=data;return data;
     }
     function parseDecision(text, results) {
         const value = JSON.parse(String(text).trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,''));
@@ -210,7 +228,8 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
         const anthropic=c.provider==='anthropic';
         const body=anthropic?{model:c.model,max_tokens:4096,system,messages,stream:true,...(tools.length?{tools:tools.map(tool=>({name:tool.name,description:tool.description,input_schema:tool.parameters}))}:{})}
             :{model:c.model,messages:[{role:'system',content:system},...messages],stream:true,...(tools.length?{tools:tools.map(tool=>({type:'function',function:tool}))}:{})};
-        const send=()=>fetch(c.apiBase+(anthropic?'/messages':'/chat/completions'),{method:'POST',headers:headers(c),body:JSON.stringify(body),signal:AbortSignal.any([signal,AbortSignal.timeout(180000)])});
+        let entry;
+        const send=()=>{entry=typeof recordRequest==='function'?recordRequest(c,body):{};return fetch(c.apiBase+(anthropic?'/messages':'/chat/completions'),{method:'POST',headers:headers(c),body:JSON.stringify(body),signal:AbortSignal.any([signal,AbortSignal.timeout(180000)])});};
         function plainToolHistory(history){
             const plain=[];
             for(const message of history){
@@ -242,14 +261,16 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
         // Preserve the actual search results as ordinary messages for the retry.
         if(!response.ok&&[400,422].includes(response.status)&&tools.length){
             initialDetail=await errorDetail(response);try{await response.body?.cancel?.();}catch{/* The error body may already have been consumed. */}delete body.tools;toolsUnavailable=true;
+            entry.response={error:`HTTP ${response.status}`,detail:initialDetail};
             fallbackMessages=plainToolHistory(messages);
-            const instruction=tools.some(tool=>tool.name==='Search_PDB')?'Native tools are unavailable. Request a search with JSON {"tool":"Search_PDB" or "Search_PubMed","query":"terms"}, or return your final JSON decision.':'Native tools are unavailable. You can still request a PubMed search through the app. Return ONLY JSON: {"tool":"Get_chain_sequences","arguments":{}} to inspect chains, {"tool":"Select_model_entity","arguments":{...}} to select, {"editAnimation":"description"} to edit animation, {"query":"PubMed search terms"} to search, or {"answer":"your answer"}. Do not claim to have searched PubMed until the app supplies results.';
+            const instruction=tools.some(tool=>tool.name==='Search_PDB')?'Native tools are unavailable. Request a search with JSON {"tool":"Search_PDB" or "Search_PubMed","query":"terms"}, or return your final JSON decision.':'Native tools are unavailable. You can still request a PubMed search through the app. Return ONLY JSON: {"tool":"View_app_info","arguments":{}} for app information, {"tool":"Get_chain_sequences","arguments":{}} to inspect chains, {"tool":"Select_model_entity","arguments":{...}} to select, {"editAnimation":"description"} to edit animation, {"query":"PubMed search terms"} to search, or {"answer":"your answer"}. Do not claim to have searched PubMed until the app supplies results.';
             if(anthropic){body.system+='\n'+instruction;body.messages=fallbackMessages;}
             else body.messages=[{role:'system',content:system+'\n'+instruction},...fallbackMessages];
             response=await send();
         }
         if(!response.ok){
             const detail=await errorDetail(response)||initialDetail;
+            entry.response={error:`HTTP ${response.status}`,detail};
             throw Error(`AI provider returned HTTP ${response.status}${detail?`: ${detail}`:'. Check the connection and model settings.'}`);
         }
         const reader=response.body.getReader(),decoder=new TextDecoder();let pending='',text='',finished=false;const calls=new Map();
@@ -271,7 +292,7 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
         try{while(true){const {done,value}=await reader.read();pending+=done?decoder.decode():decoder.decode(value,{stream:true});pending=pending.replace(/\r\n/g,'\n');let end;
             while((end=pending.indexOf('\n\n'))!==-1){const block=pending.slice(0,end);pending=pending.slice(end+2);const event=block.split('\n').filter(line=>line.startsWith('data:')).map(line=>line.slice(5).trimStart()).join('\n');if(event)consume(event);}
             if(done)break;
-        }}finally{await reader.cancel().catch(()=>{});reader.releaseLock();}
+        }}finally{entry.response={text,toolCalls:[...calls.values()],complete:finished};await reader.cancel().catch(()=>{});reader.releaseLock();}
         if(!finished)throw Error('AI stream ended early. Please retry.');
         return {text,calls:[...calls.values()],anthropic,toolsUnavailable,fallbackMessages};
     }

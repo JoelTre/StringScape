@@ -42,6 +42,12 @@
         if(row.sealed)return;
         row.elapsed+=Math.max(0,duration);
     }
+    function recordDuration(label,duration){
+        if(state.startedAt===null||state.finishedAt!==null||!Number.isFinite(duration))return;
+        let row=state.rows.find(item=>item.label===label&&item.durationOnly);
+        if(!row){row={label,start:performance.now(),end:performance.now(),status:'Done',elapsed:0,depth:0,durationOnly:true};state.rows.push(row);}
+        row.elapsed+=Math.max(0,duration);render();
+    }
     function completeCalculations(status='Done'){
         for(const row of state.rows)if(row.calculation&&!row.sealed){row.sealed=true;row.status=status;row.end=performance.now();}
         render();
@@ -58,6 +64,6 @@
             recordCalculation(name,elapsed-sample.children);
         }
     };}
-    root.BuildTimeline={state,reset,start,end,finish,beginBuild,prepare,render,wrap,wrapCalculation,completeCalculations};
+    root.BuildTimeline={state,reset,start,end,finish,beginBuild,prepare,render,wrap,wrapCalculation,recordDuration,completeCalculations};
     setInterval(()=>{if(state.startedAt!==null&&state.finishedAt===null)render();},250);
 })(globalThis);

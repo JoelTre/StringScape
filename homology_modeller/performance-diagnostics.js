@@ -70,14 +70,14 @@
             if(this.started){
                 const report=this.report(),data=document.getElementById('performanceReportData'),summary=document.getElementById('performanceRecordingSummary');
                 if(data)data.value=JSON.stringify(report,null,2);
-                if(summary)summary.textContent=report.stages.filter(stage=>!stage.name.includes('wall')&&stage.name!=='main-thread long task'&&stage.name!=='physics worker compute').slice(0,5)
+                if(summary)summary.textContent=report.stages.filter(stage=>!stage.name.includes('wall')&&stage.name!=='main-thread long task'&&stage.name!=='physics worker integration').slice(0,5)
                     .map(stage=>`${stage.name}: max ${stage.maxMs.toFixed(1)}ms, mean ${stage.meanMs.toFixed(1)}ms`).join('\n');
             }
         },
         report() {
             return {version: 1, durationMs: (this.ended || performance.now()) - this.started,
                 browser: navigator.userAgent, longTasksSupported: typeof PerformanceObserver !== 'undefined' && PerformanceObserver.supportedEntryTypes?.includes('longtask'),
-                notes: ['Stage timings overlap; do not add them together.', 'Worker and async wall times include waiting, not just CPU work.',
+                notes: ['Stage timings overlap; do not add them together.', 'Worker timings measure elapsed time and can include scheduling delays. Group step includes integration and clash projection; integration is a subset.',
                     'WebGL submission measures CPU time, not GPU execution.', 'Heap readings are optional and do not include all worker/GPU/native memory.',
                     'A main-thread stall delays recording callbacks until the page recovers.'],
                 stages: [...this.stats].map(([name, stat]) => ({name, ...stat, meanMs: stat.totalMs / stat.count})).sort((a,b) => b.maxMs - a.maxMs),

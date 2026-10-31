@@ -290,6 +290,7 @@ function selectStagedModel(id){
     if(state.done&&state.conformationGroups?.length===1&&id.startsWith('group:'))id='combined';
     if(state.done&&state.conformationGroups?.length>1&&(id==='combined'||id.startsWith('group:'))){
         state.view=id;state.current='combined';state.follow=true;
+        renderSpringCullingStats(null,'The combined model uses springs from its drafts. Select a draft to see its culling results.');
         document.getElementById('physics3dCanvas').classList.remove('hidden');
         document.getElementById('stagedPreviewHost').classList.add('hidden');
         document.getElementById('stagedStructureToggles').classList.add('hidden');
@@ -300,6 +301,8 @@ function selectStagedModel(id){
     }
     if(typeof animationPlaying!=='undefined'&&animationPlaying)stopAnimation(true);
     state.view=id;renderStagedBuildControls();
+    if(id.startsWith('draft:'))renderSpringCullingStats(state.drafts[Number(id.split(':')[1])]?.viewState?.springs?.cullingStats);
+    else if(id==='aligned')renderSpringCullingStats(null,'Culling results are available for each draft model.');
     const select=document.getElementById('physicsColorSelect');
     if(state.lastColourView!=='aligned'&&state.normalColorOptions)state.liveColorMode=physicsColorMode;
     state.lastColourView=id;
@@ -333,8 +336,8 @@ function buildStagedFullNetwork(input,state){
         const url=URL.createObjectURL(new Blob([physicsSimulationWorkerSource()],{type:'application/javascript'})),worker=new Worker(url);URL.revokeObjectURL(url);
         const finish=(error,packed)=>{worker.terminate();state.cancelNetwork=null;error?reject(error):resolve(packed);};
         state.cancelNetwork=()=>finish(new DOMException('Build cancelled','AbortError'));
-        worker.onerror=event=>finish(new Error(event.message));worker.onmessage=({data})=>{if(data.error)finish(new Error(data.error));else if(data.command==='springsBuilt')finish(null,{packed:data.packed,input:data.input});};
-        worker.postMessage({command:'buildSprings',input,returnInput:true,revision:1,cutoff:springCutoffVal,influences:referenceInfluences.slice()},MemoryData.buffers(input));
+        worker.onerror=event=>finish(new Error(event.message));worker.onmessage=({data})=>{if(data.error)finish(new Error(data.error));else if(data.command==='springsBuilt'){if(Number.isFinite(data.constructionMs))globalThis.BuildTimeline?.recordDuration('Draft merge spring network construction (worker)',data.constructionMs);if(Number.isFinite(data.cullingMs))globalThis.BuildTimeline?.recordDuration('Draft merge spring culling (worker)',data.cullingMs);finish(null,{packed:data.packed,input:data.input});}};
+        worker.postMessage({command:'buildSprings',input,returnInput:true,revision:1,cutoff:springCutoffVal,influences:referenceInfluences.slice(),culling:springCullingSettings()},MemoryData.buffers(input));
     });
 }
 async function captureStagedDraft(state){
