@@ -42,9 +42,11 @@
     pages[9].innerHTML = `<article class="app-about">
         <h1>About StringScape protein modeller</h1>
         <p>StringScape Protein Modeller builds all-atom homology models of protein complexes by aligning AlphaFold models to reference structures from the Protein Data Bank. Models can include DNA, RNA, small molecules, ions and lipid membranes.</p>
-        <p>The app is designed to make homology modelling accessible. It is also available in the Structures view of the main StringScape application and is open source under the Apache-2.0 licence.</p>
-        <p><a href="https://github.com/JoelTre/StringScape/tree/main" target="_blank" rel="noopener noreferrer">View source code <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a></p>
-        <a class="app-about-contact" href="https://stringscape.net/contact" target="_blank" rel="noopener noreferrer">Contact us <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></a>
+        <p>This app was developed by Joel Tregurtha as part of a PhD project at the University of Canterbury, New Zealand, funded by the MacDiarmid Institute.</p>
+        <p>This app has been specifically built to be easy to use to democratise access to all-atom homology modelling. We would love your feedback. Contact us below.</p>
+        <p>This app is also available as a feature within the main StringScape application (in the Structures view, where all PDB files from a species are displayed and any can be clicked on to build a homology model). This app is open source under an Apache-2.0 licence.</p>
+        <p><a class="app-about-contact" href="https://github.com/JoelTre/StringScape/tree/main" target="_blank" rel="noopener noreferrer">View source code <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a></p>
+        <a class="app-about-contact" href="https://stringscape.net/contact" target="_blank" rel="noopener noreferrer">Contact us <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a>
     </article>`;
 
     const shell = document.createElement('div'); shell.className = 'app-shell';
@@ -91,7 +93,7 @@
     function navigate(number) {
         if (number < 1 || number > pages.length) return;
         current = number;
-        if(number === 3) window.appSetExampleLoading?.(false);
+        if(number === 3) { window.appSetExampleLoading?.(false); window.appSetRecentLoading?.(false); }
         pages.forEach((page, i) => { page.hidden = i !== number - 1; });
         buttons.forEach((button, i) => { if (menuItems[i][0] === number) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current'); });
         main.classList.toggle('physics-page', number === 3 || number === 11);
@@ -116,6 +118,8 @@
     const examplesMenu = document.getElementById('exampleModelsMenu');
     const exampleLoading=document.createElement('span');exampleLoading.className='example-loading';exampleLoading.setAttribute('role','status');exampleLoading.hidden=true;exampleLoading.textContent='Loading...';examplesButton.after(exampleLoading);
     window.appSetExampleLoading=loading=>{exampleLoading.hidden=!loading;};
+    const recentLoading=document.createElement('span');recentLoading.className='example-loading';recentLoading.setAttribute('role','status');recentLoading.hidden=true;recentLoading.textContent='Loading...';document.getElementById('recentModelsButton').after(recentLoading);
+    window.appSetRecentLoading=loading=>{recentLoading.hidden=!loading;};
     examplesMenu.addEventListener('click',event=>{if(event.target.closest('button[data-reference]'))window.appSetExampleLoading(true);},true);
     function closeExamples() { examplesMenu.classList.add('hidden'); examplesButton.setAttribute('aria-expanded', 'false'); }
     function placeExamples() {

@@ -25,7 +25,7 @@
     const valid=(value,meta)=>meta.type==='continuous'?Number.isFinite(value):value!==null&&value!==undefined&&value!=='';
     function pairRows(rows,x,y){return rows.filter(row=>valid(row.x,x)&&valid(row.y,y));}
     function quantile(sorted,p){const index=(sorted.length-1)*p,lo=Math.floor(index);return sorted[lo]+(sorted[Math.ceil(index)]-sorted[lo])*(index-lo);}
-    function palette(light){return light?{background:'#ffffff',text:'#0f172a',grid:'#64748b',empty:'#f1f5f9'}:{background:'#020617',text:'#cbd5e1',grid:'#1e293b',empty:'#1e293b'};}
+    function palette(light){return light?{background:'#f1f5f9',text:'#0f172a',grid:'#64748b',empty:'#f1f5f9'}:{background:'#071321',text:'#cbd5e1',grid:'#1e293b',empty:'#1e293b'};}
     function visibleRows(rows,hiddenChains){return rows.filter(row=>!hiddenChains?.has(row.chain||'Unknown'));}
     function exportKey(chains,hiddenChains,xMode,yMode){return xMode==='chain'||yMode==='chain'?[]:chains.filter(entry=>!hiddenChains?.has(entry.chain));}
     function chainSeries(rows,indexAxis){

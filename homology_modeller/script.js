@@ -446,7 +446,7 @@
             if(origin)return {...origin,pdbIds:[file.pdbId]};
             return {pdbIds:[file.pdbId],source:'manual',reason:'The user manually supplied this reference PDB. It was not selected by AI; no AI selection justification applies.'};
         }
-        window.getComplexAiState=()=>({generation:modelBuildGeneration,ready:modelBuildCompleted&&!uniProtLookupPending&&!patternVarianceJob&&patternDetectionSnapshot?.generation===modelBuildGeneration&&animationReadyGeneration===modelBuildGeneration&&!animationPreparing,hasSubunits:alignmentResults.length>0});
+        window.getComplexAiState=()=>({generation:modelBuildGeneration,ready:(modelBuildCompleted||preSimulationAnalysisGeneration===modelBuildGeneration)&&!uniProtLookupPending&&!patternVarianceJob&&patternDetectionSnapshot?.generation===modelBuildGeneration&&animationReadyGeneration===modelBuildGeneration&&!animationPreparing,hasSubunits:alignmentResults.length>0});
         window.isComplexAiOverviewReady=()=>readyModelGeneration===modelBuildGeneration&&!uniProtLookupPending&&alignmentResults.length>0;
         window.getComplexAiContext=()=>({
             ...window.getComplexAiState(),
@@ -1099,6 +1099,7 @@
         let prevMouse3dX = 0, prevMouse3dY = 0;
         let camTheta = Math.PI / 4, camPhi = Math.PI / 6, camRadius = 180;
         let camTarget = new THREE.Vector3(0, 0, 0);
+        let physicsCameraFitPending = false;
         let chainVisibility = {}; // Map of chainId -> boolean visibility
 
         // Reference PDB static overlay (purely visual reference, no effect on physics)
@@ -2920,7 +2921,7 @@
                 worker.terminate();preferredNamesJob=null;
                 preferredNamesState=data.error?'error':'ready';
                 if(!data.error)preferredNames=new Map(data.entries);
-                status.textContent=data.error?`Could not read preferred names: ${data.error}`:'Preferred names loaded.';
+                status.textContent=data.error?`Could not read preferred names: ${data.error}`:'';
                 syncStringMatchStatusVisibility();
                 updatePreferredNameCells();
             };
@@ -4937,7 +4938,20 @@
             physicsCamera.position.copy(target).addScaledVector(viewDirection, Math.max(10, radius));
             physicsCamera.up.copy(up);
             physicsCamera.lookAt(target);
-            const distance = radius / Math.tan(THREE.MathUtils.degToRad(physicsCamera.fov * 0.5)) * 1.15;
+            physicsCamera.updateMatrixWorld();
+            const verticalHalfFov = THREE.MathUtils.degToRad(physicsCamera.fov * 0.5);
+            const verticalSlope = Math.tan(verticalHalfFov);
+            const horizontalSlope = verticalSlope * physicsCamera.aspect;
+            const right = new THREE.Vector3(), cameraUp = new THREE.Vector3(), backward = new THREE.Vector3();
+            physicsCamera.matrixWorld.extractBasis(right, cameraUp, backward);
+            const padding = Math.max(1, radius * 0.02);
+            let distance = 10;
+            for (const point of points) {
+                const relative = point.clone().sub(target);
+                const required = Math.max((Math.abs(relative.dot(right)) + padding) / horizontalSlope,
+                    (Math.abs(relative.dot(cameraUp)) + padding) / verticalSlope);
+                distance = Math.max(distance, required + (physicsCamera.isOrthographicCamera ? 0 : relative.dot(backward)));
+            }
             camRadius = distance;
             physicsCamera.position.copy(target).addScaledVector(viewDirection, Math.max(10, distance));
             physicsCamera.far = Math.max(1000, distance + radius * 2);
@@ -5204,7 +5218,7 @@
             const pull=(anchor,follower,bondIndex)=>{
                 const dx=follower.x-anchor.x,dy=follower.y-anchor.y,dz=follower.z-anchor.z;
                 const distance=Math.hypot(dx,dy,dz);
-                const limit=Math.max(4.5,Math.min(9,backboneRestLength(bondIndex)*1.25));
+                const limit=anchor.res.entityType==='nucleotide'?Math.max(4.5,Math.min(9,backboneRestLength(bondIndex)*1.25)):BACKBONE_BOND_LEN;
                 if(distance<=limit||distance<1e-8)return;
                 const scale=limit/distance;
                 follower.x=anchor.x+dx*scale;follower.y=anchor.y+dy*scale;follower.z=anchor.z+dz*scale;
@@ -5497,7 +5511,7 @@
         function isModel2Only(node) { return node.idx1 === null && node.idx2 !== null && !node.res.referenceOnly; }
         function physicsPulseOpacity(timeMs, originMode) {
             if (physicsPulsePaused) return 1;
-            return originMode && !physicsDifferenceMode ? 1 : 0.60 + 0.4 * Math.cos(timeMs * Math.PI / 2000);
+            return originMode && !physicsDifferenceMode ? 1 : 0.80 + 0.2 * Math.cos(timeMs * Math.PI / 1600);
         }
         function togglePhysicsPulse() {
             physicsPulsePaused = !physicsPulsePaused;
@@ -5839,6 +5853,7 @@
 
             physicsNodes = [];
             physicsSprings = [];
+            springNetworkDeferred=pauseBeforeFirstBuildSimulation;
             renderSpringCullingStats(null,'Culling results appear when the spring network is built.');
 
             const N = physicsPositions.length;
@@ -5935,6 +5950,7 @@
 
             updateReferenceCoordinateLockTargets();
             applyReferenceCoordinateLocks();
+            propagateInitialReferenceLockDisplacements();
 
             updateRotationalSymmetry(true);
 
@@ -5966,8 +5982,7 @@
             // Build Cutoff-Filtered Sparse Springs
             physicsBasePairs = detectPhysicsBasePairs();
             initializeNucleicExtensions();
-            rebuildCutoffSprings();
-            buildLocalGeometryRestraints();
+            if(!springNetworkDeferred){rebuildCutoffSprings();buildLocalGeometryRestraints();}
             createBasePairLines();
 
             // Pre-allocate dynamic backbone lines for each chain
@@ -5977,6 +5992,8 @@
             PerfTracker.metrics.nodeCount = N;
 
             resetPhysicsCamera();
+            autoFitPhysicsCamera();
+            physicsCameraFitPending = true;
             renderPhysicsChainToggles();
             computePhysicsOcclusion();
             updatePhysicsNodeColors();
@@ -5986,9 +6003,22 @@
                 physicsRunning=false;
                 groupSimulation.pass=2;
                 scheduleAppTask(()=>{if(groupSimulation?.nodes===physicsNodes&&multiReferenceBuild?.kind==='combined')finishGroupSimulation();});
-            }else setSimulationPhase(2); // Start Phase 2 automatically when initialization is complete
+            }else {
+                setSimulationPhase(2);
+                if(pauseBeforeFirstBuildSimulation){
+                    pauseBeforeFirstBuildSimulation=false;physicsRunning=false;
+                    preSimulationAnalysisGeneration=modelBuildGeneration;
+                    syncSurfacePhysicsPause();
+                    document.getElementById('physicsPauseText').textContent='Start Simulation';
+                    document.getElementById('physicsStatusBadge').textContent='Simulation (Paused)';
+                    const status=document.getElementById('groupSimulationStatusText');
+                    const start=document.createElement('button');start.type='button';start.textContent='Run simulation to improve model';
+                    start.className='px-3 py-1.5 rounded-md bg-cyan-600 hover:bg-cyan-500 text-white font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300';
+                    start.addEventListener('click',togglePhysicsRun);status.replaceChildren(start);
+                }
+            }
             updatePatternVariance(true);
-            if(paeSpringInfluence>0)requestSpringPae();
+            if(!springNetworkDeferred&&paeSpringInfluence>0)requestSpringPae();
 
             const elapsed = PerfTracker.end('initPhysics');
             // console.log(`[StringScape Homology Modeller Perf] Physics initialized with Phase 1 TM-alignment (${N} nodes, TM: ${phase1AlignmentMetrics.avgTmScore.toFixed(3)}, RMSD: ${phase1AlignmentMetrics.avgRmsd.toFixed(2)} Å) in ${elapsed.toFixed(1)}ms`);
@@ -6215,7 +6245,7 @@
             }});
         }
         function rebuildCutoffSprings(){
-            if(!physicsNodes.length)return;
+            if(!physicsNodes.length||springNetworkDeferred)return;
             if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.kind==='combined'&&multiReferenceBuild.merged){installStagedMergedSprings();return;}
             try{
                 const control=document.getElementById('springCutoffSelect');
@@ -6348,6 +6378,31 @@
             for (const node of physicsNodes) {
                 if (!node.referenceLockTarget) continue;
                 node.x = node.referenceLockTarget.x; node.y = node.referenceLockTarget.y; node.z = node.referenceLockTarget.z;
+            }
+        }
+
+        // Pull each unlocked stretch from its locked boundaries before relaxation.
+        function propagateInitialReferenceLockDisplacements() {
+            if (!lockAlignedResiduesToReference) return;
+            const nodes=physicsNodes;
+            const pullFromBoundary=(boundary,direction)=>{
+                const anchor=nodes[boundary];
+                if (!anchor.referenceLockTarget || anchor.res.entityType==='other' ||
+                    Math.hypot(anchor.x-anchor.phase1X,anchor.y-anchor.phase1Y,anchor.z-anchor.phase1Z)<1e-8) return;
+                for(let i=boundary+direction;i>=0&&i<nodes.length;i+=direction){
+                    const follower=nodes[i],previous=nodes[i-direction];
+                    if(follower.blockIdx!==anchor.blockIdx||follower.referenceLockTarget) break;
+                    const dx=follower.x-previous.x,dy=follower.y-previous.y,dz=follower.z-previous.z;
+                    const distance=Math.hypot(dx,dy,dz),bondIndex=Math.min(i,i-direction);
+                    const limit=anchor.res.entityType==='nucleotide'?Math.max(4.5,Math.min(9,backboneRestLength(bondIndex)*1.25)):BACKBONE_BOND_LEN;
+                    if(distance<=limit||distance<1e-8)continue;
+                    const scale=limit/distance;
+                    follower.x=previous.x+dx*scale;follower.y=previous.y+dy*scale;follower.z=previous.z+dz*scale;
+                }
+            };
+            for(let i=0;i<nodes.length;i++)if(nodes[i].referenceLockTarget){
+                if(i>0&&!nodes[i-1].referenceLockTarget&&nodes[i-1].blockIdx===nodes[i].blockIdx)pullFromBoundary(i,-1);
+                if(i+1<nodes.length&&!nodes[i+1].referenceLockTarget&&nodes[i+1].blockIdx===nodes[i].blockIdx)pullFromBoundary(i,1);
             }
         }
 
@@ -6858,7 +6913,7 @@
             }
         }
         function setReferenceColorMode(mode) {
-            if (!['same','chain','chain-random','uniform','protein-id','element','side-chains','origin','aligned','membrane','membrane-placement','charge','hydrophobicity','secondary','plddt','difference'].includes(mode)) return;
+            if (!['same','chain','chain-random','uniform','protein-id','element','side-chains','origin','aligned','locked','membrane','membrane-placement','charge','hydrophobicity','secondary','plddt','difference'].includes(mode)) return;
             referenceColorMode = mode;
             updateModel1AlignmentColors();
             if (physicsRenderer && physicsScene && physicsCamera) physicsRenderer.render(physicsScene, physicsCamera);
@@ -6997,6 +7052,9 @@
         let groupNeighbourDistance=30,groupMaxResidueSpeed=2.3,groupMaxWaitingTime=5,groupMaxSimulationResidues='dynamic';
         let pass1StericInterval=5,pass1ClashProjectionRepeats=48;
         let groupSimulation=null;
+        let pauseBeforeFirstBuildSimulation=false;
+        let springNetworkDeferred=false;
+        let preSimulationAnalysisGeneration=null;
         function resetGroupSimulation(){
             for(const [id,assign,minimum] of [
                 ['groupNeighbourDistance',value=>{groupNeighbourDistance=value;},1],
@@ -11207,6 +11265,38 @@
         // Keep randomly assigned shades stable for each model and group membership.
         let chainShadeGeneration=null;
         const chainShadeAssignments=new Map();
+        // Derive chain shades from the same base colours as Chain (random).
+        function moleculeBaseOklch(hex) {
+            const rgb=[1,3,5].map(offset=>{
+                const value=parseInt(hex.slice(offset,offset+2),16)/255;
+                return value<=0.04045 ? value/12.92 : ((value+0.055)/1.055)**2.4;
+            });
+            const [r,g,b]=rgb;
+            const l=Math.cbrt(0.4122214708*r+0.5363325363*g+0.0514459929*b);
+            const m=Math.cbrt(0.2119034982*r+0.6806995451*g+0.1073969566*b);
+            const s=Math.cbrt(0.0883024619*r+0.2817188376*g+0.6299787005*b);
+            const lightness=0.2104542553*l+0.793617785*m-0.0040720468*s;
+            const a=1.9779984951*l-2.428592205*m+0.4505937099*s;
+            const bb=0.0259040371*l+0.7827717662*m-0.808675766*s;
+            return {lightness,chroma:Math.hypot(a,bb),hue:Math.atan2(bb,a)*180/Math.PI};
+        }
+        function moleculeColor(hue, lightness, chroma) {
+            const angle=hue*Math.PI/180;
+            // Reduce chroma when a colour falls outside the displayable sRGB gamut.
+            for(let attempt=0;attempt<30;attempt++,chroma*=0.9){
+                const a=chroma*Math.cos(angle),b=chroma*Math.sin(angle);
+                const l=(lightness+0.3963377774*a+0.2158037573*b)**3;
+                const m=(lightness-0.1055613458*a-0.0638541728*b)**3;
+                const s=(lightness-0.0894841775*a-1.291485548*b)**3;
+                const rgb=[4.0767416621*l-3.3077115913*m+0.2309699292*s,
+                    -1.2684380046*l+2.6097574011*m-0.3413193965*s,
+                    -0.0041960863*l-0.7034186147*m+1.707614701*s];
+                if(rgb.every(value=>value>=0&&value<=1)){
+                    return '#'+rgb.map(value=>Math.round(255*(value<=0.0031308?12.92*value:1.055*value**(1/2.4)-0.055)).toString(16).padStart(2,'0')).join('');
+                }
+            }
+            return '#808080';
+        }
         function buildProteinChainColors() {
             const groups = new Map(), colors = new Map();
             for (const block of morphMatrixBlocks) {
@@ -11222,7 +11312,12 @@
             if(chainShadeGeneration!==modelBuildGeneration){chainShadeGeneration=modelBuildGeneration;chainShadeAssignments.clear();}
             let groupIndex = 0;
             for (const [key,chains] of groups) {
-                const hue = (0.08 + groupIndex++ * 0.61803398875) % 1;
+                const paletteIndex=groupIndex++;
+                const baseColor=CHAIN_COLORS[paletteIndex%CHAIN_COLORS.length];
+                const base=moleculeBaseOklch(baseColor);
+                const cycle=Math.floor(paletteIndex/CHAIN_COLORS.length);
+                const baseLightness=cycle%2 ? Math.min(0.84,base.lightness+0.10) : base.lightness;
+                const chroma=cycle%2 ? base.chroma*0.8 : base.chroma;
                 const membership=JSON.stringify([...chains].sort());
                 let assignment=chainShadeAssignments.get(key);
                 if(!assignment||assignment.membership!==membership){
@@ -11233,8 +11328,8 @@
                 }
                 chains.forEach(chain => {
                     const index=assignment.indices.get(chain);
-                    const lightness = chains.length === 1 ? 0.52 : 0.35 + 0.37 * index / (chains.length - 1);
-                    colors.set(chain, '#' + new THREE.Color().setHSL(hue, 0.75, lightness).getHexString());
+                    const lightness = baseLightness + (chains.length === 1 ? 0 : 0.14 * (index / (chains.length - 1) - 0.5));
+                    colors.set(chain, chains.length===1 && cycle===0 ? baseColor : moleculeColor(base.hue,lightness,chroma));
                 });
             }
             return colors;
@@ -11842,7 +11937,7 @@
             }
             document.getElementById('recentModelStatus').textContent='';
             updateBuildButtonState(); updateExampleSelection();
-            loadModelPair(entry.reference,entry.alphaFold);
+            await loadModelPair(entry.reference,entry.alphaFold);
         }
         let uploadedStructureRevision = 0;
         function clearUploadedStructure(slot) {
@@ -11948,6 +12043,7 @@
             modelBuildAbortController = null;
             modelLoading = false;
             window.appSetExampleLoading?.(false);
+            window.appSetRecentLoading?.(false);
             modelBuildCompleted = false;
             modelBuildStartedAt = null;
             completedModelInputKey = null;
@@ -12133,6 +12229,8 @@
                     : entry.uploadFile?{source:'upload',reason:'The user uploaded this reference structure. It was not selected by AI.'}:complexAiReferenceOrigins.get(id)||{source:'manual',reason:'The user manually supplied this reference PDB. It was not selected by AI; no AI selection justification applies.'};
                 return [id,origin];
             }));}catch {/* Input validation is reported by the model loader. */}
+            preSimulationAnalysisGeneration=null;
+            pauseBeforeFirstBuildSimulation=!document.getElementById('autoRunBuildSimulation').checked;
             globalThis.BuildTimeline?.beginBuild();
             modelBuildStartedAt = performance.now();
             buildSettingsChanged = false;
@@ -12330,9 +12428,21 @@
                 if(directReferences){
                     await loadUniProtAnnotations(directAccessions.map(pdbId=>({pdbId})),generation);
                     if(generation!==modelBuildGeneration)return;
-                    const build=multiReferenceBuild;void advanceStagedBuild().catch(error=>failStagedBuild(error,build));
+                    const build=multiReferenceBuild;if(!springNetworkDeferred)void advanceStagedBuild().catch(error=>failStagedBuild(error,build));
                 } else void loadUniProtAnnotations(fileResults2,generation);
-                if(!multiReferenceBuild)animationOnModelReady();
+                if(preSimulationAnalysisGeneration===generation){
+                    const state=groupSimulation;
+                    scheduleAppTask(()=>{void (async()=>{
+                        if(generation!==modelBuildGeneration||state!==groupSimulation||physicsRunning)return;
+                        updateRotationalSymmetry(true);
+                        while(patternVarianceJob&&generation===modelBuildGeneration&&state===groupSimulation)await new Promise(resolve=>setTimeout(resolve,50));
+                        if(generation!==modelBuildGeneration||state!==groupSimulation||physicsRunning)return;
+                        await updatePatternVariance(true);
+                        if(generation!==modelBuildGeneration||state!==groupSimulation||physicsRunning)return;
+                        await animationOnModelReady();
+                        if(generation===modelBuildGeneration&&state===groupSimulation&&!physicsRunning)animationReadyGeneration=generation;
+                    })().catch(reportBackgroundError);});
+                }else if(!multiReferenceBuild)animationOnModelReady();
                 updateBuildButtonState();
                 updateHomologyViewerToggle();
                 drawMorphMatrix();
@@ -12645,7 +12755,18 @@
         function togglePhysicsRun() {
             if(groupSimulation?.complete)return;
             if (physicsRepresentation === 'surface') { syncSurfacePhysicsPause(); return; }
-            if(animationPlaying){animationResumePhysics=false;animationEl('physicsPauseText').textContent='Resume Simulation';return;}
+            if(animationPlaying){
+                animationResumePhysics=false;
+                if(springNetworkDeferred)stopAnimation();
+                else{animationEl('physicsPauseText').textContent='Resume Simulation';return;}
+            }
+            if(springNetworkDeferred){
+                document.getElementById('groupSimulationStatusText').textContent='Building the spring network…';
+                springNetworkDeferred=false;
+                rebuildCutoffSprings();
+                buildLocalGeometryRestraints();
+                if(paeSpringInfluence>0)requestSpringPae();
+            }
             if (simulationPhase === 1) {
                 // If in Phase 1, start Phase 2 dynamic simulation from TM-aligned starting positions
                 setSimulationPhase(2);
@@ -12655,6 +12776,7 @@
             tickGroupSimulation(performance.now());
             if(groupSimulation?.complete)return;
             physicsRunning = !physicsRunning;
+            if(physicsRunning){preSimulationAnalysisGeneration=null;animationReadyGeneration=null;}
             if(groupSimulation){groupSimulation.lastTick=performance.now();groupSimulation.wasRunning=physicsRunning;groupSimulation.sampleElapsed=groupSimulation.elapsed;groupSimulation.sampleSteps=0;groupSimulation.coreDistances=groupSimulation.coreIndices?.map(()=>0)||[];groupSimulation.corePositions=groupSimulation.coreIndices?.flatMap(index=>{const n=physicsNodes[index];return [n.x,n.y,n.z];})||[];}
             if(groupSimulation?.parallel)resetParallelPhysicsSampling();
             physicsGraphHistory.lastPositions=null;
@@ -13037,6 +13159,7 @@
                 updateReferenceCoordinateLockTargets();
                 rebuildCutoffSprings();
                 if (lockAlignedResiduesToReference) applyReferenceCoordinateLocks();
+                if(physicsColorMode==='locked')setPhysicsColorMode('locked');
                 updateAtomRepresentation(); updateCartoonRepresentation();
             });
 
@@ -13726,9 +13849,9 @@
         let patternVarianceJob=null,patternDetectionSnapshot=null,rotationalDetectionSnapshot=null;
         async function updatePatternVariance(force=false){
             if(!physicsScene||!physicsNodes.length)return;
-            if(!modelBuildCompleted&&physicsColorMode!=='pattern-variance')return;
+            if(!modelBuildCompleted&&preSimulationAnalysisGeneration!==modelBuildGeneration&&physicsColorMode!=='pattern-variance')return;
             // Pattern colouring follows the evolving build; completed models retain their fit.
-            const liveBuild=!modelBuildCompleted&&physicsColorMode==='pattern-variance';
+            const liveBuild=!modelBuildCompleted;
             if(!liveBuild&&!patternDetectionSnapshot?.provisional&&patternDetectionSnapshot?.nodes===physicsNodes&&patternDetectionSnapshot.generation===modelBuildGeneration){
                 if(patternMarkers)patternMarkers.visible=patternMarkersVisible;
                 if(force)await renderPatternExtensions(detectedExtensionPatterns);
@@ -13942,7 +14065,7 @@
         }
         function updateRotationalSymmetry(force=false) {
             if(!physicsScene||!physicsNodes.length)return;
-            if(!modelBuildCompleted&&physicsColorMode!=='rotational-symmetry')return;
+            if(!modelBuildCompleted&&preSimulationAnalysisGeneration!==modelBuildGeneration&&physicsColorMode!=='rotational-symmetry')return;
             if(rotationalDetectionSnapshot?.nodes===physicsNodes&&rotationalDetectionSnapshot.generation===modelBuildGeneration&&!(modelBuildCompleted&&rotationalDetectionSnapshot.provisional)){
                 rotationalSymmetryAxes.visible=rotationalAxesVisible&&physicsColorMode==='rotational-symmetry';
                 document.getElementById('toggleSymmetryAxes')?.classList.toggle('hidden',!rotationalSymmetryAxes.children.length||physicsColorMode!=='rotational-symmetry');
@@ -14342,6 +14465,8 @@
                     const value=accessibleAreas.get(i);
                     color=new THREE.Color(value===undefined?'#94a3b8':'#2563eb');
                     if(value!==undefined)color.lerp(new THREE.Color('#f97316'),Math.max(0,Math.min(1,value)));
+                } else if (physicsColorMode === 'locked') {
+                    color = new THREE.Color(lockAlignedResiduesToReference && node.referenceLockTarget ? '#ef4444' : '#94a3b8');
                 } else if (physicsColorMode === 'residue-index') {
                     color = new THREE.Color(residueIndexColor(node));
                 } else if (physicsColorMode === 'chain' || physicsColorMode === 'chain-random' || physicsColorMode === 'side-chains') {
@@ -14625,7 +14750,7 @@
             if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.view==='aligned'){
                 if(['reference','chain','protein','equivalent','aligned','distance'].includes(mode)){multiReferenceBuild.alignedMode=mode;physicsColorMode=mode;syncPhysicsColorMenu();renderStagedPreview();}return;
             }
-            if (!['chain','chain-random','residue-index','uniform','protein-id','rotational-symmetry','pattern-variance','equivalent-protein-shape','keyframe-difference','residue-speed','running-simulation','steric-clashes','binding-sites','binding-site-type','mutation-effect-basic','constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','qmeandisco','element','side-chains','origin','aligned','membrane','membrane-placement','charge','hydrophobicity','accessible-surface-area','secondary','plddt','difference','af-difference',...Object.keys(UNI_PROT_FEATURE_MODES)].includes(mode)) return;
+            if (!['chain','chain-random','residue-index','uniform','protein-id','rotational-symmetry','pattern-variance','equivalent-protein-shape','keyframe-difference','residue-speed','running-simulation','steric-clashes','binding-sites','binding-site-type','mutation-effect-basic','constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','qmeandisco','element','side-chains','origin','aligned','locked','membrane','membrane-placement','charge','hydrophobicity','accessible-surface-area','secondary','plddt','difference','af-difference',...Object.keys(UNI_PROT_FEATURE_MODES)].includes(mode)) return;
             if(['residue-speed','running-simulation'].includes(mode)&&!['residue-speed','running-simulation'].includes(physicsColorMode))resetResidueSpeedTracking();
             if(mode==='accessible-surface-area')accessibleSurfaceCache=null;
             physicsColorMode = mode;
@@ -14675,6 +14800,7 @@
                 'side-chains':'Backbone: darker chain colour · Side chains: <span style="color:#f59e0b">nonpolar</span> · <span style="color:#c084fc">aromatic</span> · <span style="color:#38bdf8">polar</span> · <span style="color:#fb7185">basic</span> · <span style="color:#4ade80">acidic</span>.',
                 origin:'Origin: <span style="color:#3498db">Reference PDB</span> · <span style="color:#2eccbf">AlphaFold</span> · <span style="color:#31b2cd">Both</span>',
                 aligned:'<span style="color:#ef4444">Red</span>: aligned residue · <span style="color:#f97316">Orange</span>: similar, non-identical aligned residue (positive BLOSUM62 score) · <span style="color:#94a3b8">Grey</span>: unaligned residue',
+                locked:`<span style="color:#ef4444">Red</span>: locked residue · <span style="color:#94a3b8">Grey</span>: unlocked residue. Aligned residues farther than ${lockAlignedResiduesDistance} residues from an unaligned region stay locked to the reference during draft builds.`,
                 membrane:'<span style="color:#ef4444">Red</span>: helix or sheet residue inside the membrane plates · <span style="color:#f97316">Orange</span>: other membrane-associated residue · <span style="color:#7dd3fc">Light blue</span>: other residues, including helix and sheet portions outside the membrane',
                 'membrane-placement':'Membrane placement influence: <span style="color:#ef4444">red</span> hydrophobic · <span style="color:#2563eb">blue</span> charged · <span style="color:#94a3b8">grey</span> other. Stronger colour means greater exposed-surface influence.',
                 charge:'Charge: <span style="color:#2563eb">blue</span> positive (Lys/Arg) · <span style="color:#93c5fd">pale blue</span> His · <span style="color:#ef4444">red</span> negative (Asp/Glu) · <span style="color:#94a3b8">grey</span> neutral.',
@@ -16095,6 +16221,10 @@
                 return;
             }
             resizePhysicsScene();
+            if (physicsCameraFitPending) {
+                autoFitPhysicsCamera();
+                physicsCameraFitPending = false;
+            }
             requestVisualPhysicsMeshUpdate();
             if(physicsNodes.length){
                 updatePhysicsNodeColors();
@@ -16457,10 +16587,12 @@
             const preset = event.target.closest('button[data-reference]');
             if (!preset.hasAttribute('data-action-click')) loadModelPair(preset.dataset.reference, preset.dataset.alphafold, 'example');
             completedReferenceSearchKey = currentReferenceSearchKey();
-            requestAnimationFrame(() => document.getElementById('physicsSimulationTitle')?.scrollIntoView({
-                behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth', block:'start'
-            }));
+            requestAnimationFrame(scrollMainUiToBottom);
         });
+        function scrollMainUiToBottom(){
+            const content=document.querySelector('.app-page-content');
+            content?.scrollTo({top:content.scrollHeight,behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
+        }
         const htmlActionHandlers = {
             click: [
                 function() { loadModelPair('6YKM', 'P09348, P0AF06', 'example') },
@@ -16567,8 +16699,9 @@
         });
         document.getElementById('recentModels')?.addEventListener('change',event=>{
             if (event.target.value!=='') {
-                void restoreRecentModel(Number(event.target.value));
-                requestAnimationFrame(()=>document.getElementById('physicsSimulationTitle')?.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'}));
+                window.appSetRecentLoading?.(true);
+                void restoreRecentModel(Number(event.target.value)).finally(()=>window.appSetRecentLoading?.(false));
+                requestAnimationFrame(scrollMainUiToBottom);
             }
             event.target.value='';
         });
@@ -16632,6 +16765,7 @@
         }
         speciesSearch.addEventListener('focus',()=>{if(!speciesChoices.has(speciesSearch.value))renderSpeciesMenu();});
         speciesSearch.addEventListener('click',renderSpeciesMenu);
+        document.getElementById('stringSpeciesChevron').addEventListener('click',()=>{speciesSearch.focus();renderSpeciesMenu();});
         speciesSearch.addEventListener('keydown',event=>{
             if(event.key==='Escape')closeSpeciesMenu();
             else if(event.key==='ArrowDown'){event.preventDefault();if(speciesMenu.hidden)renderSpeciesMenu();speciesMenu.querySelector('button')?.focus();}
@@ -16642,11 +16776,56 @@
             else if(event.key==='Escape'){closeSpeciesMenu();speciesSearch.focus();}
         });
         document.addEventListener('click',event=>{if(!event.target.closest('.species-picker'))closeSpeciesMenu();});
+        let modelFilesController=null, currentSpeciesTaxon=null;
+        async function fetchModelSpeciesFiles(species,controller){
+            const status=document.getElementById('stringFilesStatus');
+            status.textContent='Fetching genome and proteome files…';
+            try {
+                const directory=await fetch('https://api.github.com/repos/JoelTre/StringScape/contents/Model_organism_files?ref=main',{signal:controller.signal});
+                if(!directory.ok)throw new Error(`GitHub folder returned ${directory.status}`);
+                const entries=await directory.json();
+                const sequence=entries.find(entry=>new RegExp(`^${species.taxon}\\.protein\\.sequences\\.v[\\d.]+(?: \\(\\d+\\))?\\.fa(?:\\.gz)?$`,'i').test(entry.name));
+                const aliases=entries.find(entry=>new RegExp(`^${species.taxon}\\.protein\\.aliases\\.v[\\d.]+(?: \\(\\d+\\))?(?:\\(shortened\\))?\\.txt(?:\\.gz)?$`,'i').test(entry.name));
+                if(!sequence||!aliases)throw new Error('Both files were not found in the model organism folder');
+                const files=await Promise.all([sequence,aliases].map(async entry=>{
+                    const response=await fetch(entry.download_url,{signal:controller.signal});
+                    if(!response.ok)throw new Error(`Could not fetch ${entry.name} (${response.status})`);
+                    return new File([await response.blob()],entry.name.replace(/ \(\d+\)|\(shortened\)/gi,''));
+                }));
+                if(controller.signal.aborted)return;
+                selectedStringFiles.sequence=files[0];selectedStringFiles.aliases=files[1];
+                const stringLink=document.createElement('a');
+                stringLink.href='https://string-db.org/cgi/download?species_text='+encodeURIComponent(species.name);stringLink.target='_blank';stringLink.rel='noopener noreferrer';
+                stringLink.textContent='STRING';stringLink.className='text-teal-400 underline';
+                status.replaceChildren('Genome and proteome fetched from ',stringLink,`: ${sequence.name}, ${aliases.name}`);
+                updateReferenceSpeciesGuidance();updateFindMatchesReady();loadPreferredNames();
+            } catch(error){
+                if(!controller.signal.aborted)status.textContent=`Could not fetch model organism files: ${error.message}.`;
+            }
+        }
         speciesSearch.addEventListener('input', () => {
             cancelStringMatching();
             updateReferenceSpeciesGuidance();
             const species = speciesChoices.get(speciesSearch.value);
             rememberSpecies(species);
+            const model=Boolean(species && featuredSpeciesTaxa.includes(species.taxon));
+            const taxon=species?.taxon || null;
+            if(taxon!==currentSpeciesTaxon){
+                currentSpeciesTaxon=taxon;modelFilesController?.abort();modelFilesController=null;
+                selectedStringFiles.sequence=null;selectedStringFiles.aliases=null;
+                document.getElementById('stringFiles').value='';
+                document.querySelector('.string-file-name').textContent='No files selected';
+                document.querySelector('.string-file-picker').classList.remove('has-file');
+                document.getElementById('stringFilesStatus').textContent='';
+                loadPreferredNames();updateFindMatchesReady();
+                if(model){modelFilesController=new AbortController();void fetchModelSpeciesFiles(species,modelFilesController);}
+            }
+            document.getElementById('stringSpeciesDownload').hidden=!species||model;
+            document.getElementById('referenceSpeciesGuidance').hidden=!species||model;
+            document.getElementById('stringUploadGuidance').hidden=!species||model;
+            document.querySelector('.string-file-picker').hidden=!species||model;
+            document.getElementById('stringMatchingGuidance').hidden=!species;
+            updateReferenceSpeciesGuidance();
             if(!species)renderSpeciesMenu();
             const link = document.getElementById('stringSpeciesDownload');
             link.setAttribute('aria-disabled', String(!species));
@@ -16893,7 +17072,7 @@
             const colorColumns=[
                 [['Main',['running-simulation','chain','chain-random','protein-id','residue-index','secondary','model-confidence','uniform']],
                  ['Properties',['steric-clashes','side-chains','element','charge','hydrophobicity','accessible-surface-area','mutation-effect-basic','residue-speed']]],
-                [['Regions',['binding-sites','binding-site-type','aligned','origin']],
+                [['Regions',['binding-sites','binding-site-type','aligned','locked','origin']],
                  ['Comparison',['rotational-symmetry','pattern-variance','equivalent-protein-shape','keyframe-difference','difference','af-difference']],
                  ['Scores',['constraint-confidence','alpha-pae','plddt','spring-strain']]],
                 [['Membrane',['membrane','membrane-placement']],
@@ -18680,7 +18859,9 @@
                 return {block,chain:node?.res?.c1,accession,name:chainProteinName(block),uniProt:uniProtAnnotations.get(accession)||null};
             });
             const fixedBlocks=new Set(allBlocks.filter(item=>/atp synthase/i.test(item.name)).map(item=>item.block));
-            return {...context,blocks:allBlocks.filter(item=>!fixedBlocks.has(item.block)),
+            const autoFrame=animationLibrary.find(entry=>entry.autoGenerated&&entry.frames?.length)?.frames[0];
+            const automaticSpin={groups:(autoFrame?.settings?.symmetry||[]).filter(item=>item.angle).map(item=>({key:item.key,rate:item.angle*180/Math.PI})),rotations:(autoFrame?.settings?.chainRotations||[]).filter(item=>item.overridden&&item.angle).map(item=>({block:Number(item.block),axis:item.axisKey,rate:item.angle*180/Math.PI}))};
+            return {...context,automaticSpin:{groups:automaticSpin.groups.filter(item=>{const group=allSymmetryRotationGroups().find(candidate=>candidate.key===item.key);return group&&![...group.blockIds].some(block=>fixedBlocks.has(block));}),rotations:automaticSpin.rotations.filter(item=>!fixedBlocks.has(item.block))},blocks:allBlocks.filter(item=>!fixedBlocks.has(item.block)),
                 patterns:[...document.querySelectorAll('[data-pattern-extension]')].map(input=>({key:input.dataset.patternExtension,blocks:input.dataset.patternExtension.split(',').map(Number),label:input.getAttribute('aria-label')})).filter(item=>!item.blocks.some(block=>fixedBlocks.has(block))),
                 groups:allSymmetryRotationGroups().filter(group=>![...group.blockIds].some(block=>fixedBlocks.has(block))).map(group=>({key:group.key,blocks:[...group.blockIds],type:group.localAxes?'helical':'rotational'})),
                 axes:[...allSymmetryRotationGroups().map(group=>({key:`group:${group.key}`,name:symmetryGroupName(group),blocks:[...group.blockIds],type:group.localAxes?'helical':'rotational',origin:group.origin,normal:group.normal,
@@ -18783,20 +18964,26 @@
                 'flagellar motor switch phosphatase fliy',
                 'chemotaxis protein chey',
                 'flagellar hook protein flge',
+                'flagellar basal-body rod protein flgg',
+                'flagellar basal body rod protein flgb',
+                'flagellar hook-basal body complex protein flie',
+                'flagellar basal-body rod protein flgf',
+                'flagellar biosynthetic protein fliq',
+                'flagellar biosynthetic protein flir',
+                'flagellar biosynthetic protein flip',
+                'flagellar basal-body rod protein flgc',
                 'flic',
                 'archaeal flagellar atpase motor flai',
                 'flaj',
                 'flagella accessory protein j'
             ].some(item=>name.includes(item))||/\bflagellin\b/.test(name);
             const cGroup=allSymmetryRotationGroups().find(group=>[...group.blockIds].some(block=>names.find(item=>item[0]===block)?.[1]?.includes('atp synthase subunit c')));
-            const connected=!!window.ModellerAI?.connected();
             for(const entry of entries)for(let index=0;index<entry.frames.length;index++){
                 const settings=entry.frames[index].settings;if(!settings)continue;
                 settings.symmetry=allSymmetryRotationGroups().map(group=>{
                     const groupNames=[...group.blockIds].map(block=>names.find(item=>item[0]===block)?.[1]||'');
-                    const atp=groupNames.some(name=>name.includes('atp synthase'));
                     const rotate=groupNames.some(name=>autoSpinProtein(name)&&!excluded(name));
-                    return {key:group.key,angle:atp||!connected?(rotate?108*Math.PI/180:0):(settings.symmetry?.find(item=>item.key===group.key)?.angle||0)};
+                    return {key:group.key,angle:entry.biologicalMotionReasons&&window.ModellerAI?.connected()&&!groupNames.some(name=>name.includes('atp synthase'))?(settings.symmetry?.find(item=>item.key===group.key)?.angle||0):(rotate?108*Math.PI/180:0)};
                 });
                 const special=names.filter(([,name])=>name.includes('atp synthase gamma chain')||name.includes('atp synthase epsilon chain'));
                 settings.chainRotations=[...(settings.chainRotations||[]).filter(item=>!special.some(([block])=>block===item.block)),...(special.length&&cGroup?special.map(([block])=>({block,angle:108*Math.PI/180,axisKey:`group:${cGroup.key}`,overridden:true})):[])];
@@ -18804,11 +18991,20 @@
             if(entries.some(entry=>entry.id===animationActiveId))applyAnimationSettings(animationFrames[animationSelected]?.settings);
             saveAnimation();
         }
+        function refreshAutomaticSpinGeometry(entries){
+            const spins=entries.filter(entry=>entry.autoGenerated&&!entry.conformationalChange&&!entry.groupConformations&&entry.frames?.length);
+            if(!spins.length)return false;
+            const coords=animationNodeCoordinates(),displayCoords=animationNodeCoordinates(true);
+            for(const entry of spins)for(const frame of entry.frames){
+                frame.coords=coords;frame.displayCoords=displayCoords;frame.atomOffsets=null;
+            }
+            return true;
+        }
         async function animationOnModelReady(){
-            if(modelBuildCompleted&&animationModelStorageKey===animationSessionKey()&&animationLibrary.length){configureAutoSpinAnimation();renderAnimationTimeline();return;}
+            if((modelBuildCompleted||preSimulationAnalysisGeneration===modelBuildGeneration)&&animationModelStorageKey===animationSessionKey()&&animationLibrary.length){configureAutoSpinAnimation();renderAnimationTimeline();return;}
             stopAnimation();animationFrames=[];animationLibrary=[];animationActiveId=null;animationAutoSpinDismissed=false;animationSelected=0;keyframeDifferenceCache=null;bindingSiteCache=null;
             animationModelStorageKey=animationSessionKey();
-            if(!modelBuildCompleted)return;
+            if(!modelBuildCompleted&&preSimulationAnalysisGeneration!==modelBuildGeneration)return;
             const generation=modelBuildGeneration,key=animationModelStorageKey;
             let repairedSpin=false;
             try{let saved;try{saved=await AnimationStorage.read(key);}catch(error){console.warn('Binary animation restore:',error);}
@@ -18831,6 +19027,7 @@
                         }
                         delete entry.sameConformation;
                     }
+                    if(preSimulationAnalysisGeneration===generation&&refreshAutomaticSpinGeometry(animationLibrary))repairedSpin=true;
                     const active=animationLibrary.find(item=>item.id===saved.activeId)||animationLibrary[0];
                     if(active)activateAnimation(active);
                 }
@@ -20444,6 +20641,7 @@ if(globalThis.BuildTimeline){
         return build?.kind==='draft'?`Draft ${build.index+1} · ${label}`:label;
     };
     computeAllChainAlignments=timeline.wrap(draftStage('Performing sequence alignment and determining equivalent chains'),computeAllChainAlignments);
+    propagateInitialReferenceLockDisplacements=timeline.wrap(draftStage('Propagating reference lock movements'),propagateInitialReferenceLockDisplacements);
     const distanceStage=draftStage('Calculating distance matrices');
     getOrComputeDistanceMatrix=timeline.wrapCalculation((model,chain)=>model.matrixCache.has(`${chain}:${springCutoffVal}`)?null:distanceStage(),getOrComputeDistanceMatrix);
     calculateLazyDistanceMatrixCell=timeline.wrapCalculation(distanceStage,calculateLazyDistanceMatrixCell);

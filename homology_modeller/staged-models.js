@@ -392,7 +392,7 @@ async function startStagedDraft(index,state){
     initPhysicsSimulation();resetPhysicsGraphHistory();renderChainLegends();resetCanvasViews();drawIndividualMatrices();drawDifferenceMatrix();drawMorphMatrix();
     modelLoading=false;state.busy=false;readyModelGeneration=state.generation;hidePhysicsViewerLoading();
     if(state.follow)selectStagedModel(state.current);else selectStagedModel(state.view);
-    if(state.directReferences)await advanceStagedBuild();
+    if(state.directReferences&&!springNetworkDeferred)await advanceStagedBuild();
 }
 async function advanceStagedBuild(){
     const state=multiReferenceBuild;if(!state||state.busy||state.kind!=='draft')return;

@@ -373,7 +373,7 @@ async function restoreSession(session){
     physicsRunning=state.physicsRunning;physicsMeshesDirty=true;matrixDataVersion++;for(const cache of Object.values(offscreenCaches)){cache.dirty=true;cache.overviewKey=null;cache.viewportKey=null;}updateBuildButtonState();
     if(!document.getElementById('detailsPanels').classList.contains('hidden'))await ensureDetailMolstarStructures();
     if(simulationAutoRendered&&physicsNodes.length)await renderCurrentSimulation();
-    if(session.camera&&physicsCamera){if(!!physicsCamera.isOrthographicCamera!==!!session.camera.orthographic)togglePhysicsProjection();physicsCamera.position.fromArray(session.camera.position);physicsCamera.quaternion.fromArray(session.camera.quaternion);physicsCamera.up.fromArray(session.camera.up);physicsCamera.zoom=session.camera.zoom;physicsCamera.updateProjectionMatrix();}
+    if(session.camera&&physicsCamera){physicsCameraFitPending=false;if(!!physicsCamera.isOrthographicCamera!==!!session.camera.orthographic)togglePhysicsProjection();physicsCamera.position.fromArray(session.camera.position);physicsCamera.quaternion.fromArray(session.camera.quaternion);physicsCamera.up.fromArray(session.camera.up);physicsCamera.zoom=session.camera.zoom;physicsCamera.updateProjectionMatrix();}
 
     // Convert legacy projection pan to a physical translation at the saved focus depth.
     if(state.physicsPanOffset&&physicsRenderer&&physicsCamera){
