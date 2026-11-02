@@ -10,8 +10,13 @@ body > header { flex-shrink:0; }
 .app-page-menu button { display:flex; align-items:center; gap:.8rem; width:15rem; max-width:100%; padding:.5rem .7rem; margin-bottom:.4rem; border:0; border-radius:.6rem; color:inherit; background:transparent; text-align:left; cursor:pointer; }
 .app-page-menu button:hover,.app-page-menu button[aria-current=page] { background:#334155; }
 .app-page-menu i { width:1.3rem; text-align:center; color:#60a5fa; }
-.app-page-layer { position:absolute; inset:0; background:#0c1929; border:0; border-radius:1rem; box-shadow:0 4px 16px #0003; transition:transform .25s ease, box-shadow .25s ease; }
-.menu-open .app-page-layer { transform:translateX(16.5rem); box-shadow:0 10px 32px #0006; }
+.app-page-layer { position:absolute; z-index:0; inset:0; background:#0c1929; border:0; border-radius:1rem; transition:transform .25s ease; }
+.menu-open .app-page-layer { transform:translateX(16.5rem); }
+.app-page-shadow { position:absolute; z-index:-1; inset:0; border-radius:inherit; box-shadow:0 2px 8px #0001; pointer-events:none; }
+.app-page-shadow::after { content:""; position:absolute; inset:0; border-radius:inherit; box-shadow:0 8px 28px #0005; opacity:0; transition:opacity .25s ease; }
+.menu-open .app-page-shadow::after { opacity:1; }
+body:not(.light-mode) .app-page-shadow { box-shadow:0 2px 8px #0003; }
+body:not(.light-mode) .app-page-shadow::after { box-shadow:0 8px 28px #0009; }
 .app-menu-toggle { position:absolute; top:1rem; left:1rem; z-index:100; width:2.8rem; height:2.8rem; border:1px solid #475569; border-radius:50%; background:#1e293b; color:#f8fafc; cursor:pointer; }
 .app-page-content { height:100%; overflow:auto; padding:4.5rem 4.2rem 1rem; }
 .app-page > * + * { margin-top:1rem; }
@@ -42,7 +47,7 @@ body.light-mode .app-page-menu button:hover,body.light-mode .app-page-menu butto
  .app-page-menu { display:flex; flex-direction:column; align-items:center; }
  .app-page-content { padding-top:4rem; }
 }
-@media (prefers-reduced-motion:reduce) { .app-shell,.app-page-layer,.app-physics-viewer { transition:none; } }
+@media (prefers-reduced-motion:reduce) { .app-shell,.app-page-layer,.app-physics-viewer,.app-page-shadow::after { transition:none; } }
 /* Search progress belongs in the form rather than a separate coloured card. */
 body :is(#referenceSequenceSearchStatus,#fetchSiftsStatus,#stringMatchStatusBox):not(.search-no-results):not(.discovery-warning):not(.hidden):not(:empty),
 body.light-mode :is(#referenceSequenceSearchStatus,#fetchSiftsStatus,#stringMatchStatusBox):not(.search-no-results):not(.discovery-warning):not(.hidden):not(:empty) {
@@ -84,10 +89,10 @@ body.light-mode #loadBtn:hover { background:#60a5fa; }
 .app-page-content::-webkit-scrollbar-thumb { background:#334155; border:3px solid #0f172a; border-radius:1rem; }
 .app-page-content::-webkit-scrollbar-thumb:hover { background:#475569; }
 .app-page-content::-webkit-scrollbar-button { display:none; width:0; height:0; }
-body.light-mode .app-page-content { scrollbar-color:auto; }
+body.light-mode .app-page-content { scrollbar-color:#cbd5e1 transparent; }
 body.light-mode .app-page-content::-webkit-scrollbar-track { background:#e2e8f0; }
-body.light-mode .app-page-content::-webkit-scrollbar-thumb { background:#94a3b8; border-color:#e2e8f0; }
-body.light-mode .app-page-content::-webkit-scrollbar-thumb:hover { background:#64748b; }
+body.light-mode .app-page-content::-webkit-scrollbar-thumb { background:#cbd5e1; border-color:#e2e8f0; }
+body.light-mode .app-page-content::-webkit-scrollbar-thumb:hover { background:#94a3b8; }
 .app-page-content::-webkit-scrollbar { width:20px; }
 .app-page-content::-webkit-scrollbar-track, body.light-mode .app-page-content::-webkit-scrollbar-track { background:transparent; margin-block:.5rem; }
 .app-page-content::-webkit-scrollbar-thumb, body.light-mode .app-page-content::-webkit-scrollbar-thumb { border:solid transparent; border-width:6px; border-radius:10px; background-clip:padding-box; }
@@ -163,15 +168,14 @@ body.light-mode #animationSelectorMenu button[aria-pressed="true"] { background:
 .complex-ai-message ol { list-style:decimal; }
 .complex-ai-message a { color:#7dd3fc; text-decoration:underline; }
 .complex-ai-user a { color:#fff; }
-.app-page:is([data-page="1"],[data-page="2"],[data-page="4"],[data-page="7"],[data-page="8"],[data-page="9"]) :is(section,div,form,article,details):is(.shadow,.shadow-sm,.shadow-md,.shadow-lg,.shadow-xl,.shadow-2xl,.shadow-inner,.validation-report) { box-shadow:none; }
+.app-page :is(section,div,form,article,details):is(.shadow,.shadow-sm,.shadow-md,.shadow-lg,.shadow-xl,.shadow-2xl,.shadow-inner,.validation-report) { box-shadow:none; }
 .app-scroll-blur { position:absolute; left:0; right:20px; height:3.25rem; z-index:2; pointer-events:none; opacity:0; transition:opacity .2s ease; -webkit-backdrop-filter:blur(5px); backdrop-filter:blur(5px); }
 .app-scroll-blur-top { top:0; border-radius:1rem 0 0 0; -webkit-mask-image:linear-gradient(to bottom,#000,transparent); mask-image:linear-gradient(to bottom,#000,transparent); }
 .app-scroll-blur-bottom { bottom:0; border-radius:0 0 0 1rem; -webkit-mask-image:linear-gradient(to top,#000,transparent); mask-image:linear-gradient(to top,#000,transparent); }
 .has-scroll-above > .app-scroll-blur-top, .has-scroll-below > .app-scroll-blur-bottom { opacity:1; }
 @media (prefers-reduced-motion:reduce) { .app-scroll-blur { transition:none; } }
-#loadBtn { margin-bottom:1rem; }
-.app-page[data-page="5"] #physicsControlsPanel > * { background:#071321; }
-body.light-mode .app-page[data-page="5"] #physicsControlsPanel > * { background:#f1f5f9; }
+.app-page[data-page="5"] #physicsControlsPanel > *,
+body.light-mode .app-page[data-page="5"] #physicsControlsPanel > * { background:transparent; }
 body :is(#referenceSearchInput,#pdbInput1,#pdbInput2) { background:#0c1929; border:1px solid #172635 !important; }
 body.light-mode :is(#referenceSearchInput,#pdbInput1,#pdbInput2) { background:#f8fafc; border:1px solid #d8e1eb !important; }
 #buildSettingsBox { --build-input:#0c1929; }
@@ -212,3 +216,143 @@ body.light-mode #physicsWebGLStatus:not([hidden]) { background:#e2e8f0; color:#1
  .physics-page:not(.mobile-sheet-expanded) #physicsViewerKey,
  .physics-page:not(.mobile-sheet-expanded) #physicsSelectionInfo { bottom:calc(88px + 1rem); }
 }
+
+.app-about { max-width:48rem; color:#cbd5e1; line-height:1.65; }
+.app-about h1 { margin-bottom:1rem; color:#f8fafc; font-size:1.75rem; font-weight:700; }
+.app-about p { margin-bottom:1rem; }
+.app-about a:not(.app-about-contact) { color:#7dd3fc; text-decoration:underline; }
+.app-about-contact { display:inline-flex; align-items:center; gap:.5rem; padding:.7rem 1rem; border-radius:.5rem; background:#2563eb; color:#fff; font-weight:600; }
+.app-about-contact:hover { background:#3b82f6; }
+body.light-mode .app-about { color:#334155; }
+body.light-mode .app-about h1 { color:#0f172a; }
+body.light-mode .app-about a:not(.app-about-contact) { color:#0369a1; }
+@media (max-width:768px) { .physics-page > .app-menu-toggle { z-index:0; } }
+
+.app-page[data-page="6"] #physicsVariableComparison > summary { display:none; }
+body .app-page[data-page="6"] #physicsVariableComparison { background:#071321; border:0; border-radius:.75rem; padding-top:1rem; }
+body.light-mode .app-page[data-page="6"] #physicsVariableComparison { background:#f1f5f9; }
+.edit-models-panel { color:#e2e8f0; background:#0f172a; border:1px solid #334155; border-radius:1rem; padding:1rem; }
+.edit-models-panel h2 { font-size:1.1rem; font-weight:700; margin-bottom:1rem; }
+.edit-models-panel h3 { font-weight:700; margin:1rem 0 .5rem; }
+.edit-models-panel .edit-row { display:flex; flex-wrap:wrap; align-items:center; gap:.6rem; margin:.6rem 0; }
+.edit-models-panel button,.edit-models-panel select,.edit-models-panel input[type=number] { background:#334155; border:1px solid #475569; border-radius:.5rem; color:#f8fafc; padding:.45rem .6rem; }
+.edit-models-panel button:hover:not(:disabled) { background:#475569; }
+.edit-models-panel button:disabled { opacity:.5; }
+.edit-models-panel input[type=number] { width:5rem; }
+.edit-models-panel input.mixed { background:#fed7aa; color:#431407; }
+.edit-models-panel .edit-field { display:inline-flex; align-items:center; gap:.3rem; }
+.edit-models-panel .edit-transform-field { display:inline-flex; align-items:center; gap:.3rem; }
+.edit-models-panel button.edit-transform-reset { width:1.75rem; height:1.75rem; padding:0; border:0; border-radius:.5rem; background:#7c3aed; color:white; }
+.edit-models-panel button.edit-transform-reset:hover:not(:disabled) { background:#6d28d9; }
+.edit-models-panel button.edit-transform-reset.is-hidden { visibility:hidden; }
+.edit-models-panel .edit-sequences { max-height:14rem; overflow:auto; font-family:monospace; overflow-wrap:anywhere; }
+.edit-models-panel .edit-visibility { display:grid; gap:.35rem; max-height:15rem; overflow:auto; }
+.edit-models-panel .edit-message { color:#cbd5e1; font-size:.8rem; }
+.edit-models-viewer { position:absolute; inset:0; background:#020617; overflow:hidden; }
+.edit-models-viewer[hidden] { display:none; }
+.edit-models-viewer canvas { width:100%; height:100%; display:block; touch-action:none; }
+.edit-models-viewer .edit-help { position:absolute; left:1rem; bottom:1rem; color:#cbd5e1; font-size:.75rem; pointer-events:none; }
+body.light-mode .edit-models-panel { background:#fff; color:#0f172a; border-color:#cbd5e1; }
+body.light-mode .edit-models-panel .edit-message { color:#475569; }
+.app-physics-viewer #physicsContainer[hidden] { display:none !important; }
+@media (max-width:768px) {
+ .edit-models-page .app-page-layer { top:45%; bottom:0; height:55%; }
+ .edit-models-page .app-page-content { padding:3.8rem 1rem 1rem; }
+}
+.edit-models-panel input[type=text] { background:#334155; border:1px solid #475569; border-radius:.5rem; color:#f8fafc; padding:.45rem .6rem; max-width:100%; }
+.edit-models-panel select { background:#7c3aed; border:0; color:#fff; font-size:.75rem; font-weight:600; min-width:10rem; }
+.edit-models-panel button { border-radius:.75rem; font-size:.75rem; font-weight:600; }
+.edit-models-panel .edit-visibility-section { margin:1rem -1rem; border-top:1px solid #1e293b; border-bottom:1px solid #1e293b; }
+.edit-models-panel .edit-visibility-section summary { cursor:pointer; display:flex; align-items:center; gap:.5rem; padding:.8rem 1.25rem; font-weight:600; font-size:.875rem; list-style:none; background:rgba(15,23,42,.9); }
+.edit-models-panel .edit-visibility-section summary > .fa-eye { color:#2dd4a7; }
+.edit-models-panel .edit-visibility-section summary > .edit-visibility-chevron { margin-left:auto; font-size:inherit; }
+.edit-models-panel .edit-visibility-section[open] .edit-visibility-chevron { transform:rotate(180deg); }
+.edit-models-panel .edit-visibility { display:block; max-height:none; }
+.edit-models-panel .edit-visibility-row { display:flex; flex-wrap:wrap; gap:.4rem; align-items:center; padding:.5rem 1.25rem; border-top:1px solid #1e293b; }
+.edit-models-panel .edit-visibility-label { color:#94a3b8; font-size:.625rem; text-transform:uppercase; letter-spacing:.05em; }
+.edit-models-panel .edit-visibility-toggle { display:inline-flex; align-items:center; gap:.35rem; padding:.3rem .6rem; border-radius:.35rem; border:1px solid #334155; background:#0f172a; color:#fff; }
+.edit-models-panel .edit-visibility-toggle[aria-pressed=false] { color:#64748b; border-style:dashed; background:#020617; }
+.edit-models-panel .edit-visibility-toggle i { color:#34d399; font-size:.65rem; }
+.edit-models-panel .edit-visibility-toggle[aria-pressed=false] i { color:#475569; }
+.edit-models-panel .edit-visibility-dot { width:.625rem; height:.625rem; display:inline-block; border-radius:50%; }
+.edit-models-panel .edit-visibility-toggle[aria-pressed=false] .edit-visibility-dot { opacity:.3; }
+body.light-mode .edit-models-panel .edit-visibility-section summary { background:#e8eef5; color:#172033; }
+.edit-download-wrap { position:relative; display:inline-block; margin-top:1rem; }
+.edit-models-panel [data-download] { background:#059669; color:white; }
+.edit-download-menu:not([hidden]) { display:flex; flex-direction:column; gap:.35rem; position:absolute; z-index:80; bottom:calc(100% + .5rem); left:0; min-width:10rem; padding:.45rem; border-radius:.75rem; background:#0f172a; box-shadow:0 16px 38px #0009; }
+.edit-models-panel .edit-download-menu button { text-align:left; border:0; border-radius:.5rem; }
+.edit-download-menu label { font-size:.75rem; padding:.4rem; color:#cbd5e1; white-space:nowrap; }
+body.light-mode .edit-download-menu:not([hidden]) { background:#f8fafc; box-shadow:0 16px 38px #33415555; }
+body.light-mode .edit-download-menu label { color:#334155; }
+.edit-models-panel select[hidden] { display:none; }
+.edit-models-panel .edit-select-trigger { min-width:10rem; display:inline-flex; align-items:center; justify-content:space-between; gap:1rem; padding:.375rem .75rem; border:0; border-radius:.75rem; background:#7c3aed; color:#fff; font-size:.75rem; font-weight:600; }
+.edit-models-panel .edit-select-trigger:hover { background:#6d28d9; }
+.edit-models-panel .edit-select-trigger i { font-size:.7rem; }
+.edit-select-menu:not([hidden]) { position:fixed; z-index:1000; display:flex; flex-direction:column; gap:.35rem; min-width:10rem; max-width:calc(100vw - 1rem); max-height:calc(100vh - 1rem); overflow:auto; padding:.45rem; border-radius:.75rem; background:#0f172a; box-shadow:0 16px 38px #0009; }
+.edit-select-menu button { min-width:0; padding:.55rem .7rem; border:0; border-radius:.5rem; background:#334155; color:#e2e8f0; text-align:left; font-size:.75rem; line-height:1.25; white-space:nowrap; cursor:pointer; }
+.edit-select-menu button:hover { background:#475569; }
+.edit-select-menu button[aria-pressed=true] { background:#7c3aed; color:#fff; }
+body.light-mode .edit-select-menu:not([hidden]) { background:#f8fafc; box-shadow:0 16px 38px #33415555; }
+body.light-mode .edit-select-menu button { background:#e2e8f0; color:#334155; }
+body.light-mode .edit-select-menu button:hover { background:#cbd5e1; }
+body.light-mode .edit-select-menu button[aria-pressed=true] { background:#8849ee; color:#fff; }
+body.light-mode .edit-models-panel .edit-select-trigger { background:#8849ee; color:#fff; }
+.edit-membrane-labels { position:absolute; inset:0; pointer-events:none; }
+.edit-membrane-label { position:absolute; transform:translate(-50%,-50%); padding:.2rem .5rem; border:1px solid #38bdf8; border-radius:.4rem; background:#0f172ae6; color:#e0f2fe; font-size:.7rem; font-weight:600; white-space:nowrap; }
+/* Edit Models controls follow the light palette used by the main viewer. */
+body.light-mode .edit-models-panel input[type=text],
+body.light-mode .edit-models-panel input[type=number] { background:#f1f5f9; border-color:#cbd5e1; color:#172033; }
+body.light-mode .edit-models-panel input::placeholder { color:#64748b; }
+body.light-mode .edit-models-panel input[type=number].mixed { background:#fed7aa; border-color:#fdba74; color:#431407; }
+.edit-models-panel input.edit-transform-input { width:5.5rem; border:0; border-radius:.55rem; background:#1e293b; color:#f8fafc; padding:.28rem .45rem; font-variant-numeric:tabular-nums; cursor:ew-resize; }
+.edit-models-panel input.edit-transform-input:focus { cursor:text; outline:2px solid #64748b; }
+.edit-models-panel input.edit-transform-input:disabled { opacity:.5; cursor:not-allowed; }
+.edit-models-panel .edit-field[title="Select a molecule first"], .edit-models-panel .edit-control-tooltip:has(button:disabled) { cursor:not-allowed; }
+.edit-models-panel .edit-field input:disabled, .edit-models-panel .edit-control-tooltip button:disabled { pointer-events:none; }
+body.light-mode .edit-models-panel input.edit-transform-input { background:#e2e8f0; color:#000; }
+.edit-models-panel input.edit-transform-input.mixed, body.light-mode .edit-models-panel input.edit-transform-input.mixed { background:#fed7aa; color:#431407; }
+body.light-mode .edit-models-panel button:not(.edit-select-trigger):not([data-download]):not(.edit-visibility-toggle) { background:#e2e8f0; border-color:#cbd5e1; color:#334155; }
+body.light-mode .edit-models-panel button:not(.edit-select-trigger):not([data-download]):not(.edit-visibility-toggle):hover:not(:disabled) { background:#cbd5e1; color:#172033; }
+body.light-mode .edit-models-panel button.edit-transform-reset:not(.edit-select-trigger):not([data-download]):not(.edit-visibility-toggle) { background:#7c3aed; color:#fff; }
+body.light-mode .edit-models-panel button.edit-transform-reset:not(.edit-select-trigger):not([data-download]):not(.edit-visibility-toggle):hover:not(:disabled) { background:#6d28d9; color:#fff; }
+body.light-mode .edit-models-panel .edit-visibility-section,
+body.light-mode .edit-models-panel .edit-visibility-row { border-color:#cbd5e1; }
+body.light-mode .edit-models-panel .edit-visibility-label { color:#475569; }
+body.light-mode .edit-models-panel .edit-visibility-toggle { background:#f8fafc; border-color:#cbd5e1; color:#172033; }
+body.light-mode .edit-models-panel .edit-visibility-toggle:hover { background:#e2e8f0; }
+body.light-mode .edit-models-panel .edit-visibility-toggle[aria-pressed=false] { background:#f1f5f9; border-color:#cbd5e1; color:#64748b; }
+body.light-mode .edit-models-panel .edit-visibility-toggle i { color:#059669; }
+body.light-mode .edit-models-panel .edit-visibility-toggle[aria-pressed=false] i { color:#64748b; }
+.edit-models-panel [data-download]:hover { background:#047857; }
+body.light-mode .edit-models-panel [data-download] { background:#059669; border-color:#059669; color:#fff; }
+body.light-mode .edit-models-panel [data-download]:hover { background:#047857; border-color:#047857; }
+body.light-mode .edit-models-viewer { background:#fff; }
+body.light-mode .edit-models-viewer .edit-help { color:#475569; }
+/* Match the main 3D viewer's full-width, borderless control surface. */
+.app-page-content:has(.app-page[data-page="11"]:not([hidden])) { padding:4.5rem 1rem 1rem; }
+body .edit-models-panel, body.light-mode .edit-models-panel { padding:0; border:0; border-radius:0; background:transparent; }
+.edit-models-panel .edit-visibility-section { margin:1rem 0; }
+@media (max-width:768px) {
+ .edit-models-page .app-page-content:has(.app-page[data-page="11"]:not([hidden])) { padding:3.8rem 1rem 1rem; }
+}
+.example-loading { color:#e2e8f0; font-size:.75rem; animation:example-loading-pulse 1.4s ease-in-out infinite; }
+body.light-mode .example-loading { color:#64748b; }
+@keyframes example-loading-pulse { 0%,100% { opacity:1; } 50% { opacity:.45; } }
+@media (prefers-reduced-motion:reduce) { .example-loading { animation:none; } }
+.edit-membrane-leaders { position:absolute; inset:0; width:100%; height:100%; z-index:11; overflow:visible; pointer-events:none; }
+.edit-membrane-leaders line { stroke:#67e8f9; stroke-width:1.5; opacity:.85; }
+.edit-membrane-labels { z-index:12; }
+.edit-selection-info { position:absolute; right:1rem; bottom:1rem; z-index:12; max-width:min(19rem,calc(100% - 2rem)); padding:.7rem .85rem; border:0; border-radius:.75rem; font-size:.75rem; line-height:1.5; background:#0c1929; color:#e2e8f0; box-shadow:0 4px 16px #0003; }
+.edit-selection-info[hidden] { display:none; }
+.edit-selection-info .selection-info-heading { display:flex; align-items:center; justify-content:space-between; gap:.75rem; }
+.edit-selection-info button { border:0; border-radius:.55rem; padding:.25rem .55rem; font-weight:600; cursor:pointer; }
+.edit-selection-info .selection-glow-button { background:#eab308; color:#422006; }
+.edit-selection-info .selection-glow-button:hover { background:#ca8a04; }
+.edit-selection-info .edit-clear-selection { margin-top:.35rem; background:#334155; color:#e2e8f0; }
+body.light-mode .edit-selection-info { background:#f8fafc; color:#1e293b; }
+body.light-mode .edit-selection-info .edit-clear-selection { background:#e2e8f0; color:#334155; }
+body.light-mode .edit-membrane-leaders line { stroke:#0284c7; }
+body.light-mode .edit-membrane-label { background:#ffffffd9; color:#075985; border-color:#7dd3fc; }
+/* Match the 3D viewer's membrane label appearance and anchor point. */
+.edit-membrane-label { transform:translate(-100%,-50%); padding:.25rem .55rem; border:0; border-radius:.5rem; background:#0f172acc; color:#e0f2fe; font-size:.75rem; font-weight:700; text-shadow:0 1px 3px #000; }
+body.light-mode .edit-membrane-label { background:#ffffffd9; color:#075985; text-shadow:none; }

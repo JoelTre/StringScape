@@ -528,7 +528,7 @@ function addStagedDraftGeometry(object,points,colors,lifecycle,render,colorMode=
         geometry.setAttribute('color',new THREE.Float32BufferAttribute(rgb,3));
         object.add(new THREE.Mesh(geometry,new THREE.MeshPhongMaterial({vertexColors:true,shininess:35})));return;
     }
-    const molecular=['ball-stick','gaussian','surface','curves'].includes(mode),entries=[],nodes=[];
+    const molecular=['ball-stick','surface','curves'].includes(mode),entries=[],nodes=[];
     points.forEach((atom,index)=>{
         nodes.push({blockIdx:0,idx2:index,res:{entityType:atom.entityType}});
         for(const source of molecular&&atom.sourceAtoms?.length?atom.sourceAtoms:[atom]){
@@ -595,7 +595,7 @@ function renderStagedPreview(){
     const groups=new Map();if(aligned&&!previewing)state.assembly.groups.forEach((group,index)=>{for(const entry of group.entries.values())groups.set(entry,{group,index});});
     const toggles=document.getElementById('stagedStructureToggles');toggles.replaceChildren();toggles.classList.toggle('hidden',!aligned);
     const lifecycle={cancelled:false};
-    const render=()=>{if(!lifecycle.cancelled){scene.background=stagedViewerBackground();syncPhysicsMaterials(scene);syncPhysicsTransparency(scene);MolecularImpostors.syncGaussianScene(scene,camera);renderer.render(scene,camera);}},makeToggle=(label,key,object)=>{
+    const render=()=>{if(!lifecycle.cancelled){scene.background=stagedViewerBackground();syncPhysicsMaterials(scene);syncPhysicsTransparency(scene);renderer.render(scene,camera);}},makeToggle=(label,key,object)=>{
         object.visible=state.visible.get(key)!==false;const button=document.createElement('button');button.type='button';button.className='px-3 py-1 rounded border border-slate-600 text-xs';button.textContent=label;button.setAttribute('aria-pressed',String(object.visible));
         button.addEventListener('click',()=>{object.visible=!object.visible;state.visible.set(key,object.visible);button.setAttribute('aria-pressed',String(object.visible));render();});toggles.append(button);
     };
@@ -662,8 +662,62 @@ function renderStagedPreview(){
 function estimateStagedRemainingMs(activeMs,completed,total){
     return completed>0?Math.max(0,total-completed)*activeMs/completed:null;
 }
+// A draft owns its counters even while another draft is being built or viewed.
+function buildPassStatsRows(build,groups){
+    const current=(key)=>groups?.statsModelKey===key?groups:null;
+    if(!build)return groups?.statsModelKey==='single'?[{label:'Model',stats:groups}]:[];
+    return (build.files||[]).map((file,index)=>({label:`Draft ${index+1} · ${file.pdbId}`,
+        stats:build.drafts?.[index]?.viewState?.groupSimulation??current(`draft:${index}`)}));
+}
+function renderBuildPassStats(build,groups){
+    const host=document.getElementById('buildPassStatsRows');if(!host)return;
+    const rows=buildPassStatsRows(build,groups);
+    if(build?.kind==='combined'&&groups?.statsModelKey===build.current)rows.push({label:'Combined model',stats:groups});
+    host.replaceChildren();
+    if(!rows.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=7;cell.textContent='Simulation statistics appear when a build starts.';row.append(cell);host.append(row);return;}
+    for(const item of rows){const row=document.createElement('tr'),name=document.createElement('th');name.scope='row';name.textContent=item.label;row.append(name);
+        for(let pass=0;pass<2;pass++){
+            const metrics=item.stats?.passMetrics?.[pass];
+            const started=metrics&&(metrics.steps>0||metrics.runningMs>0||item.stats.complete||item.stats.pass>pass+1);
+            for(const value of [started?metrics.steps.toLocaleString():'—',started?`${(metrics.runningMs/1000).toFixed(2)} s`:'—']){
+                const cell=document.createElement('td');cell.textContent=value;row.append(cell);
+            }
+        }
+        for(const value of [item.stats?.finalGeometry?.backboneDeviations,item.stats?.finalGeometry?.clashes]){
+            const cell=document.createElement('td');cell.textContent=Number.isFinite(value)?value.toLocaleString():'—';row.append(cell);
+        }
+        host.append(row);
+    }
+}
+function renderBuildStepStats(build,groups){
+    const host=document.getElementById('buildStepStatsRows');if(!host||!host.closest('details')?.open)return;
+    const rows=buildPassStatsRows(build,groups);
+    if(build?.kind==='combined'&&groups?.statsModelKey===build.current)rows.push({label:'Combined model',stats:groups});
+    const fragment=document.createDocumentFragment();let count=0;
+    for(const item of rows)for(const step of item.stats?.stepStats||[]){
+        const row=document.createElement('tr');
+        for(const value of [count+1,item.label,step.cores?.join(', ')||'—',step.pass,Number.isFinite(step.timeMs)?step.timeMs.toFixed(2):'—',step.repeats,step.neighbourRebuilt?'Yes':'No',Number.isFinite(step.mobility)?step.mobility.toFixed(6):'—',Number.isFinite(step.energy)?step.energy.toFixed(4):'—']){const cell=document.createElement('td');cell.textContent=String(value);row.append(cell);}
+        fragment.append(row);count++;
+    }
+    if(!count){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=9;cell.textContent='Simulation steps appear when a build starts.';row.append(cell);fragment.append(row);}
+    host.replaceChildren(fragment);
+}
+let buildPassStatsLastDraw=-Infinity;
 function updateStagedBuildETC(now,force=false){
     const groups=typeof groupSimulation==='undefined'?null:groupSimulation;
+    const details=document.getElementById('buildStepStatsRows')?.closest('details');
+    if(details&&!details.dataset.stepStatsListener){details.dataset.stepStatsListener='1';details.addEventListener('toggle',()=>{if(details.open)renderBuildStepStats(multiReferenceBuild,typeof groupSimulation==='undefined'?null:groupSimulation);});
+        const button=document.getElementById('copyBuildStepStats'),status=document.getElementById('copyBuildStepStatsStatus');
+        button?.addEventListener('click',async()=>{
+            renderBuildStepStats(multiReferenceBuild,typeof groupSimulation==='undefined'?null:groupSimulation);
+            const table=document.querySelector('table[aria-label="Individual simulation steps"]');
+            const lines=[...table.querySelectorAll('tr')].filter(row=>row.cells.length===9).map(row=>[...row.cells].map(cell=>cell.textContent.replace(/[\t\r\n]+/g,' ')).join('\t'));
+            if(lines.length<2){status.textContent='No simulation steps to copy.';return;}
+            try{await navigator.clipboard.writeText(lines.join('\n'));status.textContent='Table copied.';}
+            catch{status.textContent='Could not copy the table. Check clipboard permissions.';}
+        });
+    }
+    if(force||now-buildPassStatsLastDraw>=250){renderBuildPassStats(multiReferenceBuild,groups);renderBuildStepStats(multiReferenceBuild,groups);buildPassStatsLastDraw=now;}
     const singleDisplay=document.getElementById('singleBuildETC');
     if(singleDisplay)singleDisplay.classList.toggle('hidden',!multiReferenceBuild&&(!groups||groups.index<0));
     if(!multiReferenceBuild&&!groups)return;

@@ -1,5 +1,6 @@
 // Explicit bindings: uploaded sessions never supply executable code.
 const sessionBindings={
+editModelsData:{get:()=>globalThis.editModelsSessionSnapshot?.()||null,set:v=>globalThis.restoreEditModelsSession?.(v)},
 helicalSymmetryGroups:{get:()=>helicalSymmetryGroups,set:v=>{helicalSymmetryGroups=v;}},
 nucleicExtensionState:{get:()=>nucleicExtensionState,set:v=>{nucleicExtensionState=v;}},
 physicsMaterialSettings:{get:()=>physicsMaterialSettings,set:v=>Object.assign(physicsMaterialSettings,v)},
@@ -114,6 +115,8 @@ groupNeighbourDistance:{get:()=>groupNeighbourDistance,set:v=>{groupNeighbourDis
 groupMaxResidueSpeed:{get:()=>groupMaxResidueSpeed,set:v=>{groupMaxResidueSpeed=v;}},
 groupMaxWaitingTime:{get:()=>groupMaxWaitingTime,set:v=>{groupMaxWaitingTime=v;}},
 groupMaxSimulationResidues:{get:()=>groupMaxSimulationResidues,set:v=>{groupMaxSimulationResidues=v;}},
+pass1StericInterval:{get:()=>pass1StericInterval,set:v=>{pass1StericInterval=v;}},
+pass1ClashProjectionRepeats:{get:()=>pass1ClashProjectionRepeats,set:v=>{pass1ClashProjectionRepeats=v;}},
 groupSimulation:{get:()=>groupSimulation,set:v=>{groupSimulation=v;}},
 showSprings:{get:()=>showSprings,set:v=>{showSprings=v;}},
 showSpringHistogram:{get:()=>showSpringHistogram,set:v=>{showSpringHistogram=v;}},
@@ -153,7 +156,7 @@ patternMarkersVisible:{get:()=>patternMarkersVisible,set:v=>{patternMarkersVisib
 keyframeDifferenceNormalized:{get:()=>keyframeDifferenceNormalized,set:v=>{keyframeDifferenceNormalized=v;}},
 residueSpeedNormalized:{get:()=>residueSpeedNormalized,set:v=>{residueSpeedNormalized=v;}},
 sequenceChainFilter:{get:()=>sequenceChainFilter,set:v=>{sequenceChainFilter=v;}},
-physicsRepresentation:{get:()=>physicsRepresentation,set:v=>{physicsRepresentation=v;}},
+physicsRepresentation:{get:()=>physicsRepresentation,set:v=>{physicsRepresentation=v==='gaussian'?'ball-stick':v;}},
 sideChainJiggleEnabled:{get:()=>sideChainJiggleEnabled,set:v=>{sideChainJiggleEnabled=v;}},
 sideChainJiggleSpeed:{get:()=>sideChainJiggleSpeed,set:v=>{sideChainJiggleSpeed=v;}},
 simulationAutoRendered:{get:()=>simulationAutoRendered,set:v=>{simulationAutoRendered=v;}},

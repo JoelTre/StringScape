@@ -1,5 +1,11 @@
 (() => {
     'use strict';
+    const uniProtDisclosure = document.getElementById('uniProtInfoDisclosure');
+    let uniProtDisclosureTouched = false;
+    uniProtDisclosure?.querySelector('summary')?.addEventListener('click', () => { uniProtDisclosureTouched = true; });
+    function updateUniProtDisclosure(connected) {
+        if (uniProtDisclosure && !uniProtDisclosureTouched) uniProtDisclosure.open = !connected;
+    }
     // Keep the actual request and response payloads for this page session. Headers
     // are deliberately excluded so API credentials are never added to the report.
     const dialogue = [];
@@ -450,7 +456,7 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
         if (passcode) await unlockSharedKey(passcode);
     });
     el('DifferentKey').addEventListener('click',()=>{
-        sharedKey=false;active=null;el('Key').value='';updateSharedKeyControls();
+        sharedKey=false;active=null;updateUniProtDisclosure(false);el('Key').value='';updateSharedKeyControls();
         el('Open').textContent='Connect an AI';el('Open').title='';el('State').textContent='';
         providerChanged();el('Key').focus();
     });
@@ -459,7 +465,7 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
         const c=config(); if(modelsPending||!c.model)throw new Error('Wait for models to load and select a chat model first.');
         let saved=true;
         try{if(sharedKey) localStorage.removeItem(connectionStorageKey); else localStorage.setItem(connectionStorageKey,JSON.stringify({mode:connectionMode,cloudProvider,...c}));}catch{saved=false;}
-        active=c;revision++;el('State').textContent=sharedKey?'Shared AI connected for this page session.':saved?'':'AI connected, but this browser could not save the connection. Reconnect manually next time.';
+        active=c;updateUniProtDisclosure(true);revision++;el('State').textContent=sharedKey?'Shared AI connected for this page session.':saved?'':'AI connected, but this browser could not save the connection. Reconnect manually next time.';
         el('Open').textContent=`AI connected: ${c.model}`;
         el('Open').title='Manage AI connection';
         if(el('Dialog').open)el('Dialog').close();
@@ -471,7 +477,7 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
     el('Disconnect').addEventListener('click',()=>{
         let removed=true;
         try{localStorage.removeItem(connectionStorageKey);}catch{removed=false;}
-        active=null;sharedKey=false;el('Key').value='';updateSharedKeyControls();invalidateModels();el('State').textContent=removed?'AI disconnected.':'AI disconnected, but saved site data could not be removed. Clear this site’s browser storage to forget the key.';el('Open').textContent='Connect an AI';el('Open').title='';el('Status').textContent='Disconnected.';
+        active=null;updateUniProtDisclosure(false);sharedKey=false;el('Key').value='';updateSharedKeyControls();invalidateModels();el('State').textContent=removed?'AI disconnected.':'AI disconnected, but saved site data could not be removed. Clear this site’s browser storage to forget the key.';el('Open').textContent='Connect an AI';el('Open').title='';el('Status').textContent='Disconnected.';
     });
     function restoreConnection(){
         let saved;

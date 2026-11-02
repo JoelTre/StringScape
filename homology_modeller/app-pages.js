@@ -4,15 +4,20 @@
     const setup = main.firstElementChild;
     const physics = document.getElementById('homologyPhysicsSimulation');
     const viewer = document.getElementById('physicsContainer');
-    const pages = Array.from({length: 9}, (_, i) => {
+    const pages = Array.from({length: 11}, (_, i) => {
         const page = document.createElement('section');
         page.className = 'app-page';
         page.dataset.page = String(i + 1);
         page.hidden = i !== 0;
         return page;
     });
-    const labels = ['Build a model', 'Build process', '3D viewer', 'Mol* viewer', 'Build stats', 'Compare variables', 'Connect an AI', 'Save and download', 'Validation report'];
-    const icons = ['fa-cubes', 'fa-list-check', 'fa-dna', 'fa-cube', 'fa-chart-bar', 'fa-chart-line', 'fa-robot', 'fa-floppy-disk', 'fa-clipboard-check'];
+    const menuItems = [
+        [1, 'Home', 'fa-house'], [3, '3D viewer', 'fa-cube'], [4, 'Mol* viewer', 'fa-dna'], [11, 'Model editor', 'fa-pen-to-square'],
+        [2, 'Build process', 'fa-list-check'], [5, 'Build stats', 'fa-chart-bar'],
+        [6, 'Compare variables', 'fa-chart-line'], [7, 'Connect an AI', 'fa-robot'],
+        [8, 'Save and download', 'fa-floppy-disk'], [9, 'Validation report', 'fa-clipboard-check'],
+        [10, 'About this app', 'fa-circle-info']
+    ];
     const ai = document.getElementById('modellerAiOpen').closest('section');
     const session = document.getElementById('sessionPanel');
     const process = document.getElementById('buildProcessBox');
@@ -32,6 +37,15 @@
     pages[6].append(ai);
     pages[7].append(session, download);
     pages[8].append(report);
+    const editModels = window.createEditModelsPage();
+    pages[10].append(editModels.panel);
+    pages[9].innerHTML = `<article class="app-about">
+        <h1>About StringScape protein modeller</h1>
+        <p>StringScape Protein Modeller builds all-atom homology models of protein complexes by aligning AlphaFold models to reference structures from the Protein Data Bank. Models can include DNA, RNA, small molecules, ions and lipid membranes.</p>
+        <p>The app is designed to make homology modelling accessible. It is also available in the Structures view of the main StringScape application and is open source under the Apache-2.0 licence.</p>
+        <p><a href="https://github.com/JoelTre/StringScape/tree/main" target="_blank" rel="noopener noreferrer">View source code <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a></p>
+        <a class="app-about-contact" href="https://stringscape.net/contact" target="_blank" rel="noopener noreferrer">Contact us <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></a>
+    </article>`;
 
     const shell = document.createElement('div'); shell.className = 'app-shell';
     const menu = document.createElement('nav'); menu.className = 'app-page-menu'; menu.setAttribute('aria-label', 'App pages');
@@ -42,7 +56,8 @@
     const topBlur=document.createElement('div'),bottomBlur=document.createElement('div');
     topBlur.className='app-scroll-blur app-scroll-blur-top';bottomBlur.className='app-scroll-blur app-scroll-blur-bottom';
     topBlur.setAttribute('aria-hidden','true');bottomBlur.setAttribute('aria-hidden','true');
-    layer.append(burger, content, topBlur, bottomBlur); shell.append(menu, layer);
+    const shadow = document.createElement('div'); shadow.className = 'app-page-shadow'; shadow.setAttribute('aria-hidden', 'true');
+    layer.append(shadow, burger, content, topBlur, bottomBlur); shell.append(menu, layer);
     let fadeUpdateFrame=0;
     function updateScrollFades() {
         fadeUpdateFrame=0;
@@ -60,25 +75,30 @@
         const observer=new ResizeObserver(scheduleScrollFadeUpdate);
         observer.observe(content);pages.forEach(page=>observer.observe(page));
     }
-    const viewerBox = document.createElement('div'); viewerBox.className = 'app-physics-viewer'; viewerBox.append(viewer);
+    const viewerBox = document.createElement('div'); viewerBox.className = 'app-physics-viewer'; viewerBox.append(viewer, editModels.viewer);
     main.replaceChildren(shell, viewerBox); main.classList.add('app-workspace');
     const mobileSheet=window.createMobilePhysicsSheet({main,layer,burger,viewer:viewerBox,content,heading:document.querySelector('#aboutProteinComplex > h2'),chatInput:document.getElementById('complexAiQuestion')});
     let current = 1;
-    const buttons = labels.map((label, i) => {
+    const buttons = menuItems.map(([number, label, icon]) => {
         const button = document.createElement('button'); button.type = 'button';
-        button.innerHTML = `<i class="fa-solid ${icons[i]}" aria-hidden="true"></i><span>${label}</span>`;
-        button.addEventListener('click', () => navigate(i + 1)); menu.append(button); return button;
+        button.innerHTML = `<i class="fa-solid ${icon}" aria-hidden="true"></i><span>${label}</span>`;
+        button.addEventListener('click', () => navigate(number)); menu.append(button); return button;
     });
     function setMenu(open) {
         main.classList.toggle('menu-open', open); menu.inert = !open; burger.setAttribute('aria-expanded', String(open));
         burger.setAttribute('aria-label', open ? 'Close page menu' : 'Open page menu');
     }
     function navigate(number) {
-        if (number < 1 || number > 9) return;
+        if (number < 1 || number > pages.length) return;
         current = number;
+        if(number === 3) window.appSetExampleLoading?.(false);
         pages.forEach((page, i) => { page.hidden = i !== number - 1; });
-        buttons.forEach((button, i) => { if (i === number - 1) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current'); });
-        main.classList.toggle('physics-page', number === 3);
+        buttons.forEach((button, i) => { if (menuItems[i][0] === number) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current'); });
+        main.classList.toggle('physics-page', number === 3 || number === 11);
+        main.classList.toggle('edit-models-page', number === 11);
+        viewer.hidden = number === 11;
+        editModels.viewer.hidden = number !== 11;
+        if (number === 11) editModels.show();
         mobileSheet.setPage(number);
         setMenu(false); content.scrollTop = 0; scheduleScrollFadeUpdate();
         if (number === 2 && details.classList.contains('hidden')) document.getElementById('viewDetailsBtn').click();
@@ -94,6 +114,9 @@
     }
     const examplesButton = document.getElementById('exampleModelsButton');
     const examplesMenu = document.getElementById('exampleModelsMenu');
+    const exampleLoading=document.createElement('span');exampleLoading.className='example-loading';exampleLoading.setAttribute('role','status');exampleLoading.hidden=true;exampleLoading.textContent='Loading...';examplesButton.after(exampleLoading);
+    window.appSetExampleLoading=loading=>{exampleLoading.hidden=!loading;};
+    examplesMenu.addEventListener('click',event=>{if(event.target.closest('button[data-reference]'))window.appSetExampleLoading(true);},true);
     function closeExamples() { examplesMenu.classList.add('hidden'); examplesButton.setAttribute('aria-expanded', 'false'); }
     function placeExamples() {
         const rect = examplesButton.getBoundingClientRect();

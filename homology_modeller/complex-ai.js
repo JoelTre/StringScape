@@ -22,7 +22,7 @@
             'Align each reference chain or polynucleotide sequence against AlphaFold sequences. Semi-global alignment fits the reference within the AlphaFold sequence, allowing extra residues at either end. Local Smith–Waterman and global Needleman–Wunsch are also available.',
             'Calculate distance matrices for spatial relationships within each chain, polynucleotide or molecule and, in references, between them.',
             'Combine aligned reference and AlphaFold matrices into a morph distance matrix. Reference and AlphaFold influence sliders control the blend of shared intra-chain distances and their influence on simulation.',
-            'In phase 1 align AlphaFold structures to the reference by rigid-body Template Modelling alignment. In phase 2 an overdamped elastic simulation relaxes springs between residues, nucleotides and atoms. PAE and pLDDT weaken uncertain AlphaFold contributions; local Cα angular and pseudo-dihedral restraints preserve backbone bends and twists. Build Settings control these effects. Each reference independently produces a draft, locking aligned interior residues while nearby subunit groups relax in succession. The app also estimates membrane association, position, curvature and placement confidence.',
+            'AF to PDB TM alignment aligns AlphaFold structures to the reference by rigid-body Template Modelling alignment. The simulation then relaxes springs between residues, nucleotides and atoms using an overdamped elastic model. PAE and pLDDT weaken uncertain AlphaFold contributions; local Cα angular and pseudo-dihedral restraints preserve backbone bends and twists. Build Settings control these effects. Each reference independently produces a draft, locking aligned interior residues while nearby subunit groups relax in succession. The app also estimates membrane association, position, curvature and placement confidence.',
             'With multiple references, structurally TM-align completed drafts and match equivalent subunits. By default all references are in one group: combine sequences, average residue centres and spring values according to reference influence sliders, retain unmatched subunits, then simulate groups without reference coordinate locks. A connected AI can identify distinct conformational states and name and order separate groups; merge only within each group. The final model animates between states, morphing equivalent subunits and fading absent ones. The conformation group selector displays individual states. Generated group keyframes have 100 frames between them, with all variables except conformation synced.',
             'Convert the result to mmCIF, display it in a Mol* viewer, and allow the mmCIF to be downloaded.'
         ]};}
@@ -38,7 +38,7 @@
     window.requestComplexTitle=references=>{
         const entries=(references||[]).filter(item=>item&&item.id).map(item=>({id:String(item.id),name:String(item.name||'')}));
         if(!entries.length||!window.ModellerAI?.connected())return;
-        const key=JSON.stringify(entries.map(item=>item.id.toUpperCase()));
+        const key=JSON.stringify(entries.map(item=>[item.id.toUpperCase(),item.name]));
         if(key===titleKey)return;
         window.invalidateComplexTitle();titleKey=key;
         const task=new AbortController();titleController=task;
