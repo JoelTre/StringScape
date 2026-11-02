@@ -1847,6 +1847,7 @@
         let referenceSearchResults = [];
         // RCSB titles for the reference structures used by the built-in examples.
         const exampleReferenceNames = {
+            '8WO5':'Flagellar motor',
             '6YKM':'Structure of C. jejuni MotAB',
             '8UCS':'Cryo-EM structure of the flagellar MotAB stator bound to FliG',
             '5T4P':'Autoinhibited E. coli ATP synthase state 2',
@@ -3250,7 +3251,7 @@
             const unresolved=matches.filter(match=>!stringMatchAccepted(match));
             if(!unresolved.length)return '';
             const count=new Set(unresolved.map(match=>match.queryKey||match.chain)).size;
-            return `${count} reference chain match(es) unresolved. ${stringMatchesBuildable(matches)?'Building can continue with validated targets.':'No validated targets available; build cannot start.'}\n\nNo confident target match resolved for ${unresolved.map(match=>match.chain+' ('+match.referenceName+')').join(', ')}.\n\nThese identities have no validated target in this build; this does not establish that the proteins are absent from the selected species, it just means the app could not find them. Use Review protein matches to inspect candidates and validation details.\n\nIf you know the Uniprot IDs for all the proteins in your species, manually input them into the box below`;
+            return `${count} reference chain match(es) unresolved. ${stringMatchesBuildable(matches)?'Building can continue with validated targets.':'No validated targets available; build cannot start.'}\n\nNo confident target match resolved for ${unresolved.map(match=>match.chain+' ('+match.referenceName+')').join(', ')}.\n\nThese identities have no validated target in this build; this does not establish that the proteins are absent from the selected species, it just means the app could not find them. Use Review protein matches to inspect candidates and validation details.\n\nIf you know the Uniprot IDs for all these proteins in your species, manually input them into the box below`;
         }
         function publishStringMatches(response){
             const input=document.getElementById('pdbInput2'),status=document.getElementById('stringMatchStatus');
@@ -5250,8 +5251,22 @@
             }
             return original;
         }
-        let physicsMeshesDirty=true,physicsMeshDisplayState='';
-        function requestVisualPhysicsMeshUpdate(){physicsMeshesDirty=true;}
+        let physicsMeshesDirty=true,physicsMeshDisplayState='',physicsRenderDirty=true;
+        const physicsPulseModelCache=new WeakMap();
+        function physicsPulseVisible(){
+            if(physicsPulsePaused||(physicsOriginColorMode&&!physicsDifferenceMode))return false;
+            if(!physicsPulseModelCache.has(physicsNodes))physicsPulseModelCache.set(physicsNodes,physicsNodes.some(isModel2Only));
+            return physicsPulseModelCache.get(physicsNodes);
+        }
+        function requestVisualPhysicsMeshUpdate(){physicsMeshesDirty=true;physicsRenderDirty=true;}
+        function physicsViewVisible(){
+            const viewer=document.getElementById('physicsContainer');
+            return !!viewer&&!viewer.hidden&&!!viewer.getClientRects().length;
+        }
+        for(const eventName of ['pointerdown','pointermove','wheel','input','change','click','keydown'])
+            document.addEventListener(eventName,event=>{if(eventName!=='pointermove'||event.buttons)physicsRenderDirty=true;},{passive:true});
+        window.addEventListener('resize',()=>{physicsRenderDirty=true;});
+        window.addEventListener('stringscape-physics-page-visible',()=>{physicsMeshesDirty=true;physicsRenderDirty=true;});
         function syncVisualPhysicsMeshes(updateSprings=true){
             if(instancedNodeMesh&&homologyStructureVisible&&physicsRepresentation==='backbone'){
                 for(let i=0;i<physicsNodes.length;i++){
@@ -5656,10 +5671,10 @@
             const safeTitle=physicsCaptureTitle('Snap').trim().replace(/[^a-z0-9._ -]+/gi,'').replace(/\s+/g,'-').slice(0,120)||'physics-viewport';
             const link=document.createElement('a');link.href=physicsSnapshotUrl;link.download=`${safeTitle}.png`;document.body.appendChild(link);link.click();link.remove();
         }
-        function addPhysicsPulse(mesh, endpoints, backbone = false, selectionNodeIndices = []) {
+        function addPhysicsPulse(mesh, endpoints, backbone = false, selectionNodeIndices = [], preparedSelection = null) {
             mesh.geometry.setAttribute('pulseEndpoints', new THREE.InstancedBufferAttribute(ArrayBuffer.isView(endpoints)?endpoints:new Float32Array(endpoints), 2));
-            const selectionEndpoints=new Float32Array(selectionNodeIndices.length*2);
-            for(let i=0;i<selectionNodeIndices.length;i++){
+            const selectionEndpoints=preparedSelection||new Float32Array(selectionNodeIndices.length*2);
+            if(!preparedSelection)for(let i=0;i<selectionNodeIndices.length;i++){
                 const indexes=selectionNodeIndices[i],a=Array.isArray(indexes)?indexes[0]:indexes,b=Array.isArray(indexes)?indexes[1]:indexes;
                 selectionEndpoints[i*2]=selectionMatches(physicsNodes[a])?1:0;selectionEndpoints[i*2+1]=selectionMatches(physicsNodes[b])?1:0;
             }
@@ -5818,7 +5833,9 @@
 // physicsCaptureAndPulse.js end
 
 // physicsSetup.js start
-        function initPhysicsSimulation() {
+        let physicsSetupRevision=0,physicsSetupPending=false;
+        async function initPhysicsSimulation() {
+            const setupGeneration=modelBuildGeneration,setupRevision=++physicsSetupRevision;
             if (!physicsRenderer || !backboneLinesGroup) throw new Error('Molecular rendering could not start. Try closing and reopening your browser.');
             resetNucleicExtensions();
             patternDetectionSnapshot=null;rotationalDetectionSnapshot=null;
@@ -5948,7 +5965,16 @@
                 });
             }
 
-            updateReferenceCoordinateLockTargets();
+            physicsSetupPending=true;
+            try{
+                await updateReferenceCoordinateLockTargetsAsync();
+                if(setupGeneration!==modelBuildGeneration||setupRevision!==physicsSetupRevision)throw new DOMException('Build superseded','AbortError');
+                if(physicsRepresentation==='ball-stick')await prepareAtomFrameData();
+            }
+            finally{if(setupRevision===physicsSetupRevision)physicsSetupPending=false;}
+            if(setupGeneration!==modelBuildGeneration||setupRevision!==physicsSetupRevision)throw new DOMException('Build superseded','AbortError');
+            physicsSetupPending=true;
+            try {
             applyReferenceCoordinateLocks();
             propagateInitialReferenceLockDisplacements();
 
@@ -5963,7 +5989,13 @@
             instancedNodeMesh = createMolecularInstances(N,.85,false,{shininess:50});
             addPhysicsPulse(instancedNodeMesh, physicsNodes.flatMap(node => isModel2Only(node) ? [1, 1] : [0, 0]), false, physicsNodes.map((_,index)=>index));
 
+            let meshBatchDeadline=performance.now()+6;
             for (let i = 0; i < N; i++) {
+                if(i%1024===0&&performance.now()>=meshBatchDeadline){
+                    await new Promise(resolve=>setTimeout(resolve,0));
+                    if(setupGeneration!==modelBuildGeneration||setupRevision!==physicsSetupRevision)throw new DOMException('Build superseded','AbortError');
+                    meshBatchDeadline=performance.now()+6;
+                }
                 const node = physicsNodes[i];
                 nodeDummy.position.set(node.x, node.y, node.z);
                 nodeDummy.scale.setScalar(viewerSizes.physics.residue);
@@ -6022,6 +6054,7 @@
 
             const elapsed = PerfTracker.end('initPhysics');
             // console.log(`[StringScape Homology Modeller Perf] Physics initialized with Phase 1 TM-alignment (${N} nodes, TM: ${phase1AlignmentMetrics.avgTmScore.toFixed(3)}, RMSD: ${phase1AlignmentMetrics.avgRmsd.toFixed(2)} Å) in ${elapsed.toFixed(1)}ms`);
+            } finally {if(setupRevision===physicsSetupRevision)physicsSetupPending=false;}
         }
 
         // Membership is selected from immutable input coordinates, never relaxed positions.
@@ -6315,7 +6348,7 @@
             if (state) state.textContent = lockAlignedResiduesToReference ? 'On' : 'Off';
             document.getElementById('lockAlignedResiduesFalloff')?.classList.toggle('hidden', !lockAlignedResiduesToReference);
         }
-        function updateReferenceCoordinateLockTargets() {
+        function* buildReferenceCoordinateLockTargets() {
             physicsLockTargetRevision++;
             if (!physicsNodes.length) return;
             const combined=typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.kind==='combined';
@@ -6333,6 +6366,7 @@
                 for(const index of indices){if(!physicsNodes[index].usedInAlignment)last=index;nearestUnaligned.set(index,index-last);}
                 last=Infinity;for(let p=indices.length-1;p>=0;p--){const index=indices[p];if(!physicsNodes[index].usedInAlignment)last=index;nearestUnaligned.set(index,Math.min(nearestUnaligned.get(index),last-index));}
                 for (const index of indices) {
+                    if(index%256===0)yield;
                     const node = physicsNodes[index];
                     if (!node.usedInAlignment || node.idx1 === null || node.idx2 === null) continue;
                     const nearest=nearestUnaligned.get(index);
@@ -6369,7 +6403,27 @@
                 }
             }
             const lockTable=MemoryData.descriptor(lockAtoms.finish()).table;
-            for(const [node,start,length] of lockRanges)node.referenceLockAtoms=MemoryData.pointMap(lockTable,start,length);
+            let installed=0;
+            for(const [node,start,length] of lockRanges){
+                node.referenceLockAtoms=MemoryData.pointMap(lockTable,start,length);
+                if(++installed%512===0)yield;
+            }
+        }
+        function updateReferenceCoordinateLockTargets(){
+            const work=buildReferenceCoordinateLockTargets();
+            while(!work.next().done){}
+        }
+        async function updateReferenceCoordinateLockTargetsAsync(){
+            const nodes=physicsNodes,generation=modelBuildGeneration,work=buildReferenceCoordinateLockTargets();
+            let result,revision;
+            do {
+                const deadline=performance.now()+6;
+                do {result=work.next();revision??=physicsLockTargetRevision;} while(!result.done&&performance.now()<deadline);
+                if(!result.done){
+                    await new Promise(resolve=>setTimeout(resolve,0));
+                    if(nodes!==physicsNodes||generation!==modelBuildGeneration||revision!==physicsLockTargetRevision){work.return();throw new DOMException('Build superseded','AbortError');}
+                }
+            } while(!result.done);
         }
 
         function applyReferenceCoordinateLocks() {
@@ -9712,7 +9766,7 @@
                 new THREE.MeshPhongMaterial({color:0xffffff,vertexColors:true,shininess:6,specular:0x080a0d}),particles.length);
             mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);mesh.frustumCulled=false;
             const radii=Object.fromEntries(Object.entries(atomCovalentRadii).map(([element,radius])=>[element,radius/atomCovalentRadii.C]));
-            const gpu=LipidRenderer.create(LIPID_ATOMS,LIPID_BONDS,particles.length,radii,physicsRenderer);
+            const gpu=LipidRenderer.create(LIPID_ATOMS,LIPID_BONDS,particles.length,radii,physicsRenderer,molecularBondsVisible());
             const {atomMesh,stickMesh,atomGlowMesh}=gpu;
             const glowMesh=new THREE.InstancedMesh(simplifiedLipidGeometry(),
                 new THREE.MeshBasicMaterial({color:0xffe85a,transparent:true,opacity:.58,depthWrite:false,blending:THREE.AdditiveBlending}),1);
@@ -9789,7 +9843,7 @@
             reconcileMembraneLipids(geometry,now);
             const system=membraneLipids;if(!system)return;
             const molecular=['ball-stick'].includes(physicsRepresentation);
-            system.mesh.visible=!molecular;system.atomMesh.visible=molecular;system.stickMesh.visible=molecular;
+            system.mesh.visible=!molecular;system.atomMesh.visible=molecular;system.stickMesh.visible=molecular&&molecularBondsVisible();
             system.glowMesh.visible=!molecular;system.atomGlowMesh.visible=molecular;
             system.glowMesh.count=0;system.atomGlowMesh.count=0;
             const dt=Math.max(.001,Math.min(.05,(now-system.lastFrame)/1000||.016));system.lastFrame=now;
@@ -9801,10 +9855,12 @@
             const selected=linkedSelection?.kind==='lipid'?linkedSelection.particle:null;
             if(selected&&!system.particles.includes(selected))clearLinkedSelection();
             const gpu=system.gpu,level=lipidDetailLevel(system,geometry);
-            if(molecular&&gpu.detail!==level){
-                const pair=gpu.level(level);system.stickMesh.geometry=pair[1];gpu.detail=level;updateLipidColors();
+            if(molecular){
+                const oldAtom=system.atomMesh.geometry,oldStick=system.stickMesh.geometry;
+                const pair=gpu.level(level,molecularBondsVisible());
+                system.atomMesh.geometry=pair[0];system.stickMesh.geometry=pair[1];gpu.detail=level;
+                if(oldAtom!==pair[0]||oldStick!==pair[1])updateLipidColors();
             }
-            system.atomMesh.geometry=gpu.level(gpu.detail)[0];
             system.atomMesh.material=gpu.atomMaterial;
             system.atomMesh.renderOrder=2;
             Object.assign(gpu.uniforms.lipidTime,{value:now*.001});gpu.uniforms.lipidClock.value=system.spinClock;
@@ -9841,7 +9897,7 @@
                 const index=system.visibleParticles.length;system.visibleParticles.push(p);
                 if(molecular){
                     basis.makeBasis(tangent.set(...axes.tangent),bitangent.set(...axes.bitangent),inward.set(...axes.inward));
-                    basis.setPosition(p.world);system.atomMesh.setMatrixAt(index,basis);system.stickMesh.setMatrixAt(index,basis);
+                    basis.setPosition(p.world);system.atomMesh.setMatrixAt(index,basis);if(molecularBondsVisible())system.stickMesh.setMatrixAt(index,basis);
                     gpu.params.setXYZ(index,p.lipidPhase,p.baseAngle,p.lipidSpin);
                     if(selectionGlowVisible&&p===selected){
                         system.atomGlowMesh.setMatrixAt(0,basis);system.atomGlowMesh.count=1;
@@ -9864,7 +9920,7 @@
             }
             system.geometry=geometry;
             if(molecular){system.atomMesh.count=system.visibleParticles.length;system.stickMesh.count=system.visibleParticles.length;
-                gpu.params.needsUpdate=true;system.atomMesh.instanceMatrix.needsUpdate=true;system.stickMesh.instanceMatrix.needsUpdate=true;
+                gpu.params.needsUpdate=true;system.atomMesh.instanceMatrix.needsUpdate=true;if(molecularBondsVisible())system.stickMesh.instanceMatrix.needsUpdate=true;
             }else{system.mesh.count=system.visibleParticles.length;system.mesh.instanceMatrix.needsUpdate=true;if(system.mesh.instanceColor)system.mesh.instanceColor.needsUpdate=true;}
         }
         function pickMembraneLipid(raycaster){
@@ -10050,7 +10106,7 @@
                 if(data.exposures)membranePlacementExposureCache={nodes:physicsNodes,count:physicsNodes.length,values:new Map(data.exposures)};
                 updateMembraneSideNames();
                 if(physicsColorMode==='membrane'||physicsColorMode==='membrane-placement'){updatePhysicsNodeColors();if(showModel1Overlay)updateModel1AlignmentColors();}
-                renderMembraneDetectionStats();updateMembraneToggleUI();
+                renderMembraneDetectionStats();updateMembraneToggleUI();requestVisualPhysicsMeshUpdate();
             };
             return worker;
         }
@@ -10120,7 +10176,7 @@
         // with a timer, and chain completed worker steps without waiting for paint.
         let backgroundSimulationTimer=null;
         function runBackgroundSimulationTick() {
-            if(!document.hidden||window.__benchmarkRun)return;
+            if(!document.hidden||window.__benchmarkRun||physicsSetupPending)return;
             const now=performance.now();
             stepPhysicsSimulation();
             advanceConformationOptimization(now);
@@ -10191,7 +10247,9 @@
         function animateLoop() {
             requestAnimationFrame(animateLoop);
             if(document.hidden){spinLastTime=null;return;}
-            const physicsVisualUpdated=flushPendingPhysicsVisual();
+            if(physicsSetupPending)return;
+            const viewVisible=physicsViewVisible();
+            const physicsVisualUpdated=viewVisible?flushPendingPhysicsVisual():false;
             document.getElementById('groupSimulationRunningBadge')?.classList.toggle('hidden',
                 !groupSimulation||groupSimulation.complete||groupSimulation.index<0||!physicsRunning||simulationPhase!==2||modelLoading);
 
@@ -10211,6 +10269,19 @@
             if(validationState.reportVisible&&!validationState.physicsViewerVisible&&document.getElementById('validationReport')?.open&&physicsNodes.length&&
                 performance.now()-validationState.lastReportDraw>1000&&performance.now()-(validationState.matrixInteractionAt||0)>220)
                 scheduleValidationReportRefresh();
+            if(!viewVisible){spinLastTime=null;if(molstarPageOpen())renderMolstarMembraneOverlay();return;}
+            const rotating=!spinPaused&&(allSymmetryRotationGroups().some(group=>Math.abs(group.angle||0)>1e-12)||[...singleChainRotations.values()].some(entry=>entry.overridden&&Math.abs(entry.angle||0)>1e-12));
+            const geometryActive=physicsRenderDirty||physicsMeshesDirty||physicsVisualUpdated||animationPlaying||rotating||sideChainJiggleEnabled||!!draggedResidue;
+            if(!geometryActive){
+                if(physicsPulseVisible()&&physicsRenderer&&physicsScene&&physicsCamera&&!physicsWebGLContextLost){
+                    const started=globalThis.AppPerformanceDiagnostics?.active?performance.now():null;
+                    physicsRenderer.render(physicsScene,physicsCamera);
+                    if(started!==null)globalThis.AppPerformanceDiagnostics?.record('WebGL submission (CPU)',performance.now()-started,started);
+                    drawPhysicsCaptureFrame();
+                }
+                return;
+            }
+            physicsRenderDirty=false;
             // Refresh against the current conformation at display cadence, including
             // animation playback when the physics step itself is paused.
             if(['residue-speed','running-simulation'].includes(physicsColorMode)||(groupSimulation&&!groupSimulation.complete))updateResidueSpeeds(performance.now());
@@ -10251,7 +10322,7 @@
                 atomVisualRotations=null;
             }
             if(physicsNodes.length&&readyModelGeneration===modelBuildGeneration)hidePhysicsViewerLoading();
-            renderMolstarMembraneOverlay();
+            if(molstarPageOpen())renderMolstarMembraneOverlay();
         }
 
 // renderLoop.js end
@@ -10817,7 +10888,7 @@
                 renderChainLegends();
                 resetCanvasViews();
                 drawIndividualMatrices(); drawDifferenceMatrix();
-                initPhysicsSimulation(); drawMorphMatrix();
+                await initPhysicsSimulation(); drawMorphMatrix();
                 const index = alignmentResults.findIndex(result=>result.c1===chainId);
                 if (index>=0) inspectAlignment(index);
                 modelBuildCompleted = false;
@@ -12416,7 +12487,8 @@
 
                 setBuildStatus('Preparing simulation and building the spring network…');
                 window.appNavigateWhenSimulationStarts?.();
-                initPhysicsSimulation();
+                await initPhysicsSimulation();
+                if(generation!==modelBuildGeneration)return;
                 if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild){multiReferenceBuild.busy=false;renderStagedReferenceControls();renderStagedBuildControls();}
                 const accuracyWarning = [directReferences?'':modelAccuracyWarning(physicsNodes),currentStringReviewValid()?stringPartialBuildWarning(stringMatchReview.response.matches):''].filter(Boolean).join('\n\n');
                 if (accuracyWarning) showWarning(accuracyWarning);
@@ -13087,7 +13159,7 @@
                     if(!await computeAllChainAlignments())return;
                     resetDiffCanvasView();resetMorphCanvasView();
                     offscreenCaches.diff.dirty=true;offscreenCaches.morph.dirty=true;
-                    drawDifferenceMatrix();initPhysicsSimulation();drawMorphMatrix();
+                    drawDifferenceMatrix();await initPhysicsSimulation();drawMorphMatrix();
                     if(!document.getElementById('alignmentInspector').classList.contains('hidden')&&inspectedAlignmentIndex!==null){
                         if(alignmentResults[inspectedAlignmentIndex])inspectAlignment(inspectedAlignmentIndex);
                         else closeInspector();
@@ -13672,6 +13744,8 @@
         let patternExtensionUnits=0,patternExtensionGroup=null;
         const patternExtensionCounts=new Map();
         let detectedExtensionPatterns=[];
+        let automaticExtensionGeneration=null;
+        const automaticExtensionKeys=new Set();
         function patternExtensionKey(pattern){return [...pattern.members].sort((a,b)=>a-b).join(',');}
         function patternExtensionLabel(pattern){
             const members=[...pattern.members].sort((a,b)=>a-b);
@@ -13688,6 +13762,15 @@
         function updatePatternExtensionControls(patterns,templates,obstacles,copies){
             const host=document.getElementById('physicsPatternExtensionControl');if(!host)return;
             const available=availablePatternExtensions(patterns,templates,obstacles,copies);
+            if(automaticExtensionGeneration!==modelBuildGeneration){automaticExtensionGeneration=modelBuildGeneration;automaticExtensionKeys.clear();}
+            let addedAutomaticExtension=false;
+            for(const pattern of available){
+                const key=patternExtensionKey(pattern);
+                if(automaticExtensionKeys.has(key)||!pattern.members.some(block=>/^(flagellar hook protein flge|actin, alpha skeletal muscle)$/i.test(chainProteinName(block).trim())))continue;
+                automaticExtensionKeys.add(key);
+                if(!patternExtensionCounts.has(key)){patternExtensionCounts.set(key,20);addedAutomaticExtension=true;}
+            }
+            if(addedAutomaticExtension)queueMicrotask(()=>void renderPatternExtensions(detectedExtensionPatterns));
             for(const key of patternExtensionCounts.keys())if(!patterns.some(pattern=>patternExtensionKey(pattern)===key))patternExtensionCounts.delete(key);
             patternExtensionUnits=Math.max(0,...patternExtensionCounts.values());
             const signature=JSON.stringify(available.map(pattern=>[patternExtensionKey(pattern),patternExtensionLabel(pattern)]));
@@ -13864,7 +13947,7 @@
             try{
             patternVarianceLastUpdate=now;
             patternVarianceScores=Array(physicsNodes.length).fill(null);
-            disposePatternMarkers();patternMarkers=new THREE.Group();physicsScene.add(patternMarkers);
+            disposePatternMarkers();patternMarkers=new THREE.Group();patternMarkers.visible=patternMarkersVisible;physicsScene.add(patternMarkers);
             const blocks=new Map(),groups=new Map(),extensionPatterns=[],helicalGroups=[],arrowCandidates=[];
             const previousHelicalAngles=new Map(helicalSymmetryGroups.map(group=>[group.key,group.angle]));
             physicsNodes.forEach((node,index)=>{
@@ -15427,25 +15510,65 @@
             return [x,y,[x[1]*y[2]-x[2]*y[1],x[2]*y[0]-x[0]*y[2],x[0]*y[1]-x[1]*y[0]]];
         }
         const atomFrameDataCache=new WeakMap();
-        function atomFrameData(entries){
-            let data=atomFrameDataCache.get(entries);if(data&&data.nodes===physicsNodes)return data;
+        function buildAtomFrameColumns(entries,sequenceFlags,radii,originFlags,selectionFlags){
             const count=entries.length,descriptor=MemoryData.descriptor(entries);
             const nodeIndices=descriptor?.memoryKind==='entries'?descriptor.nodes:new Uint32Array(count);
             const sourceCoordinates=new Float64Array(count*3),nameCodes=new Uint32Array(count),elementCodes=new Uint32Array(count);
-            const names=[],elements=[],nameIds=new Map(),elementIds=new Map(),backbone=new Uint8Array(count),elementRatios=new Float64Array(count);
-            let sequenceOnly=false;
+            const names=[],elements=[],nameIds=new Map(),elementIds=new Map(),backbone=new Uint8Array(count),elementRatios=new Float64Array(count),bondRadii=new Float64Array(count);
+            const bondCovalent={H:.31,D:.31,C:.76,N:.71,O:.66,S:1.05,P:1.07,SE:1.20};
+            let sequenceOnly=false,ordered=true,previousNode=-1;
+            const nodeStarts=new Int32Array(sequenceFlags.length),nodeEnds=new Int32Array(sequenceFlags.length),atomPulse=new Float32Array(count*2),atomSelection=new Float32Array(count*2);nodeStarts.fill(-1);
             for(let i=0;i<count;i++){
                 const entry=entries[i],source=entry.source,name=source.atomName,element=source.element;
+                const n=entry.nodeIndex;if(n<previousNode)ordered=false;previousNode=n;
+                atomPulse[i*2]=atomPulse[i*2+1]=originFlags?.[n]||0;atomSelection[i*2]=atomSelection[i*2+1]=selectionFlags?.[n]||0;
+                if(nodeStarts[n]===-1)nodeStarts[n]=i;nodeEnds[n]=i+1;
                 if(!descriptor||descriptor.memoryKind!=='entries')nodeIndices[i]=entry.nodeIndex;
                 const k=i*3;sourceCoordinates[k]=source.x;sourceCoordinates[k+1]=source.y;sourceCoordinates[k+2]=source.z;
                 if(!nameIds.has(name)){nameIds.set(name,names.length);names.push(name);}nameCodes[i]=nameIds.get(name);
                 if(!elementIds.has(element)){elementIds.set(element,elements.length);elements.push(element);}elementCodes[i]=elementIds.get(element);
                 backbone[i]=isBackboneAtomName(name)?1:0;
-                elementRatios[i]=(atomCovalentRadii[String(element||'C').trim().toUpperCase()]??atomCovalentRadii.C)/atomCovalentRadii.C;
-                sequenceOnly ||= Boolean(physicsNodes[entry.nodeIndex].res.atoms2[physicsNodes[entry.nodeIndex].idx2]?.sequenceOnly);
+                elementRatios[i]=(radii[String(element||'C').trim().toUpperCase()]??radii.C)/radii.C;
+                bondRadii[i]=bondCovalent[element]||.77;
+                sequenceOnly ||= Boolean(sequenceFlags[entry.nodeIndex]);
             }
-            data={nodes:physicsNodes,nodeIndices,sourceCoordinates,nameCodes,elementCodes,names,elements,backbone,elementRatios,sequenceOnly,coordinateRevision:0};
-            atomFrameDataCache.set(entries,data);return data;
+            return {nodeIndices,sourceCoordinates,nameCodes,elementCodes,names,elements,backbone,elementRatios,bondRadii,atomPulse,atomSelection,sequenceOnly,nodeStarts:ordered?nodeStarts:null,nodeEnds:ordered?nodeEnds:null,coordinateRevision:0};
+        }
+        function atomIndicesForDirtyNodes(data,dirty){
+            if(!data.nodeStarts)return null;
+            let count=0;
+            for(let n=0;n<dirty.length;n++)if(dirty[n]&&data.nodeStarts[n]>=0)count+=data.nodeEnds[n]-data.nodeStarts[n];
+            if(count>=data.nodeIndices.length/4)return null;
+            const indices=new Uint32Array(count);let at=0;
+            for(let n=0;n<dirty.length;n++)if(dirty[n]&&data.nodeStarts[n]>=0)
+                for(let i=data.nodeStarts[n];i<data.nodeEnds[n];i++)indices[at++]=i;
+            return indices;
+        }
+        function bondIndicesForDirtyNodes(adjacency,dirty,bondCount){
+            if(!adjacency||!bondCount)return null;
+            const {offsets,indices}=adjacency;let candidates=0;
+            for(let n=0;n<dirty.length;n++)if(dirty[n])candidates+=offsets[n+1]-offsets[n];
+            if(candidates>=bondCount/4)return null;
+            const seen=new Uint8Array(bondCount),result=new Uint32Array(candidates);let count=0;
+            for(let n=0;n<dirty.length;n++)if(dirty[n])for(let p=offsets[n];p<offsets[n+1];p++){
+                const index=indices[p];if(!seen[index]){seen[index]=1;result[count++]=index;}
+            }
+            return result.subarray(0,count);
+        }
+        function atomFrameSequenceFlags(nodes){return Uint8Array.from(nodes,node=>Boolean(node.res.atoms2[node.idx2]?.sequenceOnly));}
+        function atomFrameData(entries){
+            let data=atomFrameDataCache.get(entries);if(data&&data.nodes===physicsNodes)return data;
+            data=buildAtomFrameColumns(entries,atomFrameSequenceFlags(physicsNodes),atomCovalentRadii,Uint8Array.from(physicsNodes,n=>isModel2Only(n)?1:0),Uint8Array.from(physicsNodes,n=>selectionMatches(n)?1:0));
+            data.selection=linkedSelection;data.additional=additionalSelections;data.nodes=physicsNodes;atomFrameDataCache.set(entries,data);return data;
+        }
+        async function prepareAtomFrameData(){
+            const nodes=physicsNodes,entries=simulationAtomEntries(),selection=linkedSelection,additional=additionalSelections;
+            if(atomFrameDataCache.get(entries)?.nodes===nodes)return;
+            const columns=await runBackgroundTask('atom-frame-columns',[isBackboneAtomName,buildAtomFrameColumns],
+                {entries,sequenceFlags:atomFrameSequenceFlags(nodes),radii:atomCovalentRadii,originFlags:Uint8Array.from(nodes,n=>isModel2Only(n)?1:0),selectionFlags:Uint8Array.from(nodes,n=>selectionMatches(n)?1:0)},
+                function(){return buildAtomFrameColumns(entries,sequenceFlags,radii,originFlags,selectionFlags);});
+            if(nodes!==physicsNodes)throw new DOMException('Build superseded','AbortError');
+            columns.nodes=nodes;columns.selection=selection;columns.additional=additional;atomFrameDataCache.set(entries,columns);
         }
         function simulationAtomCoordinates(entries, forDisplay = false) {
             const data=atomFrameData(entries),rotations=simulationAtomRotations();
@@ -15471,7 +15594,9 @@
             if(!coords||coords.length!==entries.length){coords=MemoryData.coordinates(entries.length);if(forDisplay)atomDisplayCoordinateCache.set(entries,coords);}
             const columns=MemoryData.descriptor(coords)?.table.columns,pointScratch={x:0,y:0,z:0};
             const jiggles=[],sequenceFrames=new Map(),atomNodes=data.sequenceOnly?sequenceAtomScaffold(physicsNodes):physicsNodes;
-            for(let i=0;i<entries.length;i++){
+            const changedAtoms=canUpdatePartially?atomIndicesForDirtyNodes(data,dirty):null;
+            for(let at=0;at<(changedAtoms?.length??entries.length);at++){
+                const i=changedAtoms?changedAtoms[at]:at;
                 const nodeIndex=data.nodeIndices[i];if(!dirty[nodeIndex])continue;
                 const sourceName=data.names[data.nameCodes[i]],point=columns?pointScratch:coords[i],k=i*3;
                 const node = physicsNodes[nodeIndex], ca = node.res.atoms2[node.idx2], R = rotations[nodeIndex];
@@ -15551,10 +15676,9 @@
             const N=nodes.length,block=new Int32Array(N),residue=new Int32Array(N),type=new Uint8Array(N),sequence=new Uint8Array(N);
             nodes.forEach((node,i)=>{block[i]=node.blockIdx;residue[i]=node.idx2;type[i]=node.res.entityType==='other'?2:node.res.entityType==='nucleotide'?1:0;sequence[i]=node.res.atoms2?.[node.idx2]?.sequenceOnly?1:0;});
             const data=nodes===physicsNodes?atomFrameData(entries):null,count=entries.length;
-            const xyz=data?.sourceCoordinates||new Float64Array(count*3),nodeIndices=data?.nodeIndices||new Uint32Array(count),nameCodes=data?.nameCodes||new Uint32Array(count),names=data?.names||[],ids=new Map(names.map((name,i)=>[name,i])),radii=new Float64Array(count);
+            const xyz=data?.sourceCoordinates||new Float64Array(count*3),nodeIndices=data?.nodeIndices||new Uint32Array(count),nameCodes=data?.nameCodes||new Uint32Array(count),names=data?.names||[],ids=new Map(names.map((name,i)=>[name,i])),radii=data?.bondRadii||new Float64Array(count);
             const covalent={H:.31,D:.31,C:.76,N:.71,O:.66,S:1.05,P:1.07,SE:1.20};
-            for(let i=0;i<count;i++){
-                if(data){radii[i]=covalent[data.elements[data.elementCodes[i]]]||.77;continue;}
+            if(!data)for(let i=0;i<count;i++){
                 const entry=entries[i],source=entry.source;nodeIndices[i]=entry.nodeIndex;xyz.set([source.x,source.y,source.z],i*3);
                 if(!ids.has(source.atomName)){ids.set(source.atomName,names.length);names.push(source.atomName);}nameCodes[i]=ids.get(source.atomName);radii[i]=covalent[source.element]||.77;
             }
@@ -15566,14 +15690,19 @@
             return MemoryData.pairList(output.values);
         }
         let molecularBondJob=null;
+        function molecularBondsVisible(){return physicsRepresentation!=='ball-stick'||viewerSizes.physics.atom<=2.9;}
         function requestMolecularBonds(state){
-            const job={state,nodes:physicsNodes,generation:modelBuildGeneration};molecularBondJob=job;state.bondsPending=true;
-            runBackgroundTask('molecular-bonds',[MolecularTopology.buildBonds],{input:molecularBondInput(state.entries)},function(){return buildMolecularBonds(input);}).then(output=>{
+            if(!molecularBondsVisible()||state.bondsPending||state.sticks)return;
+            const job={state,nodes:physicsNodes,generation:modelBuildGeneration,selection:linkedSelection,additional:additionalSelections};molecularBondJob=job;state.bondsPending=true;
+            const originFlags=Uint8Array.from(physicsNodes,node=>isModel2Only(node)?1:0),selectionFlags=Uint8Array.from(physicsNodes,node=>selectionMatches(node)?1:0);
+            runBackgroundTask('molecular-bonds',[MolecularTopology.buildBonds,MolecularTopology.buildBondAdjacency,MolecularTopology.buildBondDisplay],{input:molecularBondInput(state.entries),originFlags,selectionFlags},function(){const result=buildMolecularBonds(input);result.adjacency=buildMolecularBondAdjacency(result.values,input.nodeIndices,input.block.length);result.display=buildMolecularBondDisplay(result.values,input.nodeIndices,originFlags,selectionFlags);return result;}).then(output=>{
                 if(molecularBondJob!==job||atomRepresentation!==state||physicsNodes!==job.nodes||modelBuildGeneration!==job.generation)return;
-                state.bonds=MemoryData.pairList(output.values);const sticks=createMolecularInstances(state.bonds.length,1,true);
-                addPhysicsPulse(sticks,molecularEndpointFlags(state.entries,state.bonds),true,molecularBondNodeIndices(state.entries,state.bonds));
+                state.bondsPending=false;if(!molecularBondsVisible())return;
+                state.bonds=MemoryData.pairList(output.values);state.bondAdjacency=output.adjacency;const sticks=createMolecularInstances(state.bonds.length,1,true);
+                const selectionStillCurrent=linkedSelection===job.selection&&additionalSelections===job.additional;
+                addPhysicsPulse(sticks,output.display.pulse,true,MemoryData.pairList(output.display.nodes),selectionStillCurrent?output.display.selection:null);
                 sticks.frustumCulled=false;physicsScene.add(sticks);state.sticks=sticks;state.bondsPending=false;state.coordinateRevision=-1;state.frameData=null;
-                updateAtomRepresentation();
+                updateAtomRepresentation();physicsRenderDirty=true;
             }).catch(error=>{if(molecularBondJob===job){state.bondsPending=false;if(error.name!=='AbortError')reportBackgroundError(error);}});
         }
 
@@ -15789,6 +15918,7 @@
         }
 
         function updateAtomRepresentation() {
+            if(physicsSetupPending){physicsRenderDirty=true;return;}
             if (physicsRepresentation === 'curves' || curveRepresentation) updateCurveRepresentation();
             const active = ['ball-stick'].includes(physicsRepresentation) || physicsRepresentation === 'surface' || physicsRepresentation === 'curves';
             if (physicsRepresentation === 'surface') {
@@ -15815,7 +15945,10 @@
                 const sticks = null;
                 const atomGlow=surface?null:createMolecularInstances(0,.40,false,{dynamic:true,glow:true,color:0xffe85a,opacity:.56});
                 if(atomGlow){atomGlow.count=0;atomGlow.frustumCulled=false;atomGlow.renderOrder=15;physicsScene.add(atomGlow);}
-                if (!surface) addPhysicsPulse(balls,molecularEndpointFlags(entries),false,molecularAtomNodeIndices(entries));
+                if (!surface){
+                    const frame=atomFrameData(entries),current=frame.selection===linkedSelection&&frame.additional===additionalSelections;
+                    addPhysicsPulse(balls,frame.atomPulse,false,frame.nodeIndices,current?frame.atomSelection:null);
+                }
                 if (sticks) addPhysicsPulse(sticks,molecularEndpointFlags(entries,bonds),true,molecularBondNodeIndices(entries,bonds));
                 balls.frustumCulled = false;if(sticks)sticks.frustumCulled=false;
                 physicsScene.add(balls);if(sticks)physicsScene.add(sticks);
@@ -15823,7 +15956,10 @@
                 if(!surface)requestMolecularBonds(atomRepresentation);
             }
             const state=atomRepresentation,{entries,bonds,balls,sticks,atomGlow}=state;
-            balls.visible=entries.length>0;if(sticks)sticks.visible=true;
+            const showBonds=molecularBondsVisible();
+            if(!showBonds&&state.bondsPending){molecularBondJob=null;state.bondsPending=false;backgroundTasks.get('molecular-bonds')?.cancel();}
+            balls.visible=entries.length>0;if(sticks)sticks.visible=showBonds;
+            if(showBonds&&!sticks&&!state.bondsPending)requestMolecularBonds(state);
             const coords=simulationAtomCoordinates(entries,true),data=atomFrameData(entries),columns=MemoryData.descriptor(coords)?.table.columns;
             const tools=state.drawTools||(state.drawTools={dummy:new THREE.Object3D(),color:new THREE.Color(),otherColor:new THREE.Color(),selectedColor:new THREE.Color('#fff176'),sideColor:new THREE.Color(),a:new THREE.Vector3(),b:new THREE.Vector3(),direction:new THREE.Vector3(),up:new THREE.Vector3(0,1,0)});
             const {dummy,color,otherColor,selectedColor,sideColor,a,b,direction,up}=tools;
@@ -15852,7 +15988,11 @@
             state.frameData=data;state.appearanceKey=key;state.selection=linkedSelection;state.additional=additionalSelections;state.coordinateRevision=data.coordinateRevision;
             const palette=state.elementPalette??(state.elementPalette=data.elements.map(element=>new THREE.Color(ELEMENT_COLORS[String(element||'C').toUpperCase()]||'#aeb7c4')));
             let glowing=0;
-            for(let i=0;i<entries.length;i++){
+            const dirtyAtoms=new Uint8Array(N);
+            for(let n=0;n<N;n++)dirtyAtoms[n]=positionDirty[n]||colorDirty[n]?1:0;
+            const changedAtoms=!hasSelection?atomIndicesForDirtyNodes(data,dirtyAtoms):null;
+            for(let at=0;at<(changedAtoms?.length??entries.length);at++){
+                const i=changedAtoms?changedAtoms[at]:at;
                 const n=nodeIndices[i],k=n*3,point=columns?null:coords[i];
                 const x=columns?columns.x.values[i]:point.x,y=columns?columns.y.values[i]:point.y,z=columns?columns.z.values[i]:point.z;
                 const radius=viewerSizes.physics.atom*(1+atomSizeByElement*(data.elementRatios[i]-1)),visible=appearance.visible[n];
@@ -15874,7 +16014,9 @@
             }
             if(atomGlow){atomGlow.count=glowing;atomGlow.visible=glowing>0;if(glowing)atomGlow.instanceMatrix.needsUpdate=true;}
             const pairs=MemoryData.descriptor(bonds)?.values;
-            for(let i=0;sticks&&i<bonds.length;i++){
+            const changedBonds=showBonds&&sticks?bondIndicesForDirtyNodes(state.bondAdjacency,dirtyAtoms,bonds.length):null;
+            for(let at=0;showBonds&&sticks&&at<(changedBonds?.length??bonds.length);at++){
+                const i=changedBonds?changedBonds[at]:at;
                 const pair=pairs?null:bonds[i],ia=pairs?pairs[i*2]:pair[0],ib=pairs?pairs[i*2+1]:pair[1];
                 if(positionDirty[nodeIndices[ia]]||positionDirty[nodeIndices[ib]]){
                     if(columns){a.set(columns.x.values[ia],columns.y.values[ia],columns.z.values[ia]);b.set(columns.x.values[ib],columns.y.values[ib],columns.z.values[ib]);}
@@ -15885,8 +16027,8 @@
                 }
                 if(colorDirty[nodeIndices[ia]]||colorDirty[nodeIndices[ib]]){balls.getColorAt(ia,color);balls.getColorAt(ib,otherColor);sticks.setColorAt(i,color.lerp(otherColor,.5));}
             }
-            if(positionChanged){balls.instanceMatrix.needsUpdate=true;if(sticks)sticks.instanceMatrix.needsUpdate=true;}
-            if(colorChanged){if(balls.instanceColor)balls.instanceColor.needsUpdate=true;if(sticks?.instanceColor)sticks.instanceColor.needsUpdate=true;}
+            if(positionChanged){balls.instanceMatrix.needsUpdate=true;if(showBonds&&sticks)sticks.instanceMatrix.needsUpdate=true;}
+            if(colorChanged){if(balls.instanceColor)balls.instanceColor.needsUpdate=true;if(showBonds&&sticks?.instanceColor)sticks.instanceColor.needsUpdate=true;}
             data.coordinateDirty?.fill(0);
 
         }
@@ -16213,6 +16355,7 @@
         }
 
         function refreshPhysicsViewer() {
+            if(physicsSetupPending){physicsRenderDirty=true;return;}
             if(physicsWebGLContextLost||!physicsRenderer||!physicsScene||!physicsCamera)return;
             const container=document.getElementById('physicsContainer');
             if(!container?.clientWidth||!container.clientHeight)return;
@@ -16397,7 +16540,10 @@
             reference.className = 'px-3 py-1.5 rounded text-xs font-semibold ' + (homologyViewerMode === 'reference' ? 'bg-violet-600 text-white' : 'text-slate-300');
             document.getElementById('loadSimulationMolstarBtn')?.classList.toggle('hidden', homologyViewerMode !== 'homology' || !ready);
         }
+        let molstarNeedsRefresh=true;
+        function molstarPageOpen(){return !document.querySelector('.app-page[data-page="4"]')?.hidden;}
         async function setHomologyViewerMode(mode) {
+            if(!molstarPageOpen()){homologyViewerMode=mode;molstarNeedsRefresh=true;return false;}
             if (mode === 'homology' && (modelLoading || readyModelGeneration !== modelBuildGeneration || (groupSimulation&&!groupSimulation.complete))) return;
             if (mode === 'reference' && !currentReferenceFile) return;
             homologyViewerMode = mode;
@@ -16406,17 +16552,25 @@
             if (!simulationMolstarViewer && typeof molstar !== 'undefined' && molstar.Viewer) {
                 simulationMolstarViewer = await molstar.Viewer.create('molstar-simulation-container', { extensions: [], disabledExtensions: ['volseg', 'mp4-export'], layoutIsExpanded: false, layoutShowControls: false, layoutShowRemoteState: false, layoutShowSequence: false, layoutShowLog: false, viewportShowExpand: false, viewportShowSelectionMode: false, viewportShowAnimation: false });
             }
-            if (!simulationMolstarViewer?.plugin) return;
+            if (!simulationMolstarViewer?.plugin||!molstarPageOpen()) return;
             await simulationMolstarViewer.plugin.clear();
+            if(!molstarPageOpen())return false;
             if (mode === 'reference') {
                 await loadReferenceFilesIntoMolstar(simulationMolstarViewer);
                 document.getElementById('simulationMolstarPlaceholder')?.classList.add('hidden');
-            } else return renderCurrentSimulation();
+            } else {const result=await renderCurrentSimulation();if(!result)return result;}
+            molstarNeedsRefresh=false;
             return true;
         }
         function loadSimulationIntoMolstar() {
+            if(!molstarPageOpen()){
+                molstarNeedsRefresh=true;
+                if(!modelLoading&&readyModelGeneration===modelBuildGeneration&&(!groupSimulation||groupSimulation.complete))homologyViewerMode='homology';
+                return Promise.resolve(false);
+            }
             if (modelLoading || readyModelGeneration !== modelBuildGeneration || (groupSimulation&&!groupSimulation.complete)) return Promise.resolve(false);
             if(simulationRenderTask)return simulationRenderTask;
+            molstarNeedsRefresh=true;
             const task=setHomologyViewerMode('homology');
             simulationRenderTask=task;
             void task.then(()=>{if(simulationRenderTask===task)simulationRenderTask=null;},
@@ -16424,6 +16578,7 @@
             return task;
         }
         async function renderCurrentSimulation() {
+            if(!molstarPageOpen())return false;
             const buildGeneration = modelBuildGeneration;
             const membraneSnapshot=simulationMembraneSnapshot();
             const cifContent = generateSimulationMmCifString(membraneSnapshot);
@@ -16454,6 +16609,7 @@
 
                 if (simulationMolstarViewer && simulationMolstarViewer.plugin) {
                     await simulationMolstarViewer.plugin.clear();
+                    if(!molstarPageOpen())return false;
                     const blob = new Blob([cifContent], { type: 'text/plain' });
                     const url = URL.createObjectURL(blob);
                     try {
@@ -16492,8 +16648,16 @@
         }
 
         window.loadSimulationIntoMolstar = loadSimulationIntoMolstar;
+        let molstarPageLoad=null;
+        window.addEventListener('stringscape-molstar-page-visible',()=>{
+            if((!simulationMolstarViewer||molstarNeedsRefresh)&&currentReferenceFile&&!molstarPageLoad){
+                molstarPageLoad=setHomologyViewerMode(homologyViewerMode);
+                void molstarPageLoad.catch(reportBackgroundError).finally(()=>{molstarPageLoad=null;});
+            }
+        });
 
         async function initMolstarViewers() {
+            if(!molstarPageOpen())return;
             if(document.getElementById('detailsPanels')?.classList.contains('hidden'))return;
             if(molstarViewer1&&molstarViewer2)return;
             try {
@@ -17184,6 +17348,7 @@
         }
         document.getElementById('togglePatternMarkers')?.addEventListener('click',()=>{
             patternMarkersVisible=!patternMarkersVisible;
+            if(patternMarkers)patternMarkers.visible=patternMarkersVisible;
             updatePhysicsToggleButton('togglePatternMarkers',patternMarkersVisible);
             updatePatternVariance(true);
         });
@@ -17376,8 +17541,6 @@
             document.getElementById('hideAllNonProteinBtn').addEventListener('click',()=>setAllChainsVisibility(false,false));
             setPhysicsRepresentation('ball-stick');
             updateDiffLegendGradient();
-            await initMolstarViewers();
-
             document.addEventListener('visibilitychange',syncBackgroundSimulationScheduler);
             syncBackgroundSimulationScheduler();
             animateLoop();
@@ -18072,7 +18235,7 @@
             if(membraneLipids){
                 const molecular=lipidsVisible&&['ball-stick'].includes(physicsRepresentation);
                 membraneLipids.mesh.visible=lipidsVisible&&!molecular;
-                membraneLipids.atomMesh.visible=molecular;membraneLipids.stickMesh.visible=molecular;
+                membraneLipids.atomMesh.visible=molecular;membraneLipids.stickMesh.visible=molecular&&molecularBondsVisible();
             }
             updateMembraneToggleUI();
         });
@@ -18868,7 +19031,15 @@
                     ...(group.localAxes?{localAxes:[...group.localAxes].map(([block,axis])=>({block,origin:axis.origin,normal:axis.normal}))}:{} )})),...['x','y','z'].map(axis=>({key:`self-${axis}`,name:`Each selected protein's own ${axis.toUpperCase()} axis`}))],
                 drafts:(multiReferenceBuild?.files||[]).map(file=>({pdbId:file.pdbId.toUpperCase(),title:file.parsed?.title||''})),
                 conformationGroups:(multiReferenceBuild?.conformationGroups||[]).map((group,index)=>({index,name:group.name,pdbIds:group.pdbIds})),
-                animationIds:animationLibrary.map(entry=>entry.id),playing:animationPlaying};
+                animationIds:animationLibrary.map(entry=>entry.id),hasAutomaticSpin:animationLibrary.some(entry=>entry.autoGenerated&&!entry.aiSpinGenerated&&entry.frames?.length),automaticExtensions:automaticExtensionGeneration===modelBuildGeneration?[...automaticExtensionKeys].map(key=>({key,units:patternExtensionCounts.get(key)??0})):[],playing:animationPlaying};
+        };
+        window.applyBiologicalExtensions=(generation,extensions)=>{
+            if(generation!==modelBuildGeneration)return false;
+            const keys=new Set(window.getBiologicalMotionContext().patterns.map(item=>item.key));
+            for(const item of extensions)if(keys.has(item.key)&&Number.isInteger(item.units)&&item.units>=0&&item.units<=100)patternExtensionCounts.set(item.key,item.units);
+            patternExtensionUnits=Math.max(0,...patternExtensionCounts.values());
+            void renderPatternExtensions(detectedExtensionPatterns);
+            return true;
         };
         window.applyBiologicalMotion=(generation,decision,{createSpinAnimation=true}={})=>{
             if(generation!==modelBuildGeneration||animationPlaying||animationPreparing)return false;
@@ -18937,7 +19108,7 @@
         };
         window.playBiologicalMotion=async generation=>{
             if(generation!==modelBuildGeneration||animationPlaying||animationPreparing)return false;
-            const entry=multiReferenceBuild?.groupAnimation||animationLibrary.find(item=>item.aiSpinGenerated)||animationLibrary.find(item=>item.id===animationActiveId);
+            const entry=animationLibrary.find(item=>item.autoGenerated&&!item.aiSpinGenerated&&item.frames?.length)||multiReferenceBuild?.groupAnimation||animationLibrary.find(item=>item.aiSpinGenerated)||animationLibrary.find(item=>item.id===animationActiveId);
             if(!entry?.frames?.length)return false;
             if(animationActiveId!==entry.id)activateAnimation(entry);
             await playAnimation();

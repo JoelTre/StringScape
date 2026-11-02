@@ -110,6 +110,7 @@
         const refreshViewer=()=>{
             window.dispatchEvent(new Event('resize'));
             if(current===3)window.dispatchEvent(new Event('stringscape-physics-page-visible'));
+            if(current===4)window.dispatchEvent(new Event('stringscape-molstar-page-visible'));
         };
         requestAnimationFrame(refreshViewer);
         setTimeout(refreshViewer, 350);

@@ -131,7 +131,7 @@
             const signature=JSON.stringify(context.animationIds);
             if(decision){if(applied!==signature&&window.applyBiologicalMotion(model,decision,{createSpinAnimation:!applied}))applied=signature;return;}
             if(attempted)return;
-            if(!context.blocks.length&&!context.conformationGroups?.length){attempted=true;status('ATP synthase uses fixed animation rules.');return;}
+            if(!context.blocks.length&&!context.conformationGroups?.length&&!context.hasAutomaticSpin&&!context.patterns.length){attempted=true;status('ATP synthase uses fixed animation rules.');return;}
             attempted=true;const controller=new AbortController();task=controller;const generation=model;
             setFilamentStatus('running');
             status('AI is considering filament extensions…');
@@ -141,12 +141,19 @@
             const input={originalRequest:`For some context, here is what the user originally asked this app to make a model of: ${context.originalRequest||''}`,proteins:context.proteins||[],blocks:context.blocks.map(({uniProt,...block})=>block),references:context.references,patterns:context.patterns,groups:context.groups,axes:context.axes,automaticSpin:context.automaticSpin||{groups:[],rotations:[]},drafts:context.drafts||[],conformationGroups:context.conformationGroups};
             let first,second,extensionApplied=false,animationApplied=false;
             try{
-                first=await decide(groupPrompt,input,controller.signal,data=>{if(!Array.isArray(data.extensions))throw Error('Missing extensions');const keys=new Set(context.patterns.map(item=>item.key));if(data.extensions.some(item=>!keys.has(item.key)||!Number.isInteger(item.units)||item.units<0||item.units>100||typeof item.reason!=='string'||!item.reason.trim()))throw Error('Invalid filament extension');checkAssessmentReason(data);});
+                const autoExtensions=context.automaticExtensions||[];
+                first=autoExtensions.length?{reason:'Extended automatically using the protein name rule.',extensions:autoExtensions.map(item=>({...item,reason:'Automatic protein name rule.'}))}:!context.patterns.length?{reason:'No patterns have an extendable end.',extensions:[]}:await decide(groupPrompt,input,controller.signal,data=>{if(!Array.isArray(data.extensions))throw Error('Missing extensions');const keys=new Set(context.patterns.map(item=>item.key));if(data.extensions.some(item=>!keys.has(item.key)||!Number.isInteger(item.units)||item.units<0||item.units>100||typeof item.reason!=='string'||!item.reason.trim()))throw Error('Invalid filament extension');checkAssessmentReason(data);});
                 if(controller.signal.aborted||generation!==model)return;
-                if(!window.applyBiologicalMotion(generation,{extensions:first.extensions,groups:context.automaticSpin?.groups||[],rotations:context.automaticSpin?.rotations||[]},{createSpinAnimation:false}))throw Error('Could not apply filament extension assessment');
+                if(context.hasAutomaticSpin&&!window.applyBiologicalExtensions?.(generation,first.extensions))throw Error('Could not apply filament extension assessment');
+                if(!context.hasAutomaticSpin&&!window.applyBiologicalMotion(generation,{extensions:first.extensions,groups:context.automaticSpin?.groups||[],rotations:context.automaticSpin?.rotations||[]},{createSpinAnimation:false}))throw Error('Could not apply filament extension assessment');
                 extensionApplied=first.extensions.some(item=>item.units>0);
                 window.biologicalMotionAssessments={generation,filament:first,animation:null};
-                setFilamentStatus('complete',first);
+                if(autoExtensions.length||!context.patterns.length)setFilamentStatus('reset');else setFilamentStatus('complete',first);
+                if(context.hasAutomaticSpin){
+                    animationApplied=true;
+                    await window.playBiologicalMotion?.(generation);
+                    return;
+                }
                 setCreatingAnimation(true);
                 status('AI is planning animation…');
                 second=await decide(axisPrompt,{...input,filamentDecision:first},controller.signal,data=>{validate(first,data,context);checkAssessmentReason(data);});
@@ -169,7 +176,7 @@
                 }
                 status('AI biological motions applied. '+[...first.extensions,...second.groups,...result.rotations].map(item=>item.reason).join(' '));
             }catch(error){if(!controller.signal.aborted){if(filamentButton?.dataset.aiCreating==='true')setFilamentStatus('failed');status('Biological motion assessment failed: '+error.message+'. Reconnect AI to retry.');console.warn('Biological motion AI:',error,{patternAndSymmetryReason:first?.reason||'The first assessment did not complete.',proteinAndAxisReason:second?.reason||'The second assessment did not complete.'});}}
-            finally{if(!controller.signal.aborted&&generation===model&&(extensionApplied||animationApplied))window.complexAiMotionSummary={generation,extensionApplied,animationApplied,filament:extensionApplied?first:null,animation:animationApplied?second:null};if(task===controller){task=null;setCreatingAnimation(false);}}
+            finally{if(!controller.signal.aborted&&generation===model&&(extensionApplied||animationApplied))window.complexAiMotionSummary={generation,extensionApplied,animationApplied,automaticSpin:!!context.hasAutomaticSpin,filament:extensionApplied?first:null,animation:animationApplied?second:null};if(task===controller){task=null;setCreatingAnimation(false);}}
         }catch(error){console.warn('Biological motion state:',error);}
     },1500);
 })();

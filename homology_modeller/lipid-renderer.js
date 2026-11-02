@@ -92,16 +92,24 @@ vec3 lipidNormal(vec3 n){
         if(bond)mat.defines={LIPID_BOND:1};
         return {material:mat,update:proxy.onBeforeRender,dispose:()=>proxy.dispose()};
     }
-    function create(atoms,bonds,count,radii,renderer){
+    function create(atoms,bonds,count,radii,renderer,includeBonds=true){
         const uniforms=Object.fromEntries(['Time','Clock','MotionScale','Jiggle','Depth','AtomSize','StickSize','ElementSize','Glow'].map(name=>['lipid'+name,{value:name==='Glow'?1:0}]));
         const params=new THREE.InstancedBufferAttribute(new Float32Array(count*3),3);params.setUsage(THREE.DynamicDrawUsage);
         const variants=new Map(),analytic=MolecularImpostors.supported(renderer);
-        function level(segments){
-            if(!variants.has(segments)){for(const pair of variants.values())for(const geo of pair)geo.dispose();variants.clear();variants.set(segments,[geometry(atoms,bonds,analytic?0:segments,false,count,params,radii),geometry(atoms,bonds,analytic?0:segments,true,count,params,radii)]);}
-            return variants.get(segments);
+        function level(segments,needBonds=true){
+            if(!variants.has(segments)){
+                for(const pair of variants.values())for(const geo of pair)geo.dispose();
+                variants.clear();
+                variants.set(segments,[geometry(atoms,bonds,analytic?0:segments,false,count,params,radii),new THREE.BufferGeometry()]);
+            }
+            const pair=variants.get(segments);
+            if(needBonds&&!pair[1].userData.lipidTemplate){
+                pair[1].dispose();pair[1]=geometry(atoms,bonds,analytic?0:segments,true,count,params,radii);
+            }
+            return pair;
         }
         const atomShader=analytic?impostor(uniforms,false):null,stickShader=analytic?impostor(uniforms,true):null;
-        const geos=level(6),atomMesh=new THREE.InstancedMesh(geos[0],atomShader?.material||material(uniforms,false),count),stickMesh=new THREE.InstancedMesh(geos[1],stickShader?.material||material(uniforms,true),count);
+        const geos=level(6,includeBonds),atomMesh=new THREE.InstancedMesh(geos[0],atomShader?.material||material(uniforms,false),count),stickMesh=new THREE.InstancedMesh(geos[1],stickShader?.material||material(uniforms,true),count);
         if(analytic){atomMesh.onBeforeRender=atomShader.update;stickMesh.onBeforeRender=stickShader.update;atomMesh.dispose=atomShader.dispose;stickMesh.dispose=stickShader.dispose;}
         const atomMaterial=atomMesh.material;
         const glowUniforms={...uniforms,lipidGlow:{value:1.24}};
@@ -117,6 +125,7 @@ vec3 lipidNormal(vec3 n){
     function colors(render,atoms,bonds,colorAt){
         const palette=atoms.map(colorAt);render.palette=palette;
         for(const geos of render.variants.values())for(const geo of geos){
+            if(!geo.userData.lipidTemplate)continue;
             const values=geo.attributes.color.array,len=geo.userData.verticesPerPart;
             for(let i=0;i<(geo.userData.bond?bonds.length:atoms.length);i++){
                 const color=geo.userData.bond?palette[bonds[i][0]].clone().lerp(palette[bonds[i][1]],.5):palette[i];

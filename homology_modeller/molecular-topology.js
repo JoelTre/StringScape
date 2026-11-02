@@ -32,5 +32,27 @@
   }
   return {values:pairs.slice(0,used*2)};
  }
- globalThis.MolecularTopology={buildBonds:buildMolecularBonds};
+ function buildMolecularBondAdjacency(values,nodeIndices,nodeCount){
+  const counts=new Uint32Array(nodeCount),count=values.length/2;
+  for(let i=0;i<count;i++){
+   const a=nodeIndices[values[i*2]],b=nodeIndices[values[i*2+1]];
+   counts[a]++;if(a!==b)counts[b]++;
+  }
+  const offsets=new Uint32Array(nodeCount+1);
+  for(let n=0;n<nodeCount;n++)offsets[n+1]=offsets[n]+counts[n];
+  const cursor=offsets.slice(0,nodeCount),indices=new Uint32Array(offsets[nodeCount]);
+  for(let i=0;i<count;i++){
+   const a=nodeIndices[values[i*2]],b=nodeIndices[values[i*2+1]];
+   indices[cursor[a]++]=i;if(a!==b)indices[cursor[b]++]=i;
+  }
+  return {offsets,indices};
+ }
+ function buildMolecularBondDisplay(values,nodeIndices,originFlags,selectionFlags){
+  const nodes=new Uint32Array(values.length),pulse=new Float32Array(values.length),selection=new Float32Array(values.length);
+  for(let i=0;i<values.length;i++){
+   const n=nodeIndices[values[i]];nodes[i]=n;pulse[i]=originFlags[n];selection[i]=selectionFlags[n];
+  }
+  return {nodes,pulse,selection};
+ }
+ globalThis.MolecularTopology={buildBonds:buildMolecularBonds,buildBondAdjacency:buildMolecularBondAdjacency,buildBondDisplay:buildMolecularBondDisplay};
 })();

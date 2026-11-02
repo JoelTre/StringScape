@@ -389,7 +389,7 @@ async function startStagedDraft(index,state){
     populateChainSelectors();
     if(state.directReferences){modelData2.chains=modelData1.chains;modelData2.caAtoms=modelData1.caAtoms;setDirectReferenceAlignments(modelData1.chains);}
     else if(!await computeAllChainAlignments()||state!==multiReferenceBuild)return;
-    initPhysicsSimulation();resetPhysicsGraphHistory();renderChainLegends();resetCanvasViews();drawIndividualMatrices();drawDifferenceMatrix();drawMorphMatrix();
+    await initPhysicsSimulation();resetPhysicsGraphHistory();renderChainLegends();resetCanvasViews();drawIndividualMatrices();drawDifferenceMatrix();drawMorphMatrix();
     modelLoading=false;state.busy=false;readyModelGeneration=state.generation;hidePhysicsViewerLoading();
     if(state.follow)selectStagedModel(state.current);else selectStagedModel(state.view);
     if(state.directReferences&&!springNetworkDeferred)await advanceStagedBuild();
@@ -446,7 +446,7 @@ async function startCombinedStagedModel(state){
     const chains=state.merged.chains;modelData1.chains=chains;modelData1.caAtoms=Object.values(chains).flat();modelData1.pdbId='Merged draft model';
     modelData2.chains=chains;modelData2.caAtoms=modelData1.caAtoms;modelData1.matrixCache.clear();modelData2.matrixCache.clear();
     setDirectReferenceAlignments(chains);
-    selectedPairKey=null;initPhysicsSimulation();resetPhysicsGraphHistory();
+    selectedPairKey=null;await initPhysicsSimulation();resetPhysicsGraphHistory();
     populateChainSelectors();renderAlignmentTable();renderChainLegends();resetCanvasViews();drawIndividualMatrices();drawDifferenceMatrix();drawMorphMatrix();
     state.busy=false;modelLoading=false;readyModelGeneration=state.generation;hidePhysicsViewerLoading();
     selectStagedModel(state.view);renderStagedBuildControls();
