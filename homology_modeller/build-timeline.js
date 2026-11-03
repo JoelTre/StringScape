@@ -1,17 +1,17 @@
 // Wall-clock stage timings; concurrent work may overlap in the timeline.
 (function(root){
     const state={startedAt:null,finishedAt:null,rows:[],preparing:false,lastRender:0};
-    function reset(preparing=false){Object.assign(state,{startedAt:performance.now(),finishedAt:null,rows:[],preparing,lastRender:0});render();}
+    function reset(preparing=false){root.DeveloperLog?.record(preparing?'Preparing model build':'Starting model build');Object.assign(state,{startedAt:performance.now(),finishedAt:null,rows:[],preparing,lastRender:0});render();}
     function start(label,aggregate=false){
         if(state.startedAt===null)reset();
         if(state.finishedAt!==null)return null;
         let row=aggregate?state.rows.find(item=>item.label===label):null;
         if(row){if(row.end!==null){row.start=performance.now();row.end=null;}row.depth++;row.status='Running';}
         else {row={label,start:performance.now(),end:null,status:'Running',elapsed:0,depth:1};state.rows.push(row);}
-        render();return row;
+        root.DeveloperLog?.record(`Started: ${label}`);render();return row;
     }
-    function end(row,status='Done'){if(!row||row.end!==null)return;if(--row.depth>0)return;row.end=performance.now();row.elapsed+=row.end-row.start;row.status=status;render();}
-    function finish(status='Done'){completeCalculations(status);for(const row of state.rows)if(row.end===null){row.depth=1;end(row,status);}state.finishedAt=performance.now();state.preparing=false;render();}
+    function end(row,status='Done'){if(!row||row.end!==null)return;if(--row.depth>0)return;row.end=performance.now();row.elapsed+=row.end-row.start;row.status=status;root.DeveloperLog?.record(`${status}: ${row.label} (${(row.elapsed/1000).toFixed(2)} s)`);render();}
+    function finish(status='Done'){root.DeveloperLog?.record(`Build ${status.toLowerCase()}`);completeCalculations(status);for(const row of state.rows)if(row.end===null){row.depth=1;end(row,status);}state.finishedAt=performance.now();state.preparing=false;render();}
     function beginBuild(){if(!state.preparing||state.finishedAt!==null)reset();state.preparing=false;}
     function prepare(){if(!state.preparing||state.finishedAt!==null)reset(true);}
     function render(){
@@ -38,7 +38,7 @@
     function recordCalculation(label,duration){
         if(state.startedAt===null||state.finishedAt!==null)return;
         let row=state.rows.find(item=>item.label===label);
-        if(!row){row={label,start:performance.now(),end:performance.now(),status:'Calculating (on demand)',elapsed:0,depth:0,calculation:true,sealed:false};state.rows.push(row);}
+        if(!row){root.DeveloperLog?.record(`Calculating: ${label}`);row={label,start:performance.now(),end:performance.now(),status:'Calculating (on demand)',elapsed:0,depth:0,calculation:true,sealed:false};state.rows.push(row);}
         if(row.sealed)return;
         row.elapsed+=Math.max(0,duration);
     }
@@ -46,7 +46,7 @@
         if(state.startedAt===null||state.finishedAt!==null||!Number.isFinite(duration))return;
         let row=state.rows.find(item=>item.label===label&&item.durationOnly);
         if(!row){row={label,start:performance.now(),end:performance.now(),status:'Done',elapsed:0,depth:0,durationOnly:true};state.rows.push(row);}
-        row.elapsed+=Math.max(0,duration);render();
+        row.elapsed+=Math.max(0,duration);root.DeveloperLog?.record(`${label}: ${(duration/1000).toFixed(3)} s`);render();
     }
     function completeCalculations(status='Done'){
         for(const row of state.rows)if(row.calculation&&!row.sealed){row.sealed=true;row.status=status;row.end=performance.now();}

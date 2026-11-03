@@ -154,12 +154,12 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
         if (!response.ok) {if(entry)entry.response={error:`HTTP ${response.status}`};throw new Error(`AI provider returned HTTP ${response.status}. Check your key, model and server CORS settings.`);}
         const data=await response.json();if(entry)entry.response=data;return data;
     }
-    function parseDecision(text, results) {
+    function parseDecision(text, results, maxReferences=5) {
         const value = JSON.parse(String(text).trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,''));
         if (!Array.isArray(value.pdbIds) || typeof value.reason !== 'string') throw new Error('AI returned an invalid selection.');
         const allowed = new Set(results.map(hit=>hit.identifier));
         const ids = [...new Set(value.pdbIds.map(id=>typeof id==='string'?id.toUpperCase():''))];
-        if (ids.length>5 || ids.some(id=>!allowed.has(id))) throw new Error('AI selected IDs outside the search results or too many references.');
+        if (ids.length>maxReferences || ids.some(id=>!allowed.has(id))) throw new Error('AI selected IDs outside the search results or too many references.');
         // Membership is many-to-many: validate coverage, not a partition.
         let groups;
         if(value.groups===undefined)groups=ids.length?[{name:'Combined model',pdbIds:ids.slice()}]:[];
@@ -224,7 +224,7 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
         const rows=results.filter(hit=>selection.pdbIds.includes(hit.identifier));
         const prompt=SYSTEM_PROMPT.slice(SYSTEM_PROMPT.indexOf('Assign selected references'));
         const text=await askJson(prompt,{query,selectedPdbIds:selection.pdbIds,results:rows});
-        const decision=parseDecision(text,rows);
+        const decision=parseDecision(text,rows,selection.pdbIds.length);
         if(selection.pdbIds.some(id=>!decision.pdbIds.includes(id))||decision.pdbIds.length!==selection.pdbIds.length)throw Error('Group assignment changed the reference selection.');
         return decision.groups;
     }

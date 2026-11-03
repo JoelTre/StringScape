@@ -152,6 +152,8 @@ body.light-mode #homologyPhysicsSimulation :is(#animationAiReasons,.membrane-sta
 #animationSelectorButton { min-width:10rem; display:inline-flex; align-items:center; justify-content:space-between; gap:1rem; border:0; border-radius:.5rem; background:#7c3aed; color:#fff; }
 #animationSelectorButton:hover { background:#6d28d9; }
 body.light-mode #animationSelectorButton { background:#8849ee; color:#fff; }
+body.light-mode #buildProcessModelsToggle,
+body.light-mode #conformationGroupSection > span { color:#172033; }
 #animationSelectorMenu { position:absolute; z-index:80; min-width:10rem; max-width:calc(100vw - 1rem); max-height:min(24rem,calc(100vh - 1rem)); overflow:auto; padding:.45rem; border:0; border-radius:.75rem; background:#0f172a; box-shadow:0 16px 38px #0009; }
 #animationSelectorMenu:not(.hidden) { display:flex; flex-direction:column; gap:.35rem; }
 #animationSelectorMenu button { min-width:0; padding:.55rem .7rem; border:0; border-radius:.5rem; background:#334155; color:#e2e8f0; text-align:left; font-size:.75rem; line-height:1.25; white-space:nowrap; }
@@ -357,3 +359,24 @@ body.light-mode .edit-membrane-label { background:#ffffffd9; color:#075985; bord
 /* Match the 3D viewer's membrane label appearance and anchor point. */
 .edit-membrane-label { transform:translate(-100%,-50%); padding:.25rem .55rem; border:0; border-radius:.5rem; background:#0f172acc; color:#e0f2fe; font-size:.75rem; font-weight:700; text-shadow:0 1px 3px #000; }
 body.light-mode .edit-membrane-label { background:#ffffffd9; color:#075985; text-shadow:none; }
+
+.developer-mode-setting{margin-top:32px;padding-top:20px;border-top:1px solid #334155}
+.developer-mode-setting p{font-size:13px}
+.developer-log{padding:16px 20px;border-top:1px solid #334155;background:#020617;color:#cbd5e1;font-size:12px}
+.developer-log[hidden]{display:none}
+.developer-log summary{cursor:pointer;font-weight:600;font-size:14px;color:#7dd3fc}
+.developer-log p{margin:10px 0;color:#94a3b8;font-size:11px}
+.developer-log ol{max-height:280px;overflow:auto;list-style:none;padding:0;margin:0;font-family:ui-monospace,Consolas,monospace;overflow-wrap:anywhere}
+.developer-log li{padding:5px 0;border-top:1px solid #1e293b;white-space:pre-wrap}
+body.light-mode .developer-log{background:#f8fafc;color:#334155;border-color:#cbd5e1}
+body.light-mode .developer-log summary{color:#0369a1}
+body.light-mode .developer-log p{color:#475569}
+body.light-mode .developer-log li,body.light-mode .developer-mode-setting{border-color:#cbd5e1}
+
+.developer-log-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:10px 0}
+.developer-log-toolbar p{margin:0}
+.developer-log-copy{flex-shrink:0;border:1px solid #475569;border-radius:6px;padding:5px 10px;background:#1e293b;color:#e2e8f0;cursor:pointer;font:inherit}
+.developer-log-copy:hover{background:#334155}
+.developer-log-copy:focus-visible{outline:2px solid #60a5fa;outline-offset:3px}
+body.light-mode .developer-log-copy{background:#fff;border-color:#cbd5e1;color:#334155}
+body.light-mode .developer-log-copy:hover{background:#e2e8f0}

@@ -47,6 +47,7 @@
         <p>This app is also available as a feature within the main StringScape application (in the Structures view, where all PDB files from a species are displayed and any can be clicked on to build a homology model). This app is open source under an Apache-2.0 licence.</p>
         <p><a class="app-about-contact" href="https://github.com/JoelTre/StringScape/tree/main" target="_blank" rel="noopener noreferrer">View source code <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a></p>
         <a class="app-about-contact" href="https://stringscape.net/contact" target="_blank" rel="noopener noreferrer">Contact us <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a>
+        <div class="developer-mode-setting"><label class="nucleic-guide-switch text-sm text-slate-300" for="developerModeToggle">Developer mode <input id="developerModeToggle" type="checkbox" role="switch"></label><p>Show a live model-building log in the 3D viewer.</p></div>
     </article>`;
 
     const shell = document.createElement('div'); shell.className = 'app-shell';
@@ -79,6 +80,7 @@
     }
     const viewerBox = document.createElement('div'); viewerBox.className = 'app-physics-viewer'; viewerBox.append(viewer, editModels.viewer);
     main.replaceChildren(shell, viewerBox); main.classList.add('app-workspace');
+    window.DeveloperLog?.mount();
     const mobileSheet=window.createMobilePhysicsSheet({main,layer,burger,viewer:viewerBox,content,heading:document.querySelector('#aboutProteinComplex > h2'),chatInput:document.getElementById('complexAiQuestion')});
     let current = 1;
     const buttons = menuItems.map(([number, label, icon]) => {

@@ -1839,6 +1839,37 @@
                 query:null, searched:false
             };
         }
+        async function useRequestedReferencePdbIds(ids) {
+            const key=currentReferenceSearchKey(),token=++referenceSearchRequest;
+            const referenceAtStart=document.getElementById('pdbInput1').value;
+            const isCurrent=()=>token===referenceSearchRequest && key===currentReferenceSearchKey() && document.getElementById('pdbInput1').value===referenceAtStart;
+            const status=document.getElementById('referenceSequenceSearchStatus');
+            let groups=null;
+            if(window.ModellerAI?.connected()){
+                referenceSearchLoading=true;updateBuildButtonState();
+                status.textContent='AI is assigning the supplied references to conformation groups…';
+                try {
+                    const hits=ids.map(identifier=>({identifier}));
+                    for(let index=0;index<hits.length;index+=4){
+                        await Promise.all(hits.slice(index,index+4).map(enrichReferenceSearchHit));
+                        if(!isCurrent())return;
+                    }
+                    groups=await window.ModellerAI.assignReferenceGroups(document.getElementById('referenceSearchInput').value,hits,{pdbIds:ids});
+                    if(!isCurrent())return;
+                    referenceSearchResults=hits;
+                    status.textContent='AI assigned the supplied references to conformation groups.';
+                } catch(error) {
+                    if(!isCurrent())return;
+                    status.textContent=`AI conformation grouping failed: ${error.message}. Continuing with one combined group.`;
+                } finally {
+                    if(token===referenceSearchRequest){referenceSearchLoading=false;updateBuildButtonState();}
+                }
+            }
+            if(!isCurrent())return;
+            referenceConformationPlan=groups?{pdbIds:ids.slice(),groups}:null;
+            completedReferenceSearchKey=key;
+            setReferenceSearchSelection(ids);
+        }
         function selectedReferencePdbIds() {
             try { return referenceInputParts(document.getElementById('pdbInput1').value).ids.filter(id => /^[0-9][A-Z0-9]{3}$/.test(id)); }
             catch (_) { return []; }
@@ -2076,6 +2107,7 @@
             if(button)button.disabled=!document.getElementById('referenceSearchInput')?.value.trim();
         }
         function appendReferenceSearchStep(status,message,progressKey=null){
+            globalThis.DeveloperLog?.record(message);
             let list=status.querySelector('ul');
             if(!list){list=document.createElement('ul');status.replaceChildren(list);}
             list.querySelector('.search-step-active')?.classList.remove('search-step-active');
@@ -6051,7 +6083,7 @@
                     document.getElementById('physicsPauseText').textContent='Start Simulation';
                     document.getElementById('physicsStatusBadge').textContent='Simulation (Paused)';
                     const status=document.getElementById('groupSimulationStatusText');
-                    const start=document.createElement('button');start.type='button';start.textContent='Run simulation to improve model';
+                    const start=document.createElement('button');start.type='button';start.innerHTML='Run simulation to improve model <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>';
                     start.className='px-3 py-1.5 rounded-md bg-cyan-600 hover:bg-cyan-500 text-white font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300';
                     start.addEventListener('click',togglePhysicsRun);status.replaceChildren(start);
                 }
@@ -10773,7 +10805,7 @@
                 worker.onerror=event=>finish(new Error(event.message||'Modelling worker failed'));
                 worker.onmessage=({data:message})=>{
                     if(modellingWorkerJob!==job||message.id!==id)return;
-                    if(message.progress){onProgress(message.progress);return;}
+                    if(message.progress){globalThis.DeveloperLog?.progress(data.operation||'Model alignment',message.progress);onProgress(message.progress);return;}
                     finish(message.error?new Error(message.error):null,MemoryData.wire(message,true));
                 };
                 try{worker.postMessage(MemoryData.wire(data));}catch(error){finish(error);}
@@ -13101,6 +13133,10 @@
                 if(searchText && (completedReferenceSearchKey !== currentReferenceSearchKey() || !document.getElementById('pdbInput1').value.trim())) {
                     try {
                         const parts=referenceInputParts(searchText);
+                        if(parts.ids.length){
+                            void useRequestedReferencePdbIds(parts.ids);
+                            return;
+                        }
                         void fetchReferencePdbsForSequences(parts.sequences.length?'sequence':'query');
                     } catch(error) {document.getElementById('referenceSequenceSearchStatus').textContent=error.message;}
                     return;
@@ -16741,6 +16777,7 @@
         }
 
         function showError(msg) {
+            globalThis.DeveloperLog?.record(`Error: ${msg}`);
             document.getElementById('errorModal').classList.remove('warning-modal');
             document.getElementById('errorModalTitle').textContent = 'Error Processing Request';
             document.getElementById('errorMessage').textContent = msg;
@@ -20833,6 +20870,10 @@ if(globalThis.BuildTimeline){
         const build=typeof multiReferenceBuild==='undefined'?null:multiReferenceBuild;
         return build?.kind==='draft'?`Draft ${build.index+1} · ${label}`:label;
     };
+    initPhysicsSimulation=timeline.wrap(draftStage('Initializing simulation and molecular geometry'),initPhysicsSimulation);
+    captureStagedDraft=timeline.wrap(draftStage('Capturing completed draft and spring targets'),captureStagedDraft);
+    startCombinedStagedModel=timeline.wrap('Building combined model from aligned drafts',startCombinedStagedModel);
+    loadValidationPae=timeline.wrap('Loading predicted aligned error confidence data',loadValidationPae);
     computeAllChainAlignments=timeline.wrap(draftStage('Performing sequence alignment and determining equivalent chains'),computeAllChainAlignments);
     propagateInitialReferenceLockDisplacements=timeline.wrap(draftStage('Propagating reference lock movements'),propagateInitialReferenceLockDisplacements);
     const distanceStage=draftStage('Calculating distance matrices');

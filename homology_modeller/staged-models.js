@@ -383,6 +383,7 @@ async function startStagedDraft(index,state){
     if(state.replaying)return resumePreparedStagedDraft(index,state);
     if(state.prepareOnly)pauseBeforeFirstBuildSimulation=true;
     if(state!==multiReferenceBuild||state.generation!==modelBuildGeneration)return;
+    globalThis.DeveloperLog?.record(`Building draft ${index+1}/${state.files.length}: ${state.files[index].pdbId}`);
     state.index=index;state.kind='draft';state.current=`draft:${index}`;state.busy=true;
     if(state.follow)state.view=state.current;renderStagedBuildControls();
     modelLoading=true;physicsRunning=false;referenceAssembly=null;referenceFiles=[state.files[index]];currentReferenceFile=referenceFiles[0];
@@ -418,6 +419,7 @@ async function advanceStagedBuild(){
     const output=await runModellingWorker({id,operation:'drafts',settings:{mode:alignmentMode,gapOpen:alignmentGapOpen,gapExtend:alignmentGapExtend},
         files:state.drafts.map(draft=>({pdbId:draft.id,chainIdentities:draft.chainIdentities,parsed:{chains:draft.chains}}))},progress=>{
         if(progress.stage!=='draft-placement'||state!==multiReferenceBuild||state.generation!==modelBuildGeneration)return;
+        globalThis.DeveloperLog?.record(`Aligned draft ${progress.moving+1}: TM-score ${progress.fit?.tmScore ?? 'unavailable'}, RMSD ${progress.fit?.rmsd ?? 'unavailable'}`);
         state.alignmentPreview.fits[progress.moving]=progress.fit;
         if(state.view==='aligned')applyStagedPreviewFit(progress.moving,progress.fit);
     });
@@ -427,6 +429,7 @@ async function advanceStagedBuild(){
     {
         for(const group of state.conformationGroups){
             const indices=new Set(state.files.flatMap((file,index)=>group.pdbIds.includes(file.pdbId.toUpperCase())?[index]:[]));
+            globalThis.DeveloperLog?.record(`Merging conformation group: ${group.name || group.pdbIds.join(', ')}`);
             group.merged=mergeDraftModels(state.assembly,state.drafts,state.weights,indices);
         }
         // The final topology is a union. Coordinates always come from one state,
