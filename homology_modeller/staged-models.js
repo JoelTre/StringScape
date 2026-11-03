@@ -189,6 +189,7 @@ function mergeDraftModels(assembly,drafts,weights,allowed=null,unionOnly=false){
 function beginStagedBuild(files,alphaFiles,generation){
     const oldWeights=new Map(referenceFiles.map((file,i)=>[file.pdbId,referenceInfluences[i]??1]));
     multiReferenceBuild={files,alphaFiles,generation,weights:files.map(file=>stagedReferenceWeights.get(file.pdbId)??oldWeights.get(file.pdbId)??1),
+        prepareOnly:pauseBeforeFirstBuildSimulation,awaitingSimulation:false,replaying:false,
         drafts:[],kind:'draft',index:0,current:'draft:0',view:'draft:0',follow:true,busy:false,done:false,
         conformationGroups:conformationGroupsForFiles(files,typeof referenceConformationPlan==='undefined'?null:referenceConformationPlan),
         assembly:null,merged:null,alignedMode:'reference',visible:new Map(),links:true};
@@ -364,7 +365,7 @@ async function captureStagedDraft(state){
         chains[chain].push({...original,x:node.x,y:node.y,z:node.z,sourceAtoms:fullAtoms[index],draftNodeIndex:index,
             afResSeq:original.resSeq,afFileIndex:original.fileIndex,afSourcePdbId:original.sourcePdbId});
     });
-    const viewState={groupSimulation,occlusion:Float32Array.from(physicsOcclusionFactors),residueSpeeds:residueSpeedState.speeds.slice(),residueSpeedScale:residueSpeedState.scale,nodes:physicsNodes,blocks:morphMatrixBlocks,springs:physicsSprings,positions:physicsPositions,offset:{...physicsCenterOffset},
+    const viewState={groupSimulation,occlusion:Float32Array.from(physicsOcclusionFactors),residueSpeeds:residueSpeedState.speeds.slice(),residueSpeedScale:residueSpeedState.scale,nodes:physicsNodes,alignments:alignmentResults,blocks:morphMatrixBlocks,springs:physicsSprings,positions:physicsPositions,offset:{...physicsCenterOffset},
         referenceFiles:referenceFiles.slice(),referenceInfluences:referenceInfluences.slice(),model1Influence,model2Influence,referenceAssembly,modelData1:{...modelData1,matrixCache:new Map()},modelData2:{...modelData2,matrixCache:new Map()}};
     const input=physicsSpringInputSnapshot();for(let i=0;i<input.flags.length;i++)input.flags[i]&=~1;
     const result=await buildStagedFullNetwork(input,state),packed=result.packed;
@@ -379,6 +380,8 @@ async function captureStagedDraft(state){
     return {id:`Draft ${state.index+1} · ${state.files[state.index].pdbId}`,chains,chainIdentities,springTargets:springTargets.finish(),viewState};
 }
 async function startStagedDraft(index,state){
+    if(state.replaying)return resumePreparedStagedDraft(index,state);
+    if(state.prepareOnly)pauseBeforeFirstBuildSimulation=true;
     if(state!==multiReferenceBuild||state.generation!==modelBuildGeneration)return;
     state.index=index;state.kind='draft';state.current=`draft:${index}`;state.busy=true;
     if(state.follow)state.view=state.current;renderStagedBuildControls();
@@ -392,12 +395,18 @@ async function startStagedDraft(index,state){
     await initPhysicsSimulation();resetPhysicsGraphHistory();renderChainLegends();resetCanvasViews();drawIndividualMatrices();drawDifferenceMatrix();drawMorphMatrix();
     modelLoading=false;state.busy=false;readyModelGeneration=state.generation;hidePhysicsViewerLoading();
     if(state.follow)selectStagedModel(state.current);else selectStagedModel(state.view);
-    if(state.directReferences&&!springNetworkDeferred)await advanceStagedBuild();
+    if(state.prepareOnly||state.directReferences&&!springNetworkDeferred)await advanceStagedBuild();
 }
 async function advanceStagedBuild(){
     const state=multiReferenceBuild;if(!state||state.busy||state.kind!=='draft')return;
     state.busy=true;physicsRunning=false;renderStagedBuildControls();
-    const draft=await captureStagedDraft(state);state.drafts.push(draft);
+    if(state.prepareOnly){
+        updateRotationalSymmetry(true);
+        while(patternVarianceJob&&state===multiReferenceBuild)await new Promise(resolve=>setTimeout(resolve,50));
+        if(state!==multiReferenceBuild)return;
+        await updatePatternVariance(true);
+    }
+    const draft=await captureStagedDraft(state);state.drafts[state.index]=draft;
     if(state!==multiReferenceBuild||state.generation!==modelBuildGeneration)return;
     if(state.index+1<state.files.length){await startStagedDraft(state.index+1,state);return;}
     const alignTiming=globalThis.BuildTimeline?.start('Aligned draft models');
@@ -446,10 +455,83 @@ async function startCombinedStagedModel(state){
     const chains=state.merged.chains;modelData1.chains=chains;modelData1.caAtoms=Object.values(chains).flat();modelData1.pdbId='Merged draft model';
     modelData2.chains=chains;modelData2.caAtoms=modelData1.caAtoms;modelData1.matrixCache.clear();modelData2.matrixCache.clear();
     setDirectReferenceAlignments(chains);
-    selectedPairKey=null;await initPhysicsSimulation();resetPhysicsGraphHistory();
+    selectedPairKey=null;if(state.prepareOnly)pauseBeforeFirstBuildSimulation=true;
+    await initPhysicsSimulation();
+    if(state!==multiReferenceBuild||state.generation!==modelBuildGeneration)return;
+    resetPhysicsGraphHistory();
     populateChainSelectors();renderAlignmentTable();renderChainLegends();resetCanvasViews();drawIndividualMatrices();drawDifferenceMatrix();drawMorphMatrix();
-    state.busy=false;modelLoading=false;readyModelGeneration=state.generation;hidePhysicsViewerLoading();
+    state.busy=state.prepareOnly;modelLoading=false;readyModelGeneration=state.generation;hidePhysicsViewerLoading();
+    if(state.prepareOnly){
+        state.done=true;preSimulationAnalysisGeneration=state.generation;
+        updateRotationalSymmetry(true);
+        while(patternVarianceJob&&state===multiReferenceBuild)await new Promise(resolve=>setTimeout(resolve,50));
+        if(state!==multiReferenceBuild)return;
+        await updatePatternVariance(true);
+        if(state!==multiReferenceBuild)return;
+        await animationOnModelReady();
+        if(state!==multiReferenceBuild)return;
+        await createGroupedConformationAnimation();
+        if(state!==multiReferenceBuild)return;
+        state.awaitingSimulation=true;state.busy=false;
+        animationReadyGeneration=state.generation;
+        void loadSimulationIntoMolstar();
+    }
     selectStagedModel(state.view);renderStagedBuildControls();
+}
+async function beginPreparedStagedSimulation(){
+    const state=multiReferenceBuild;if(!state?.awaitingSimulation||state.busy)return;
+    state.busy=true;
+    try{
+        if(animationPlaying||animationPreparing)stopAnimation(true);
+        syncActiveAnimation();
+        for(const entry of animationLibrary)await loadAnimationGeometry(entry);
+        if(state!==multiReferenceBuild)return;
+        state.preservedAnimations=animationLibrary.slice();state.preservedActiveId=animationActiveId;
+        state.awaitingSimulation=false;state.prepareOnly=false;state.replaying=true;state.done=false;
+        state.follow=true;modelBuildCompleted=false;preSimulationAnalysisGeneration=null;animationReadyGeneration=null;
+        buildSimulationStatus='running';updateBuildButtonState();
+        await resumePreparedStagedDraft(0,state);
+    }catch(error){failStagedBuild(error,state);}
+}
+async function resumePreparedStagedDraft(index,state){
+    if(state!==multiReferenceBuild||state.generation!==modelBuildGeneration)return;
+    const saved=state.drafts[index].viewState;
+    state.index=index;state.kind='draft';state.current=state.view=`draft:${index}`;state.busy=true;
+    physicsRunning=false;modelLoading=true;referenceAssembly=saved.referenceAssembly;
+    referenceFiles=saved.referenceFiles.slice();referenceInfluences=saved.referenceInfluences.slice();
+    currentReferenceFile=referenceFiles[0];model1Influence=saved.model1Influence;model2Influence=saved.model2Influence;
+    modelData1={...saved.modelData1,matrixCache:new Map(saved.modelData1.matrixCache)};
+    modelData2={...saved.modelData2,matrixCache:new Map(saved.modelData2.matrixCache)};
+    morphMatrixBlocks=saved.blocks;physicsPositions=saved.positions;
+    alignmentResults=saved.alignments;
+    pauseBeforeFirstBuildSimulation=false;
+    await initPhysicsSimulation(saved.nodes);resetPhysicsGraphHistory();
+    state.drafts[index].viewState.groupSimulation=groupSimulation;
+    if(state!==multiReferenceBuild)return;
+    modelLoading=false;state.busy=false;readyModelGeneration=state.generation;
+    populateChainSelectors();renderAlignmentTable();renderChainLegends();hidePhysicsViewerLoading();
+    selectStagedModel(state.current);renderStagedBuildControls();
+}
+function refreshPreparedStagedAnimations(){
+    const state=multiReferenceBuild;if(!state?.preservedAnimations)return false;
+    animationLibrary=state.preservedAnimations;
+    const coords=animationNodeCoordinates(),displayCoords=animationNodeCoordinates(true);
+    for(const entry of animationLibrary)for(const frame of entry.frames){
+        const pose=state.groupPoses?.[frame.conformationGroup];
+        frame.coords=pose?MemoryData.vectors(pose.atoms.map((atom,index)=>{
+            const node=physicsNodes[index];
+            return [atom.x-physicsCenterOffset.cx+node.x-node.initX,atom.y-physicsCenterOffset.cy+node.y-node.initY,atom.z-physicsCenterOffset.cz+node.z-node.initZ];
+        })):coords;
+        frame.displayCoords=pose?frame.coords:displayCoords;frame.atomOffsets=pose?animationResidueOffsets(pose.atoms):null;
+        if(pose)frame.groupPresence=pose.presence.slice();
+    }
+    const active=animationLibrary.find(entry=>entry.id===state.preservedActiveId)||animationLibrary[0];
+    if(active)activateAnimation(active);
+    delete state.preservedAnimations;delete state.preservedActiveId;
+    animationModelStorageKey=animationSessionKey();
+    keyframeDifferenceCache=null;bindingSiteCache=null;
+    renderAnimationTimeline();saveAnimation();
+    return true;
 }
 function installStagedMergedSprings(){
     const state=ensurePhysicsSimulationWorker(),build=multiReferenceBuild;
@@ -667,7 +749,7 @@ function buildPassStatsRows(build,groups){
     const current=(key)=>groups?.statsModelKey===key?groups:null;
     if(!build)return groups?.statsModelKey==='single'?[{label:'Model',stats:groups}]:[];
     return (build.files||[]).map((file,index)=>({label:`Draft ${index+1} · ${file.pdbId}`,
-        stats:build.drafts?.[index]?.viewState?.groupSimulation??current(`draft:${index}`)}));
+        stats:current(`draft:${index}`)??build.drafts?.[index]?.viewState?.groupSimulation}));
 }
 function renderBuildPassStats(build,groups){
     const host=document.getElementById('buildPassStatsRows');if(!host)return;
@@ -727,6 +809,7 @@ function updateStagedBuildETC(now,force=false){
     const estimate=state.etc;
     const current=groups&&!state.busy&&groups.nodes===physicsNodes&&['draft','combined'].includes(state.kind);
     const running=Boolean(current&&physicsRunning&&simulationPhase===2&&!modelLoading&&!animationPlaying&&!physicsSimulationWorkerState?.buildPending&&!groups.complete);
+    if(running)estimate.started=true;
     if(estimate.lastRunning&&running)estimate.activeMs+=Math.max(0,now-estimate.lastAt);
     estimate.lastAt=now;estimate.lastRunning=running;
     if(current){
@@ -743,7 +826,7 @@ function updateStagedBuildETC(now,force=false){
     const total=draftCounts.reduce((sum,count)=>sum+count,0)+combined;
     const completed=[...estimate.counts.values()].reduce((sum,count)=>sum+count,0);
     const remaining=estimateStagedRemainingMs(estimate.activeMs,completed,total);
-    if(remaining===null||estimate.activeMs<=0){display.textContent='ETC: measuring…';return;}
+    if(remaining===null||estimate.activeMs<=0){display.textContent=estimate.started?'ETC: measuring…':'';return;}
     const seconds=Math.ceil(remaining/1000),duration=seconds>=60?`${Math.floor(seconds/60)}m ${seconds%60}s`:`${seconds}s`;
     const time=new Date(Date.now()+remaining).toLocaleTimeString('en-NZ',{hour:'numeric',minute:'2-digit',hour12:true}).replace(/\s+/g,' ').toLowerCase();
     display.textContent=`ETC: ${duration} remaining (${time})${running?'':' · paused'}`;

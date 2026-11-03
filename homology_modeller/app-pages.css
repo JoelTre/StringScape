@@ -57,7 +57,7 @@ body .chain-mapping-box { background:#0f172a; border-color:#334155; color:#cbd5e
 body .chain-mapping-toggle { color:#5eead4; }
 body.light-mode .chain-mapping-box { background:#fff; border-color:#cbd5e1; color:#334155; }
 body.light-mode .chain-mapping-toggle { color:#0f766e; }
-.manual-structure-options > summary { display:flex; align-items:center; justify-content:space-between; gap:1rem; color:#5eead4; font-weight:600; cursor:pointer; list-style:none; }
+.manual-structure-options > summary { display:flex; align-items:center; justify-content:flex-start; gap:.5rem; color:#5eead4; font-weight:600; cursor:pointer; list-style:none; }
 .manual-structure-options > summary::-webkit-details-marker { display:none; }
 .manual-structure-options[open] > summary > i { transform:rotate(180deg); }
 .manual-structure-fields { display:flex; flex-direction:column; gap:.75rem; padding-top:1rem; }
@@ -130,6 +130,7 @@ body.light-mode #homologyPhysicsSimulation > #createAnimationBtn:hover { backgro
 #physicsSequencePanel { background:#0c1929; }
 body.light-mode #physicsSequencePanel { background:#f8fafc; }
 body:not(.light-mode) #physicsContainer #physicsViewerKey, body.light-mode #physicsContainer #physicsViewerKey { border:0; }
+#physicsContainer #physicsViewerKey { box-shadow:0 0 25px -5px rgb(0 0 0 / .1),0 0 10px -6px rgb(0 0 0 / .1); }
 .app-page-layer::before, .app-page-layer::after { content:""; position:absolute; left:0; right:20px; height:3.25rem; z-index:3; pointer-events:none; opacity:0; transition:opacity .2s ease; }
 .app-page-layer::before { top:0; border-radius:1rem 0 0 0; background:linear-gradient(to bottom,rgba(12,25,41,.8),transparent); }
 .app-page-layer::after { bottom:0; border-radius:0 0 0 1rem; background:linear-gradient(to top,rgba(12,25,41,.8),transparent); }

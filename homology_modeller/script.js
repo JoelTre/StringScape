@@ -5834,7 +5834,7 @@
 
 // physicsSetup.js start
         let physicsSetupRevision=0,physicsSetupPending=false;
-        async function initPhysicsSimulation() {
+        async function initPhysicsSimulation(preparedNodes=null) {
             const setupGeneration=modelBuildGeneration,setupRevision=++physicsSetupRevision;
             if (!physicsRenderer || !backboneLinesGroup) throw new Error('Molecular rendering could not start. Try closing and reopening your browser.');
             resetNucleicExtensions();
@@ -5909,7 +5909,8 @@
                 for (const pair of simulationPairs) {
                     const coordinateIndex=block.res.referenceOnly?pair.idx1:pair.idx2;
                     const coordinates=block.res.initialCoordinates;
-                    const x=coordinates[coordinateIndex*3],y=coordinates[coordinateIndex*3+1],z=coordinates[coordinateIndex*3+2];
+                    const prepared=preparedNodes?.[initialCoords.length];
+                    const x=prepared?prepared.x:coordinates[coordinateIndex*3],y=prepared?prepared.y:coordinates[coordinateIndex*3+1],z=prepared?prepared.z:coordinates[coordinateIndex*3+2];
                     initialCoords.push({ x, y, z });
                 }
             }
@@ -5967,7 +5968,7 @@
 
             physicsSetupPending=true;
             try{
-                await updateReferenceCoordinateLockTargetsAsync();
+                if(!preparedNodes)await updateReferenceCoordinateLockTargetsAsync();
                 if(setupGeneration!==modelBuildGeneration||setupRevision!==physicsSetupRevision)throw new DOMException('Build superseded','AbortError');
                 if(physicsRepresentation==='ball-stick')await prepareAtomFrameData();
             }
@@ -5975,8 +5976,13 @@
             if(setupGeneration!==modelBuildGeneration||setupRevision!==physicsSetupRevision)throw new DOMException('Build superseded','AbortError');
             physicsSetupPending=true;
             try {
-            applyReferenceCoordinateLocks();
-            propagateInitialReferenceLockDisplacements();
+            if(preparedNodes){
+                physicsNodes.forEach((node,index)=>Object.assign(node,preparedNodes[index]));
+                physicsCenterOffset={...multiReferenceBuild.drafts[multiReferenceBuild.index].viewState.offset};
+            }else{
+                applyReferenceCoordinateLocks();
+                propagateInitialReferenceLockDisplacements();
+            }
 
             updateRotationalSymmetry(true);
 
@@ -6031,7 +6037,7 @@
             updatePhysicsNodeColors();
             refreshSelectedGlowIndices();
             resetGroupSimulation();
-            if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.kind==='combined'&&multiReferenceBuild.conformationGroups?.length>1){
+            if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.kind==='combined'&&!multiReferenceBuild.prepareOnly&&!multiReferenceBuild.replaying&&multiReferenceBuild.conformationGroups?.length>1){
                 physicsRunning=false;
                 groupSimulation.pass=2;
                 scheduleAppTask(()=>{if(groupSimulation?.nodes===physicsNodes&&multiReferenceBuild?.kind==='combined')finishGroupSimulation();});
@@ -6040,6 +6046,7 @@
                 if(pauseBeforeFirstBuildSimulation){
                     pauseBeforeFirstBuildSimulation=false;physicsRunning=false;
                     preSimulationAnalysisGeneration=modelBuildGeneration;
+                    buildSimulationStatus='waiting';updateBuildButtonState();
                     syncSurfacePhysicsPause();
                     document.getElementById('physicsPauseText').textContent='Start Simulation';
                     document.getElementById('physicsStatusBadge').textContent='Simulation (Paused)';
@@ -7456,7 +7463,9 @@
                 if(!modelBuildCompleted||state!==groupSimulation)return;updateRotationalSymmetry(true);
                 while(patternVarianceJob&&state===groupSimulation)await new Promise(resolve=>setTimeout(resolve,50));
                 if(!modelBuildCompleted||state!==groupSimulation)return;await updatePatternVariance(true);
-                if(state!==groupSimulation)return;await animationOnModelReady();
+                if(state!==groupSimulation)return;
+                const animationsPreserved=typeof refreshPreparedStagedAnimations==='function'&&refreshPreparedStagedAnimations();
+                if(!animationsPreserved)await animationOnModelReady();
                 if(state===groupSimulation&&typeof createGroupedConformationAnimation==='function')await createGroupedConformationAnimation();
                 if(state===groupSimulation&&modelBuildCompleted)animationReadyGeneration=modelBuildGeneration;
             })().catch(reportBackgroundError);});
@@ -12077,7 +12086,9 @@
             document.getElementById('cancelBuildBtn')?.classList.toggle('hidden',!building);
             button.setAttribute('aria-busy',String(building));
             button.classList.toggle('homology-build-glow', building);
-            if (building) {
+            if (building && buildSimulationStatus) {
+                button.textContent=buildSimulationStatus==='waiting'?'Model built, waiting for simulation start':'Simulation running';
+            } else if (building) {
                 button.replaceChildren();
                 const spinner = document.createElement('i');
                 spinner.className = 'fa-solid fa-circle-notch fa-spin';
@@ -12088,6 +12099,7 @@
                     ? 'Homology Model Built (see below)' : 'Build Homology Model';
         }
         let modelBuildGeneration = 0;
+        let buildSimulationStatus = null;
         let modelBuildAbortController = null;
         let currentReferenceFile = null;
         let homologyViewerMode = 'reference';
@@ -12282,6 +12294,11 @@
             syncStringMatchStatusVisibility();
             updateFindMatchesReady();
             document.getElementById('pdbInput2').value = pdbId2Raw;
+            if(modelBuildInputKey!==null&&modelBuildInputKey!==currentModelInputKey()){
+                document.getElementById('stringMatchStatus')?.querySelector('ul')?.remove();
+                document.getElementById('referenceSequenceSearchStatus')?.querySelector('ul')?.remove();
+                syncStringMatchStatusVisibility();
+            }
             editedChainMatches.clear();
             linkedSelection=null;
             let referenceParts=null;
@@ -12305,7 +12322,7 @@
             globalThis.BuildTimeline?.beginBuild();
             modelBuildStartedAt = performance.now();
             buildSettingsChanged = false;
-            modelBuildCompleted = false; modelLoading = true; simulationAutoRendered = false;
+            buildSimulationStatus=null; modelBuildCompleted = false; modelLoading = true; simulationAutoRendered = false;
             for(const [lane,task] of backgroundTasks)if(lane.startsWith('matrix:')&&lane.endsWith(':range'))task.cancel();
             modelBuildInputKey = currentModelInputKey();
             completedModelInputKey = null;
@@ -12500,9 +12517,11 @@
                 if(directReferences){
                     await loadUniProtAnnotations(directAccessions.map(pdbId=>({pdbId})),generation);
                     if(generation!==modelBuildGeneration)return;
-                    const build=multiReferenceBuild;if(!springNetworkDeferred)void advanceStagedBuild().catch(error=>failStagedBuild(error,build));
+                    const build=multiReferenceBuild;if(!build.prepareOnly&&!springNetworkDeferred)void advanceStagedBuild().catch(error=>failStagedBuild(error,build));
                 } else void loadUniProtAnnotations(fileResults2,generation);
-                if(preSimulationAnalysisGeneration===generation){
+                if(multiReferenceBuild?.prepareOnly){
+                    await advanceStagedBuild();
+                }else if(preSimulationAnalysisGeneration===generation){
                     const state=groupSimulation;
                     scheduleAppTask(()=>{void (async()=>{
                         if(generation!==modelBuildGeneration||state!==groupSimulation||physicsRunning)return;
@@ -12825,6 +12844,8 @@
         }
 
         function togglePhysicsRun() {
+            if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.busy)return;
+            if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.awaitingSimulation){void beginPreparedStagedSimulation();return;}
             if(groupSimulation?.complete)return;
             if (physicsRepresentation === 'surface') { syncSurfacePhysicsPause(); return; }
             if(animationPlaying){
@@ -12848,7 +12869,7 @@
             tickGroupSimulation(performance.now());
             if(groupSimulation?.complete)return;
             physicsRunning = !physicsRunning;
-            if(physicsRunning){preSimulationAnalysisGeneration=null;animationReadyGeneration=null;}
+            if(physicsRunning){if(buildSimulationStatus==='waiting'){buildSimulationStatus='running';updateBuildButtonState();}preSimulationAnalysisGeneration=null;animationReadyGeneration=null;}
             if(groupSimulation){groupSimulation.lastTick=performance.now();groupSimulation.wasRunning=physicsRunning;groupSimulation.sampleElapsed=groupSimulation.elapsed;groupSimulation.sampleSteps=0;groupSimulation.coreDistances=groupSimulation.coreIndices?.map(()=>0)||[];groupSimulation.corePositions=groupSimulation.coreIndices?.flatMap(index=>{const n=physicsNodes[index];return [n.x,n.y,n.z];})||[];}
             if(groupSimulation?.parallel)resetParallelPhysicsSampling();
             physicsGraphHistory.lastPositions=null;
@@ -19140,6 +19161,7 @@
                 'flagellar hook-basal body complex protein flie',
                 'flagellar basal-body rod protein flgf',
                 'flagellar biosynthetic protein fliq',
+                'flagellar biosynthetic protein flhb',
                 'flagellar biosynthetic protein flir',
                 'flagellar biosynthetic protein flip',
                 'flagellar basal-body rod protein flgc',
