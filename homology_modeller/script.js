@@ -6074,7 +6074,7 @@
                 groupSimulation.pass=2;
                 scheduleAppTask(()=>{if(groupSimulation?.nodes===physicsNodes&&multiReferenceBuild?.kind==='combined')finishGroupSimulation();});
             }else {
-                setSimulationPhase(2);
+                setSimulationPhase(2, !pauseBeforeFirstBuildSimulation);
                 if(pauseBeforeFirstBuildSimulation){
                     pauseBeforeFirstBuildSimulation=false;physicsRunning=false;
                     preSimulationAnalysisGeneration=modelBuildGeneration;
@@ -7172,7 +7172,7 @@
             updateDynamicResidueBudgetDisplay();
             updateAveragePhysicsStepRate();
             if(physicsNodes.length){
-                const status=document.getElementById('groupSimulationStatusText');if(status)status.textContent='Preparing simulation and building the spring network…';
+                const status=document.getElementById('groupSimulationStatusText');if(status)status.textContent=springNetworkDeferred?'Preparing aligned model and molecular geometry…':'Preparing simulation and building the spring network…';
                 document.getElementById('groupSimulationStatus').style.display='flex';
             }
             updateGroupTimeLimitCount();
@@ -7506,7 +7506,7 @@
             void loadSimulationIntoMolstar();
         }
 
-        function setSimulationPhase(phase) {
+        function setSimulationPhase(phase, startRunning=true) {
             if(phase===2&&groupSimulation?.complete)return;
             simulationPhase = phase;
             if (phase === 2 && window.__benchmarkRun) window.__benchmarkRun.phase2StartedAt ??= performance.now();
@@ -7537,8 +7537,8 @@
                 if (pauseIcon) pauseIcon.className = "fa-solid fa-play text-emerald-400";
             } else {
                 // Phase 2: Dynamic elastic simulation evolving from Phase 1 starting positions
-                startPhysicsGraphHistory();
-                physicsRunning = true;
+                if(startRunning)startPhysicsGraphHistory();
+                physicsRunning = startRunning;
                 physicsGraphHistory.lastPositions=null;
 
                 if (btn1) {
@@ -12534,7 +12534,7 @@
                 drawIndividualMatrices();
                 drawDifferenceMatrix();
 
-                setBuildStatus('Preparing simulation and building the spring network…');
+                setBuildStatus(pauseBeforeFirstBuildSimulation?'Preparing aligned model and molecular geometry…':'Preparing simulation and building the spring network…');
                 window.appNavigateWhenSimulationStarts?.();
                 await initPhysicsSimulation();
                 if(generation!==modelBuildGeneration)return;
@@ -12891,6 +12891,7 @@
                 rebuildCutoffSprings();
                 buildLocalGeometryRestraints();
                 if(paeSpringInfluence>0)requestSpringPae();
+                startPhysicsGraphHistory();
             }
             if (simulationPhase === 1) {
                 // If in Phase 1, start Phase 2 dynamic simulation from TM-aligned starting positions
@@ -20870,7 +20871,7 @@ if(globalThis.BuildTimeline){
         const build=typeof multiReferenceBuild==='undefined'?null:multiReferenceBuild;
         return build?.kind==='draft'?`Draft ${build.index+1} · ${label}`:label;
     };
-    initPhysicsSimulation=timeline.wrap(draftStage('Initializing simulation and molecular geometry'),initPhysicsSimulation);
+    initPhysicsSimulation=timeline.wrap(draftStage('Preparing aligned model and molecular geometry'),initPhysicsSimulation);
     captureStagedDraft=timeline.wrap(draftStage('Capturing completed draft and spring targets'),captureStagedDraft);
     startCombinedStagedModel=timeline.wrap('Building combined model from aligned drafts',startCombinedStagedModel);
     loadValidationPae=timeline.wrap('Loading predicted aligned error confidence data',loadValidationPae);
