@@ -249,7 +249,7 @@ document.getElementById('buildProcessModelsToggle')?.addEventListener('click',()
     state.buildModelsExpanded=!state.buildModelsExpanded;
     renderStagedBuildControls();
 });
-function stagedLiveView(){return !multiReferenceBuild||(multiReferenceBuild.view===multiReferenceBuild.current||multiReferenceBuild.done&&multiReferenceBuild.view.startsWith('group:'))&&multiReferenceBuild.current!=='aligned'&&!multiReferenceBuild.busy;}
+function stagedLiveView(){return !multiReferenceBuild||(multiReferenceBuild.view===multiReferenceBuild.current||multiReferenceBuild.done&&multiReferenceBuild.view.startsWith('group:'))&&multiReferenceBuild.current!=='aligned'&&(!multiReferenceBuild.busy||Boolean(physicsPreparationPreview));}
 // Draft review retains the packed network on disk while another view is active.
 // Only the network is paged: draft geometry and other shared model objects keep
 // their existing identities throughout the build and merge.

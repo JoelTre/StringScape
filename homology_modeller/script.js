@@ -1925,7 +1925,8 @@
             renderRecentModels();
             renderReferenceSearchResults();
             if(selectedReferencePdbIds().length) {
-                if(stringSequenceFile() || stringAliasesFile()) void findStringReferenceMatches();
+                if(targetsWereManuallySet()) void loadModelPair(input.value,document.getElementById('pdbInput2').value);
+                else if(stringSequenceFile() || stringAliasesFile()) void findStringReferenceMatches();
                 else void fetchSiftsUniProtIds({autoBuild:true});
             }
             else {
@@ -3229,6 +3230,15 @@
             if(!stringTaxonomyCache.has(key))stringTaxonomyCache.set(key,stringJson(`https://rest.uniprot.org/taxonomy/${encodeURIComponent(key)}`,signal).catch(error=>{stringTaxonomyCache.delete(key);throw error;}));
             return stringTaxonomyCache.get(key);
         }
+        async function stringSpeciesTaxon(taxon,signal){
+            if(!taxon)return null;
+            try {
+                const entry=await stringTaxonomy(String(taxon),signal);
+                if(entry.rank==='species')return String(entry.taxonId||taxon);
+                const species=(entry.lineage||[]).find(node=>node.rank==='species');
+                return species ? String(species.taxonId) : null;
+            } catch(error) { if(signal?.aborted)throw error; return null; }
+        }
         async function stringTargetTaxonCompatible(entryTaxon,targetTaxon,signal){
             if(String(entryTaxon)===String(targetTaxon))return true;
             if(!entryTaxon)return false;
@@ -3288,7 +3298,14 @@
         function publishStringMatches(response){
             const input=document.getElementById('pdbInput2'),status=document.getElementById('stringMatchStatus');
             const {value,added}=appendStringUniProtIds(input.value,response.matches);
-            input.value=added.length?value:parseModelInputs(input.value).filter(entry=>entry.sequence).map(entry=>entry.sequence).join(', ');resizeStructureIdInputs();updateBuildButtonState();
+            input.value=added.length?value:parseModelInputs(input.value).filter(entry=>entry.sequence).map(entry=>entry.sequence).join(', ');
+            automaticTargetSource={reference:document.getElementById('pdbInput1').value.trim().toUpperCase(),targets:input.value.trim().toUpperCase(),
+                records:response.matches.filter(stringMatchAccepted).map(match=>{
+                    const separator=match.chain.indexOf(': ');
+                    return {reference:match.chain.slice(0,separator).toUpperCase(),chains:[match.chain.slice(separator+2)],
+                        accession:uniProtAccession(match.accession),lockAll:Boolean(match.referenceSameSpecies)};
+                }).filter(record=>record.accession)};
+            resizeStructureIdInputs();updateBuildButtonState();
             const unresolved=new Set(response.matches.filter(match=>!stringMatchAccepted(match)).map(match=>match.queryKey)).size;
             const warning=stringPartialBuildWarning(response.matches);
             appendReferenceSearchStep(status,`Searched ${response.count.toLocaleString()} proteins. Loaded ${added.length} unique UniProt ID(s).${warning?`\n\n${warning}`:''}`);
@@ -3364,6 +3381,10 @@
             if(stringMatchJob) {stringMatchJob.worker.terminate();stringMatchJob.reject(new Error('Matching cancelled because an input changed.'));stringMatchJob=null;}
         }
         async function findStringReferenceMatches() {
+            if (targetsWereManuallySet()) {
+                void loadModelPair(document.getElementById('pdbInput1').value.trim(),document.getElementById('pdbInput2').value.trim());
+                return;
+            }
             if (stringMatchingLoading) return;
             stringMatchingLoading = true;
             updateBuildButtonState();
@@ -3436,6 +3457,14 @@
                 if(!inputsUnchanged())throw new Error('Inputs changed; press Build Homology Model again.');
                 appendReferenceSearchStep(status,'Validating current UniProt aliases against target sequences and taxonomy…');
                 await validateStringAccessions(response.matches,fa[1],controller.signal);
+                // Compare species for each reference chain, not once for the whole build.
+                const targetSpecies=await stringSpeciesTaxon(fa[1],controller.signal);
+                for(const match of response.matches){
+                    const query=queries.find(item=>item.chain===match.chain);
+                    const taxa=query?.taxa||[];
+                    const species=await Promise.all(taxa.map(taxon=>stringSpeciesTaxon(taxon,controller.signal)));
+                    match.referenceSameSpecies=Boolean(targetSpecies && species.length && species.every(id=>id===targetSpecies));
+                }
                 if(!inputsUnchanged()||controller.signal.aborted)throw new Error('Inputs changed; press Build Homology Model again.');
                 stringMatchReview={reference:currentStringReferenceKey(),fasta,aliases,taxon:fa[1],gapOpen:alignmentGapOpen,gapExtend:alignmentGapExtend,response};
                 if(publishStringMatches(response))void loadModelPair(document.getElementById('pdbInput1').value.trim(),document.getElementById('pdbInput2').value.trim().toUpperCase());
@@ -5865,9 +5894,36 @@
 // physicsCaptureAndPulse.js end
 
 // physicsSetup.js start
-        let physicsSetupRevision=0,physicsSetupPending=false;
+        let physicsSetupRevision=0,physicsSetupPending=false,physicsPreparationPreview=null;
+        function createPreparationBackbonePreview(){
+            const scene=new THREE.Scene(),positions=[],colors=[],linePositions=[],lineColors=[];
+            scene.background=physicsScene.background;
+            const scores=calculateStericClashScores(physicsNodes,stericClashRadius,rigidBodySimulation);
+            for(let i=0;i<physicsNodes.length;i++){
+                const node=physicsNodes[i],color=new THREE.Color(stericClashScoreColor(scores[i]));
+                positions.push(node.x,node.y,node.z);colors.push(color.r,color.g,color.b);
+                const previous=physicsNodes[i-1];
+                if(previous&&previous.blockIdx===node.blockIdx&&node.res.entityType!=='other'){
+                    linePositions.push(previous.x,previous.y,previous.z,node.x,node.y,node.z);
+                    const previousColor=new THREE.Color(stericClashScoreColor(scores[i-1]));
+                    lineColors.push(previousColor.r,previousColor.g,previousColor.b,color.r,color.g,color.b);
+                }
+            }
+            const geometry=(points,colour)=>{const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(points,3));g.setAttribute('color',new THREE.Float32BufferAttribute(colour,3));return g;};
+            scene.add(new THREE.Points(geometry(positions,colors),new THREE.PointsMaterial({size:1.7,vertexColors:true,sizeAttenuation:true})));
+            scene.add(new THREE.LineSegments(geometry(linePositions,lineColors),new THREE.LineBasicMaterial({vertexColors:true})));
+            resetPhysicsCamera();autoFitPhysicsCamera();
+            return {scene};
+        }
+        function disposePreparationBackbonePreview(preview){
+            if(!preview)return;
+            preview.scene.traverse(object=>{object.geometry?.dispose();object.material?.dispose();});
+            if(physicsPreparationPreview===preview)physicsPreparationPreview=null;
+        }
         async function initPhysicsSimulation(preparedNodes=null) {
             const setupGeneration=modelBuildGeneration,setupRevision=++physicsSetupRevision;
+            disposePreparationBackbonePreview(physicsPreparationPreview);
+            document.getElementById('preSimulationProjectionBadge')?.classList.add('hidden');
             if (!physicsRenderer || !backboneLinesGroup) throw new Error('Molecular rendering could not start. Try closing and reopening your browser.');
             resetNucleicExtensions();
             patternDetectionSnapshot=null;rotationalDetectionSnapshot=null;
@@ -6014,6 +6070,20 @@
             }else{
                 applyReferenceCoordinateLocks();
                 propagateInitialReferenceLockDisplacements();
+                const combined=typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.kind==='combined';
+                const preview=combined?null:createPreparationBackbonePreview();
+                if(preview){
+                    physicsPreparationPreview=preview;
+                    if(typeof multiReferenceBuild==='undefined'||!multiReferenceBuild||multiReferenceBuild.view===multiReferenceBuild.current){
+                        document.getElementById('physics3dCanvas')?.classList.remove('hidden');
+                        document.getElementById('stagedPreviewHost')?.classList.add('hidden');
+                        hidePhysicsViewerLoading();
+                    }
+                }
+                document.getElementById('groupSimulationRunningBadge')?.classList.add('hidden');
+                const badge=document.getElementById('preSimulationProjectionBadge');badge?.classList.remove('hidden');
+                try{await refineInitialGeometry(setupGeneration,setupRevision);}
+                finally{disposePreparationBackbonePreview(preview);if(setupRevision===physicsSetupRevision)badge?.classList.add('hidden');}
             }
 
             updateRotationalSymmetry(true);
@@ -6409,7 +6479,7 @@
                     const node = physicsNodes[index];
                     if (!node.usedInAlignment || node.idx1 === null || node.idx2 === null) continue;
                     const nearest=nearestUnaligned.get(index);
-                    if (nearest <= lockAlignedResiduesDistance) continue;
+                    if (!sourceLocksAllAlignedResidues(node) && nearest <= lockAlignedResiduesDistance) continue;
                     const referenceCount = referenceAssembly ? referenceFiles.length : 1;
                     const residues = Array.from({length: referenceCount}, (_, referenceIndex) => referenceLockResidue(node, referenceIndex));
                     const weights = residues.map((residue, referenceIndex) => residue ? (referenceAssembly ? referenceInfluences[referenceIndex] ?? 1 : model1Influence) : 0);
@@ -6478,24 +6548,52 @@
         function propagateInitialReferenceLockDisplacements() {
             if (!lockAlignedResiduesToReference) return;
             const nodes=physicsNodes;
-            const pullFromBoundary=(boundary,direction)=>{
-                const anchor=nodes[boundary];
-                if (!anchor.referenceLockTarget || anchor.res.entityType==='other' ||
-                    Math.hypot(anchor.x-anchor.phase1X,anchor.y-anchor.phase1Y,anchor.z-anchor.phase1Z)<1e-8) return;
-                for(let i=boundary+direction;i>=0&&i<nodes.length;i+=direction){
-                    const follower=nodes[i],previous=nodes[i-direction];
-                    if(follower.blockIdx!==anchor.blockIdx||follower.referenceLockTarget) break;
-                    const dx=follower.x-previous.x,dy=follower.y-previous.y,dz=follower.z-previous.z;
-                    const distance=Math.hypot(dx,dy,dz),bondIndex=Math.min(i,i-direction);
-                    const limit=anchor.res.entityType==='nucleotide'?Math.max(4.5,Math.min(9,backboneRestLength(bondIndex)*1.25)):BACKBONE_BOND_LEN;
-                    if(distance<=limit||distance<1e-8)continue;
-                    const scale=limit/distance;
-                    follower.x=previous.x+dx*scale;follower.y=previous.y+dy*scale;follower.z=previous.z+dz*scale;
+            const limitAt=(i)=>nodes[i].res.entityType==='nucleotide'
+                ?Math.max(4.5,Math.min(9,backboneRestLength(i)*1.25)):BACKBONE_BOND_LEN;
+            const moved=anchor=>Math.hypot(anchor.x-anchor.phase1X,anchor.y-anchor.phase1Y,anchor.z-anchor.phase1Z)>=1e-8;
+            const confidence=i=>nodes[i].res.atoms2?.[nodes[i].idx2]?.plddt;
+            // Process each unlocked stretch independently, applying both boundary
+            // walks at each confidence threshold before lowering the protection.
+            for(let start=0;start<nodes.length;){
+                if(nodes[start].referenceLockTarget){start++;continue;}
+                let end=start;
+                while(end+1<nodes.length&&nodes[end+1].blockIdx===nodes[start].blockIdx&&!nodes[end+1].referenceLockTarget)end++;
+                const left=start>0&&nodes[start-1].blockIdx===nodes[start].blockIdx&&nodes[start-1].referenceLockTarget?start-1:null;
+                const right=end+1<nodes.length&&nodes[end+1].blockIdx===nodes[end].blockIdx&&nodes[end+1].referenceLockTarget?end+1:null;
+                if(nodes[start].res.entityType==='other'||(left===null&&right===null)||
+                    ![left,right].some(i=>i!==null&&moved(nodes[i]))){start=end+1;continue;}
+                const hasExcess=()=>{
+                    for(let i=left??start;i<(right??end);i++){
+                        const a=nodes[i],b=nodes[i+1];
+                        if(Math.hypot(b.x-a.x,b.y-a.y,b.z-a.z)>limitAt(i)+1e-8)return true;
+                    }
+                    return false;
+                };
+                const walk=(boundary,direction,threshold)=>{
+                    if(boundary===null)return;
+                    for(let i=boundary+direction;i>=start&&i<=end;){
+                        const follower=nodes[i],previous=nodes[i-direction];
+                        const dx=follower.x-previous.x,dy=follower.y-previous.y,dz=follower.z-previous.z;
+                        const distance=Math.hypot(dx,dy,dz),limit=limitAt(Math.min(i,i-direction));
+                        let lo=i,hi=i;
+                        const confident=j=>threshold!==null&&Number.isFinite(confidence(j))&&confidence(j)>=threshold&&confidence(j)<=100;
+                        if(distance>limit&&confident(i)){
+                            while(lo>start&&confident(lo-1))lo--;
+                            while(hi<end&&confident(hi+1))hi++;
+                        }
+                        if(distance>limit&&distance>=1e-8){
+                            const scale=limit/distance-1,tx=dx*scale,ty=dy*scale,tz=dz*scale;
+                            for(let j=lo;j<=hi;j++){nodes[j].x+=tx;nodes[j].y+=ty;nodes[j].z+=tz;}
+                        }
+                        i=direction>0?hi+1:lo-1;
+                    }
+                };
+                for(const threshold of [50,70,90,null]){
+                    if(!hasExcess())break;
+                    walk(left,1,threshold);
+                    walk(right,-1,threshold);
                 }
-            };
-            for(let i=0;i<nodes.length;i++)if(nodes[i].referenceLockTarget){
-                if(i>0&&!nodes[i-1].referenceLockTarget&&nodes[i-1].blockIdx===nodes[i].blockIdx)pullFromBoundary(i,-1);
-                if(i+1<nodes.length&&!nodes[i+1].referenceLockTarget&&nodes[i+1].blockIdx===nodes[i].blockIdx)pullFromBoundary(i,1);
+                start=end+1;
             }
         }
 
@@ -8034,6 +8132,92 @@
             metrics.unresolvedClashBlocks=group.unresolvedClashBlocks;
             return metrics;
         }
+        // Run the same position projection used by group simulation before any
+        // simulation starts. A dedicated worker keeps preparation responsive and
+        // publishes each completed iteration so the deadline can retain progress.
+        function projectionClashDistribution(nodes,radius){
+            const scores=new Float32Array(nodes.length);let clashes=0;
+            forEachNearbyPhysicsPair(nodes,Math.max(radius,radius*(2.2/MIN_RESIDUE_DIST)),(i,j)=>{
+                const a=nodes[i],b=nodes[j];
+                if(a.blockIdx===b.blockIdx&&(Math.abs(i-j)===1||a.res.entityType==='other'))return;
+                const limit=a.res.entityType==='other'||b.res.entityType==='other'?radius*(2.2/MIN_RESIDUE_DIST):radius;
+                const distance=Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z);
+                if(distance>=limit-.001)return;
+                clashes++;const overlap=Math.max(0,Math.min(1,(limit-distance)/limit));
+                scores[i]=Math.max(scores[i],overlap);scores[j]=Math.max(scores[j],overlap);
+            });
+            const bins=new Uint32Array(20);
+            for(const score of scores)if(score>0)bins[Math.min(19,Math.floor(score*20))]++;
+            return {clashes,bins:Array.from(bins),scores};
+        }
+        async function refineInitialGeometry(generation,revision){
+            const nodes=physicsNodes,combined=typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.kind==='combined';
+            const label=combined?'Combined model':typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.kind==='draft'?`Draft ${multiReferenceBuild.index+1}`:'Model';
+            const row=globalThis.BuildTimeline?.start(`${label} · Pre-simulation clash projection`);
+            const distributionRecord=globalThis.ProjectionStats?.start(label);
+            const started=performance.now(),deadline=started+120000;
+            const input=nodes.map((node,i)=>({x:node.x,y:node.y,z:node.z,blockIdx:node.blockIdx,
+                res:{entityType:node.res.entityType},locked:!combined&&Boolean(node.referenceLockTarget),
+                target:node.res.entityType==='nucleotide'?backboneRestLength(i):BACKBONE_BOND_LEN}));
+            const source=`let physicsNodes=[],stericClashRadius,rigidBodySimulation=false;
+                const BACKBONE_BOND_LEN=${BACKBONE_BOND_LEN},MIN_RESIDUE_DIST=${MIN_RESIDUE_DIST};
+                const backboneRestLength=i=>physicsNodes[i].target;
+                ${projectPhysicsGroupClashes.toString()}
+                ${projectPhysicsGroupClashesUncached.toString()}
+                ${forEachNearbyPhysicsPair.toString()}
+                ${projectionClashDistribution.toString()}
+                self.onmessage=({data})=>{
+                    try{
+                        physicsNodes=data.nodes;stericClashRadius=data.radius;
+                        const movable=[],movableSet=new Set(),blocks=new Map(),bonds=[];
+                        physicsNodes.forEach((node,i)=>{if(!blocks.has(node.blockIdx))blocks.set(node.blockIdx,[]);blocks.get(node.blockIdx).push(i);
+                            if(!node.locked){movable.push(i);movableSet.add(i);}});
+                        for(let i=0;i+1<physicsNodes.length;i++){const a=physicsNodes[i],b=physicsNodes[i+1];
+                            if(a.blockIdx===b.blockIdx&&a.res.entityType!=='other'&&(movableSet.has(i)||movableSet.has(i+1)))bonds.push(i);}
+                        const group={movable,movableSet,blocks,bonds};
+                        const initialStats={captureClashPairs:true};
+                        const initialClashes=projectPhysicsGroupClashes(group,0,initialStats),initialPairs=initialStats.clashPairs;
+                        self.postMessage({initialClashes});
+                        for(let iteration=1;iteration<=96;iteration++){
+                            const stats={repeats:0,captureClashPairs:true};const clashes=projectPhysicsGroupClashes(group,1,stats);
+                            const distribution=projectionClashDistribution(physicsNodes,stericClashRadius);
+                            const remainingPairs=stats.clashPairs;
+                            let fixed=0;for(const pair of initialPairs)if(!remainingPairs.has(pair))fixed++;
+                            const coordinates=new Float64Array(physicsNodes.length*3);
+                            physicsNodes.forEach((node,i)=>{coordinates[i*3]=node.x;coordinates[i*3+1]=node.y;coordinates[i*3+2]=node.z;});
+                            self.postMessage({iteration,clashes,fixed,distribution,converged:Boolean(stats.converged),coordinates},[coordinates.buffer,distribution.scores.buffer]);
+                            if(stats.converged)break;
+                        }
+                    }catch(error){self.postMessage({error:error.message});}
+                };`;
+            let worker,url,timer,poll,latest=null,initialClashes=null,reason='Failed';
+            try{
+                url=URL.createObjectURL(new Blob([source],{type:'text/javascript'}));worker=new Worker(url);
+                await new Promise((resolve,reject)=>{
+                    const finish=value=>{reason=value;resolve();};
+                    timer=setTimeout(()=>finish('Time limit'),Math.max(0,deadline-performance.now()));
+                    poll=setInterval(()=>{if(generation!==modelBuildGeneration||revision!==physicsSetupRevision||nodes!==physicsNodes){reason='Cancelled';reject(new DOMException('Build superseded','AbortError'));}},100);
+                    worker.onerror=event=>reject(new Error(event.message||'Pre-simulation projection worker failed'));
+                    worker.onmessage=({data})=>{
+                        if(data.error){reject(new Error(data.error));return;}
+                        if(data.initialClashes!==undefined){initialClashes=data.initialClashes;return;}
+                        latest=data;
+                        globalThis.ProjectionStats?.add(distributionRecord,data.distribution);
+                        if(data.converged)finish('Converged');else if(data.iteration>=96)finish('Repeat limit');
+                    };
+                    worker.postMessage({nodes:input,radius:stericClashRadius});
+                });
+                if(generation!==modelBuildGeneration||revision!==physicsSetupRevision||nodes!==physicsNodes)throw new DOMException('Build superseded','AbortError');
+                if(latest)for(let i=0;i<nodes.length;i++){nodes[i].x=latest.coordinates[i*3];nodes[i].y=latest.coordinates[i*3+1];nodes[i].z=latest.coordinates[i*3+2];}
+                const remaining=latest?.clashes??initialClashes;
+                const fixed=latest?.fixed??(initialClashes===null?null:0);
+                globalThis.DeveloperLog?.record(`${label} · Pre-simulation clash projection: ${reason}; ${latest?.iteration??0} repeats; ${initialClashes??'unknown'} initial clashes; ${fixed??'unknown'} initial clashes fixed; ${remaining??'unknown'} unresolved clashes`);
+            }finally{
+                clearTimeout(timer);clearInterval(poll);worker?.terminate();if(url)URL.revokeObjectURL(url);
+                globalThis.ProjectionStats?.finish(distributionRecord,reason);
+                globalThis.BuildTimeline?.end(row,reason);
+            }
+        }
         function projectPhysicsGroupClashes(group,maxRepeats=24,stats=null) {
             const nodes=physicsNodes,skin=2,halfSkin=skin/2;
             const radiusFor=(a,b)=>a.res.entityType==='other'||b.res.entityType==='other'?stericClashRadius*(2.2/MIN_RESIDUE_DIST):stericClashRadius;
@@ -8057,8 +8241,9 @@
                 }
                 return group.clashNeighbours={nodes,radius:stericClashRadius,rigid:rigidBodySimulation,positions,pairs:Uint32Array.from(pairs)};
             };
-            const finalClashes=()=>{let count=0;const blocks=new Set(),pairs=group.clashNeighbours.pairs;
-                for(let k=0;k<pairs.length;k+=2){if(!eligible(pairs[k],pairs[k+1]))continue;const a=nodes[pairs[k]],b=nodes[pairs[k+1]];if(Math.hypot(b.x-a.x,b.y-a.y,b.z-a.z)<radiusFor(a,b)-.001){count++;blocks.add(a.blockIdx);blocks.add(b.blockIdx);}}
+            const finalClashes=()=>{let count=0;const blocks=new Set(),pairs=group.clashNeighbours.pairs,clashPairs=stats?.captureClashPairs?new Set():null;
+                for(let k=0;k<pairs.length;k+=2){if(!eligible(pairs[k],pairs[k+1]))continue;const a=nodes[pairs[k]],b=nodes[pairs[k+1]];if(Math.hypot(b.x-a.x,b.y-a.y,b.z-a.z)<radiusFor(a,b)-.001){count++;blocks.add(a.blockIdx);blocks.add(b.blockIdx);clashPairs?.add(`${pairs[k]},${pairs[k+1]}`);}}
+                if(clashPairs)stats.clashPairs=clashPairs;
                 group.unresolvedClashBlocks=[...blocks];return count;
             };
             let invalid=false;
@@ -8096,7 +8281,7 @@
                         for(let n=0;n<nodes.length;n++)if(!group.movableSet.has(n)){const p=nodes[n],key=`${Math.floor(p.x/cell)},${Math.floor(p.y/cell)},${Math.floor(p.z/cell)}`;let bucket=group.fixedGrid.get(key);if(!bucket)group.fixedGrid.set(key,bucket=[]);bucket.push(n);}
                         projectPhysicsGroupClashesUncached(group,Math.max(0,maxRepeats-iteration-1),stats);build();return finalClashes();}build();invalid=false;k=-2;}
                 }
-                if(!invalid&&!clashes&&bondError<.005)break;
+                if(!invalid&&!clashes&&bondError<.005){if(stats)stats.converged=true;break;}
             }
             // Count final unresolved overlaps from a current complete list, so a
             // late displacement cannot hide a clash from the stopping rule.
@@ -8151,7 +8336,7 @@
                         }
                     }
                 }
-                if(!clashes&&bondError<.005)break;
+                if(!clashes&&bondError<.005){if(stats)stats.converged=true;break;}
             }
             group.unresolvedClashBlocks=[...clashBlocks];
             return clashes;
@@ -10288,7 +10473,11 @@
         function animateLoop() {
             requestAnimationFrame(animateLoop);
             if(document.hidden){spinLastTime=null;return;}
-            if(physicsSetupPending)return;
+            if(physicsSetupPending){
+                if(physicsPreparationPreview&&physicsViewVisible()&&(typeof stagedLiveView!=='function'||stagedLiveView()))
+                    physicsRenderer.render(physicsPreparationPreview.scene,physicsCamera);
+                return;
+            }
             const viewVisible=physicsViewVisible();
             const physicsVisualUpdated=viewVisible?flushPendingPhysicsVisual():false;
             document.getElementById('groupSimulationRunningBadge')?.classList.toggle('hidden',
@@ -11773,6 +11962,28 @@
                 hit.mapping={records:[],accessions:[],coverageIncomplete:true,notes:[`${hit.identifier}: mapping lookup failed (${error.message}).`]};
             } finally { clearTimeout(timeout); }
         }
+        // Automatic IDs share the editable target box with manual IDs. Keep their
+        // provenance separately, including reference-chain mappings for each draft.
+        let automaticTargetSource=null;
+        let buildTargetSource=null;
+        function automaticTargetsCurrent(reference, targets) {
+            return Boolean(automaticTargetSource && automaticTargetSource.reference===reference.trim().toUpperCase() &&
+                automaticTargetSource.targets===targets.trim().toUpperCase());
+        }
+        function targetsWereManuallySet() {
+            const targets=document.getElementById('pdbInput2').value;
+            return Boolean(targets.trim() && targets!=='Loading...' && (!automaticTargetSource || automaticTargetSource.targets!==targets.trim().toUpperCase()));
+        }
+        function sourceLocksAllAlignedResidues(node) {
+            if (!buildTargetSource || !node.res || !referenceFiles.length) return false;
+            if (buildTargetSource.kind==='example') return true;
+            const reference=String(referenceFiles[0].pdbId||'').toUpperCase();
+            const chain=String(node.res.c1||'');
+            const accession=uniProtAccession(node.res.atoms2?.[node.idx2]?.sourcePdbId || node.res.atoms2?.[0]?.sourcePdbId);
+            if (!accession) return false;
+            return buildTargetSource.records.some(record=>record.reference===reference &&
+                record.chains.includes(chain) && record.accession===accession && record.lockAll);
+        }
         let siftsReferenceKey=null;
         let siftsRequestToken=0;
         let siftsLookupLoading=false;
@@ -11837,6 +12048,12 @@
                 renderChainMappingReport(report);
                 if(!accessions.length){status.textContent='No suitable UniProt IDs found. See chain mapping information.';status.classList.add('discovery-warning');showWarning(status.textContent);return;}
                 clearUploadedStructure('alphaFold');alphaFoldInput.value=report.targetText;
+                automaticTargetSource={reference:referenceText.trim().toUpperCase(),targets:report.targetText.trim().toUpperCase(),
+                    records:report.records.flatMap(record=>(record.accessions||[]).map(accession=>({
+                        reference:String(record.pdbId||'').toUpperCase(),
+                        chains:[...new Set([...(record.chains||[]),...Object.keys(record.chainAliases||{})])],
+                        accession:uniProtAccession(accession),lockAll:true
+                    })).filter(record=>record.accession))};
                 status.textContent=`Found ${accessions.length} unique UniProt IDs${unresolved.length?' with unresolved chains':''}. See chain mapping information.`;
                 if(unresolved.length){status.classList.add('discovery-warning');showWarning(status.textContent);}
                 else status.classList.add('search-success');
@@ -12062,6 +12279,7 @@
             const selected=slot==='reference'?files:[files[0]];
             const inputValue=selected.map(file=>file.name).join(', ');
             uploadedStructureFiles[slot] = { file:selected[0], files:selected, inputValue:inputValue.toUpperCase(), revision: ++uploadedStructureRevision };
+            if(slot==='alphaFold') automaticTargetSource=null;
             target.value = inputValue;
             renderChainMappingReport(null);
             if (slot === 'reference') {
@@ -12312,6 +12530,8 @@
             if (uploadedStructureFiles.reference && pdbId1.toUpperCase() !== uploadedStructureFiles.reference.inputValue) clearUploadedStructure('reference');
             if (uploadedStructureFiles.alphaFold && pdbId2Raw.toUpperCase() !== uploadedStructureFiles.alphaFold.inputValue) clearUploadedStructure('alphaFold');
             if(chainMappingReport && (chainMappingReport.referenceText!==pdbId1 || chainMappingReport.targetText!==pdbId2Raw))renderChainMappingReport(null);
+            if(referenceSource==='example') automaticTargetSource={kind:'example',reference:pdbId1.trim().toUpperCase(),targets:pdbId2Raw.trim().toUpperCase(),records:[]};
+            buildTargetSource=automaticTargetsCurrent(pdbId1,pdbId2Raw) ? structuredClone(automaticTargetSource) : null;
             document.getElementById('pdbInput1').value = pdbId1;
             window.requestComplexTitle?.(selectedReferencePdbIds().map(id=>({id,name:(referenceSource==='example'&&exampleReferenceNames[id.toUpperCase()])||referenceSearchResults.find(hit=>hit.identifier.toUpperCase()===id.toUpperCase())?.name||''})));
             renderChosenReferences();
@@ -12341,6 +12561,7 @@
             modelBuildAbortController = new AbortController();
             const buildSignal = modelBuildAbortController.signal;
             const generation = ++modelBuildGeneration;
+            globalThis.ProjectionStats?.reset();
             complexAiModelOrigins=new Map();
             try {complexAiModelOrigins=new Map(modelInputEntries(pdbId1,'reference').map(entry=>{
                 const id=entry.id.toUpperCase();
@@ -13156,12 +13377,13 @@
                     }
                 }
                 if(document.getElementById('useReferencesDirectly').checked){loadModelPair(id1,id2);return;}
+                if(targetsWereManuallySet() || (automaticTargetSource?.kind==='example' && automaticTargetsCurrent(id1,id2))){loadModelPair(id1,id2);return;}
                 if(stringSequenceFile() || stringAliasesFile()) {
                     if(currentStringReviewValid()&&stringMatchesBuildable(stringMatchReview.response.matches))buildReviewedStringMatches();
                     else if(!stringMatchJob)void findStringReferenceMatches();
                     return;
                 }
-                if(id2)loadModelPair(id1,id2);
+                if(id2 && automaticTargetsCurrent(id1,id2))loadModelPair(id1,id2);
                 else if(selectedReferencePdbIds().length)void fetchSiftsUniProtIds({autoBuild:true});
             });
 
@@ -14371,7 +14593,9 @@
                 cache.scores=calculateStericClashScores(physicsNodes,stericClashRadius,rigidBodySimulation);
                 cache.nodes=physicsNodes;cache.radius=stericClashRadius;cache.rigid=rigidBodySimulation;cache.at=now;
             }
-            const score=cache.scores[index]??0;
+            return stericClashScoreColor(cache.scores[index]??0);
+        }
+        function stericClashScoreColor(score){
             if(score===0)return '#94a3b8';
             // Yellow at first contact, red at 50% overlap or greater.
             const t=Math.min(1,score*2);
@@ -14941,7 +15165,7 @@
                 'side-chains':'Backbone: darker chain colour · Side chains: <span style="color:#f59e0b">nonpolar</span> · <span style="color:#c084fc">aromatic</span> · <span style="color:#38bdf8">polar</span> · <span style="color:#fb7185">basic</span> · <span style="color:#4ade80">acidic</span>.',
                 origin:'Origin: <span style="color:#3498db">Reference PDB</span> · <span style="color:#2eccbf">AlphaFold</span> · <span style="color:#31b2cd">Both</span>',
                 aligned:'<span style="color:#ef4444">Red</span>: aligned residue · <span style="color:#f97316">Orange</span>: similar, non-identical aligned residue (positive BLOSUM62 score) · <span style="color:#94a3b8">Grey</span>: unaligned residue',
-                locked:`<span style="color:#ef4444">Red</span>: locked residue · <span style="color:#94a3b8">Grey</span>: unlocked residue. Aligned residues farther than ${lockAlignedResiduesDistance} residues from an unaligned region stay locked to the reference during draft builds.`,
+                locked:`<span style="color:#ef4444">Red</span>: locked residue · <span style="color:#94a3b8">Grey</span>: unlocked residue. Reference-sourced aligned residues are locked in draft builds; other aligned residues are locked when farther than ${lockAlignedResiduesDistance} residues from an unaligned region.`,
                 membrane:'<span style="color:#ef4444">Red</span>: helix or sheet residue inside the membrane plates · <span style="color:#f97316">Orange</span>: other membrane-associated residue · <span style="color:#7dd3fc">Light blue</span>: other residues, including helix and sheet portions outside the membrane',
                 'membrane-placement':'Membrane placement influence: <span style="color:#ef4444">red</span> hydrophobic · <span style="color:#2563eb">blue</span> charged · <span style="color:#94a3b8">grey</span> other. Stronger colour means greater exposed-surface influence.',
                 charge:'Charge: <span style="color:#2563eb">blue</span> positive (Lys/Arg) · <span style="color:#93c5fd">pale blue</span> His · <span style="color:#ef4444">red</span> negative (Asp/Glu) · <span style="color:#94a3b8">grey</span> neutral.',
@@ -16879,7 +17103,7 @@
             ],
             input: [
                 function() { referenceSearchRequest++; referenceSearchLoading=false; siftsRequestToken++; if(siftsLookupLoading)clearSiftsLookupLoading(true); document.getElementById('fetchSiftsStatus').textContent=''; document.getElementById('fetchSiftsStatus').classList.remove('discovery-warning', 'search-success'); referenceSearchSessionId=null; clearUploadedStructure('reference'); cancelStringMatching(); hideStringMatchResults(); if(!this.value.trim()){const alphaFoldInput=document.getElementById('pdbInput2'); if(alphaFoldInput.value){alphaFoldInput.value=''; alphaFoldInput.dispatchEvent(new Event('input',{bubbles:true}));}} updateBuildButtonState(); updateFindMatchesReady(); updateExampleSelection(); updateReferenceSequenceSearchButton(true); document.getElementById('viewReferenceSearchResultsBtn').classList.add('hidden'); document.getElementById('referenceSearchResults').classList.add('hidden'); document.getElementById('referenceSequenceSearchStatus').textContent='' },
-                function() { if(stringMatchingLoading)cancelStringMatching(); if(siftsLookupLoading){siftsRequestToken++;clearSiftsLookupLoading();} clearUploadedStructure('alphaFold'); this.classList.remove('string-id-glow'); updateBuildButtonState(); updateExampleSelection() },
+                function() { automaticTargetSource=null; if(stringMatchingLoading)cancelStringMatching(); if(siftsLookupLoading){siftsRequestToken++;clearSiftsLookupLoading();} clearUploadedStructure('alphaFold'); this.classList.remove('string-id-glow'); updateBuildButtonState(); updateExampleSelection() },
                 function() { setViewerSize('alignment', 'residue', this.value) },
                 function() { setViewerSize('alignment', 'backbone', this.value) },
                 function() { setSideChainJiggleSpeed(this.value) },
@@ -18550,8 +18774,10 @@
             animationEl('conformationAnimationNote')?.classList.toggle('hidden',!animationLibrary.find(item=>item.id===animationActiveId)?.conformationalChange);
             renderAnimationSyncTable();
         }
-        function activateAnimation(entry){
+        let restoredAnimationPending=false;
+        function activateAnimation(entry,{preserveView=false}={}){
             if(!entry)return;
+            restoredAnimationPending=preserveView;
             entry.frames.forEach(initializeAnimationControls);
             animationActiveId=entry.id;animationTitle=entry.title;animationFrames=entry.frames;
             animationLoop=entry.loop!==false;animationSyncKeys=new Set(entry.syncKeys||[]);animationInterpolation={...entry.interpolation};
@@ -18561,7 +18787,7 @@
             }
             animationSelected=0;animationTableRows=null;keyframeDifferenceCache=null;
             renderAnimationTimeline();renderAnimationSelector();
-            if(physicsNodes.length&&animationFrames[0]?.coords?.length===physicsNodes.length)showAnimationFrame(0);
+            if(!preserveView&&physicsNodes.length&&animationFrames[0]?.coords?.length===physicsNodes.length)showAnimationFrame(0);
         }
         window.replaceAnimationFromAi=(generation,originalId,plan)=>{
             if(generation!==modelBuildGeneration||animationPlaying||animationPreparing||animationActiveId!==originalId)throw Error('The model or active animation changed; retry the edit after stopping playback.');
@@ -18601,7 +18827,7 @@
         }
         function scheduleAnimationSave(){updateQuickPlayVisibility();keyframeDifferenceCache=null;if(physicsColorMode==='keyframe-difference')updatePhysicsNodeColors();clearTimeout(animationSaveTimer);animationSaveTimer=setTimeout(saveAnimation,300);}
         function saveSelectedAnimationFrame(){
-            if(!animationFrames.length||animationPlaying||animationApplying||(typeof conformationSelectionMorph!=='undefined'&&conformationSelectionMorph)||!physicsNodes.length)return;
+            if(restoredAnimationPending||!animationFrames.length||animationPlaying||animationApplying||(typeof conformationSelectionMorph!=='undefined'&&conformationSelectionMorph)||!physicsNodes.length)return;
             clearTimeout(animationCaptureTimer);
             animationFrames[animationSelected]=captureAnimationFrame(animationFrames[animationSelected]);
             syncAnimationVariables(animationFrames[animationSelected]);
@@ -18669,6 +18895,7 @@
         }
         function showAnimationFrame(index){
             const frame=animationFrames[index];if(!frame||frame.coords.length!==physicsNodes.length)return;
+            restoredAnimationPending=false;
             animationSelected=index;
             applyAnimationSettings(frame.settings);
             frame.coords.forEach((point,i)=>{const node=physicsNodes[i];[node.x,node.y,node.z]=point;});
@@ -18729,7 +18956,7 @@
                 (first.atomOffsets!=null&&frame.atomOffsets!=null&&!animationValuesEqual(first.atomOffsets,frame.atomOffsets)));
         }
         function updateQuickPlayVisibility(){
-            animationEl('quickPlayAnimationBtn')?.classList.toggle('hidden',!(animationPlaying||animationPreparing||conformationOptimization||animationHasKeyframeDifferences(animationFrames)));
+            animationEl('quickPlayAnimationBtn')?.classList.toggle('hidden',!(restoredAnimationPending||animationPlaying||animationPreparing||conformationOptimization||animationHasKeyframeDifferences(animationFrames)));
         }
         function updateAnimationButtons(){
             const exists=animationFrames.length>0;
@@ -19233,7 +19460,7 @@
         }
         async function animationOnModelReady(){
             if((modelBuildCompleted||preSimulationAnalysisGeneration===modelBuildGeneration)&&animationModelStorageKey===animationSessionKey()&&animationLibrary.length){configureAutoSpinAnimation();renderAnimationTimeline();return;}
-            stopAnimation();animationFrames=[];animationLibrary=[];animationActiveId=null;animationAutoSpinDismissed=false;animationSelected=0;keyframeDifferenceCache=null;bindingSiteCache=null;
+            stopAnimation();restoredAnimationPending=false;animationFrames=[];animationLibrary=[];animationActiveId=null;animationAutoSpinDismissed=false;animationSelected=0;keyframeDifferenceCache=null;bindingSiteCache=null;
             animationModelStorageKey=animationSessionKey();
             if(!modelBuildCompleted&&preSimulationAnalysisGeneration!==modelBuildGeneration)return;
             const generation=modelBuildGeneration,key=animationModelStorageKey;
@@ -19260,7 +19487,7 @@
                     }
                     if(preSimulationAnalysisGeneration===generation&&refreshAutomaticSpinGeometry(animationLibrary))repairedSpin=true;
                     const active=animationLibrary.find(item=>item.id===saved.activeId)||animationLibrary[0];
-                    if(active)activateAnimation(active);
+                    if(active)activateAnimation(active,{preserveView:true});
                 }
             }catch(error){console.warn('Could not restore animation:',error);}
             if(repairedSpin)saveAnimation();
@@ -19276,7 +19503,7 @@
                 animationActiveId=entry.id;animationFrames=entry.frames;animationSyncKeys=new Set(entry.syncKeys);
                 for(const row of animationSyncDefinitions())if(row.category==='Physics variables')animationSyncKeys.add(row.key);
                 entry.syncKeys=[...animationSyncKeys];
-                if(previous!==entry.id){const selected=animationLibrary.find(item=>item.id===previous);if(selected)activateAnimation(selected);}
+                if(previous!==entry.id){const selected=animationLibrary.find(item=>item.id===previous);if(selected)activateAnimation(selected,{preserveView:restoredAnimationPending});}
                 saveAnimation();
             }
             configureAutoSpinAnimation();

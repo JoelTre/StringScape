@@ -142,6 +142,8 @@ modelBuildInputKey:{get:()=>modelBuildInputKey,set:v=>{modelBuildInputKey=v;}},
 completedModelInputKey:{get:()=>completedModelInputKey,set:v=>{completedModelInputKey=v;}},
 chainMappingReport:{get:()=>chainMappingReport,set:v=>{chainMappingReport=v;}},
 siftsReferenceKey:{get:()=>siftsReferenceKey,set:v=>{siftsReferenceKey=v;}},
+automaticTargetSource:{get:()=>automaticTargetSource,set:v=>{automaticTargetSource=v;}},
+buildTargetSource:{get:()=>buildTargetSource,set:v=>{buildTargetSource=v;}},
 alphaFoldBeforeSiftsLookup:{get:()=>alphaFoldBeforeSiftsLookup,set:v=>{alphaFoldBeforeSiftsLookup=v;}},
 currentReferenceFile:{get:()=>currentReferenceFile,set:v=>{currentReferenceFile=v;}},
 homologyViewerMode:{get:()=>homologyViewerMode,set:v=>{homologyViewerMode=v;}},
@@ -338,6 +340,7 @@ async function restoreSession(session){
     if(selectionGlowMesh){physicsScene.remove(selectionGlowMesh);selectionGlowMesh.dispose?.();selectionGlowMesh.geometry.dispose();selectionGlowMesh.material.dispose();selectionGlowMesh=null;}
     if(springDisplay){physicsScene.remove(springDisplay);springDisplay.dispose?.();springDisplay.geometry.dispose();springDisplay.material.dispose();springDisplay=null;}
     globalThis.ChainMergingReport?.clear();
+    automaticTargetSource=null; buildTargetSource=null; // Older sessions have no target provenance.
     for(const [key,binding] of Object.entries(sessionBindings))if(Object.hasOwn(state,key))binding.set(state[key]);
     globalThis.ChainMergingReport?.setAnnotations(uniProtAnnotations);
     if(!Object.hasOwn(state,'chainMergingData'))globalThis.ChainMergingReport?.update(alignmentResults,{modelChains:modelData2.chains,referenceChains:modelData1.chains,reference:referenceFiles.map(file=>file.pdbId).join(', '),accessionForId:uniProtAccession});
