@@ -29,8 +29,8 @@
     const comparison = document.getElementById('physicsVariableComparison');
     const report = document.getElementById('validationReport');
     pages[0].append(setup);
-    pages[1].append(process, details);
-    pages[2].append(physics, document.getElementById('stagedModelComparisons'));
+    pages[1].append(process, details, document.getElementById('stagedModelComparisons'));
+    pages[2].append(physics);
     pages[3].append(molstar);
     pages[4].append(statsButton, stats);
     pages[5].append(comparison);

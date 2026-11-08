@@ -128,7 +128,12 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
     }
     const endpoints = {openai:'https://api.openai.com/v1',anthropic:'https://api.anthropic.com/v1',google:'https://generativelanguage.googleapis.com/v1beta/openai',local:'http://127.0.0.1:1234/v1'};
     const connectionStorageKey='homology-modeller.ai-connection.v1';
+    const pauseStorageKey='homology-modeller.ai-paused.v1';
+    let paused=false;
+    try{paused=localStorage.getItem(pauseStorageKey)==='true';}catch{}
     let active = null, revision = 0, connectionMode = 'cloud', cloudProvider = 'openai', sharedKey = false;
+    let useController = new AbortController();
+    function updatePauseButton(){const button=el('Pause');button.disabled=!active;button.textContent=paused?'Resume AI use':'Pause AI use';button.setAttribute('aria-pressed',String(paused));}
     const el = id => document.getElementById('modellerAi'+id);
     function config() {
         const provider = connectionMode === 'local' ? 'local' : el('Provider').value;
@@ -150,7 +155,7 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
     }
     async function request(c, path, body) {
         const entry=body?recordRequest(c,body):null;
-        const response = await fetch(c.apiBase+path,{method:body?'POST':'GET',headers:headers(c),...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(90000)});
+        const response = await fetch(c.apiBase+path,{method:body?'POST':'GET',headers:headers(c),...(body?{body:JSON.stringify(body)}:{}),signal:body?AbortSignal.any([useController.signal,AbortSignal.timeout(90000)]):AbortSignal.timeout(90000)});
         if (!response.ok) {if(entry)entry.response={error:`HTTP ${response.status}`};throw new Error(`AI provider returned HTTP ${response.status}. Check your key, model and server CORS settings.`);}
         const data=await response.json();if(entry)entry.response=data;return data;
     }
@@ -177,7 +182,7 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
     }
     async function askJson(system, payload) {
         const c=active, version=revision;
-        if(!c)throw new Error('No AI connected.');
+        if(!c||paused)throw new Error(paused?'AI use is paused.':'No AI connected.');
         const anthropic=c.provider==='anthropic', user=JSON.stringify(payload);
         const body=anthropic
             ? {model:c.model,max_tokens:1600,system,messages:[{role:'user',content:user}]}
@@ -230,12 +235,12 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
     }
     async function streamComplex({system,messages,tools=[],signal,onText=()=>{}}) {
         const c=active,version=revision;
-        if(!c)throw Error('Connect an AI first.');
+        if(!c||paused)throw Error(paused?'AI use is paused.':'Connect an AI first.');
         const anthropic=c.provider==='anthropic';
         const body=anthropic?{model:c.model,max_tokens:4096,system,messages,stream:true,...(tools.length?{tools:tools.map(tool=>({name:tool.name,description:tool.description,input_schema:tool.parameters}))}:{})}
             :{model:c.model,messages:[{role:'system',content:system},...messages],stream:true,...(tools.length?{tools:tools.map(tool=>({type:'function',function:tool}))}:{})};
         let entry;
-        const send=()=>{entry=typeof recordRequest==='function'?recordRequest(c,body):{};return fetch(c.apiBase+(anthropic?'/messages':'/chat/completions'),{method:'POST',headers:headers(c),body:JSON.stringify(body),signal:AbortSignal.any([signal,AbortSignal.timeout(180000)])});};
+        const send=()=>{entry=typeof recordRequest==='function'?recordRequest(c,body):{};return fetch(c.apiBase+(anthropic?'/messages':'/chat/completions'),{method:'POST',headers:headers(c),body:JSON.stringify(body),signal:AbortSignal.any([...(signal?[signal]:[]),useController.signal,AbortSignal.timeout(180000)])});};
         function plainToolHistory(history){
             const plain=[];
             for(const message of history){
@@ -266,10 +271,21 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
         // Some providers reject native tools, including after returning a tool call.
         // Preserve the actual search results as ordinary messages for the retry.
         if(!response.ok&&[400,422].includes(response.status)&&tools.length){
-            initialDetail=await errorDetail(response);try{await response.body?.cancel?.();}catch{/* The error body may already have been consumed. */}delete body.tools;toolsUnavailable=true;
+            initialDetail=await errorDetail(response);try{await response.body?.cancel?.();}catch{/* The error body may already have been consumed. */}
             entry.response={error:`HTTP ${response.status}`,detail:initialDetail};
+            // Some Chat Completions models support tools only with reasoning disabled.
+            if(!anthropic&&/reasoning_effort/i.test(initialDetail)&&/['"]none['"]/i.test(initialDetail)){
+                body.reasoning_effort='none';response=await send();
+                if(!response.ok&&[400,422].includes(response.status)){
+                    initialDetail=await errorDetail(response);entry.response={error:`HTTP ${response.status}`,detail:initialDetail};
+                    try{await response.body?.cancel?.();}catch{/* Already consumed. */}
+                }
+            }
+        }
+        if(!response.ok&&[400,422].includes(response.status)&&tools.length){
+            delete body.tools;toolsUnavailable=true;
             fallbackMessages=plainToolHistory(messages);
-            const instruction=tools.some(tool=>tool.name==='Search_PDB')?'Native tools are unavailable. Request a search with JSON {"tool":"Search_PDB" or "Search_PubMed","query":"terms"}, or return your final JSON decision.':'Native tools are unavailable. You can still request a PubMed search through the app. Return ONLY JSON: {"tool":"View_app_info","arguments":{}} for app information, {"tool":"Get_chain_sequences","arguments":{}} to inspect chains, {"tool":"Select_model_entity","arguments":{...}} to select, {"editAnimation":"description"} to edit animation, {"query":"PubMed search terms"} to search, or {"answer":"your answer"}. Do not claim to have searched PubMed until the app supplies results.';
+            const instruction=tools.some(tool=>tool.name==='Search_PDB')?'Native tools are unavailable. Request a search with JSON {"tool":"Search_PDB" or "Search_PubMed","query":"terms"}, or return your final JSON decision.':'Native tools are unavailable. You can still request a PubMed search through the app. Return ONLY JSON: {"tool":"View_app_info","arguments":{}} for app information, {"tool":"Get_chain_sequences","arguments":{}} to inspect chains, {"tool":"Get_protein_annotations","arguments":{"accession":"..."}} for annotations, {"tool":"Get_model_context","arguments":{}} to list model sections or {"tool":"Get_model_context","arguments":{"section":"all"}} for full model data, {"tool":"Get_current_selection","arguments":{}} for the selection, {"tool":"Select_model_entity","arguments":{...}} to select, {"editAnimation":"description"} to edit animation, {"query":"PubMed search terms"} to search, or {"answer":"your answer"}. Do not claim to have searched PubMed until the app supplies results.';
             if(anthropic){body.system+='\n'+instruction;body.messages=fallbackMessages;}
             else body.messages=[{role:'system',content:system+'\n'+instruction},...fallbackMessages];
             response=await send();
@@ -303,7 +319,7 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
         return {text,calls:[...calls.values()],anthropic,toolsUnavailable,fallbackMessages};
     }
 
-    window.ModellerAI = {streamComplex,searchReferences,assignReferenceGroups,connected:()=>!!active,planSearches,retrySearches,summarizeSearchFailure,chooseReferences};
+    window.ModellerAI = {streamComplex,searchReferences,assignReferenceGroups,connected:()=>!!active&&!paused,planSearches,retrySearches,summarizeSearchFailure,chooseReferences};
     // Pure selection validation is also used by the offline regression suite.
     if (typeof module !== 'undefined') module.exports = {parseDecision,parseSearchPlan,searchRoundHistory,requestSearchPlan,referencePrompt,FLAGELLAR_GUIDANCE,SYSTEM_PROMPT,SEARCH_PROMPT,RETRY_PROMPT,SUMMARY_PROMPT};
     if (!el('Open')) return;
@@ -358,7 +374,11 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
         pickers[kind]={close,refresh};refresh();
     }
     setupPicker('Provider');setupPicker('Model');
-    el('Dialog').addEventListener('click',event=>{if(!event.target.closest('.ai-picker'))closeMenus();});
+    el('Dialog').addEventListener('click',event=>{
+        const dialog=el('Dialog'), bounds=dialog.getBoundingClientRect();
+        if(event.target===dialog&&(event.clientX<bounds.left||event.clientX>bounds.right||event.clientY<bounds.top||event.clientY>bounds.bottom)){dialog.close();return;}
+        if(!event.target.closest('.ai-picker'))closeMenus();
+    });
     el('Dialog').addEventListener('close',closeMenus);
     function invalidateModels() {
         revision++;clearTimeout(loadTimer);modelsPending=false;el('Model').replaceChildren();
@@ -456,7 +476,7 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
         if (passcode) await unlockSharedKey(passcode);
     });
     el('DifferentKey').addEventListener('click',()=>{
-        sharedKey=false;active=null;updateUniProtDisclosure(false);el('Key').value='';updateSharedKeyControls();
+        useController.abort();useController=new AbortController();sharedKey=false;active=null;updatePauseButton();updateUniProtDisclosure(false);el('Key').value='';updateSharedKeyControls();
         el('Open').textContent='Connect an AI';el('Open').title='';el('State').textContent='';
         providerChanged();el('Key').focus();
     });
@@ -465,7 +485,7 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
         const c=config(); if(modelsPending||!c.model)throw new Error('Wait for models to load and select a chat model first.');
         let saved=true;
         try{if(sharedKey) localStorage.removeItem(connectionStorageKey); else localStorage.setItem(connectionStorageKey,JSON.stringify({mode:connectionMode,cloudProvider,...c}));}catch{saved=false;}
-        active=c;updateUniProtDisclosure(true);revision++;el('State').textContent=sharedKey?'Shared AI connected for this page session.':saved?'':'AI connected, but this browser could not save the connection. Reconnect manually next time.';
+        active=c;useController.abort();useController=new AbortController();updatePauseButton();updateUniProtDisclosure(true);revision++;el('State').textContent=paused?'AI use paused.':sharedKey?'Shared AI connected for this page session.':saved?'':'AI connected, but this browser could not save the connection. Reconnect manually next time.';
         el('Open').textContent=`AI connected: ${c.model}`;
         el('Open').title='Manage AI connection';
         if(el('Dialog').open)el('Dialog').close();
@@ -474,10 +494,18 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
         event.preventDefault();
         try{connect();}catch(error){el('Status').textContent=error.message;}
     });
+    el('Pause').addEventListener('click',()=>{
+        if(!active)return;
+        paused=!paused;revision++;
+        try{localStorage.setItem(pauseStorageKey,String(paused));}catch{}
+        if(paused)useController.abort();else useController=new AbortController();
+        updatePauseButton();
+        el('State').textContent=paused?'AI use paused.':'AI use resumed.';
+    });
     el('Disconnect').addEventListener('click',()=>{
         let removed=true;
         try{localStorage.removeItem(connectionStorageKey);}catch{removed=false;}
-        active=null;updateUniProtDisclosure(false);sharedKey=false;el('Key').value='';updateSharedKeyControls();invalidateModels();el('State').textContent=removed?'AI disconnected.':'AI disconnected, but saved site data could not be removed. Clear this site’s browser storage to forget the key.';el('Open').textContent='Connect an AI';el('Open').title='';el('Status').textContent='Disconnected.';
+        useController.abort();useController=new AbortController();active=null;updatePauseButton();updateUniProtDisclosure(false);sharedKey=false;el('Key').value='';updateSharedKeyControls();invalidateModels();el('State').textContent=removed?'AI disconnected.':'AI disconnected, but saved site data could not be removed. Clear this site’s browser storage to forget the key.';el('Open').textContent='Connect an AI';el('Open').title='';el('Status').textContent='Disconnected.';
     });
     function restoreConnection(){
         let saved;

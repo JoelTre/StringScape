@@ -138,6 +138,7 @@ membranePresenceMode:{get:()=>membranePresenceMode,set:v=>{membranePresenceMode=
 atomSizeByElement:{get:()=>atomSizeByElement,set:v=>{atomSizeByElement=v;}},
 modelBuildStartedAt:{get:()=>modelBuildStartedAt,set:v=>{modelBuildStartedAt=v;}},
 modelBuildCompleted:{get:()=>modelBuildCompleted,set:v=>{modelBuildCompleted=v;}},
+aiSimulationStarted:{get:()=>aiSimulationUnknownGeneration===modelBuildGeneration?null:aiSimulationStartedGeneration===modelBuildGeneration,set:v=>{aiSimulationStartedGeneration=v===true?modelBuildGeneration:null;aiSimulationUnknownGeneration=v===null?modelBuildGeneration:null;}},
 modelBuildInputKey:{get:()=>modelBuildInputKey,set:v=>{modelBuildInputKey=v;}},
 completedModelInputKey:{get:()=>completedModelInputKey,set:v=>{completedModelInputKey=v;}},
 chainMappingReport:{get:()=>chainMappingReport,set:v=>{chainMappingReport=v;}},
@@ -342,6 +343,7 @@ async function restoreSession(session){
     globalThis.ChainMergingReport?.clear();
     automaticTargetSource=null; buildTargetSource=null; // Older sessions have no target provenance.
     for(const [key,binding] of Object.entries(sessionBindings))if(Object.hasOwn(state,key))binding.set(state[key]);
+    if(!Object.hasOwn(state,'aiSimulationStarted'))aiSimulationUnknownGeneration=modelBuildGeneration;
     globalThis.ChainMergingReport?.setAnnotations(uniProtAnnotations);
     if(!Object.hasOwn(state,'chainMergingData'))globalThis.ChainMergingReport?.update(alignmentResults,{modelChains:modelData2.chains,referenceChains:modelData1.chains,reference:referenceFiles.map(file=>file.pdbId).join(', '),accessionForId:uniProtAccession});
     if(physicsSprings.packed)physicsSprings=physicsSpringNetworkView(physicsSprings);
@@ -368,6 +370,7 @@ async function restoreSession(session){
         updatePhysicsNodeColors();setPhysicsRepresentation(physicsRepresentation);syncVisualPhysicsMeshes();updatePhysicsSequences();renderPhysicsChainToggles();
     }
     const savedChains=[modelData1.currentChain,modelData2.currentChain];populateChainSelectors();[modelData1.currentChain,modelData2.currentChain]=savedChains;document.getElementById('PDBChainSelect').value=savedChains[0];document.getElementById('AFChainSelect').value=savedChains[1];renderChainLegends();renderReferenceInfluenceControls();renderStagedBuildControls();renderAnimationSelector();renderAnimationTimeline();renderValidationReport(true);
+    renderBuildPatternStats(detectedExtensionPatterns, !detectedExtensionPatterns.length && !modelBuildCompleted);
     drawIndividualMatrices();drawDifferenceMatrix();drawMorphMatrix();
     if(inferredMembrane)renderMembraneGeometry(inferredMembrane);renderSecondMembrane(performance.now());
     if(multiReferenceBuild?.view&&!stagedLiveView())selectStagedModel(multiReferenceBuild.view);

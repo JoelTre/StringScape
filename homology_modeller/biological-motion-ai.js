@@ -96,6 +96,30 @@
         animationExplanation=[assessment.reason,...(result.draftGroups||[]).map(group=>`${group.name} (${group.pdbIds.join(', ')}): ${group.reason}`),...result.keyframes.map(item=>`Keyframe group ${item.group+1}: ${item.reason}`),...result.groups.map(item=>`${item.key}: ${item.reason}`),...result.rotations.map(item=>`Subunit ${item.block}: ${item.reason}`)].filter(Boolean).join('\n\n');
         if(noAnimationButton){noAnimationButton.textContent=hasAnimation?'AI created an animation':'AI made no animation';noAnimationButton.hidden=false;}
     }
+    const reviewButton=document.getElementById('reviewAutoSpinAI');
+    const reviewStatus=document.getElementById('reviewAutoSpinStatus');
+    reviewButton?.addEventListener('click',async()=>{
+        const say=text=>{if(reviewStatus)reviewStatus.textContent=text;};
+        if(task){say('Another AI assessment is in progress. Please try again when it finishes.');return;}
+        if(!window.ModellerAI?.connected()){say('Connect AI to review this animation.');return;}
+        if(!window.ComplexPubMed){say('The literature search service is unavailable.');return;}
+        const snapshot=window.getAnimationEditSnapshot?.(),context=window.getBiologicalMotionContext?.();
+        if(!snapshot?.activeId||!context||context.playing){say('Stop playback before reviewing the animation.');return;}
+        const controller=new AbortController(),generation=snapshot.generation,original=JSON.stringify(snapshot);
+        task=controller;reviewButton.disabled=true;reviewButton.setAttribute('aria-busy','true');say('AI is reviewing the animation…');
+        try{
+            const first=window.biologicalMotionAssessments?.generation===generation&&window.biologicalMotionAssessments.filament||{reason:'Existing filament settings were retained.',extensions:[]};
+            const input={originalRequest:context.originalRequest||'',proteins:context.proteins||[],blocks:context.blocks.map(({uniProt,...block})=>block),references:context.references,patterns:context.patterns,groups:context.groups,axes:context.axes,automaticSpin:context.automaticSpin,drafts:context.drafts||[],conformationGroups:context.conformationGroups,filamentDecision:first};
+            const second=await decide(axisPrompt,input,controller.signal,data=>{validate(first,data,context);checkAssessmentReason(data);});
+            const result=validate(first,second,context);
+            if(controller.signal.aborted||!window.ModellerAI?.connected())throw Error('AI disconnected');
+            if(JSON.stringify(window.getAnimationEditSnapshot?.())!==original)throw Error('The model or animation changed during review; please retry');
+            if(!window.applyBiologicalMotion(generation,{...result,extensions:[]},{createSpinAnimation:false,targetAnimationId:snapshot.activeId}))throw Error('Could not apply the review; stop playback and retry');
+            window.biologicalMotionAssessments={generation,filament:first,animation:second};
+            say('AI review applied. See the explanation below.');
+        }catch(error){say('AI review failed: '+error.message+'. The animation was not changed.');}
+        finally{if(task===controller)task=null;reviewButton.disabled=false;reviewButton.setAttribute('aria-busy','false');}
+    });
     let filamentExplanation='';
     const filamentButton=document.getElementById('filamentAiStatusBtn');
     const filamentDialog=document.getElementById('filamentAiExplanationDialog');
@@ -151,7 +175,6 @@
                 if(autoExtensions.length||!context.patterns.length)setFilamentStatus('reset');else setFilamentStatus('complete',first);
                 if(context.hasAutomaticSpin){
                     animationApplied=true;
-                    await window.playBiologicalMotion?.(generation);
                     return;
                 }
                 setCreatingAnimation(true);
@@ -169,7 +192,6 @@
                     applied=signature;showAnimationResult(result,second);
                     const hasAnimation=result.keyframes.length>1||result.groups.some(item=>item.rate!==0)||result.rotations.some(item=>item.rate!==0);
                     animationApplied=hasAnimation;
-                    if(hasAnimation)await window.playBiologicalMotion?.(generation);
                 }
                 if(!result.groups.length&&!result.rotations.length){
                     console.info('Biological motion AI: no spin animation selected.',{references:context.references,availableGroups:context.groups.length,availableAxes:context.axes.length,patternAndSymmetryReason:first.reason,proteinAndAxisReason:second.reason});
