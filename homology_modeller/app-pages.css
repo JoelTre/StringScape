@@ -380,3 +380,155 @@ body.light-mode .developer-log li,body.light-mode .developer-mode-setting{border
 .developer-log-copy:focus-visible{outline:2px solid #60a5fa;outline-offset:3px}
 body.light-mode .developer-log-copy{background:#fff;border-color:#cbd5e1;color:#334155}
 body.light-mode .developer-log-copy:hover{background:#e2e8f0}
+
+.model-overview { color:#e2e8f0; max-width:70rem; margin-inline:auto; }
+.model-overview h1 { font-size:1.8rem; font-weight:700; margin-bottom:1rem; }
+.model-overview h2 { font-size:1.25rem; font-weight:700; margin-bottom:.75rem; }
+.model-overview #overviewBody > section { margin-top:1.5rem; padding:1.25rem; border:0; border-radius:.75rem; background:#0f172a; }
+.model-overview p { white-space:pre-wrap; margin:.4rem 0; overflow-wrap:anywhere; }
+.model-overview-reference + .model-overview-reference { border-top:1px solid #334155; margin-top:1rem; padding-top:1rem; }
+.model-overview-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:.5rem; }
+body.light-mode .model-overview { color:#0f172a; }
+body.light-mode .model-overview #overviewBody > section { background:#fff; border-color:#cbd5e1; }
+
+.model-overview #overviewImage { display:block; width:min(100%, 480px); height:auto; border-radius:.5rem; }
+
+.model-overview-heading { display:flex; align-items:center; gap:1.5rem; margin-bottom:1rem; }
+.model-overview-heading #overviewImageSection { flex:0 1 480px; min-width:0; }
+.model-overview-heading h1 { margin:0; }
+@media (max-width:600px) { .model-overview-heading { flex-direction:column; align-items:flex-start; } .model-overview-heading #overviewImageSection { flex:auto; } }
+
+.model-overview #overviewBody > .overview-detail { position:relative; overflow:hidden; padding:1.4rem 1.5rem; border-color:#334d64; background:linear-gradient(135deg,#14263a,#101b2d 72%); box-shadow:0 12px 28px #02061726; }
+.model-overview .overview-detail::before { content:""; position:absolute; inset:0 auto 0 0; width:4px; background:linear-gradient(135deg,#60a5fa 0%,#2eccbf 100%); }
+.model-overview .overview-detail h2 { display:flex; align-items:center; gap:.7rem; margin:0 0 1rem; }
+.model-overview .overview-detail h2 i { display:grid; place-items:center; flex:none; width:2.2rem; height:2.2rem; border-radius:.7rem; color:#7dd3fc; background:#38bdf81c; font-size:.95rem; }
+.model-overview .overview-references h2 i { color:#c4b5fd; background:#a78bfa1c; }
+.model-overview .overview-composition h2 i { color:#5eead4; background:#2dd4bf1c; }
+.model-overview .overview-detail-row { display:grid; grid-template-columns:minmax(10rem, 15rem) minmax(0, 1fr); gap:.5rem 1rem; margin:0; padding:.7rem .8rem; border-top:1px solid #ffffff12; }
+.model-overview .overview-detail-row strong { color:#94a3b8; font-size:.8rem; line-height:1.5; }
+.model-overview .overview-detail-row span { color:#e2e8f0; line-height:1.5; }
+.model-overview .model-overview-reference { border:1px solid #64748b40; border-radius:.75rem; background:#02061735; overflow:hidden; }
+.model-overview .model-overview-reference + .model-overview-reference { margin-top:.75rem; padding-top:0; border-top:1px solid #64748b40; }
+.model-overview .model-overview-reference .overview-detail-row:first-child { border-top:0; background:#a78bfa12; }
+.model-overview .model-overview-reference .overview-detail-row:first-child span { color:#ddd6fe; font-weight:700; }
+.model-overview #overviewComposition { display:flex; flex-wrap:wrap; gap:.65rem; }
+.model-overview .overview-protein { display:flex; align-items:center; gap:.8rem; padding:.65rem .8rem; border:1px solid #2dd4bf40; border-radius:.7rem; background:#0d363966; }
+.model-overview .overview-protein strong { flex:none; padding:.2rem .5rem; border-radius:999px; background:#2dd4bf26; color:#99f6e4; font-size:.78rem; }
+body.light-mode .model-overview #overviewBody > .overview-detail { background:#fff; border-color:#cbdde8; box-shadow:0 12px 28px #0f172a0a; }
+body.light-mode .model-overview .overview-detail-row { border-color:#cbd5e180; }
+body.light-mode .model-overview .overview-detail-row strong { color:#475569; }
+body.light-mode .model-overview .overview-detail-row span { color:#1e293b; }
+body.light-mode .model-overview .model-overview-reference { background:#fff; border-color:#cbd5e1; }
+body.light-mode .model-overview .model-overview-reference .overview-detail-row:first-child span { color:#5b21b6; }
+body.light-mode .model-overview .overview-protein { background:#f0fdfa; border-color:#99f6e4; }
+body.light-mode .model-overview .overview-protein strong { background:#ccfbf1; color:#115e59; }
+@media (max-width:600px) { .model-overview .overview-detail-row { grid-template-columns:1fr; gap:.2rem; } }
+
+.model-overview .overview-note { color:#94a3b8; font-size:.8rem; line-height:1.5; margin:.8rem .8rem 0; }
+.model-overview .overview-chain { margin:.5rem 0; padding:.75rem; border:1px solid #64748b40; border-radius:.65rem; background:#02061735; }
+.model-overview .overview-chain summary { cursor:pointer; font-weight:600; }
+.model-overview .overview-sequence { font-family:monospace; overflow-wrap:anywhere; color:#a5f3fc; }
+body.light-mode .model-overview .overview-note { color:#475569; }
+body.light-mode .model-overview .overview-chain { background:#fff; border-color:#cbd5e1; }
+body.light-mode .model-overview .overview-sequence { color:#155e75; }
+
+.model-overview #overviewBindingSites { margin-top:1rem; }
+.model-overview .overview-binding-pair { margin-top:.8rem; padding:1rem; border:1px solid #64748b40; border-radius:.75rem; background:#02061735; }
+.model-overview .overview-binding-pair h3 { font-weight:700; color:#bae6fd; overflow-wrap:anywhere; }
+.model-overview .overview-binding-count { color:#94a3b8; font-size:.85rem; }
+.model-overview .overview-binding-site { margin-top:.65rem; overflow-x:auto; }
+.model-overview .overview-binding-site summary { cursor:pointer; font-weight:600; }
+.model-overview .overview-binding-site table { width:100%; margin-top:.6rem; border-collapse:collapse; text-align:left; font-size:.85rem; }
+.model-overview .overview-binding-site th,.model-overview .overview-binding-site td { padding:.4rem .6rem; border-bottom:1px solid #64748b40; }
+body.light-mode .model-overview .overview-binding-pair { background:#fff; border-color:#cbd5e1; }
+body.light-mode .model-overview .overview-binding-pair h3 { color:#075985; }
+body.light-mode .model-overview .overview-binding-count { color:#475569; }
+
+.model-overview .overview-binding-image { display:block; width:min(100%,480px); height:auto; margin:.75rem 0; border-radius:.6rem; }
+.model-overview .overview-binding-image[hidden] { display:none; }
+.model-overview .overview-binding-site > details { margin-top:.75rem; }
+
+.model-overview .overview-binding-site > h4 { font-weight:700; color:#e2e8f0; }
+.model-overview .overview-binding-site > details > summary { display:inline-flex; align-items:center; gap:.55rem; padding:.3rem .8rem; border:0; border-radius:.6rem; background:#1e293b; color:#e2e8f0; cursor:pointer; list-style:none; }
+.model-overview .overview-binding-site > details > summary::-webkit-details-marker { display:none; }
+.model-overview .overview-binding-site > details[open] > summary i { transform:rotate(180deg); }
+body.light-mode .model-overview .overview-binding-site > h4 { color:#1e293b; }
+body.light-mode .model-overview .overview-binding-site > details > summary { background:#f1f5f9; border-color:#cbd5e1; color:#1e293b; }
+
+.model-overview .model-overview-reference, .model-overview .model-overview-reference + .model-overview-reference, .model-overview .overview-protein, .model-overview .overview-chain, .model-overview .overview-binding-pair { border:0; }
+
+.model-overview .overview-binding-site-heading { display:flex; flex-wrap:wrap; align-items:center; gap:.7rem; }
+.model-overview .overview-binding-site-heading h4 { font-weight:700; color:#e2e8f0; }
+.model-overview .overview-binding-select { padding:.3rem .8rem; border:0; border-radius:.6rem; background:#60a5fa; color:#0f172a; font-size:.8rem; font-weight:600; cursor:pointer; }
+.model-overview .overview-binding-select:hover { background:#1d4ed8; }
+.model-overview .overview-binding-select-status { color:#fca5a5; font-size:.8rem; }
+body.light-mode .model-overview .overview-binding-site-heading h4 { color:#1e293b; }
+body.light-mode .model-overview .overview-binding-select-status { color:#b91c1c; }
+
+.model-overview .overview-binding-image-wrap { position:relative; width:min(100%,480px); aspect-ratio:4/3; margin:.75rem 0; }
+.model-overview .overview-binding-image-wrap .overview-binding-image { margin:0; }
+.model-overview .overview-binding-download { position:absolute; top:.6rem; right:.6rem; display:grid; place-items:center; width:2rem; height:2rem; border-radius:.5rem; background:transparent; color:#f8fafc; text-decoration:none; }
+.model-overview .overview-binding-download:hover { background:transparent; color:#60a5fa; }
+.model-overview .overview-binding-download[hidden] { display:none; }
+
+.model-overview .overview-binding-metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(11rem,1fr)); gap:.6rem; margin-top:1rem; }
+.model-overview .overview-binding-metric { display:flex; flex-direction:column; gap:.25rem; padding:.7rem .8rem; border-radius:.65rem; background:#1e3a5059; }
+.model-overview .overview-binding-metric span,.model-overview .overview-binding-metric small { color:#94a3b8; font-size:.75rem; }
+.model-overview .overview-binding-metric strong { color:#e0f2fe; font-size:1rem; overflow-wrap:anywhere; }
+.model-overview .overview-binding-properties { margin:.8rem; font-size:.85rem; }
+.model-overview .overview-binding-properties summary { cursor:pointer; font-weight:600; }
+.model-overview .overview-binding-properties div { padding-top:.7rem; }
+body.light-mode .model-overview .overview-binding-metric { background:#eaf6fd; }
+body.light-mode .model-overview .overview-binding-metric span,body.light-mode .model-overview .overview-binding-metric small { color:#475569; }
+body.light-mode .model-overview .overview-binding-metric strong { color:#0c4a6e; }
+
+.model-overview .overview-chemistry-bar { display:flex; height:.55rem; overflow:hidden; border-radius:999px; margin:.5rem .8rem; }
+.model-overview .overview-chemistry-nonpolar { background:#f59e0b; }
+.model-overview .overview-chemistry-aromatic { background:#c084fc; }
+.model-overview .overview-chemistry-polar { background:#38bdf8; }
+.model-overview .overview-chemistry-basic { background:#fb7185; }
+.model-overview .overview-chemistry-acidic { background:#4ade80; }
+.model-overview .overview-chemistry-other { background:#94a3b8; }
+
+body.light-mode .model-overview .overview-binding-download { color:#0f172a; }
+body.light-mode .model-overview .overview-binding-download:hover { color:#2563eb; }
+body.light-mode .model-overview .overview-binding-select { color:#0f172a; background:#bfdbfe; }
+body.light-mode .model-overview .overview-binding-select:hover { background:#93c5fd; }
+
+.model-overview .overview-chemistry-label-nonpolar { color:#f59e0b; }
+.model-overview .overview-chemistry-label-aromatic { color:#c084fc; }
+.model-overview .overview-chemistry-label-polar { color:#38bdf8; }
+.model-overview .overview-chemistry-label-basic { color:#fb7185; }
+.model-overview .overview-chemistry-label-acidic { color:#4ade80; }
+.model-overview .overview-chemistry-label-other { color:#94a3b8; }
+body.light-mode .model-overview .overview-chemistry-label-nonpolar { color:#a16207; }
+body.light-mode .model-overview .overview-chemistry-label-aromatic { color:#7e22ce; }
+body.light-mode .model-overview .overview-chemistry-label-polar { color:#0369a1; }
+body.light-mode .model-overview .overview-chemistry-label-basic { color:#be123c; }
+body.light-mode .model-overview .overview-chemistry-label-acidic { color:#15803d; }
+body.light-mode .model-overview .overview-chemistry-label-other { color:#475569; }
+
+.model-overview .overview-binding-disclosure-heading { display:flex; align-items:center; justify-content:space-between; gap:1rem; cursor:pointer; list-style:none; }
+.model-overview .overview-binding-disclosure-heading::-webkit-details-marker { display:none; }
+.model-overview .overview-binding-disclosure-heading h2 { margin:0; }
+.model-overview .overview-binding-disclosure-chevron { color:#94a3b8; transition:transform .2s ease; }
+.model-overview #overviewBindingDisclosure[open] > .overview-binding-disclosure-heading .overview-binding-disclosure-chevron { transform:rotate(180deg); }
+.model-overview #overviewBindingDisclosure[open] > .overview-binding-disclosure-heading { margin-bottom:1rem; }
+body.light-mode .model-overview .overview-binding-disclosure-chevron { color:#475569; }
+
+.model-overview .overview-chemistry-bar[hidden] { display:none; }
+
+.model-overview .overview-binding-summary { padding:1rem; border-radius:.75rem; background:#102a3c; }
+.model-overview .overview-binding-summary-total { display:flex; align-items:baseline; gap:.55rem; color:#cbd5e1; }
+.model-overview .overview-binding-summary-total strong { color:#7dd3fc; font-size:1.6rem; line-height:1; }
+.model-overview .overview-binding-summary-categories { display:flex; flex-wrap:wrap; gap:.45rem; margin-top:.8rem; }
+.model-overview .overview-binding-summary-categories span { padding:.3rem .6rem; border-radius:.5rem; background:#38bdf81c; color:#bae6fd; font-size:.8rem; }
+.model-overview .overview-binding-summary-list { list-style:none; margin:.8rem 0 0; padding:0; }
+.model-overview .overview-binding-summary-list li { display:flex; align-items:baseline; justify-content:space-between; gap:1rem; padding:.5rem 0; border-top:1px solid #ffffff18; }
+.model-overview .overview-binding-summary-list li span { overflow-wrap:anywhere; }
+.model-overview .overview-binding-summary-list li strong { flex:none; color:#7dd3fc; font-size:.8rem; }
+body.light-mode .model-overview .overview-binding-summary { background:#eff8ff; }
+body.light-mode .model-overview .overview-binding-summary-total { color:#334155; }
+body.light-mode .model-overview .overview-binding-summary-total strong,body.light-mode .model-overview .overview-binding-summary-list li strong { color:#0369a1; }
+body.light-mode .model-overview .overview-binding-summary-categories span { background:#dbeafe; color:#075985; }
+body.light-mode .model-overview .overview-binding-summary-list li { border-color:#cbd5e180; }

@@ -469,6 +469,7 @@ async function startCombinedStagedModel(state){
     resetPhysicsGraphHistory();
     populateChainSelectors();renderAlignmentTable();renderChainLegends();resetCanvasViews();drawIndividualMatrices();drawDifferenceMatrix();drawMorphMatrix();
     state.busy=state.prepareOnly;modelLoading=false;readyModelGeneration=state.generation;hidePhysicsViewerLoading();
+    schedulePreparedOverviewCapture();
     if(state.prepareOnly){
         state.done=true;preSimulationAnalysisGeneration=state.generation;
         updateRotationalSymmetry(true);
@@ -883,8 +884,10 @@ function cancelConformationSelectionMorph(){
 }
 function selectConformationGroup(index){
     const state=multiReferenceBuild,frameIndex=state?.groupAnimation?.frames.findIndex(frame=>frame.conformationGroup===index)??-1;if(frameIndex<0)return;
+    const wasMorphing=Boolean(conformationSelectionMorph);
     cancelConformationSelectionMorph();
     if(animationPlaying||animationPreparing)stopAnimation(true);
+    if(!wasMorphing)saveSelectedAnimationFrame();
     clearTimeout(animationCaptureTimer);
     const from={coords:physicsNodes.map(node=>[node.x,node.y,node.z]),groupPresence:conformationNodePresence?.slice(),atomOffsets:animationAtomOffsets};
     if(animationActiveId!==state.groupAnimation.id)activateAnimation(state.groupAnimation);

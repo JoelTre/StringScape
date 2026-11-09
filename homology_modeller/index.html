@@ -931,6 +931,28 @@
         body.light-mode .ai-assessment-close { color:#475569; }
         body.light-mode .ai-assessment-close:hover { background:#e2e8f0; color:#0f172a; }
         body.light-mode .ai-assessment-text { color:#334155; }
+        #manualConformationDialog { --assessment-accent:#67e8f9; --assessment-icon-bg:#164e63; width:min(800px,calc(100vw - 32px)); }
+        #manualConformationDialog .conformation-help { color:#cbd5e1; font-size:.9rem; line-height:1.6; }
+        #manualConformationDialog label { display:block; margin-top:16px; color:#e2e8f0; font-size:.875rem; font-weight:600; }
+        #manualConformationDialog .conformation-input { position:relative; margin-top:6px; border-radius:9px; background:#0f172a; }
+        #manualConformationDialog input { position:relative; z-index:1; display:block; width:100%; padding:10px 12px; border:1px solid #475569; border-radius:9px; background:transparent; color:#f8fafc; }
+        #manualConformationDialog .conformation-suggestion { position:absolute; inset:1px; overflow:hidden; padding:10px 12px; color:#94a3b8; white-space:pre; pointer-events:none; font-size:.875rem; font-weight:600; }
+        #manualConformationDialog .conformation-suggestion-prefix { visibility:hidden; }
+        #manualConformationDialog input:focus-visible { outline:2px solid #22d3ee; outline-offset:2px; }
+        #manualConformationDialog .conformation-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; margin-top:24px; }
+        #manualConformationDialog .conformation-actions button { padding:9px 16px; border-radius:9px; font-size:.875rem; font-weight:600; }
+        #manualConformationDialog .conformation-cancel { background:#334155; color:#f1f5f9; }
+        #manualConformationDialog .conformation-cancel:hover { background:#475569; }
+        #manualConformationDialog .conformation-submit { background:#0891b2; color:white; }
+        #manualConformationDialog .conformation-submit:hover { background:#0e7490; }
+        body.light-mode #manualConformationDialog { --assessment-accent:#0e7490; --assessment-icon-bg:#cffafe; }
+        body.light-mode #manualConformationDialog .conformation-help { color:#475569; }
+        body.light-mode #manualConformationDialog label { color:#334155; }
+        body.light-mode #manualConformationDialog .conformation-input { background:#f8fafc; }
+        body.light-mode #manualConformationDialog input { color:#0f172a; border-color:#cbd5e1; }
+        body.light-mode #manualConformationDialog .conformation-suggestion { color:#94a3b8; }
+        body.light-mode #manualConformationDialog .conformation-cancel { background:#e2e8f0; color:#334155; }
+        body.light-mode #manualConformationDialog .conformation-cancel:hover { background:#cbd5e1; }
         #stringReviewDialog { width:min(1400px,94vw); max-height:90vh; overflow:auto; padding:0; border:1px solid #475569; border-radius:16px; background:rgb(30 41 59 / .7); color:#e2e8f0; box-shadow:0 24px 80px #0005; color-scheme:dark; }
         #stringReviewHeader { position:sticky; top:0; z-index:2; padding:20px 24px; background:#0f172a; border-bottom:1px solid #475569; }
         #stringReviewBody { padding:0 24px 24px; }
@@ -1108,7 +1130,7 @@ body.light-mode .complex-ai-assistant {background:#e2e8f0;color:#1e293b;}
 body.light-mode .complex-ai {background:#fff;color:#1e293b;border-color:#cbd5e1}
 body.light-mode #complexAiQuestion {background:white;border-color:#cbd5e1}
 </style>
-    <link rel="stylesheet" href="app-pages.css?v=104">
+    <link rel="stylesheet" href="app-pages.css?v=129">
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col">
 
@@ -2039,20 +2061,22 @@ body.light-mode #complexAiQuestion {background:white;border-color:#cbd5e1}
     <script src="build-timeline.js"></script>
     <script src="chain-merging.js?v=20261030"></script>
     <script src="shared-ai-key.js"></script>
-    <script src="modeller-ai.js?v=20261103groups1"></script>
-    <script src="complex-ai.js?v=20261102alignmentlabels"></script>
+    <script src="modeller-ai.js?v=20261109bindingsites1"></script>
+    <script src="complex-ai.js?v=20261109bindingsites2"></script>
     <script src="biological-motion-ai.js?v=20261031motionoverview1"></script>
     <script src="projection-stats.js?v=20261105stats1"></script>
-    <script src="staged-models.js?v=20261109preview2"></script>
+    <script src="staged-models.js?v=20261109overview1"></script>
     <script src="nucleotide-extensions.js?v=20261029"></script>
     <script src="molecular-topology.js?v=20261103responsive2"></script>
     <script src="animation-storage.js?v=20261029pipeline4"></script>
-    <script id="appScript" src="script.js?v=20261105stats1"></script>
+    <script src="binding-site-detection.js?v=1"></script>
+    <script src="binding-site-analysis.js?v=2"></script>
+    <script id="appScript" src="script.js?v=20261109interfaces1"></script>
     <script src="sessions.js?v=20261102style2"></script>
     <script src="mobile-physics-sheet.js?v=2"></script>
     <script src="edit-models-state.js?v=6"></script>
     <script src="edit-models.js?v=20"></script>
-    <script src="app-pages.js?v=15"></script>
+    <script src="app-pages.js?v=36"></script>
     <div id="simulationLoadingPopup" class="hidden" role="status" aria-live="polite"><div><i class="fa-solid fa-circle-notch fa-spin mr-2" aria-hidden="true"></i>Loading...</div></div>
 </body>
 </html>
