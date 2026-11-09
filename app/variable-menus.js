@@ -1,11 +1,11 @@
 // Keep native selects as the source of truth for application state and handlers.
 (() => {
-    const ids = ['colorMode', 'nodeBorderColorMode', 'nodeSizeVariable', 'nodeBorderWidthMode',
-        'nodeLabelField', 'linkMode', 'linkVisibilityMode', 'linkWidthMode', 'bgMode', 'colorTheme'];
+    const ids = ['colorMode', 'clusterVariableMode', 'nodeBorderColorMode', 'nodeSizeVariable', 'nodeBorderWidthMode',
+        'nodeLabelField', 'linkMode', 'linkVisibilityMode', 'linkWidthMode', 'bgMode', 'colorTheme', 'searchScope'];
     const numeric = new Set(['layer', 'centrality', 'local_clustering_coefficient', 'eigen',
-        'embeddings', 'annotation', 'size', 'pdb_structure_count', 'score']);
-    const categorical = new Set(['collection', 'characterization', 'localization',
-        'biological_process', 'complex_pdbs', 'species']);
+        'embeddings', 'annotation', 'size', 'pdb_structure_count', 'score', 'gene_exon_count', 'gc_content', 'genomic_position']);
+    const categorical = new Set(['paralogues', 'collection', 'characterization', 'localization',
+        'biological_process', 'complex_pdbs', 'complex_pdbs_combined', 'species', 'chromosome', 'strand']);
     let active = null;
     const close = (focus = false) => {
         if (!active) return;
@@ -30,7 +30,7 @@
             const id = select.id;
             cleanups.get(id)?.();
             enhanced.add(select);
-            const label = select.previousElementSibling?.textContent.trim() || id;
+            const label = select.labels?.[0]?.textContent.trim() || select.previousElementSibling?.textContent.trim() || id;
             const trigger = document.createElement('button');
             trigger.type = 'button';
             trigger.id = `${id}MenuButton`;
@@ -58,22 +58,44 @@
                 });
             };
             const rebuild = () => {
-                const groups = new Map(['Numeric', 'Categorical', 'Other', 'Custom'].map(name => [name, []]));
+                const plot = ['plot', 'structure'].includes(select.dataset.menuGroups);
+                const groups = new Map((plot ? (select.dataset.menuGroups === 'structure' ? ['AI', 'Protein Data Bank'] : ['Main', 'Collections']) : ['Numeric', 'Categorical', 'Other', 'Custom']).map(name => [name, []]));
                 if (id === 'nodeLabelField') { groups.clear(); groups.set('', []); }
                 Array.from(select.options).forEach(option => {
-                    if (option.hidden || option.style.display === 'none' || (option.parentElement.tagName === 'OPTGROUP' && option.parentElement.hidden)) return;
+                    if ((select.dataset.menuGroups === 'structure' && !option.value) || option.hidden || option.style.display === 'none' || (option.parentElement.tagName === 'OPTGROUP' && option.parentElement.hidden)) return;
                     const key = option.value;
-                    const group = key.startsWith('var::') || key.startsWith('linkvar::') || option.parentElement.tagName === 'OPTGROUP'
-                        ? 'Custom' : option.dataset.variableType === 'continuous' || numeric.has(key) ? 'Numeric' : option.dataset.variableType === 'categorical' || categorical.has(key) || key.startsWith('#') ? 'Categorical' : 'Other';
-                    groups.get(id === 'nodeLabelField' ? '' : group).push(option);
+                    const group = option.dataset.menuGroup || (key.startsWith('var::') || key.startsWith('linkvar::') || option.parentElement.tagName === 'OPTGROUP'
+                        ? 'Custom' : option.dataset.variableType === 'continuous' || numeric.has(key) ? 'Numeric' : option.dataset.variableType === 'categorical' || categorical.has(key) || key.startsWith('#') ? 'Categorical' : 'Other');
+                    groups.get(plot ? option.parentElement.label : id === 'nodeLabelField' ? '' : group).push(option);
                 });
+                const categories = groups.get('Categorical');
+                if (categories) {
+                    const pdbIndex = categories.findIndex(option => option.value === 'complex_pdbs');
+                    const goOption = categories.find(option => option.textContent === 'Complexes (Gene Ontology)');
+                    if (pdbIndex !== -1 && goOption) {
+                        const [pdbOption] = categories.splice(pdbIndex, 1);
+                        categories.splice(categories.indexOf(goOption), 0, pdbOption);
+                    }
+                    const combinedIndex = categories.findIndex(option => option.value === 'complex_pdbs_combined');
+                    const pdbOption = categories.find(option => option.value === 'complex_pdbs');
+                    if (combinedIndex !== -1 && pdbOption) {
+                        const [combinedOption] = categories.splice(combinedIndex, 1);
+                        categories.splice(categories.indexOf(pdbOption) + 1, 0, combinedOption);
+                    }
+                }
                 panel.replaceChildren();
                 groups.forEach((options, name) => {
-                    if (!options.length) return;
+                    if (!options.length && !(select.dataset.menuGroups === 'structure' && name === 'Protein Data Bank')) return;
                     const section = document.createElement('section');
                     const heading = document.createElement('h3');
                     heading.textContent = name;
                     if (name) section.append(heading);
+                    if (!options.length) {
+                        const empty = document.createElement('p');
+                        empty.className = 'app-variable-menu-empty';
+                        empty.textContent = 'No PDBs available for this protein';
+                        section.append(empty);
+                    }
                     options.forEach(option => {
                         const button = document.createElement('button');
                         button.type = 'button';
@@ -90,6 +112,10 @@
                     });
                     panel.append(section);
                 });
+                if (plot) {
+                    panel.classList.add('app-variable-menu-plot');
+                    panel.classList.toggle('app-variable-menu-plot-collections', panel.children.length > 1);
+                }
                 sync();
                 if (active?.panel === panel) place();
             };

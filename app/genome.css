@@ -32,7 +32,7 @@ body.secondary-genome-view-active #secondary-network { visibility:hidden; }
 .genome-focus-controls { display:flex; align-items:center; justify-content:center; gap:14px; white-space:nowrap; }
 .genome-toggle { border-radius:24px; padding:4px; }
 .genome-toggle button { border-radius:20px; padding:9px 16px; font-weight:600; white-space:nowrap; }
-.genome-view { transition:padding-left .4s cubic-bezier(.4,0,.2,1),padding-right .4s cubic-bezier(.4,0,.2,1); }
+.genome-view { transition:padding-left .4s cubic-bezier(.4,0,.2,1),padding-right .4s cubic-bezier(.4,0,.2,1),right .4s cubic-bezier(.4,0,.2,1),width .4s cubic-bezier(.4,0,.2,1),left .4s cubic-bezier(.4,0,.2,1); }
 body.genome-left-minimized:not(.split-view-active) .genome-view { padding-left:65px; }
 body.genome-right-minimized:not(.split-view-active) .genome-view { padding-right:65px; }
 .genome-gene-hit { cursor:pointer; transition:filter .1s; }
@@ -211,3 +211,34 @@ body:is(.light-mode,[data-app-mode="light"]) .genome-view .genome-mapping-cell.g
 .genome-variable-key button { width:auto; padding:7px 15px; margin:8px 0 0; border-radius:18px; }
 
 .genome-view .genome-png-download:hover { background:var(--button-bg-hover); filter:none; }
+
+.genome-colour-menu { position:absolute; left:calc(100% + 16px); z-index:8; font-size:14px; }
+.genome-colour-menu summary { cursor:pointer; list-style:none; border-radius:14px; padding:12px 16px; background:var(--button-bg); color:var(--text-color); white-space:nowrap; }
+.genome-colour-menu summary::-webkit-details-marker { display:none; }
+.genome-colour-options { position:absolute; top:calc(100% + 6px); left:0; min-width:210px; padding:6px; border-radius:12px; background:var(--panel-bg, #25313d); box-shadow:0 6px 24px #0004; }
+.genome-colour-options button { display:block; width:100%; text-align:left; border:0; border-radius:8px; padding:10px 12px; color:var(--text-color); background:transparent; }
+.genome-colour-options button:hover { background:var(--button-bg-hover); }
+@container (max-width:1100px) { .genome-colour-menu { position:relative; left:auto; margin-left:14px; } }
+@container (max-width:650px) { .genome-colour-menu { margin-left:0; } }
+
+.genome-chromosome-footer { display:flex; align-items:baseline; gap:18px; margin-top:12px; }
+.genome-chromosome-footer .genome-zoom-hint { flex-shrink:0; white-space:nowrap; }
+.genome-chromosome-footer p { margin:0; }
+
+/* Match the AI panel's outer width, including its 1px left border.
+   Split panes already use the available widths computed by the app. */
+body.ai-panel-open:not(.split-view-active) .genome-view { right:calc(var(--ai-panel-width) + 1px); }
+
+/* Keep Genome navigation visible within each pane while its diagrams scroll. */
+.genome-view { padding-top:0; scroll-padding-top:110px; }
+.genome-header {
+    position:sticky;
+    top:0;
+    z-index:12;
+    padding:14px 0;
+    margin-bottom:20px;
+    background:var(--bg-color,#111923);
+    border-bottom:1px solid var(--border-color-strong,#53677c66);
+    box-shadow:0 8px 16px -12px #0008;
+}
+body:is(.light-mode,[data-app-mode="light"]) .genome-header { background:var(--bg-color,#f3f7fb); }

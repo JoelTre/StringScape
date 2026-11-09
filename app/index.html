@@ -1663,6 +1663,11 @@
             word-break: break-word;
         }
         .ai-python-approval-panel {
+            box-sizing: border-box;
+            min-width: 0;
+            width: 100%;
+            max-width: 100%;
+            overflow-wrap: anywhere;
             margin: 8px 0;
             padding: 12px;
             background: #161b22;
@@ -1705,6 +1710,19 @@
 
         #ai-chatbox .ai-file-approval-actions { display: flex; flex-direction: row; flex-wrap: nowrap; gap: 8px; margin-top: 12px; }
         #ai-chatbox .ai-file-approval-actions > button { flex: 1 1 0; width: auto; margin: 0; }
+        #ai-chatbox .ai-file-approval-card { padding: 16px; border-radius: 14px; background: var(--surface-color-panel); color: var(--text-color); line-height: 1.5; }
+        .ai-file-approval-card .ai-python-approval-title { color: var(--text-color); margin-bottom: 12px; line-height: 1.5; }
+        .ai-file-approval-location { min-width: 0; padding: 10px 12px; border: 1px solid var(--border-color-strong); border-radius: 8px; margin-bottom: 12px; }
+        .ai-file-approval-location > span { display: block; color: var(--muted-text-color); font-size: 0.72rem; margin-bottom: 4px; }
+        .ai-file-approval-location > strong { display: block; font-family: Consolas, monospace; font-size: 0.8rem; font-weight: 500; overflow-wrap: anywhere; white-space: pre-wrap; }
+        .ai-file-approval-stats { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+        .ai-file-approval-review { padding: 12px; background: var(--button-bg); border-radius: 8px; margin-bottom: 12px; font-size: 0.82rem; }
+        .ai-file-approval-review p { margin: 6px 0 0; white-space: pre-wrap; }
+        #ai-chatbox .ai-file-approval-card button { box-sizing: border-box; min-width: 0; max-width: 100%; width: auto; height: auto; margin: 0; padding: 8px 14px; border: none; border-radius: 15px; background: var(--button-bg-hover); color: var(--text-color); font-size: 0.78rem; font-weight: bold; white-space: normal; overflow-wrap: anywhere; cursor: pointer; transition: filter 0.2s ease; }
+        #ai-chatbox .ai-file-approval-card button:hover { background: var(--button-bg-hover); filter: brightness(1.15); }
+        #ai-chatbox .ai-file-approval-card button:focus-visible { outline: 2px solid var(--text-color); outline-offset: 2px; }
+        #ai-chatbox .ai-file-approval-card .ai-file-count-added { color: #b1ffc6; background: #174b31; }
+        #ai-chatbox .ai-file-approval-card .ai-file-count-removed { color: #ffb7bf; background: #602737; }
         dialog.ai-file-diff-dialog { box-sizing: border-box; width: 94vw; max-width: 1600px; height: 88vh; max-height: 94vh; margin: auto; background: var(--surface-color-panel, #20252d); color: var(--text-color, #eee); border: 1px solid var(--border-color-strong, #777); border-radius: 12px; padding: 20px; overflow: hidden; }
         .ai-file-diff-dialog::backdrop { background: #0009; }
         .ai-file-diff-dialog > h3 { margin: 0 44px 18px 0; font-weight: 600; overflow-wrap: anywhere; }
@@ -1764,6 +1782,19 @@
         #ai-preview-area:not(:empty) {
             margin-bottom: 6px;
         }
+        .ai-automation-option { margin: 12px 0; }
+        .ai-automation-option label { display: flex; width: 100%; justify-content: space-between; align-items: center; gap: 12px; margin: 0; text-align: left; }
+        .ai-automation-option label > span { flex: 1; text-align: left; }
+        .ai-automation-option .settings-switch { margin-left: auto; }
+        .ai-automation-option p { margin: 5px 0 0; font-size: 0.78rem; line-height: 1.45; color: var(--muted-text-color); }
+        #ai-composer-menu { position: absolute; bottom: calc(100% + 6px); left: 10px; width: min(340px, calc(100% - 20px)); max-height: 65vh; overflow: auto; padding: 12px; border: 1px solid var(--border-color-strong); border-radius: 12px; background: var(--surface-color-panel); box-shadow: 0 8px 24px #0005; z-index: 30; }
+        #ai-composer-menu[hidden], #ai-reply-hint[hidden] { display: none; }
+        #ai-upload-menu-btn { width: 100%; height: 36px; padding: 0 10px; margin: 0; text-align: center; }
+        #ai-composer-text { flex: 1; min-width: 0; position: relative; display: grid; }
+        #ai-composer-text textarea { width: 100%; display: block; grid-area: 1 / 1; }
+        #ai-reply-hint { z-index: 1; grid-area: 1 / 1; align-self: start; min-width: 0; box-sizing: border-box; padding: 9px 13px; color: var(--muted-text-color); opacity: .65; font-size: .9rem; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow-y: auto; overscroll-behavior: contain; cursor: text; border-radius: 20px; }
+        #ai-composer-text:has(#ai-reply-hint:not([hidden])) textarea { height: 100% !important; max-height: 200px; overflow-y: hidden !important; }
+        #ai-composer-text:has(#ai-reply-hint:not([hidden])) textarea::placeholder { color: transparent; }
         #ai-input-controls {
             display: flex;
             align-items: flex-end;
@@ -3631,13 +3662,14 @@
         .search-container input, .search-container button { margin: 0; height: 100%; vertical-align: middle; }
         #search-input-wrap { position: relative; flex: 1; min-width: 0; }
         #searchInput { width: 100%; box-sizing: border-box; }
-        #searchInput, #searchBtn { border-radius: 15px; }
+        #searchInput, #searchBtn, #ai-upload-menu-btn { border-radius: 15px; }
         #search-input-wrap.search-improving #searchInput { color: transparent; caret-color: transparent; }
         #smart-search-loading { position: absolute; inset: 0; display: flex; align-items: center; gap: 7px; padding: 0 10px; color: color-mix(in srgb, var(--muted-text-color) 60%, white); font-size: 13px; pointer-events: none; }
         #smart-search-loading[hidden] { display: none; }
         #smart-search-label { font-size: 15px; color: var(--accent-color-soft); font-weight: 600; }
-        #searchBtn { width: 80px; padding: 0 5px; color: white; transition: filter 0.2s ease;  }
-        #searchBtn:hover { background-color: var(--accent-color-soft); }
+        #searchBtn { width: 80px; padding: 0 5px; color: white; }
+        #searchBtn, #ai-upload-menu-btn { transition: filter 0.2s ease; }
+        #searchBtn:hover, #ai-upload-menu-btn:hover { background-color: var(--accent-color-soft); }
 
         .Selection-tools-btn { 
             font-size: 17px; /* Increased from 11px */
@@ -4321,6 +4353,19 @@
         body.secondary-structures-view-active #secondary-network { display: none !important; }
         body.structures-view-active #network,
         body.structures-view-active #network-gpu { display: none !important; }
+        body.protein-modeller-view-active #network,
+        body.protein-modeller-view-active #network-gpu,
+        body.secondary-protein-modeller-view-active #secondary-network { display: none !important; }
+        .protein-modeller-view {
+            position: fixed; inset: 0; z-index: 4; display: none; overflow: auto;
+            box-sizing: border-box; padding: 24px 24px 24px 340px;
+        }
+        body.split-view-active .protein-modeller-view {
+            right: auto; width: var(--split-primary-width, 50vw); padding-left: 24px;
+        }
+        body.split-view-active #secondary-protein-modeller-view {
+            left: var(--split-primary-width, 50vw); width: var(--split-secondary-width, 50vw);
+        }
         .protein-complex-structures-view {
             position: fixed;
             inset: 0;
@@ -4819,7 +4864,8 @@
         #ask-ai-btn,
         #ai-history-launch-btn,
         #ai-python-console-btn,
-        #searchBtn {
+        #searchBtn,
+        #ai-upload-menu-btn {
             background: var(--button-bg-hover) !important;
             color: var(--text-color) !important;
         }
@@ -5106,8 +5152,14 @@
             </div>
         </div>
 
-        <span class="dropdown-toggle panel-section-heading">Nodes <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
-        <div id="nodes-drop" class="dropdown-content">
+        <span class="dropdown-toggle panel-section-heading">Network <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
+        <div id="network-drop" class="dropdown-content">
+            <label for="complexClusterStrength">Cluster by complexes <span id="complexClusterStrengthValue" class="slider-val">0</span></label>
+            <input type="range" id="complexClusterStrength" min="0" max="1" step="0.01" value="0">
+            <label for="clusterVariableSlider">Cluster by variable <span id="val-cluster-var" class="slider-val">0</span></label>
+            <input type="range" id="clusterVariableSlider" min="0" max="1" step="0.01" value="0">
+            <label for="clusterVariableMode">Variable to cluster by</label>
+            <select id="clusterVariableMode"><option value="same_as_color">Same as Colour Nodes By</option></select>
             <label class="analytics-toggle-row" style="width:100%; justify-content:space-between; margin-bottom:8px;">
                 <span>Network labels</span>
                 <input id="networkLabelShow" class="settings-switch" type="checkbox" role="switch" checked>
@@ -5119,7 +5171,11 @@
                 <label for="networkLabelSize">Network label size <span id="networkLabelSizeValue" class="slider-val">10px</span></label>
                 <input type="range" id="networkLabelSize" min="8" max="20" step="1" value="10">
             </div>
+        </div>
 
+        <hr class="dropdown-divider">
+        <span class="dropdown-toggle panel-section-heading">Nodes <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
+        <div id="nodes-drop" class="dropdown-content">
             <div id="network-merge-controls" style="display:none; margin-bottom:12px;">
                 <button type="button" id="mergeNetworksBtn" class="action-btn" style="width:100%; text-align:center; justify-content:center;">Merge Networks</button>
                 <div id="mergeNetworksHelp" style="font-size:11px; color:#aaa; margin-top:5px;"></div>
@@ -5354,9 +5410,6 @@
             <label>Max Canvas Drift Distance <span id="val-drift" class="slider-val">8000</span></label>
             <input type="range" id="driftSlider" min="100" max="10000" step="100" value="8000">
 
-            <label>Cluster by Variable <span id="val-cluster-var" class="slider-val">0</span></label>
-            <input type="range" id="clusterVariableSlider" min="0" max="1" step="0.01" value="0">
-
             <button id="dragNodesBtn" style="margin-top:15px; background:#666">Drag nodes</button>
         </div>
 
@@ -5364,6 +5417,7 @@
         <span class="dropdown-toggle panel-section-heading">AI <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
         <div id="ai-drop" class="dropdown-content">
             <button id="ai-open-connection-btn" type="button" style="width:100%;">Connect an AI</button>
+            <div data-ai-automation-controls></div>
         </div>
 
         <hr class="dropdown-divider">
@@ -5729,11 +5783,18 @@
     <div id="ai-input-area" class="relative">
         <div id="ai-glow-container"><div class="ai-processing-glow"></div></div>
         <div id="ai-preview-area"></div>
+        <div id="ai-composer-menu" hidden aria-label="Chat options">
+            <button id="ai-upload-menu-btn" type="button"><i class="fa-solid fa-upload" aria-hidden="true"></i> Files</button>
+            <div data-ai-automation-controls></div>
+        </div>
         <div id="ai-input-controls">
             <input type="file" id="ai-file-input" accept=".txt,.csv,.tsv,image/*">
-            <button id="ai-file-btn" title="Upload files">+</button>
+            <button id="ai-file-btn" type="button" title="Files and AI options" aria-label="Files and AI options" aria-controls="ai-composer-menu">+</button>
+            <div id="ai-composer-text">
+            <div id="ai-reply-hint" hidden aria-live="polite"></div>
             <textarea id="ai-user-input" rows="1" placeholder="Connect an AI in the left panel"
                       class="flex-1 bg-[#0d1117] border border-[#30363d] px-4 focus:outline-none focus:border-[#3498db] resize-none text-sm"></textarea>
+            </div>
             <button id="ai-send-btn" class="pill-btn bg-[#3498db] text-white h-10 ai-btn-disabled">SEND</button>
         </div>
     </div>
