@@ -4649,6 +4649,8 @@ function drawChevronCanvasLabel(context, label, x, y) {
             if (key === 'size') return getProteinSizeValue?.(id, resolveBuiltInColorSource?.('size')) ?? proteinMetadata.get(id)?.size;
             if (key === 'annotation') return (getProteinInfoAnnotation?.(id) || '').length;
             if (key === 'paralogues') return getParalogueGroup(id);
+            if (key === 'expression') return window.StringScapeExpression?.value(id) ?? null;
+            if (key === 'mutations') return window.StringScapeMutations?.value(id) ?? null;
             if(isGenomeNumericMode(key)||key==='strand')return getGenomeGeneValue(node,key);
             if (key === 'chromosome') return getGenomeChromosomeValue(node);
             if (key === 'characterization') return getCharacterizationValue(id);
@@ -6308,6 +6310,10 @@ def clean_numeric(values):
                         } else if (key === 'size') {
                             const source = resolveProteinSizeSource(safeNodes);
                             values = safeNodes.map(n => getProteinSizeValue(n?.id, source));
+                        } else if (key === 'expression') {
+                            values = safeNodes.map(n => window.StringScapeExpression?.value(n.id) ?? null);
+                        } else if (key === 'mutations') {
+                            values = safeNodes.map(n => window.StringScapeMutations?.value(n.id) ?? null);
                         } else if (isGenomeNumericMode(key)||key==='strand') {
                             values=safeNodes.map(n=>getGenomeGeneValue(n,key));
                         } else if (key === 'chromosome') {
@@ -11114,6 +11120,10 @@ self.onmessage = async (event) => {
                 const normalized = clamp01((annLen - annotationMin) / annotationSpan);
                 n.col = d3.interpolatePlasma(normalized);
                 colorValue = normalized;
+            } else if (mode === 'expression') {
+                n.col = window.StringScapeExpression?.colour(n.id) || '#73808c'; colorValue = hashStringToUnit(n.col);
+            } else if (mode === 'mutations') {
+                n.col = window.StringScapeMutations?.colour(n.id) || '#73808c'; colorValue = hashStringToUnit(n.col);
             } else if (isGenomeNumericMode(mode)||mode==='strand') {
                 n.col=mode==='strand'?getGenomeStrandColor(getGenomeGeneValue(n,mode)):getGenomeNumericColor(n,mode);colorValue=hashStringToUnit(n.col);
             } else if (mode === 'chromosome') {
@@ -12008,6 +12018,8 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
                 : getLinkVariableValue(node, variable);
             return Number(rawValue);
         }
+        if (key === 'expression') return window.StringScapeExpression?.value(node.id) ?? NaN;
+        if (key === 'mutations') return window.StringScapeMutations?.value(node.id) ?? NaN;
         if(isGenomeNumericMode(key))return getGenomeGeneValue(node,key);
         if (key === 'centrality') return Number.isFinite(node.centrality) ? node.centrality : 0;
         if (key === 'size') {
@@ -12207,6 +12219,8 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         if (key === 'pdb_structure_count') return getPdbStructureCount(node.id);
         if (key === 'annotation') return getAnnotationLengthFromSource(node.id);
         if (key === 'layer') return Number.isFinite(+node.layer) ? +node.layer : 0;
+        if (key === 'expression') return window.StringScapeExpression?.value(node.id) ?? 0;
+        if (key === 'mutations') return window.StringScapeMutations?.value(node.id) ?? 0;
         if (isGenomeNumericMode(key)) return getGenomeGeneValue(node,key)??0;
         if (key === 'random') return hashStringToUnit(String(node.id));
         if (key.startsWith('var::')) {
@@ -12281,6 +12295,8 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         else if (key === 'random') color = node.randColor || '#ffffff';
         else if (key === 'collection') color = getCollectionColorForNode(node.id);
         else if (key === 'paralogues') color = getParalogueColor(node.id);
+        else if (key === 'expression') color = window.StringScapeExpression?.colour(node.id) || '#73808c';
+        else if (key === 'mutations') color = window.StringScapeMutations?.colour(node.id) || '#73808c';
         else if (isGenomeNumericMode(key)||key==='strand')color=key==='strand'?getGenomeStrandColor(getGenomeGeneValue(node,key)):getGenomeNumericColor(node,key);
         else if (key === 'chromosome') color = getGenomeChromosomeColor(node);
         else if (key === 'characterization') color = getCategoricalNodeColor('characterization', getCharacterizationValue(node.id), d3.schemeTableau10[0]);
@@ -14292,6 +14308,8 @@ fn computeMain(@builtin(global_invocation_id) gid: vec3<u32>) {
         if (currentViewId !== 'base') switchView('base');
 
         Object.keys(uploadedInteractionFiles).forEach(name => delete uploadedInteractionFiles[name]);
+        window.StringScapeExpression?.clear();
+        window.StringScapeMutations?.clear();
         window.StringScapeGenome?.clear();
         Object.keys(uploadedAccessoryFiles).forEach(name => delete uploadedAccessoryFiles[name]);
         Object.keys(uploadedEmbeddingFiles).forEach(name => delete uploadedEmbeddingFiles[name]);
@@ -15440,6 +15458,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
         // 1. Built-in colour mode options
         const builtins = [
+            { key: 'expression', label: 'Expression', type: 'Numerical - Continuous' },
+            { key: 'mutations', label: 'Mutations', type: 'Numerical - Continuous' },
             { key: 'layer', label: 'Degrees of Separation', type: 'Numerical - Discrete' },
             { key: 'centrality', label: 'Centrality', type: 'Numerical - Continuous' },
             { key: 'eigen', label: 'Eigenvector centrality', type: 'Numerical - Continuous' },
@@ -15839,6 +15859,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         select.innerHTML = '';
 
         const defaults = [
+            {value:'expression', text:'Expression', color:'#93c5fd'},
+            {value:'mutations', text:'Mutations', color:'#93c5fd'},
             {value:'layer', text:'Degrees of separation', color:'#93c5fd'},
             {value:'centrality', text:'Centrality', color:'#93c5fd'},
             {value:'local_clustering_coefficient', text:'Local Clustering Coefficient', color:'#93c5fd'},
@@ -16058,7 +16080,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     }
 
     function getNodeComparisonVariableType(variable) {
-        if (isGenomeNumericMode(variable))return 'continuous';
+        if (variable === 'expression' || variable === 'mutations' || isGenomeNumericMode(variable))return 'continuous';
         if (['layer', 'centrality', 'local_clustering_coefficient', 'eigen', 'annotation', 'size', 'pdb_structure_count'].includes(variable)) return 'continuous';
         if (variable?.startsWith('var::')) {
             const type = getCustomVariableSelection(variable)?.cfg?.type || '';
@@ -16076,6 +16098,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         if (variable === 'pdb_structure_count') return getPdbStructureCount(node.id);
         if (variable === 'collection') return getNodeCollectionMemberships(node.id).sort().join('|') || 'None';
         if (variable === 'paralogues') return getParalogueGroup(node.id);
+        if (variable === 'expression') return window.StringScapeExpression?.value(node.id) ?? null;
+        if (variable === 'mutations') return window.StringScapeMutations?.value(node.id) ?? null;
         if (isGenomeNumericMode(variable)||variable==='strand')return getGenomeGeneValue(node,variable);
         if (variable === 'chromosome') return getGenomeChromosomeValue(node);
         if (variable === 'characterization') return getCharacterizationValue(node.id);
@@ -18342,7 +18366,6 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         onStatus('Looking for an existing ESM Atlas structure…');
         try {
             const endpoints = [
-                `/api/esm-atlas/proteins/${hash}`,
                 `https://biohub.ai/esm/protein/api/v1alpha1/proteins/${hash}?fold_on_miss=false&topk_features=1`
             ];
             for (const endpoint of endpoints) {
@@ -18359,7 +18382,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     // A valid record with no structure is a miss; do not fetch the same record twice.
                     break;
                 } catch {
-                    // Static hosts lack the bridge; attempt direct access where CORS permits it.
+                    // The remote service is unavailable or blocks cross-origin access.
                 }
             }
         } catch {
@@ -18680,7 +18703,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
     function getProteinInfoDefaultHeightPx() {
         const viewportHeight = Math.max(480, window.innerHeight || 0);
-        return Math.round(viewportHeight * (['structure', 'homology', 'orthology'].includes(proteinInfoMode) ? 0.48 : (proteinInfoMode === 'enrichment' ? 0.44 : 0.34)));
+        return Math.round(viewportHeight * (['structure', 'homology', 'orthology', 'mutations'].includes(proteinInfoMode) ? 0.48 : (proteinInfoMode === 'enrichment' ? 0.44 : 0.34)));
     }
 
     function applyProteinInfoPanelHeight(heightPx = null) {
@@ -19361,6 +19384,101 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         });
     }
 
+    const proteinMutationLookup = window.StringScapeProteinMutations?.create((...args) => fetch(...args));
+
+    function renderProteinInfoMutationsView(body, nodeId, retry = false) {
+        body.replaceChildren();
+        const add = (parent, tag, className, text) => {
+            const element = document.createElement(tag);
+            if (className) element.className = className;
+            if (text !== undefined) element.textContent = text;
+            parent.appendChild(element);
+            return element;
+        };
+        const view = add(body, 'div', 'protein-mutations-view');
+        add(view, 'p', 'protein-mutations-intro', 'Mutation records from imported datasets and UniProt for this protein. UniProt distinguishes natural variation from experimental mutagenesis; source descriptions and evidence are shown as reported.');
+        let loaded = [];
+        try { loaded = window.StringScapeMutations?.recordsForNode(nodeId) || []; }
+        catch (error) { add(view, 'p', 'protein-mutations-status', `Could not map imported mutation data: ${error.message}`); }
+        const renderRecords = (parent, records, defaultType = 'Variant') => {
+            const wrap = add(parent, 'div', 'protein-mutations-list');
+            const table = add(wrap, 'table', 'protein-mutations-table');
+            table.setAttribute('aria-label', 'Mutation records');
+            const head = add(table, 'thead', ''), header = add(head, 'tr', '');
+            for (const label of ['Type', 'Residue', 'Mutation/variant', 'Effect', 'Other info']) {
+                const th = add(header, 'th', '', label); th.scope = 'col';
+            }
+            const tbody = add(table, 'tbody', '');
+            for (const record of records) {
+                const row = add(tbody, 'tr', '');
+                add(row, 'td', '', record.kind || record.type || defaultType);
+                const start = record.location?.start?.value, end = record.location?.end?.value;
+                add(row, 'td', '', start != null ? `${start}${end != null && end !== start ? `–${end}` : ''}` : '—');
+                const alt = record.alternativeSequence;
+                const proteinChange = alt && (alt.originalSequence || alt.alternativeSequences?.length)
+                    ? `${alt.originalSequence || '?'} → ${(alt.alternativeSequences || []).join(', ') || '?'}` : '';
+                const genomicChange = record.chromosome && record.position && (record.ref || record.alt)
+                    ? `${record.chromosome}:${record.position} ${record.ref || '?'} → ${record.alt || '?'}` : '';
+                const hgvs = [record.hgvs_pro, record.hgvs_nt].filter(value => value && value !== 'NA').join(' · ');
+                add(row, 'td', '', proteinChange || hgvs || genomicChange || '—');
+                const effects = [];
+                if (record.description) effects.push(record.description);
+                if (record.score != null && record.score !== '' && record.score !== 'NA') effects.push(`Reported score: ${record.score}`);
+                if (record.info?.consequence) effects.push(`${record.info.evidence === 'predicted consequence' ? 'Predicted' : 'Reported'} consequence: ${record.info.consequence}`);
+                if (record.info?.clinical_significance) effects.push(`Clinical significance: ${record.info.clinical_significance}`);
+                add(row, 'td', '', effects.join(' · ') || '—');
+                const other = add(row, 'td', ''), details = add(other, 'div', 'protein-mutations-fields');
+                const button = add(details, 'button', 'protein-mutations-fields-button', 'View all recorded fields');
+                button.type = 'button'; button.setAttribute('aria-expanded', 'false');
+                button.addEventListener('click', () => {
+                    let pre = details.querySelector('pre');
+                    if (!pre) { pre = add(details, 'pre', ''); pre.textContent = JSON.stringify(record, null, 2); pre.hidden = true; }
+                    pre.hidden = !pre.hidden;
+                    button.setAttribute('aria-expanded', String(!pre.hidden));
+                });
+            }
+        };
+        if (loaded.length) {
+            add(view, 'h5', '', 'Imported mutation data');
+            for (const dataset of loaded) {
+                const section=add(view,'details','protein-mutations-status');
+                add(section,'summary','',`${dataset.title} · ${dataset.records.length} record${dataset.records.length===1?'':'s'} · ${dataset.source}`);
+                add(section,'p','protein-mutations-source',`Evidence: ${dataset.evidence || 'not supplied'}.`);
+                try {
+                    const url = new URL(dataset.url);
+                    if (url.protocol === 'https:' && ['www.uniprot.org','www.mavedb.org','www.ensembl.org','www.ebi.ac.uk','www.ncbi.nlm.nih.gov'].includes(url.hostname)) {
+                        const link=add(section,'a','protein-mutations-source','View data source');link.href=url.href;link.target='_blank';link.rel='noopener noreferrer';
+                    }
+                } catch (_) { /* Uploaded data need not include a source link. */ }
+                section.addEventListener('toggle',()=>{if(section.open&&!section.querySelector('.protein-mutations-list'))renderRecords(section,dataset.records,dataset.type === 'functional' ? 'Functional assay' : dataset.type === 'natural' ? 'Natural variant' : 'Variant');});
+            }
+        }
+        add(view, 'h5', '', 'UniProt annotations');
+        const status = add(view, 'div', 'protein-mutations-status', 'Fetching mutation annotations from UniProt…');
+        if (loaded.some(dataset => dataset.source === 'UniProt')) {
+            status.textContent = 'UniProt mutation annotations are already included in the imported data above.';
+            return;
+        }
+        if (!proteinMutationLookup) { status.textContent='UniProt mutation lookup is unavailable.'; return; }
+        const accession = getPreferredUniProtAliasForProtein(nodeId);
+        const sequence = getProteinSequence(nodeId);
+        proteinMutationLookup.get({nodeId,accession,sequence},{retry}).then(result => {
+            if (!view.isConnected) return;
+            status.replaceChildren();
+            if (result.status !== 'success') { status.textContent = result.message; return; }
+            const link=add(status,'a','',`View UniProt ${result.accession} `);
+            link.href=`https://www.uniprot.org/uniprotkb/${encodeURIComponent(result.accession)}/entry`;link.target='_blank';link.rel='noopener noreferrer';
+            const icon=add(link,'i','fa-solid fa-arrow-up-right-from-square');icon.setAttribute('aria-hidden','true');
+            add(status,'p','protein-mutations-source',`Source taxon: ${result.sourceTaxon || 'not supplied'}. ${result.sequenceVerified ? 'Protein sequence matches the loaded sequence.' : 'The loaded protein sequence was unavailable; the source identifier was used.'}`);
+            if (!result.features.length) add(status,'p','', 'No natural-variant or experimental-mutagenesis annotations are available for this protein in UniProt.');
+            else renderRecords(status,result.features);
+        }).catch(error => {
+            if (!view.isConnected) return;
+            status.replaceChildren();add(status,'p','',`UniProt mutation annotations could not be fetched: ${error.message}`);
+            const button=add(status,'button','protein-mutations-retry','Try again');button.type='button';button.addEventListener('click',()=>renderProteinInfoMutationsView(body,nodeId,true));
+        });
+    }
+
     function getProteinOrthologyData(nodeIds) {
         const selected = Array.isArray(nodeIds) ? nodeIds : [nodeIds];
         const ids = new Set(selected.filter(Boolean).flatMap(id => nodeMap.get(id)?._speciesIds || [id]));
@@ -19991,7 +20109,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             }
         } else if (selectedId !== null && selectedId !== undefined) {
             heading.textContent = `${getPreferredProteinName(selectedId)} (${selectedId})`;
-            if (proteinInfoMode === 'links') {
+            if (proteinInfoMode === 'mutations') {
+                proteinInfoStructureRenderToken++;
+                disposeProteinInfoMolstarViewer();
+                renderProteinInfoMutationsView(body, selectedId);
+            } else if (proteinInfoMode === 'links') {
                 proteinInfoStructureRenderToken++;
                 disposeProteinInfoMolstarViewer();
                 renderProteinInfoLinksView(body, selectedId);
@@ -20015,7 +20137,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         } else {
             proteinInfoStructureRenderToken++;
             disposeProteinInfoMolstarViewer();
-            const label = proteinInfoMode === 'description'
+            const label = proteinInfoMode === 'mutations' ? 'mutations' : proteinInfoMode === 'description'
                 ? 'Description'
                 : (proteinInfoMode === 'sequence'
                     ? 'Sequence'
@@ -20023,7 +20145,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                         ? 'Structure'
                         : (proteinInfoMode === 'alias' ? 'Aliases' : proteinInfoMode === 'links' ? 'Links' : (proteinInfoMode === 'enrichment' ? 'Enrichment' : proteinInfoMode === 'homology' ? 'Homology' : 'Annotation'))));
             heading.textContent = 'Protein Info';
-            applyMarkdownLatexContent(body, `Select only one node to view the proteins ${label}.`);
+            applyMarkdownLatexContent(body, proteinInfoMode === 'mutations' ? 'Select one protein to view its mutation data.' : `Select only one node to view the proteins ${label}.`);
         }
 
         updateProteinInfoPanelControls(selectedId);
@@ -27399,6 +27521,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
     function updateSizesAndColors() {
         console.log("function updateSizesAndColors()");
         const mode = document.getElementById('colorMode').value, monoCol = document.getElementById('nodeMonoColor').value;
+        if (mode === 'expression') window.StringScapeExpression?.prepare();
+        if (mode === 'mutations') window.StringScapeMutations?.prepare();
         const sizeByKey = document.getElementById('nodeSizeVariable')?.value || 'none';
         const sizeByMagnitudeValue = Number(document.getElementById('nodeSizeBySlider')?.value);
         const sizeByMagnitude = Number.isFinite(sizeByMagnitudeValue) ? sizeByMagnitudeValue : 0.2;
@@ -27568,6 +27692,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 const aMax = annotationLengthRange?.[1] || 1;
                 n.col = d3.interpolatePlasma((annLen - aMin) / ((aMax - aMin) || 1));
             }
+            else if (mode === 'expression') n.col = window.StringScapeExpression?.colour(n.id) || '#73808c';
+            else if (mode === 'mutations') n.col = window.StringScapeMutations?.colour(n.id) || '#73808c';
             else if (isGenomeNumericMode(mode)||mode==='strand') n.col=mode==='strand'?getGenomeStrandColor(getGenomeGeneValue(n,mode)):getGenomeNumericColor(n,mode);
             else if (mode === 'chromosome') n.col=getGenomeChromosomeColor(n);
             else if (mode === 'characterization') {
@@ -27680,6 +27806,7 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const rangeUINode = document.getElementById('range-ui');
         const wasRangeOpen = rangeUINode ? rangeUINode.style.display === 'block' : false;
 
+        legendControls.node()?.querySelectorAll('select.expression-legend-select').forEach(select => window.disposeVariableMenu?.(select));
         legendControls.html("");
         legend.html("");
         footer.select('#layer0-update-selection-btn').remove();
@@ -27787,6 +27914,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
             return;
         }
 
+        if (mode === 'expression') { window.StringScapeExpression?.renderKey(legendControls.node(), legend.node()); return; }
+        if (mode === 'mutations') { window.StringScapeMutations?.renderKey(legendControls.node(), legend.node()); return; }
         if(isGenomeNumericMode(mode)&&window.StringScapeGenome?.chromosomeState().loaded){appendGenomeNumericLegend(mode==='genomic_position'?legend:legendControls,mode,activeNodes);if(mode==='genomic_position')legend.property('scrollTop',legendScrollTop);return;}
         const footerNotes = [];
         if((mode==='chromosome'||mode==='strand'||isGenomeNumericMode(mode))&&!window.StringScapeGenome?.chromosomeState().loaded){
@@ -29464,6 +29593,8 @@ Motility without chemotaxis => (flagell* OR cili* OR motility OR motile) AND NOT
             refreshEmbeddingsView(false);
             return;
         }
+        window.StringScapeExpression?.remove(fileName);
+        window.StringScapeMutations?.remove(fileName);
         window.StringScapeGenome?.remove(fileName);
         delete uploadedAccessoryFiles[fileName];
         if (!uploadedInteractionFiles[fileName]) delete uploadedFileViewerData[fileName];
@@ -29592,7 +29723,7 @@ Motility without chemotaxis => (flagell* OR cili* OR motility OR motile) AND NOT
         window.variableConfigs = variableConfigs;
 
         Object.entries(uploadedAccessoryFiles).forEach(([fileName, text]) => {
-            if (isPythonVariablesSessionFile(fileName) || window.StringScapeGenome?.has(fileName)) return;
+            if (isPythonVariablesSessionFile(fileName) || window.StringScapeGenome?.has(fileName) || window.StringScapeExpression?.has(fileName) || window.StringScapeMutations?.has(fileName)) return;
             const lowerName = fileName.toLowerCase();
             const isFasta = lowerName.endsWith('.fa') || lowerName.endsWith('.fasta') || lowerName.endsWith('.faa') || lowerName.endsWith('.fna');
             if (isFasta) {
@@ -29729,10 +29860,31 @@ Motility without chemotaxis => (flagell* OR cili* OR motility OR motile) AND NOT
         if (progressWrapper) progressWrapper.style.display = 'block';
         if (progressBar) progressBar.style.width = '0%';
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-        let processed = 0;
+        let processed = 0, expressionLoaded = false, mutationLoaded = false;
         for (let file of targetFiles) {
             file = await normalizeUploadedFile(file);
             aiWorkspaceOriginalFiles.set(file.name, file);
+            if (/\.mutation\.(?:vcf|json)$/i.test(file.name)) {
+                const text = await file.text();
+                window.StringScapeMutations.add(file.name, text);
+                mutationLoaded = true;
+                uploadedAccessoryFiles[file.name] = text;
+                uploadedFileViewerData[file.name] = { text };
+                processed++;
+                progressOptions.onProgress?.(processed, targetFiles.length);
+                continue;
+            }
+            if (/\.expression\.(?:csv|tsv|txt|json)$/i.test(file.name)) {
+                const prepared = progressOptions.expressionPrepared?.name === file.name ? progressOptions.expressionPrepared : null;
+                const text = prepared?.text ?? await file.text();
+                window.StringScapeExpression.add(file.name, text, prepared);
+                expressionLoaded = true;
+                uploadedAccessoryFiles[file.name] = text;
+                uploadedFileViewerData[file.name] = { text };
+                processed++;
+                progressOptions.onProgress?.(processed, targetFiles.length);
+                continue;
+            }
             if (window.StringScapeGenome?.accepts(file.name)) {
                 let summary;
                 try { summary = await window.StringScapeGenome.add(file); }
@@ -29782,7 +29934,10 @@ Motility without chemotaxis => (flagell* OR cili* OR motility OR motile) AND NOT
                 setTimeout(() => { if (progressWrapper) progressWrapper.style.display = 'none'; }, 300);
             }
         }
-        rebuildAccessoryDataFromUploads();
+        if ((expressionLoaded || mutationLoaded) && targetFiles.every(file => /\.(?:expression\.(?:csv|tsv|txt|json)|mutation\.(?:vcf|json))$/i.test(file.name))) updateUploadedListsUI();
+        else rebuildAccessoryDataFromUploads();
+        if (expressionLoaded) handleColorModeChange('expression', { actor: 'Human' });
+        if (mutationLoaded) handleColorModeChange('mutations', { actor: 'Human' });
         if (progressWrapper) progressWrapper.style.display = 'none';
         if (currentViewId === 'Embeddings') {
             markEmbeddingsDirty(true);
@@ -31343,8 +31498,32 @@ Motility without chemotaxis => (flagell* OR cili* OR motility OR motile) AND NOT
         updateViewMenu(); draw();
     }
 
+    window.StringScapeMutations?.init({
+        taxa: () => getGenomeAppContext().taxa,
+        catalog: () => { const active = new Set(nodes.map(n => n.id)); return getGenomeProteinCatalog().filter(n => active.has(n.nodeId)).map(n => ({id:n.nodeId,taxId:n.taxId,preferred:n.preferred,identifiers:n.identifiers,sequence:getProteinSequence(n.id)})); },
+        genome: () => window.StringScapeGenome?.chromosomeState() || {tracks:new Map(),features:new Map()},
+        fetchGenome: assembly => window.StringScapeGenome?.fetchGenome({assembly_accession:assembly, chromosomes:[]}),
+        refresh: () => { if (document.getElementById('colorMode')?.value === 'mutations') updateSizesAndColors(); },
+        upload: files => processAccessoryFiles(files)
+    });
+
+    window.StringScapeExpression?.init({
+        catalog: getGenomeProteinCatalog,
+        catalogStamp: () => `${genomeProteinVersion}:${proteinMetadata.size}:${aliasData.size}:${nodes.map(node=>node.id).join(',')}`,
+        nodes: () => nodes,
+        taxa: () => getGenomeAppContext().taxa,
+        refresh: () => { if (document.getElementById('colorMode')?.value === 'expression') updateSizesAndColors(); },
+        selectRange: (min, max) => {
+            if (selectionTargetMode !== 'nodes') setSelectionTargetMode('nodes');
+            const activeNodes = (currentViewId === 'base' || currentViewId === 'Venn Diagram' || currentViewId === 'Scatter Plot' || currentViewId === 'Embeddings' || currentViewId === 'Genome') ? nodes : (activeSubData?.nodes || []);
+            const matches = activeNodes.filter(node => { const v = window.StringScapeExpression.value(node.id); return Number.isFinite(v) && v >= min && v <= max; });
+            applySearchLogic(matches, `Expression range ${min} - ${max}`); draw();
+        },
+        upload: (files, expressionPrepared) => processAccessoryFiles(files, {expressionPrepared})
+    });
+
     window.StringScapeGenome?.init({
-        genomeChanged: () => { if(['chromosome','strand','gene_exon_count','gc_content','genomic_position'].includes(document.getElementById('colorMode')?.value))requestAnimationFrame(()=>updateSizesAndColors()); },
+        genomeChanged: () => { if (document.getElementById('colorMode')?.value === 'mutations') requestAnimationFrame(()=>updateSizesAndColors()); if(['chromosome','strand','gene_exon_count','gc_content','genomic_position'].includes(document.getElementById('colorMode')?.value))requestAnimationFrame(()=>updateSizesAndColors()); },
         colour: id => nodeMap.get(id)?.col,
         catalog: getGenomeProteinCatalog,
         catalogStamp: () => `${genomeProteinVersion}:${proteinMetadata.size}:${aliasData.size}:${nodes.length}`,

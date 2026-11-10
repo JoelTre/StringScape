@@ -57,12 +57,7 @@
     async function ncbiReport(kind, identifier, reference) {
         const baseQuery = 'filters.has_annotation=true&filters.assembly_version=current&filters.exclude_paired_reports=true&page_size=100';
         const path = kind === 'gene' ? `gene/id/${identifier}/dataset_report?page_size=5` : kind === 'assembly' ? `genome/accession/${identifier}/dataset_report?${baseQuery}` : `genome/taxon/${identifier}/dataset_report?${baseQuery}&${reference ? 'filters.reference_only=true' : 'tax_exact_match=true'}`;
-        let response;
-        try { response = await fetch(`https://api.ncbi.nlm.nih.gov/datasets/v2/${path}`, { signal: controller.signal, headers: { Accept: 'application/json' } }); }
-        catch (error) {
-            if (error.name === 'AbortError') throw error;
-            response = await fetch(`/api/ncbi/report/${kind}/${identifier}${kind === 'taxon' ? `?reference=${reference ? 'true' : 'false'}` : ''}`, { signal: controller.signal });
-        }
+        const response = await fetch(`https://api.ncbi.nlm.nih.gov/datasets/v2/${path}`, { signal: controller.signal, headers: { Accept: 'application/json' } });
         if (!response.ok) throw new Error(`NCBI assembly lookup failed (HTTP ${response.status}). Try again or enter an assembly accession.`);
         return response.json();
     }
@@ -143,9 +138,7 @@
             else document.getElementById('genome-source').textContent=`Using assembly override ${accession}.`;
             status(`Downloading ${accession}: genome, GFF3 annotations and sequence report…`);
             const endpoint=`https://api.ncbi.nlm.nih.gov/datasets/v2/genome/accession/${accession}/download?include_annotation_type=GENOME_FASTA&include_annotation_type=GENOME_GFF&include_annotation_type=SEQUENCE_REPORT&hydrated=FULLY_HYDRATED${query}`;
-            let response;
-            try {response=await fetch(endpoint,{signal:controller.signal,headers:{Accept:'application/zip'}});}
-            catch(error){if(error.name==='AbortError')throw error;response=await fetch(`/api/ncbi/genome/${accession}?${query.slice(1)}`,{signal:controller.signal});}
+            const response=await fetch(endpoint,{signal:controller.signal,headers:{Accept:'application/zip'}});
             if(!response.ok)throw Error(`NCBI download failed (HTTP ${response.status}). Check the accession and try again.`);
             const reader=response.body.getReader(),chunks=[];let size=0;
             while(true){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>GenomeData.LIMIT){await reader.cancel();throw Error('Download exceeds the 512 MiB browser limit. Upload a smaller assembly or chromosome subset.');}chunks.push(value);status(`Downloading ${accession} · ${(size/1048576).toFixed(1)} MiB…`);}

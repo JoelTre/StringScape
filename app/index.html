@@ -20,7 +20,8 @@
             https://cdn.jsdelivr.net;
         connect-src 'self' data: blob: https://search.rcsb.org https://swissmodel.expasy.org https://models.rcsb.org https://www.ebi.ac.uk https://rest.uniprot.org
             http://127.0.0.1:1234
-            https://eutils.ncbi.nlm.nih.gov
+            https://eutils.ncbi.nlm.nih.gov https://ftp.ncbi.nlm.nih.gov https://www.ncbi.nlm.nih.gov
+            https://ftp.ebi.ac.uk https://gemma.msl.ubc.ca https://www.proteomicsdb.org https://api.mavedb.org https://rest.ensembl.org
             https://api.ncbi.nlm.nih.gov
             https://api.openai.com
             https://api.anthropic.com
@@ -233,6 +234,12 @@
             align-items: flex-end;
         }
         #pill-blue-btn,
+        #expression-fetch,
+        #expression-search,
+        #expression-filter-search,
+        #expression-upload,
+        #mutation-fetch,
+        #mutation-upload,
         #protein-info-box .protein-nav-btn {
             width: auto;
             padding: 8px 18px;
@@ -254,6 +261,12 @@
             transition: filter 0.2s ease, transform 0.2s ease;
         }
         #pill-blue-btn:hover,
+        #expression-fetch:hover,
+        #expression-search:hover,
+        #expression-filter-search:hover,
+        #expression-upload:hover,
+        #mutation-fetch:hover,
+        #mutation-upload:hover,
         #protein-info-box .protein-nav-btn:hover {
             filter: brightness(1.12);
             transform: translateY(-2px); /* Subtle lift on hover for better interactivity feedback */
@@ -2278,6 +2291,23 @@
         .markdown-url-link { color:#38bdf8; text-decoration:underline; text-underline-offset:3px; overflow-wrap:anywhere; }
         .markdown-url-link:hover { color:#7dd3fc; }
         .markdown-url-link:focus-visible { outline:2px solid currentColor; outline-offset:3px; border-radius:2px; }
+        .protein-mutations-view { padding: 4px; line-height: 1.5; }
+        .protein-mutations-view h5 { margin: 16px 0 8px; font-size: 14px; }
+        .protein-mutations-intro { margin: 4px 0 12px; color: var(--muted-text-color); }
+        .protein-mutations-status { padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 10px; }
+        .protein-mutations-list { max-width: 100%; overflow-x: auto; margin-top: 10px; }
+        .protein-mutations-table { width: 100%; min-width: 850px; border-collapse: collapse; font-size: 12px; text-align: left; }
+        .protein-mutations-table th, .protein-mutations-table td { padding: 9px 10px; border-bottom: 1px solid var(--border-color); vertical-align: top; overflow-wrap: anywhere; }
+        .protein-mutations-table th { color: var(--muted-text-color); font-weight: 600; }
+        .protein-mutations-table th:nth-child(1), .protein-mutations-table td:nth-child(1) { min-width: 135px; }
+        .protein-mutations-table th:nth-child(2), .protein-mutations-table td:nth-child(2) { min-width: 90px; }
+        .protein-mutations-table th:nth-child(3), .protein-mutations-table td:nth-child(3) { min-width: 155px; }
+        .protein-mutations-table td:nth-child(4) { min-width: 200px; }
+        #protein-info-box .protein-mutations-fields-button { width: auto; margin: 0; padding: 5px 8px; font-size: 11px; white-space: nowrap; background: var(--button-bg-hover) !important; color: var(--text-color) !important; }
+        .protein-mutations-fields pre { max-width: 360px; max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
+        .protein-mutations-source { font-size: 12px; color: var(--muted-text-color); }
+        .protein-mutations-view a { color: var(--accent-color-soft); }
+        #protein-info-box .protein-mutations-retry { width: auto; margin: 8px 0 0; }
         .protein-orthology-view { padding:4px; }
         .protein-orthology-intro { padding:8px 18px; border-radius:16px; background:linear-gradient(120deg,#38bdf815,#a78bfa10); border:1px solid #64748b44; line-height:1.65; }
         .protein-orthology-intro > strong { font-size:16px; }
@@ -4854,6 +4884,12 @@
         }
         /* Main controls share the theme's button highlight colour. */
         #pill-blue-btn,
+        #expression-fetch,
+        #expression-search,
+        #expression-filter-search,
+        #expression-upload,
+        #mutation-fetch,
+        #mutation-upload,
         #protein-info-toggle-btn,
         #protein-info-box:not(.nav-disabled) .protein-nav-btn,
         #loadExampleBtn,
@@ -5093,6 +5129,7 @@
             }
     </style>
     <link rel="stylesheet" href="variable-menus.css">
+    <link rel="stylesheet" href="expression.css?v=geo-sample-data">
 </head>
 <body>
 <div id="ui-layer">
@@ -5122,6 +5159,7 @@
             <button type="button" class="upload-inline-open-btn">Open <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button>
             <div class="uploaded-file-items"><span class="uploaded-file-list-empty">No files uploaded</span></div>
         </div>
+        <div id="expression-import-jobs" aria-label="Expression imports" aria-live="polite"></div>
         <div class="upload-progress" id="openFilesProgress"><div class="upload-progress-track"><div class="upload-progress-bar" id="openFilesProgressBar"></div></div><div class="upload-progress-text">Loading...</div></div>
 
         <span id="more-toggle" class="dropdown-toggle" style="justify-self: center; background-color: transparent; border: none;">Advanced <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
@@ -5190,7 +5228,9 @@
             <h4 class="node-settings-subheading">Node Colour:</h4>
             <label>Colour Nodes By</label>
             <select id="colorMode">
-                <option value="layer">Degrees of separation</option>
+                <option value="expression">Expression</option>
+                <option value="mutations">Mutations</option>
+                <option value="layer" selected>Degrees of separation</option>
                 <option value="centrality">Centrality</option>
                 <option value="local_clustering_coefficient">Local Clustering Coefficient</option>
                 <option value="eigen">Eigenvector centrality</option>
@@ -5343,6 +5383,23 @@
             <p id="genome-status" role="status" aria-live="polite" style="font-size:12px">Fetch the genome for the selected proteins or loaded organism, or upload an NCBI genome ZIP (up to 512 MiB expanded).</p>
         </div>
 
+        <hr class="dropdown-divider">
+        <span class="dropdown-toggle panel-section-heading">Experimental data <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
+        <div class="dropdown-content" id="experimental-data-drop">
+            <button id="expression-fetch" type="button" style="width:100%">Import expression data…</button>
+            <p style="font-size:12px">Import from expression databases</p>
+            <button id="expression-upload" type="button" style="width:100%">Upload expression data…</button>
+            <input id="expression-file" type="file" accept=".csv,.tsv,.txt,.xlsx,.xls" multiple hidden>
+            <p style="font-size:12px">Upload a CSV, TSV, or Excel file with an identifier column followed by numeric sample or condition columns. Uploaded files are added to the main uploaded files box above.</p>
+            <button id="mutation-fetch" type="button" style="width:100%">Import mutation data…</button>
+            <p style="font-size:12px">Import from mutation databases</p>
+            <button id="mutation-upload" type="button" style="width:100%">Upload mutation data…</button>
+            <input id="mutation-file" type="file" accept=".vcf,.json" multiple hidden>
+            <p style="font-size:12px">Upload a VCF with a versioned reference assembly in its header, or a StringScape mutation JSON file.</p>
+            <p id="mutation-upload-status" role="status"></p>
+            <div id="expression-excel-upload-choice"></div>
+            <p id="expression-upload-status" role="status" aria-live="polite"></p>
+        </div>
         <hr class="dropdown-divider">
         <span class="dropdown-toggle panel-section-heading">App style <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
         <div id="bg-drop" class="dropdown-content">
@@ -5891,6 +5948,7 @@
                     <button type="button" class="protein-info-mode-btn" data-protein-mode="enrichment">Enrichment</button>
                     <button type="button" class="protein-info-mode-btn" data-protein-mode="homology">Homology</button>
                     <button type="button" class="protein-info-mode-btn" data-protein-mode="orthology">Orthology</button>
+                    <button type="button" class="protein-info-mode-btn" data-protein-mode="mutations">Mutations</button>
                     <button type="button" class="protein-info-mode-btn" data-protein-mode="guide">Guides</button>
                     <button id="protein-info-overflow-btn" type="button" class="protein-info-mode-btn" aria-expanded="false" aria-controls="protein-info-overflow-menu" hidden>More <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button>
                     <div id="protein-info-overflow-menu" aria-label="More protein info options" hidden></div>
@@ -7902,8 +7960,33 @@
 <script src="genome-annotations.js"></script>
 <script src="genome-sequence-view.js"></script>
 <script src="genome.js"></script>
-<script id="main-script" src="script.js"></script>
-<script src="variable-menus.js"></script>
+<dialog id="expression-dialog" aria-labelledby="expression-dialog-title" aria-modal="true">
+    <header class="expression-dialog-header">
+        <button id="expression-close" class="close-modal" type="button" aria-label="Close expression data browser">&times;</button>
+        <h2 id="expression-dialog-title">Fetch expression data</h2>
+        <p>Explore available expression datasets for a loaded organism.</p>
+    </header>
+    <div class="expression-search-controls">
+        <div class="expression-search-field"><label for="expression-taxon">Taxon</label><select id="expression-taxon" data-menu-groups="simple"></select></div>
+    </div>
+    <div class="expression-filter-field"><label for="expression-filter">Search studies by keyword</label><div class="expression-keyword-controls"><input id="expression-filter" type="search" placeholder="Leave empty to search all studies for this species" autocomplete="off"><button id="expression-filter-search" type="button"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Find studies</button></div><div id="expression-limit-notices" aria-live="polite"></div><p id="expression-filter-status" role="status" aria-live="polite"></p><p id="expression-keyword-status" role="status" aria-live="polite"></p></div>
+    <p id="expression-search-status" role="status" aria-live="polite"></p>
+    <div id="expression-results"></div>
+</dialog>
+<dialog id="mutation-dialog" aria-labelledby="mutation-title">
+    <header class="expression-dialog-header"><button id="mutation-close" class="close-modal" type="button" aria-label="Close mutation data browser">&times;</button><h2 id="mutation-title">Import mutation data</h2><p>Find mutation datasets for a loaded organism.</p></header>
+    <div class="expression-search-controls"><div class="expression-search-field"><label for="mutation-taxon">Taxon</label><select id="mutation-taxon" data-menu-groups="simple"></select></div></div>
+    <div class="expression-filter-field"><label for="mutation-keyword">Search studies and score sets</label><div class="expression-keyword-controls"><input id="mutation-keyword" type="search" placeholder="Optional keyword"><button id="mutation-search" type="button"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Find data</button></div></div>
+    <p id="mutation-search-status" role="status" aria-live="polite"></p><div id="mutation-results"></div>
+</dialog>
+<script src="mutation-data.js"></script>
+<script src="protein-mutation-info.js"></script>
+<script src="mutation-ui.js"></script>
+<script src="expression-data.js"></script>
+<script src="expression-sources.js?v=geo-sample-data"></script>
+<script src="expression-ui.js?v=geo-sample-data"></script>
+<script id="main-script" src="script.js?v=excel-support"></script>
+<script src="variable-menus.js?v=expression-menu-ellipsis"></script>
 
 </body>
 </html>

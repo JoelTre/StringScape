@@ -2,7 +2,7 @@
 (() => {
     const ids = ['colorMode', 'clusterVariableMode', 'nodeBorderColorMode', 'nodeSizeVariable', 'nodeBorderWidthMode',
         'nodeLabelField', 'linkMode', 'linkVisibilityMode', 'linkWidthMode', 'bgMode', 'colorTheme', 'searchScope'];
-    const numeric = new Set(['layer', 'centrality', 'local_clustering_coefficient', 'eigen',
+    const numeric = new Set(['expression', 'mutations', 'layer', 'centrality', 'local_clustering_coefficient', 'eigen',
         'embeddings', 'annotation', 'size', 'pdb_structure_count', 'score', 'gene_exon_count', 'gc_content', 'genomic_position']);
     const categorical = new Set(['paralogues', 'collection', 'characterization', 'localization',
         'biological_process', 'complex_pdbs', 'complex_pdbs_combined', 'species', 'chromosome', 'strand']);
@@ -41,16 +41,23 @@
             const panel = document.createElement('div');
             panel.id = `${id}Menu`;
             panel.className = 'app-variable-menu';
-            if (['linkVisibilityMode', 'bgMode', 'colorTheme', 'nodeLabelField'].includes(id)) panel.classList.add('app-variable-menu-compact');
+            if (['linkVisibilityMode', 'bgMode', 'colorTheme', 'nodeLabelField'].includes(id) || select.dataset.menuGroups === 'simple') panel.classList.add('app-variable-menu-compact');
             panel.hidden = true;
             panel.setAttribute('role', 'dialog');
             panel.setAttribute('aria-label', label);
             select.hidden = true;
             select.after(trigger);
-            document.body.append(panel);
+            // Modal dialogs occupy the top layer, so their menus must live inside it.
+            (select.closest('dialog') ? select.parentElement : document.body).append(panel);
             const sync = () => {
                 const selected = select.selectedOptions[0];
-                trigger.textContent = `${selected?.textContent || 'Choose an option'} ▾`;
+                const selectedText = selected?.textContent || 'Choose an option';
+                if (select.classList.contains('expression-legend-select')) {
+                    const text = document.createElement('span'); text.className = 'expression-menu-label'; text.textContent = selectedText;
+                    const arrow = document.createElement('span'); arrow.className = 'expression-menu-arrow'; arrow.setAttribute('aria-hidden', 'true'); arrow.textContent = '▾';
+                    trigger.replaceChildren(text, arrow);
+                    trigger.title = selectedText;
+                } else trigger.textContent = `${selectedText} ▾`;
                 trigger.setAttribute('aria-label', `${label}: ${selected?.textContent || 'Choose an option'}`);
                 trigger.disabled = select.disabled;
                 panel.querySelectorAll('button').forEach(button => {
@@ -60,13 +67,13 @@
             const rebuild = () => {
                 const plot = ['plot', 'structure'].includes(select.dataset.menuGroups);
                 const groups = new Map((plot ? (select.dataset.menuGroups === 'structure' ? ['AI', 'Protein Data Bank'] : ['Main', 'Collections']) : ['Numeric', 'Categorical', 'Other', 'Custom']).map(name => [name, []]));
-                if (id === 'nodeLabelField') { groups.clear(); groups.set('', []); }
+                if (id === 'nodeLabelField' || select.dataset.menuGroups === 'simple') { groups.clear(); groups.set('', []); }
                 Array.from(select.options).forEach(option => {
                     if ((select.dataset.menuGroups === 'structure' && !option.value) || option.hidden || option.style.display === 'none' || (option.parentElement.tagName === 'OPTGROUP' && option.parentElement.hidden)) return;
                     const key = option.value;
                     const group = option.dataset.menuGroup || (key.startsWith('var::') || key.startsWith('linkvar::') || option.parentElement.tagName === 'OPTGROUP'
                         ? 'Custom' : option.dataset.variableType === 'continuous' || numeric.has(key) ? 'Numeric' : option.dataset.variableType === 'categorical' || categorical.has(key) || key.startsWith('#') ? 'Categorical' : 'Other');
-                    groups.get(plot ? option.parentElement.label : id === 'nodeLabelField' ? '' : group).push(option);
+                    groups.get(plot ? option.parentElement.label : (id === 'nodeLabelField' || select.dataset.menuGroups === 'simple') ? '' : group).push(option);
                 });
                 const categories = groups.get('Categorical');
                 if (categories) {
@@ -160,8 +167,14 @@
             rebuild();
     }
     window.enhanceVariableMenu = enhance;
+    window.disposeVariableMenu = select => {
+        if (!select || !enhanced.has(select)) return;
+        cleanups.get(select.id)?.(); cleanups.delete(select.id); enhanced.delete(select);
+        select.nextElementSibling?.remove(); select.hidden = false;
+    };
     function init() {
         [...ids, 'keyColorMode'].forEach(id => enhance(document.getElementById(id)));
+        document.addEventListener('close', event => { if (active && event.target.contains(active.trigger)) close(); }, true);
         document.addEventListener('pointerdown', event => {
             if (active && !active.panel.contains(event.target) && !active.trigger.contains(event.target)) close();
         });
