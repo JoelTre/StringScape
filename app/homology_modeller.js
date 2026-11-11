@@ -12908,7 +12908,7 @@
             const show = panels.classList.toggle('hidden') === false;
             panels.setAttribute('aria-hidden', String(!show));
             button.setAttribute('aria-expanded', String(show));
-            button.innerHTML = (show ? 'Hide' : 'View') + ' homology model build process <i class="fa-solid fa-chevron-down" aria-hidden="true" style="transform:rotate(' + (show ? 180 : 0) + 'deg)"></i>';
+            button.textContent = show ? 'Hide homology model build process ▾' : 'View homology model build process ▾';
             if (show) requestAnimationFrame(() => {
                 resizeCanvases();
                 resetCanvasViews();

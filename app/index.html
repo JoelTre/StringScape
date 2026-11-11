@@ -20,8 +20,7 @@
             https://cdn.jsdelivr.net;
         connect-src 'self' data: blob: https://search.rcsb.org https://swissmodel.expasy.org https://models.rcsb.org https://www.ebi.ac.uk https://rest.uniprot.org
             http://127.0.0.1:1234
-            https://eutils.ncbi.nlm.nih.gov https://ftp.ncbi.nlm.nih.gov https://www.ncbi.nlm.nih.gov
-            https://ftp.ebi.ac.uk https://gemma.msl.ubc.ca https://www.proteomicsdb.org https://api.mavedb.org https://rest.ensembl.org
+            https://eutils.ncbi.nlm.nih.gov
             https://api.ncbi.nlm.nih.gov
             https://api.openai.com
             https://api.anthropic.com
@@ -234,12 +233,6 @@
             align-items: flex-end;
         }
         #pill-blue-btn,
-        #expression-fetch,
-        #expression-search,
-        #expression-filter-search,
-        #expression-upload,
-        #mutation-fetch,
-        #mutation-upload,
         #protein-info-box .protein-nav-btn {
             width: auto;
             padding: 8px 18px;
@@ -261,12 +254,6 @@
             transition: filter 0.2s ease, transform 0.2s ease;
         }
         #pill-blue-btn:hover,
-        #expression-fetch:hover,
-        #expression-search:hover,
-        #expression-filter-search:hover,
-        #expression-upload:hover,
-        #mutation-fetch:hover,
-        #mutation-upload:hover,
         #protein-info-box .protein-nav-btn:hover {
             filter: brightness(1.12);
             transform: translateY(-2px); /* Subtle lift on hover for better interactivity feedback */
@@ -1676,11 +1663,6 @@
             word-break: break-word;
         }
         .ai-python-approval-panel {
-            box-sizing: border-box;
-            min-width: 0;
-            width: 100%;
-            max-width: 100%;
-            overflow-wrap: anywhere;
             margin: 8px 0;
             padding: 12px;
             background: #161b22;
@@ -1723,19 +1705,6 @@
 
         #ai-chatbox .ai-file-approval-actions { display: flex; flex-direction: row; flex-wrap: nowrap; gap: 8px; margin-top: 12px; }
         #ai-chatbox .ai-file-approval-actions > button { flex: 1 1 0; width: auto; margin: 0; }
-        #ai-chatbox .ai-file-approval-card { padding: 16px; border-radius: 14px; background: var(--surface-color-panel); color: var(--text-color); line-height: 1.5; }
-        .ai-file-approval-card .ai-python-approval-title { color: var(--text-color); margin-bottom: 12px; line-height: 1.5; }
-        .ai-file-approval-location { min-width: 0; padding: 10px 12px; border: 1px solid var(--border-color-strong); border-radius: 8px; margin-bottom: 12px; }
-        .ai-file-approval-location > span { display: block; color: var(--muted-text-color); font-size: 0.72rem; margin-bottom: 4px; }
-        .ai-file-approval-location > strong { display: block; font-family: Consolas, monospace; font-size: 0.8rem; font-weight: 500; overflow-wrap: anywhere; white-space: pre-wrap; }
-        .ai-file-approval-stats { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-        .ai-file-approval-review { padding: 12px; background: var(--button-bg); border-radius: 8px; margin-bottom: 12px; font-size: 0.82rem; }
-        .ai-file-approval-review p { margin: 6px 0 0; white-space: pre-wrap; }
-        #ai-chatbox .ai-file-approval-card button { box-sizing: border-box; min-width: 0; max-width: 100%; width: auto; height: auto; margin: 0; padding: 8px 14px; border: none; border-radius: 15px; background: var(--button-bg-hover); color: var(--text-color); font-size: 0.78rem; font-weight: bold; white-space: normal; overflow-wrap: anywhere; cursor: pointer; transition: filter 0.2s ease; }
-        #ai-chatbox .ai-file-approval-card button:hover { background: var(--button-bg-hover); filter: brightness(1.15); }
-        #ai-chatbox .ai-file-approval-card button:focus-visible { outline: 2px solid var(--text-color); outline-offset: 2px; }
-        #ai-chatbox .ai-file-approval-card .ai-file-count-added { color: #b1ffc6; background: #174b31; }
-        #ai-chatbox .ai-file-approval-card .ai-file-count-removed { color: #ffb7bf; background: #602737; }
         dialog.ai-file-diff-dialog { box-sizing: border-box; width: 94vw; max-width: 1600px; height: 88vh; max-height: 94vh; margin: auto; background: var(--surface-color-panel, #20252d); color: var(--text-color, #eee); border: 1px solid var(--border-color-strong, #777); border-radius: 12px; padding: 20px; overflow: hidden; }
         .ai-file-diff-dialog::backdrop { background: #0009; }
         .ai-file-diff-dialog > h3 { margin: 0 44px 18px 0; font-weight: 600; overflow-wrap: anywhere; }
@@ -1795,19 +1764,6 @@
         #ai-preview-area:not(:empty) {
             margin-bottom: 6px;
         }
-        .ai-automation-option { margin: 12px 0; }
-        .ai-automation-option label { display: flex; width: 100%; justify-content: space-between; align-items: center; gap: 12px; margin: 0; text-align: left; }
-        .ai-automation-option label > span { flex: 1; text-align: left; }
-        .ai-automation-option .settings-switch { margin-left: auto; }
-        .ai-automation-option p { margin: 5px 0 0; font-size: 0.78rem; line-height: 1.45; color: var(--muted-text-color); }
-        #ai-composer-menu { position: absolute; bottom: calc(100% + 6px); left: 10px; width: min(340px, calc(100% - 20px)); max-height: 65vh; overflow: auto; padding: 12px; border: 1px solid var(--border-color-strong); border-radius: 12px; background: var(--surface-color-panel); box-shadow: 0 8px 24px #0005; z-index: 30; }
-        #ai-composer-menu[hidden], #ai-reply-hint[hidden] { display: none; }
-        #ai-upload-menu-btn { width: 100%; height: 36px; padding: 0 10px; margin: 0; text-align: center; }
-        #ai-composer-text { flex: 1; min-width: 0; position: relative; display: grid; }
-        #ai-composer-text textarea { width: 100%; display: block; grid-area: 1 / 1; }
-        #ai-reply-hint { z-index: 1; grid-area: 1 / 1; align-self: start; min-width: 0; box-sizing: border-box; padding: 9px 13px; color: var(--muted-text-color); opacity: .65; font-size: .9rem; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow-y: auto; overscroll-behavior: contain; cursor: text; border-radius: 20px; }
-        #ai-composer-text:has(#ai-reply-hint:not([hidden])) textarea { height: 100% !important; max-height: 200px; overflow-y: hidden !important; }
-        #ai-composer-text:has(#ai-reply-hint:not([hidden])) textarea::placeholder { color: transparent; }
         #ai-input-controls {
             display: flex;
             align-items: flex-end;
@@ -2291,23 +2247,6 @@
         .markdown-url-link { color:#38bdf8; text-decoration:underline; text-underline-offset:3px; overflow-wrap:anywhere; }
         .markdown-url-link:hover { color:#7dd3fc; }
         .markdown-url-link:focus-visible { outline:2px solid currentColor; outline-offset:3px; border-radius:2px; }
-        .protein-mutations-view { padding: 4px; line-height: 1.5; }
-        .protein-mutations-view h5 { margin: 16px 0 8px; font-size: 14px; }
-        .protein-mutations-intro { margin: 4px 0 12px; color: var(--muted-text-color); }
-        .protein-mutations-status { padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 10px; }
-        .protein-mutations-list { max-width: 100%; overflow-x: auto; margin-top: 10px; }
-        .protein-mutations-table { width: 100%; min-width: 850px; border-collapse: collapse; font-size: 12px; text-align: left; }
-        .protein-mutations-table th, .protein-mutations-table td { padding: 9px 10px; border-bottom: 1px solid var(--border-color); vertical-align: top; overflow-wrap: anywhere; }
-        .protein-mutations-table th { color: var(--muted-text-color); font-weight: 600; }
-        .protein-mutations-table th:nth-child(1), .protein-mutations-table td:nth-child(1) { min-width: 135px; }
-        .protein-mutations-table th:nth-child(2), .protein-mutations-table td:nth-child(2) { min-width: 90px; }
-        .protein-mutations-table th:nth-child(3), .protein-mutations-table td:nth-child(3) { min-width: 155px; }
-        .protein-mutations-table td:nth-child(4) { min-width: 200px; }
-        #protein-info-box .protein-mutations-fields-button { width: auto; margin: 0; padding: 5px 8px; font-size: 11px; white-space: nowrap; background: var(--button-bg-hover) !important; color: var(--text-color) !important; }
-        .protein-mutations-fields pre { max-width: 360px; max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
-        .protein-mutations-source { font-size: 12px; color: var(--muted-text-color); }
-        .protein-mutations-view a { color: var(--accent-color-soft); }
-        #protein-info-box .protein-mutations-retry { width: auto; margin: 8px 0 0; }
         .protein-orthology-view { padding:4px; }
         .protein-orthology-intro { padding:8px 18px; border-radius:16px; background:linear-gradient(120deg,#38bdf815,#a78bfa10); border:1px solid #64748b44; line-height:1.65; }
         .protein-orthology-intro > strong { font-size:16px; }
@@ -3692,14 +3631,13 @@
         .search-container input, .search-container button { margin: 0; height: 100%; vertical-align: middle; }
         #search-input-wrap { position: relative; flex: 1; min-width: 0; }
         #searchInput { width: 100%; box-sizing: border-box; }
-        #searchInput, #searchBtn, #ai-upload-menu-btn { border-radius: 15px; }
+        #searchInput, #searchBtn { border-radius: 15px; }
         #search-input-wrap.search-improving #searchInput { color: transparent; caret-color: transparent; }
         #smart-search-loading { position: absolute; inset: 0; display: flex; align-items: center; gap: 7px; padding: 0 10px; color: color-mix(in srgb, var(--muted-text-color) 60%, white); font-size: 13px; pointer-events: none; }
         #smart-search-loading[hidden] { display: none; }
         #smart-search-label { font-size: 15px; color: var(--accent-color-soft); font-weight: 600; }
-        #searchBtn { width: 80px; padding: 0 5px; color: white; }
-        #searchBtn, #ai-upload-menu-btn { transition: filter 0.2s ease; }
-        #searchBtn:hover, #ai-upload-menu-btn:hover { background-color: var(--accent-color-soft); }
+        #searchBtn { width: 80px; padding: 0 5px; color: white; transition: filter 0.2s ease;  }
+        #searchBtn:hover { background-color: var(--accent-color-soft); }
 
         .Selection-tools-btn { 
             font-size: 17px; /* Increased from 11px */
@@ -4383,19 +4321,6 @@
         body.secondary-structures-view-active #secondary-network { display: none !important; }
         body.structures-view-active #network,
         body.structures-view-active #network-gpu { display: none !important; }
-        body.protein-modeller-view-active #network,
-        body.protein-modeller-view-active #network-gpu,
-        body.secondary-protein-modeller-view-active #secondary-network { display: none !important; }
-        .protein-modeller-view {
-            position: fixed; inset: 0; z-index: 4; display: none; overflow: auto;
-            box-sizing: border-box; padding: 24px 24px 24px 340px;
-        }
-        body.split-view-active .protein-modeller-view {
-            right: auto; width: var(--split-primary-width, 50vw); padding-left: 24px;
-        }
-        body.split-view-active #secondary-protein-modeller-view {
-            left: var(--split-primary-width, 50vw); width: var(--split-secondary-width, 50vw);
-        }
         .protein-complex-structures-view {
             position: fixed;
             inset: 0;
@@ -4884,12 +4809,6 @@
         }
         /* Main controls share the theme's button highlight colour. */
         #pill-blue-btn,
-        #expression-fetch,
-        #expression-search,
-        #expression-filter-search,
-        #expression-upload,
-        #mutation-fetch,
-        #mutation-upload,
         #protein-info-toggle-btn,
         #protein-info-box:not(.nav-disabled) .protein-nav-btn,
         #loadExampleBtn,
@@ -4900,8 +4819,7 @@
         #ask-ai-btn,
         #ai-history-launch-btn,
         #ai-python-console-btn,
-        #searchBtn,
-        #ai-upload-menu-btn {
+        #searchBtn {
             background: var(--button-bg-hover) !important;
             color: var(--text-color) !important;
         }
@@ -5129,7 +5047,6 @@
             }
     </style>
     <link rel="stylesheet" href="variable-menus.css">
-    <link rel="stylesheet" href="expression.css?v=geo-sample-data">
 </head>
 <body>
 <div id="ui-layer">
@@ -5159,7 +5076,6 @@
             <button type="button" class="upload-inline-open-btn">Open <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button>
             <div class="uploaded-file-items"><span class="uploaded-file-list-empty">No files uploaded</span></div>
         </div>
-        <div id="expression-import-jobs" aria-label="Expression imports" aria-live="polite"></div>
         <div class="upload-progress" id="openFilesProgress"><div class="upload-progress-track"><div class="upload-progress-bar" id="openFilesProgressBar"></div></div><div class="upload-progress-text">Loading...</div></div>
 
         <span id="more-toggle" class="dropdown-toggle" style="justify-self: center; background-color: transparent; border: none;">Advanced <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
@@ -5190,14 +5106,8 @@
             </div>
         </div>
 
-        <span class="dropdown-toggle panel-section-heading">Network <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
-        <div id="network-drop" class="dropdown-content">
-            <label for="complexClusterStrength">Cluster by complexes <span id="complexClusterStrengthValue" class="slider-val">0</span></label>
-            <input type="range" id="complexClusterStrength" min="0" max="1" step="0.01" value="0">
-            <label for="clusterVariableSlider">Cluster by variable <span id="val-cluster-var" class="slider-val">0</span></label>
-            <input type="range" id="clusterVariableSlider" min="0" max="1" step="0.01" value="0">
-            <label for="clusterVariableMode">Variable to cluster by</label>
-            <select id="clusterVariableMode"><option value="same_as_color">Same as Colour Nodes By</option></select>
+        <span class="dropdown-toggle panel-section-heading">Nodes <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
+        <div id="nodes-drop" class="dropdown-content">
             <label class="analytics-toggle-row" style="width:100%; justify-content:space-between; margin-bottom:8px;">
                 <span>Network labels</span>
                 <input id="networkLabelShow" class="settings-switch" type="checkbox" role="switch" checked>
@@ -5209,11 +5119,7 @@
                 <label for="networkLabelSize">Network label size <span id="networkLabelSizeValue" class="slider-val">10px</span></label>
                 <input type="range" id="networkLabelSize" min="8" max="20" step="1" value="10">
             </div>
-        </div>
 
-        <hr class="dropdown-divider">
-        <span class="dropdown-toggle panel-section-heading">Nodes <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
-        <div id="nodes-drop" class="dropdown-content">
             <div id="network-merge-controls" style="display:none; margin-bottom:12px;">
                 <button type="button" id="mergeNetworksBtn" class="action-btn" style="width:100%; text-align:center; justify-content:center;">Merge Networks</button>
                 <div id="mergeNetworksHelp" style="font-size:11px; color:#aaa; margin-top:5px;"></div>
@@ -5228,9 +5134,7 @@
             <h4 class="node-settings-subheading">Node Colour:</h4>
             <label>Colour Nodes By</label>
             <select id="colorMode">
-                <option value="expression">Expression</option>
-                <option value="mutations">Mutations</option>
-                <option value="layer" selected>Degrees of separation</option>
+                <option value="layer">Degrees of separation</option>
                 <option value="centrality">Centrality</option>
                 <option value="local_clustering_coefficient">Local Clustering Coefficient</option>
                 <option value="eigen">Eigenvector centrality</option>
@@ -5384,23 +5288,6 @@
         </div>
 
         <hr class="dropdown-divider">
-        <span class="dropdown-toggle panel-section-heading">Experimental data <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
-        <div class="dropdown-content" id="experimental-data-drop">
-            <button id="expression-fetch" type="button" style="width:100%">Import expression data…</button>
-            <p style="font-size:12px">Import from expression databases</p>
-            <button id="expression-upload" type="button" style="width:100%">Upload expression data…</button>
-            <input id="expression-file" type="file" accept=".csv,.tsv,.txt,.xlsx,.xls" multiple hidden>
-            <p style="font-size:12px">Upload a CSV, TSV, or Excel file with an identifier column followed by numeric sample or condition columns. Uploaded files are added to the main uploaded files box above.</p>
-            <button id="mutation-fetch" type="button" style="width:100%">Import mutation data…</button>
-            <p style="font-size:12px">Import from mutation databases</p>
-            <button id="mutation-upload" type="button" style="width:100%">Upload mutation data…</button>
-            <input id="mutation-file" type="file" accept=".vcf,.json" multiple hidden>
-            <p style="font-size:12px">Upload a VCF with a versioned reference assembly in its header, or a StringScape mutation JSON file.</p>
-            <p id="mutation-upload-status" role="status"></p>
-            <div id="expression-excel-upload-choice"></div>
-            <p id="expression-upload-status" role="status" aria-live="polite"></p>
-        </div>
-        <hr class="dropdown-divider">
         <span class="dropdown-toggle panel-section-heading">App style <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
         <div id="bg-drop" class="dropdown-content">
             <label>Colour Background By</label>
@@ -5467,6 +5354,9 @@
             <label>Max Canvas Drift Distance <span id="val-drift" class="slider-val">8000</span></label>
             <input type="range" id="driftSlider" min="100" max="10000" step="100" value="8000">
 
+            <label>Cluster by Variable <span id="val-cluster-var" class="slider-val">0</span></label>
+            <input type="range" id="clusterVariableSlider" min="0" max="1" step="0.01" value="0">
+
             <button id="dragNodesBtn" style="margin-top:15px; background:#666">Drag nodes</button>
         </div>
 
@@ -5474,7 +5364,6 @@
         <span class="dropdown-toggle panel-section-heading">AI <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></span>
         <div id="ai-drop" class="dropdown-content">
             <button id="ai-open-connection-btn" type="button" style="width:100%;">Connect an AI</button>
-            <div data-ai-automation-controls></div>
         </div>
 
         <hr class="dropdown-divider">
@@ -5840,18 +5729,11 @@
     <div id="ai-input-area" class="relative">
         <div id="ai-glow-container"><div class="ai-processing-glow"></div></div>
         <div id="ai-preview-area"></div>
-        <div id="ai-composer-menu" hidden aria-label="Chat options">
-            <button id="ai-upload-menu-btn" type="button"><i class="fa-solid fa-upload" aria-hidden="true"></i> Files</button>
-            <div data-ai-automation-controls></div>
-        </div>
         <div id="ai-input-controls">
             <input type="file" id="ai-file-input" accept=".txt,.csv,.tsv,image/*">
-            <button id="ai-file-btn" type="button" title="Files and AI options" aria-label="Files and AI options" aria-controls="ai-composer-menu">+</button>
-            <div id="ai-composer-text">
-            <div id="ai-reply-hint" hidden aria-live="polite"></div>
+            <button id="ai-file-btn" title="Upload files">+</button>
             <textarea id="ai-user-input" rows="1" placeholder="Connect an AI in the left panel"
                       class="flex-1 bg-[#0d1117] border border-[#30363d] px-4 focus:outline-none focus:border-[#3498db] resize-none text-sm"></textarea>
-            </div>
             <button id="ai-send-btn" class="pill-btn bg-[#3498db] text-white h-10 ai-btn-disabled">SEND</button>
         </div>
     </div>
@@ -5948,7 +5830,6 @@
                     <button type="button" class="protein-info-mode-btn" data-protein-mode="enrichment">Enrichment</button>
                     <button type="button" class="protein-info-mode-btn" data-protein-mode="homology">Homology</button>
                     <button type="button" class="protein-info-mode-btn" data-protein-mode="orthology">Orthology</button>
-                    <button type="button" class="protein-info-mode-btn" data-protein-mode="mutations">Mutations</button>
                     <button type="button" class="protein-info-mode-btn" data-protein-mode="guide">Guides</button>
                     <button id="protein-info-overflow-btn" type="button" class="protein-info-mode-btn" aria-expanded="false" aria-controls="protein-info-overflow-menu" hidden>More <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button>
                     <div id="protein-info-overflow-menu" aria-label="More protein info options" hidden></div>
@@ -7960,33 +7841,8 @@
 <script src="genome-annotations.js"></script>
 <script src="genome-sequence-view.js"></script>
 <script src="genome.js"></script>
-<dialog id="expression-dialog" aria-labelledby="expression-dialog-title" aria-modal="true">
-    <header class="expression-dialog-header">
-        <button id="expression-close" class="close-modal" type="button" aria-label="Close expression data browser">&times;</button>
-        <h2 id="expression-dialog-title">Fetch expression data</h2>
-        <p>Explore available expression datasets for a loaded organism.</p>
-    </header>
-    <div class="expression-search-controls">
-        <div class="expression-search-field"><label for="expression-taxon">Taxon</label><select id="expression-taxon" data-menu-groups="simple"></select></div>
-    </div>
-    <div class="expression-filter-field"><label for="expression-filter">Search studies by keyword</label><div class="expression-keyword-controls"><input id="expression-filter" type="search" placeholder="Leave empty to search all studies for this species" autocomplete="off"><button id="expression-filter-search" type="button"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Find studies</button></div><div id="expression-limit-notices" aria-live="polite"></div><p id="expression-filter-status" role="status" aria-live="polite"></p><p id="expression-keyword-status" role="status" aria-live="polite"></p></div>
-    <p id="expression-search-status" role="status" aria-live="polite"></p>
-    <div id="expression-results"></div>
-</dialog>
-<dialog id="mutation-dialog" aria-labelledby="mutation-title">
-    <header class="expression-dialog-header"><button id="mutation-close" class="close-modal" type="button" aria-label="Close mutation data browser">&times;</button><h2 id="mutation-title">Import mutation data</h2><p>Find mutation datasets for a loaded organism.</p></header>
-    <div class="expression-search-controls"><div class="expression-search-field"><label for="mutation-taxon">Taxon</label><select id="mutation-taxon" data-menu-groups="simple"></select></div></div>
-    <div class="expression-filter-field"><label for="mutation-keyword">Search studies and score sets</label><div class="expression-keyword-controls"><input id="mutation-keyword" type="search" placeholder="Optional keyword"><button id="mutation-search" type="button"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Find data</button></div></div>
-    <p id="mutation-search-status" role="status" aria-live="polite"></p><div id="mutation-results"></div>
-</dialog>
-<script src="mutation-data.js"></script>
-<script src="protein-mutation-info.js"></script>
-<script src="mutation-ui.js"></script>
-<script src="expression-data.js"></script>
-<script src="expression-sources.js?v=geo-sample-data"></script>
-<script src="expression-ui.js?v=geo-sample-data"></script>
-<script id="main-script" src="script.js?v=excel-support"></script>
-<script src="variable-menus.js?v=expression-menu-ellipsis"></script>
+<script id="main-script" src="script.js"></script>
+<script src="variable-menus.js"></script>
 
 </body>
 </html>
