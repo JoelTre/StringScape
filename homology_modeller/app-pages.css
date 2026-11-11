@@ -10,6 +10,7 @@ body > header { flex-shrink:0; }
 .app-page-menu button { display:flex; align-items:center; gap:.8rem; width:15rem; max-width:100%; padding:.5rem .7rem; margin-bottom:.4rem; border:0; border-radius:.6rem; color:inherit; background:transparent; text-align:left; cursor:pointer; }
 .app-page-menu button:hover,.app-page-menu button[aria-current=page] { background:#334155; }
 .app-page-menu i { width:1.3rem; text-align:center; color:#60a5fa; }
+.app-page-menu .app-mobile-theme-toggle { display:none; }
 .app-page-layer { position:absolute; z-index:0; inset:0; background:#0c1929; border:0; border-radius:1rem; transition:transform .25s ease; }
 .menu-open .app-page-layer { transform:translateX(16.5rem); }
 .app-page-shadow { position:absolute; z-index:-1; inset:0; border-radius:inherit; box-shadow:0 2px 8px #0001; pointer-events:none; }
@@ -34,6 +35,7 @@ body.light-mode .app-page-layer { background:#f8fafc; }
 body.light-mode .app-page-menu { color:#0f172a; }
 body.light-mode .app-page-menu button:hover,body.light-mode .app-page-menu button[aria-current=page] { background:#e2e8f0; }
 @media (max-width:768px) {
+ body > header.flex { display:none; }
  #Introduction > p:first-child { font-size:2rem !important; }
  #loadBtn { width:100%; justify-content:center; }
  .app-workspace { display:flex; flex-direction:column-reverse; height:auto; max-width:calc(100% - 4rem); padding:0; gap:.5rem; }
@@ -45,6 +47,13 @@ body.light-mode .app-page-menu button:hover,body.light-mode .app-page-menu butto
  .menu-open .app-page-layer, .menu-open .app-physics-viewer { transform:translateX(75vw); }
  .menu-open .app-menu-toggle { transform:translateX(-85vw); }
  .app-page-menu { display:flex; flex-direction:column; align-items:center; }
+ .app-page-menu .app-mobile-theme-toggle { display:flex; justify-content:center; gap:.7rem; width:auto; margin:1rem auto 0; padding:.5rem; transform:translateX(-1rem); }
+ .app-mobile-theme-toggle .app-mobile-theme-track { position:relative; display:grid; grid-template-columns:1fr 1fr; place-items:center; width:5rem; height:2.4rem; border-radius:999px; background:#29384b; }
+ .app-mobile-theme-track i { z-index:1; display:grid; place-items:center; width:100%; height:100%; font-size:1rem; color:#60a5fa; }
+ .app-mobile-theme-track span { position:absolute; top:.2rem; left:.25rem; width:2rem; height:2rem; border-radius:50%; background:#1e293b; transition:transform .2s ease; }
+ .app-mobile-theme-toggle[aria-checked=true] .app-mobile-theme-track { background:#e2e8f0; }
+ .app-mobile-theme-toggle[aria-checked=true] .app-mobile-theme-track span { background:#f1f5f9; transform:translateX(2.5rem); }
+ .app-mobile-theme-toggle:focus-visible { outline:2px solid #60a5fa; outline-offset:2px; }
  .app-page-content { padding-top:4rem; }
 }
 @media (prefers-reduced-motion:reduce) { .app-shell,.app-page-layer,.app-physics-viewer,.app-page-shadow::after { transition:none; } }
@@ -89,7 +98,6 @@ body.light-mode #loadBtn:hover { background:#60a5fa; }
 .app-page-content::-webkit-scrollbar-thumb { background:#334155; border:3px solid #0f172a; border-radius:1rem; }
 .app-page-content::-webkit-scrollbar-thumb:hover { background:#475569; }
 .app-page-content::-webkit-scrollbar-button { display:none; width:0; height:0; }
-body.light-mode .app-page-content { scrollbar-color:#cbd5e1 transparent; }
 body.light-mode .app-page-content::-webkit-scrollbar-track { background:#e2e8f0; }
 body.light-mode .app-page-content::-webkit-scrollbar-thumb { background:#cbd5e1; border-color:#e2e8f0; }
 body.light-mode .app-page-content::-webkit-scrollbar-thumb:hover { background:#94a3b8; }
@@ -97,6 +105,9 @@ body.light-mode .app-page-content::-webkit-scrollbar-thumb:hover { background:#9
 .app-page-content::-webkit-scrollbar-track, body.light-mode .app-page-content::-webkit-scrollbar-track { background:transparent; margin-block:.5rem; }
 .app-page-content::-webkit-scrollbar-thumb, body.light-mode .app-page-content::-webkit-scrollbar-thumb { border:solid transparent; border-width:6px; border-radius:10px; background-clip:padding-box; }
 .app-page-content::-webkit-scrollbar-thumb:hover, body.light-mode .app-page-content::-webkit-scrollbar-thumb:hover { border-width:5px; background-clip:padding-box; }
+@media (max-width:768px) {
+ .app-page-content::-webkit-scrollbar-thumb { min-height:60px; }
+}
 /* Card backgrounds on the setup, process, viewer, AI, session and report pages. */
 body .app-page:is([data-page="1"],[data-page="2"],[data-page="4"],[data-page="7"],[data-page="8"],[data-page="9"]) :is(.bg-slate-900.border,.validation-report,.validation-report-toggle) { background-color:#071321; }
 body.light-mode .app-page:is([data-page="1"],[data-page="2"],[data-page="4"],[data-page="7"],[data-page="8"],[data-page="9"]) :is(.bg-slate-900.border,.validation-report,.validation-report-toggle) { background-color:#f1f5f9; }
@@ -118,6 +129,7 @@ body:not(.light-mode) #aboutProteinComplexContent .about-protein-name { backgrou
 body:not(.light-mode) #aboutProteinComplexContent .about-protein-name:hover { background:#334155; }
 body:not(.light-mode) #physicsContainer :is(#physicsSelectionInfo,#physicsViewerKey) { background:#0c1929; border:1px solid #334155; color:#e2e8f0; }
 body.light-mode #physicsContainer :is(#physicsSelectionInfo,#physicsViewerKey) { background:#f8fafc; border:1px solid #cbd5e1; color:#1e293b; }
+body.light-mode #probeSurfaceLoading { background:rgba(248,250,252,.95); border-color:#cbd5e1; color:#0e7490; }
 #physicsSelectionInfo { box-shadow:0 4px 16px #0003; }
 #physicsSelectionInfo .selection-glow-button { color:#422006; }
 #homologyPhysicsSimulation > #createAnimationBtn { display:flex; align-items:center; gap:.5rem; width:100%; padding:.75rem 1.25rem; border:0; border-bottom:1px solid #1e293b; border-radius:0; background:rgba(15,23,42,.9); color:#fff; font-size:.875rem; font-weight:600; text-align:left; }
@@ -206,7 +218,8 @@ body.light-mode #physicsWebGLStatus:not([hidden]) { background:#e2e8f0; color:#1
  .physics-page.mobile-sheet-dragging .app-page-layer { transition:none; }
  .physics-page .app-page-content:has(.app-page[data-page="3"]:not([hidden])) { padding:.5rem .75rem 1rem; }
  .physics-page #homologyPhysicsSimulation > #aboutProteinComplex { order:-1; border-top:0; }
- .physics-page #aboutProteinComplex > h2 { cursor:ns-resize; touch-action:none; user-select:none; padding:1rem .5rem .75rem; }
+ .physics-page #aboutProteinComplex > h2 { display:flex; align-items:center; gap:.6rem; cursor:ns-resize; touch-action:none; user-select:none; padding:1rem .5rem .75rem; }
+ .physics-page #aboutProteinComplex > h2::after { content:""; flex:none; width:.55rem; height:.55rem; border-right:2px solid currentColor; border-bottom:2px solid currentColor; transform:rotate(45deg) translateY(-.15rem); }
  .physics-page .mobile-sheet-handle { display:block; position:absolute; z-index:6; top:0; left:0; right:0; height:14px; cursor:ns-resize; touch-action:none; }
  .physics-page .mobile-sheet-handle::after { content:""; display:block; width:2.5rem; height:4px; margin:5px auto 0; border-radius:999px; background:#64748b; }
  .physics-page .app-page-layer::after, .physics-page .app-scroll-blur-bottom { border-radius:0; }

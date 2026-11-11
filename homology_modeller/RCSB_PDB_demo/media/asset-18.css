@@ -1,0 +1,62 @@
+:root {
+    --brand: #325880;
+    --brand-lighter: #5d82aa;
+    --brand-darker: #243f5b;
+
+    --logo: #7dacd1;
+    --logo-lighter: #b3d3ed;
+    --logo-darker: #3d6d9c;
+
+    --powder-blue: #d9edf7;
+    --powder-blue-lighter: #e9f4f9;
+    --powder-blue-darker: #a8c8c8;
+
+    --csm: #05d0e7;
+    --csm-lighter: #94dde5;
+    --csm-darker: #04bace;
+
+    --external: #f0ad4e;
+    --external-lighter: #f6ce95;
+    --external-darker: #df8a13;
+
+
+    --link: #337ab7;
+    --link-lighter: #63a0d4;
+    --link-darker: #337bb8;
+
+    --text-color: #333333;
+    --text-color-lighter: #595959;
+
+    --accent: #d23858;
+
+
+    --gray0: rgb(244, 245, 246);
+    /* lightest-gray - background for the first level bcg, lightest gray bcg */
+    --gray1: rgb(235, 235, 235);
+    /* background for tabs in search */
+    --gray2: rgb(225, 225, 225);
+    /* disabled elements */
+    --gray3: rgb(210, 210, 210);
+    /* needed for groups in attribute search */
+    --gray4: rgb(195, 195, 195);
+
+    --gray5: rgb(165, 165, 165);
+
+    --gray6: rgb(130, 130, 130);
+    /* icons outside input elements */
+    --gray7: rgb(95, 96, 99);
+    /* darkest-gray - gray card header, gray icons hover  */
+
+    --neutral: #fff;
+
+
+    --green: #0b9e0b;
+    /* checkmark, validation */
+
+
+    --wwpdb: #669966;
+    --wwpdb-lighter: #ddeee2;
+    --wwpdb-darker: #476b47;
+
+    --red-highlight: #c1292f;
+}

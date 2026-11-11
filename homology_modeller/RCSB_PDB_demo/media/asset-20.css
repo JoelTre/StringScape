@@ -1,0 +1,142 @@
+/* Structure Tabs
+-------------------------------------------------- */
+
+/* Bottom border under the whole tab row */
+#structuretabs {
+    border-bottom: 5px solid #325880;
+}
+
+
+
+#structuretabs>.nav-item {
+    --bs-nav-link-padding-y: 0.3rem;
+    margin-bottom: 1px;
+    margin-right: 3px;
+}
+
+
+#structuretabs .nav-link {
+    color: var(--brand);
+}
+
+
+#structuretabs .nav-link.active {
+    background-color: var(--brand) !important;
+    color: #fff !important;
+    border-color: transparent;
+    border-bottom-color: transparent;
+    /* keeps the tab connected to content */
+}
+
+#structuretabs .nav-link.active:hover,
+#structuretabs .nav-link.active:focus {
+    background-color: var(--brand-darker) !important;
+}
+
+#structuretabs>.nav-item>.nav-link {
+    background-color: var(--gray1);
+    border-bottom-color: transparent;
+}
+
+#structuretabs .nav-link:hover,
+#structuretabs .nav-link:focus {
+    background-color: var(--gray2) !important;
+
+}
+
+/* Collapse container spacing */
+#navbar-collapse-SSP {
+    padding: 0;
+    margin: 0;
+}
+
+
+.secondaryheader h1 {
+
+    margin-right: 10px;
+
+}
+
+.secondaryheader h4 {
+    margin-top: 30px;
+}
+
+#entitynext {
+    margin-top: 10px;
+    background-color: #416D93;
+}
+
+.navbar-toggler,
+.float-start {
+    float: none;
+}
+
+
+
+/* MACROMOLECULE HIGHLIGHTS */
+table .highlight td {
+    background-color: #FFF2E0;
+}
+
+/* MACROMOLECULE HIGHLIGHTS */
+table td ul {
+    -webkit-padding-start: 15px;
+}
+
+
+
+
+
+
+table tr td button {
+    margin: 4px 1px;
+}
+
+
+
+#structuretabs .dropdown .dropdown-menu {
+    min-width: 100%;
+}
+
+
+
+
+/* Mobile */
+
+/* --------- TABLET FORM FACTOR --------- */
+@media screen and (min-width: 768px) and (max-width: 991px) {}
+
+
+/* --------- MOBILE PHONE FORM FACTOR --------- */
+@media screen and (max-width: 767px) {
+
+    #collapsedHeader>div {
+        padding-left: 0;
+        padding-right: 0;
+    }
+
+    /* #SSP-collapsed-tabs {
+        background-color: #EFEDED;
+        margin-top: 0;
+        border: 1px solid #ccc;
+        padding: 10px;
+    }
+
+    #navbar-collapse-SSP {
+        width: 100%;
+        margin: 0;
+    } */
+
+    #structuretabs {
+        border: 0;
+
+    }
+
+    /*make these buttons*/
+    #structuretabs li {
+        width: 100%;
+    }
+
+
+
+}

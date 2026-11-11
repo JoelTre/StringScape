@@ -238,6 +238,16 @@
         button.innerHTML = `<i class="fa-solid ${icon}" aria-hidden="true"></i><span>${label}</span>`;
         button.addEventListener('click', () => navigate(number)); menu.append(button); return button;
     });
+    const mobileThemeToggle = document.createElement('button');
+    mobileThemeToggle.type = 'button';
+    mobileThemeToggle.className = 'app-mobile-theme-toggle';
+    mobileThemeToggle.id = 'mobileThemeToggle';
+    mobileThemeToggle.setAttribute('role', 'switch');
+    mobileThemeToggle.setAttribute('aria-label', 'Light mode');
+    mobileThemeToggle.setAttribute('aria-checked', String(document.body.classList.contains('light-mode')));
+    mobileThemeToggle.innerHTML = '<span class="app-mobile-theme-track" aria-hidden="true"><i class="fa-solid fa-moon"></i><i class="fa-solid fa-sun"></i><span></span></span>';
+    mobileThemeToggle.addEventListener('click', () => document.getElementById('themeToggle').click());
+    menu.append(mobileThemeToggle);
     function setMenu(open) {
         main.classList.toggle('menu-open', open); menu.inert = !open; burger.setAttribute('aria-expanded', String(open));
         burger.setAttribute('aria-label', open ? 'Close page menu' : 'Open page menu');

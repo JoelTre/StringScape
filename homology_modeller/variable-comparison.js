@@ -11,6 +11,7 @@
     add('pattern-variance','continuous','chain','Å');
     add('rotational-symmetry equivalent-protein-shape keyframe-difference difference af-difference','continuous','residue','Å');
     add('residue-speed','continuous','residue','Å/s');
+    add('backbone-issues','continuous','residue','Å; worst adjacent backbone distance deviation');
     add('mutation-effect-basic membrane-placement','continuous','residue','0–1');
     add('constraint-confidence membrane-score model-confidence qmeandisco','continuous','residue','0–1; mean of incident restraints where applicable');
     add('spring-strain','continuous','residue','fraction; mean of incident restraints');

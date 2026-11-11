@@ -1804,7 +1804,7 @@
                         : null;
                 const makeEntry=(atom,sourceAtoms)=>({resName, singleChar:type==='protein'?(AA_3TO1[resName]||'X'):type==='nucleotide'?(NUCLEOTIDE_CODES[resName]||'N'):'X',
                     resSeq:group.resSeq,chainId:chainKey,groupKey:chainKey,entityType:type,
-                    x:atom.x,y:atom.y,z:atom.z,plddt:type==='protein'?atom.bFactor||null:null,sourceAtoms});
+                    x:atom.x,y:atom.y,z:atom.z,plddt:type==='protein'?(atom.bFactor??null):null,sourceAtoms});
                 const entries=type==='other'?sources.map((atom,i)=>makeEntry(atom,MemoryData.list(recordTable,sourceStart+i,1,orderedIndices))):representative?[makeEntry(representative,sources)]:[];
                 if(!entries.length)continue;
                 (chains[chainKey] ||= []).push(...entries);allAtoms.push(...entries);
@@ -1831,7 +1831,7 @@
                     x,y,z,occupancy:line.slice(54,60).trim()?Number(line.slice(54,60)):1,
                     insertionCode:line.slice(26,27).trim(),resName:line.slice(17,20).trim(),
                     chainId:line.slice(21,22).trim()||'A',resSeq:Number(line.slice(22,26))||Number(line.slice(6,11))||0,
-                    bFactor:Number(line.slice(60,66))||null,groupPdb:line.slice(0,6).trim()});
+                    bFactor:line.slice(60,66).trim() ? Number(line.slice(60,66)) : null,groupPdb:line.slice(0,6).trim()});
             }
             return assembleStructureEntities(records.finish(),includeOther);
         }
@@ -2557,7 +2557,7 @@
                     records.push({atomName,element:(get('type_symbol')||atomName.replace(/^[0-9]+/,'')[0]||'C').toUpperCase(),
                         x,y,z,occupancy:Number(get('occupancy')||1),insertionCode:get('pdbx_PDB_ins_code')||'',
                         resName:get('label_comp_id','auth_comp_id')||'UNK',chainId:get('label_asym_id','auth_asym_id')||'A',
-                        resSeq:Number(get('auth_seq_id','label_seq_id'))||Number(get('id'))||0,bFactor:Number(get('B_iso_or_equiv'))||null,groupPdb});
+                        resSeq:Number(get('auth_seq_id','label_seq_id'))||Number(get('id'))||0,bFactor:get('B_iso_or_equiv') === null ? null : Number(get('B_iso_or_equiv')),groupPdb});
                 }
             }
             return assembleStructureEntities(records.finish(),includeOther,title);
@@ -4868,7 +4868,10 @@
                 }
                 const meshes=[];
                 if(atomRepresentation?.sticks?.visible)meshes.push(atomRepresentation.sticks);
-                if(physicsRepresentation==='surface'&&atomRepresentation?.balls?.visible)meshes.push(atomRepresentation.balls);
+                if(physicsRepresentation==='surface'&&atomRepresentation?.balls?.visible){
+                    const surface=atomRepresentation.balls;
+                    if(surface.isGroup)meshes.push(...surface.children.filter(child=>child.visible));else meshes.push(surface);
+                }
                 for(const representation of [cartoonRepresentation,curveRepresentation])for(const mesh of representation?.meshes||[])if(mesh.visible)meshes.push(mesh);
                 for(const chain of backboneChains)if(chain.line.visible)meshes.push(chain.line);
                 for(const hit of raycaster.intersectObjects(meshes,false)){
@@ -5745,6 +5748,18 @@
 // physicsCaptureAndPulse.js start
         const physicsPulseUniform = { value: 1 };
         function isModel2Only(node) { return node.idx1 === null && node.idx2 !== null && !node.res.referenceOnly; }
+        // Expose residue-level provenance for the lightweight viewer. Scores are
+        // taken from the source residue rather than the exported CIF B-factor,
+        // which the modeller uses to encode residue origin.
+        window.getAddedProteinResidues = () => physicsNodes.flatMap(node => {
+            if (!isModel2Only(node) || node.res.entityType !== 'protein') return [];
+            const atom = node.res.atoms2?.[node.idx2];
+            if (!atom) return [];
+            const chain = String(node.res.c1 || node.res.c2 || 'Unknown');
+            const record = chainMappingReport?.records?.find(item => (item.chains || []).includes(chain) || item.chainAliases?.[chain]);
+            return [{chain, proteinName: chainProteinName(node.blockIdx) || record?.name || 'Unknown protein',
+                plddt: Number.isFinite(atom.plddt) && atom.plddt >= 0 && atom.plddt <= 100 ? atom.plddt : null}];
+        });
         function physicsPulseOpacity(timeMs, originMode) {
             if (physicsPulsePaused) return 1;
             return originMode && !physicsDifferenceMode ? 1 : 0.80 + 0.2 * Math.cos(timeMs * Math.PI / 1600);
@@ -7082,7 +7097,7 @@
             mesh.count=idx;
             mesh.instanceMatrix.needsUpdate = true;
             if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-            if (physicsRepresentation === 'cartoon') {
+            if (['cartoon','mol-cartoon'].includes(physicsRepresentation)) {
                 mesh.dispose?.();mesh.geometry.dispose(); mesh.material.dispose();
                 const pointEntries=[];
                 for(const cid of chainIds){
@@ -7094,7 +7109,7 @@
                     const nodes=atoms.map(atom=>({x:atom.x-cx,y:atom.y-cy,z:atom.z-cz,secondaryType:atom.secondaryType}));
                     const ribbon=createCartoonRibbon(nodes,
                         (i,target)=>target.set(getChainColor(cid,chainKeys)),
-                        ()=>true,()=>false,()=>viewerSizes.physics.backbone);
+                        ()=>true,()=>false,()=>viewerSizes.physics.backbone,()=>1,physicsRepresentation==='mol-cartoon');
                     ribbon.userData.referenceChainId=cid;
                     group.add(ribbon);
                 }
@@ -7213,6 +7228,7 @@
                     : referenceKeyframeColors ? referenceKeyframeColors[referenceNodeIndex]??'#475569'
                     : referenceSiteColors ? referenceSiteColors[referenceNodeIndex]??'#475569'
                     : referenceMutationColors ? referenceMutationColors[referenceNodeIndex]??'#475569'
+                    : mode==='backbone-issues' ? backboneIssueColor(referenceNodeIndex)
                     : mode==='steric-clashes' ? stericClashColor(referenceNodeIndex)
                     : mode==='residue-speed' ? residueSpeedColor(referenceNodeIndex)
                     : ['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','qmeandisco'].includes(mode) ? validationNodeColor(referenceNodeIndex,mode)
@@ -8344,14 +8360,18 @@
                         const initialStats={captureClashPairs:true};
                         const initialClashes=projectPhysicsGroupClashes(group,0,initialStats),initialPairs=initialStats.clashPairs;
                         self.postMessage({initialClashes});
-                        for(let iteration=1;iteration<=96;iteration++){
+                        for(let iteration=1;iteration<=192;iteration++){
                             const stats={repeats:0,captureClashPairs:true};const clashes=projectPhysicsGroupClashes(group,1,stats);
                             const distribution=projectionClashDistribution(physicsNodes,stericClashRadius);
+                            let backboneDeviations=0,maxBackboneError=0;
+                            for(const i of bonds){const a=physicsNodes[i],b=physicsNodes[i+1];
+                                const error=Math.abs(Math.hypot(b.x-a.x,b.y-a.y,b.z-a.z)-a.target);
+                                if(error>=.005)backboneDeviations++;maxBackboneError=Math.max(maxBackboneError,error);}
                             const remainingPairs=stats.clashPairs;
                             let fixed=0;for(const pair of initialPairs)if(!remainingPairs.has(pair))fixed++;
                             const coordinates=new Float64Array(physicsNodes.length*3);
                             physicsNodes.forEach((node,i)=>{coordinates[i*3]=node.x;coordinates[i*3+1]=node.y;coordinates[i*3+2]=node.z;});
-                            self.postMessage({iteration,clashes,fixed,distribution,converged:Boolean(stats.converged),coordinates},[coordinates.buffer,distribution.scores.buffer]);
+                            self.postMessage({iteration,clashes,fixed,backboneDeviations,maxBackboneError,distribution,converged:Boolean(stats.converged),coordinates},[coordinates.buffer,distribution.scores.buffer]);
                             if(stats.converged)break;
                         }
                     }catch(error){self.postMessage({error:error.message});}
@@ -8369,7 +8389,7 @@
                         if(data.initialClashes!==undefined){initialClashes=data.initialClashes;return;}
                         latest=data;
                         globalThis.ProjectionStats?.add(distributionRecord,data.distribution);
-                        if(data.converged)finish('Converged');else if(data.iteration>=96)finish('Repeat limit');
+                        if(data.converged)finish('Converged');else if(data.iteration>=192)finish('Repeat limit');
                     };
                     worker.postMessage({nodes:input,radius:stericClashRadius});
                 });
@@ -8377,7 +8397,7 @@
                 if(latest)for(let i=0;i<nodes.length;i++){nodes[i].x=latest.coordinates[i*3];nodes[i].y=latest.coordinates[i*3+1];nodes[i].z=latest.coordinates[i*3+2];}
                 const remaining=latest?.clashes??initialClashes;
                 const fixed=latest?.fixed??(initialClashes===null?null:0);
-                globalThis.DeveloperLog?.record(`${label} · Pre-simulation clash projection: ${reason}; ${latest?.iteration??0} repeats; ${initialClashes??'unknown'} initial clashes; ${fixed??'unknown'} initial clashes fixed; ${remaining??'unknown'} unresolved clashes`);
+                globalThis.DeveloperLog?.record(`${label} · Pre-simulation clash projection: ${reason}; ${latest?.iteration??0} repeats; ${initialClashes??'unknown'} initial clashes; ${fixed??'unknown'} initial clashes fixed; ${remaining??'unknown'} unresolved clashes; ${latest?.backboneDeviations??'unknown'} unresolved backbone distances; maximum backbone error ${latest?.maxBackboneError?.toFixed(3)??'unknown'} Å`);
             }finally{
                 clearTimeout(timer);clearInterval(poll);worker?.terminate();if(url)URL.revokeObjectURL(url);
                 globalThis.ProjectionStats?.finish(distributionRecord,reason);
@@ -8424,14 +8444,20 @@
             for(let iteration=0;iteration<maxRepeats;iteration++){
                 if(stats)stats.repeats++;
                 if(stale())build();invalid=false;clashBlocks.clear();let bondError=0;
-                if(!rigidBodySimulation)for(const i of group.bonds){
+                if(!rigidBodySimulation)for(let sweep=0;sweep<8;sweep++){
+                  for(let n=0;n<group.bonds.length;n++){
+                    const i=group.bonds[sweep%2?group.bonds.length-1-n:n];
                     const a=nodes[i],b=nodes[i+1],first=group.movableSet.has(i),second=group.movableSet.has(i+1);
                     let dx=b.x-a.x,dy=b.y-a.y,dz=b.z-a.z,d=Math.hypot(dx,dy,dz);
-                    const target=a.res.entityType==='nucleotide'?backboneRestLength(i):BACKBONE_BOND_LEN;
-                    bondError=Math.max(bondError,Math.abs(d-target));if(d<1e-9){dx=1;dy=0;dz=0;d=1;}
+                    const target=a.res.entityType==='nucleotide'?backboneRestLength(i):BACKBONE_BOND_LEN;if(d<1e-9){dx=1;dy=0;dz=0;d=1;}
                     const amount=(Math.hypot(b.x-a.x,b.y-a.y,b.z-a.z)-target)/d,share=first&&second?.5:1;
                     if(first)shift(i,dx*amount*share,dy*amount*share,dz*amount*share);
                     if(second)shift(i+1,-dx*amount*share,-dy*amount*share,-dz*amount*share);
+                  }
+                  let maxError=0;
+                  for(const i of group.bonds){const a=nodes[i],b=nodes[i+1],target=a.res.entityType==='nucleotide'?backboneRestLength(i):BACKBONE_BOND_LEN;
+                    maxError=Math.max(maxError,Math.abs(Math.hypot(b.x-a.x,b.y-a.y,b.z-a.z)-target));}
+                  if(maxError<.005)break;
                 }
                 if(invalid){build();invalid=false;}
                 clashes=0;let restarts=0;
@@ -8447,7 +8473,11 @@
                         for(let n=0;n<nodes.length;n++)if(!group.movableSet.has(n)){const p=nodes[n],key=`${Math.floor(p.x/cell)},${Math.floor(p.y/cell)},${Math.floor(p.z/cell)}`;let bucket=group.fixedGrid.get(key);if(!bucket)group.fixedGrid.set(key,bucket=[]);bucket.push(n);}
                         projectPhysicsGroupClashesUncached(group,Math.max(0,maxRepeats-iteration-1),stats);build();return finalClashes();}build();invalid=false;k=-2;}
                 }
-                if(!invalid&&!clashes&&bondError<.005){if(stats)stats.converged=true;break;}
+                if(stale())build();
+                clashes=finalClashes();
+                if(!rigidBodySimulation)for(const i of group.bonds){const a=nodes[i],b=nodes[i+1],target=a.res.entityType==='nucleotide'?backboneRestLength(i):BACKBONE_BOND_LEN;
+                    bondError=Math.max(bondError,Math.abs(Math.hypot(b.x-a.x,b.y-a.y,b.z-a.z)-target));}
+                if(!clashes&&bondError<.005){if(stats)stats.converged=true;break;}
             }
             // Count final unresolved overlaps from a current complete list, so a
             // late displacement cannot hide a clash from the stopping rule.
@@ -8470,15 +8500,21 @@
                 if(stats)stats.repeats++;
                 clashBlocks.clear();
                 let bondError=0;
-                if(!rigidBodySimulation)for(const i of group.bonds){
+                if(!rigidBodySimulation)for(let sweep=0;sweep<8;sweep++){
+                  for(let n=0;n<group.bonds.length;n++){
+                    const i=group.bonds[sweep%2?group.bonds.length-1-n:n];
                     const a=nodes[i],b=nodes[i+1],first=group.movableSet.has(i),second=group.movableSet.has(i+1);
                     let dx=b.x-a.x,dy=b.y-a.y,dz=b.z-a.z,d=Math.hypot(dx,dy,dz);
                     const target=a.res.entityType==='nucleotide'?backboneRestLength(i):BACKBONE_BOND_LEN;
-                    bondError=Math.max(bondError,Math.abs(d-target));
                     if(d<1e-9){dx=1;dy=0;dz=0;d=1;}
                     const amount=(Math.hypot(b.x-a.x,b.y-a.y,b.z-a.z)-target)/d,share=first&&second?.5:1;
                     if(first)shift(i,dx*amount*share,dy*amount*share,dz*amount*share);
                     if(second)shift(i+1,-dx*amount*share,-dy*amount*share,-dz*amount*share);
+                  }
+                  let maxError=0;
+                  for(const i of group.bonds){const a=nodes[i],b=nodes[i+1],target=a.res.entityType==='nucleotide'?backboneRestLength(i):BACKBONE_BOND_LEN;
+                    maxError=Math.max(maxError,Math.abs(Math.hypot(b.x-a.x,b.y-a.y,b.z-a.z)-target));}
+                  if(maxError<.005)break;
                 }
                 const grid=new Map();
                 for(const index of group.movable){const node=nodes[index],key=`${Math.floor(node.x/cell)},${Math.floor(node.y/cell)},${Math.floor(node.z/cell)}`;
@@ -8502,6 +8538,18 @@
                         }
                     }
                 }
+                // Recount on final positions: clash corrections can create new overlaps
+                // and can stretch bonds that were already projected.
+                clashes=0;clashBlocks.clear();
+                forEachNearbyPhysicsPair(nodes,Math.max(stericClashRadius,stericClashRadius*(2.2/MIN_RESIDUE_DIST)),(i,j)=>{
+                    const a=nodes[i],b=nodes[j];
+                    if(!group.movableSet.has(i)&&!group.movableSet.has(j))return;
+                    if(a.blockIdx===b.blockIdx&&(Math.abs(i-j)===1||rigidBodySimulation||a.res.entityType==='other'))return;
+                    const radius=a.res.entityType==='other'||b.res.entityType==='other'?stericClashRadius*(2.2/MIN_RESIDUE_DIST):stericClashRadius;
+                    if(Math.hypot(b.x-a.x,b.y-a.y,b.z-a.z)<radius-.001){clashes++;clashBlocks.add(a.blockIdx);clashBlocks.add(b.blockIdx);}
+                });
+                if(!rigidBodySimulation)for(const i of group.bonds){const a=nodes[i],b=nodes[i+1],target=a.res.entityType==='nucleotide'?backboneRestLength(i):BACKBONE_BOND_LEN;
+                    bondError=Math.max(bondError,Math.abs(Math.hypot(b.x-a.x,b.y-a.y,b.z-a.z)-target));}
                 if(!clashes&&bondError<.005){if(stats)stats.converged=true;break;}
             }
             group.unresolvedClashBlocks=[...clashBlocks];
@@ -10681,7 +10729,9 @@
                 scheduleValidationReportRefresh();
             if(!viewVisible){spinLastTime=null;if(molstarPageOpen())renderMolstarMembraneOverlay();return;}
             const rotating=!spinPaused&&(allSymmetryRotationGroups().some(group=>Math.abs(group.angle||0)>1e-12)||[...singleChainRotations.values()].some(entry=>entry.overridden&&Math.abs(entry.angle||0)>1e-12));
-            const geometryActive=physicsRenderDirty||physicsMeshesDirty||physicsVisualUpdated||animationPlaying||rotating||sideChainJiggleEnabled||!!draggedResidue;
+            const cartoonMoving=(physicsRunning && simulationPhase===2 && !modelLoading) || animationPlaying || !!draggedResidue || rotating;
+            const cartoonTransition=physicsRepresentation==='mol-cartoon' && cartoonRepresentation && cartoonRepresentation.rounded===cartoonMoving;
+            const geometryActive=physicsRenderDirty||physicsMeshesDirty||physicsVisualUpdated||animationPlaying||rotating||sideChainJiggleEnabled||!!draggedResidue||cartoonTransition;
             if(!geometryActive){
                 if(physicsPulseVisible()&&physicsRenderer&&physicsScene&&physicsCamera&&!physicsWebGLContextLost){
                     const started=globalThis.AppPerformanceDiagnostics?.active?performance.now():null;
@@ -10695,7 +10745,7 @@
             // Refresh against the current conformation at display cadence, including
             // animation playback when the physics step itself is paused.
             if(['residue-speed','running-simulation'].includes(physicsColorMode)||(groupSimulation&&!groupSimulation.complete))updateResidueSpeeds(performance.now());
-            if((physicsColorMode==='af-difference'||['residue-speed','running-simulation','steric-clashes'].includes(physicsColorMode)||['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence'].includes(physicsColorMode))&&
+            if((physicsColorMode==='af-difference'||['residue-speed','running-simulation','backbone-issues','steric-clashes'].includes(physicsColorMode)||['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence'].includes(physicsColorMode))&&
                 (++physicsAfDifferenceFrame%2===0)&&(!['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence'].includes(physicsColorMode)||performance.now()-validationState.lastDraw>1000)){
                 if(['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence'].includes(physicsColorMode)){
                     calculateValidationPairs();validationState.lastDraw=performance.now();
@@ -11085,6 +11135,7 @@
                 onProgress({stage:'alignments',completed:++completed,total:chains1.length});
             });
 
+            const coverageResults=alignmentResults.filter(result=>!result.referenceOnly&&result.entityType==='protein').map(result=>({c2:result.c2,entityType:result.entityType,seq1:result.seq1,alignedPairs:result.alignedPairs}));
             alignmentResults=mergeReferenceFragments(alignmentResults,onProgress);
             addNonPolymerAlignments(chains1,chains2,alignmentResults,modelData1.chains,modelData2.chains);
 
@@ -11103,7 +11154,7 @@
                 });
                 onProgress({stage:'fits',completed:index+1,total:alignmentResults.length});
             }
-            return {results:alignmentResults.map(({atoms1,atoms2,...result})=>result),automaticMatches:automaticChainMatches,sequenceAlignmentCount:sequenceCache.size};
+            return {results:alignmentResults.map(({atoms1,atoms2,...result})=>result),automaticMatches:automaticChainMatches,coverageResults,sequenceAlignmentCount:sequenceCache.size};
         }
         function modellingWorkerRuntime(){
             self.onmessage=({data})=>{
@@ -11241,6 +11292,76 @@
             }
             return candidates;
         }
+        function sequenceOverlapMembership(files, groups, coverage) {
+            const memberships=files.map(()=>[]);
+            groups.forEach((group,groupIndex)=>{
+                const indices=files.flatMap((file,index)=>group.pdbIds.includes(file.pdbId.toUpperCase())?[index]:[]);
+                const parent=new Map(indices.map(index=>[index,index]));
+                const root=index=>{while(parent.get(index)!==index)index=parent.get(index);return index;};
+                for(let i=0;i<indices.length;i++)for(let j=i+1;j<indices.length;j++){
+                    const a=indices[i],b=indices[j];let shared=0;
+                    for(const [protein,positions] of coverage[a]){
+                        const other=coverage[b].get(protein);if(!other)continue;
+                        for(let k=0;k<positions.length&&shared<5;k++)if(positions[k]&&other[k])shared++;
+                        if(shared>=5)break;
+                    }
+                    if(shared>=5)parent.set(root(b),root(a));
+                }
+                const labels=new Map();
+                for(const index of indices){
+                    const representative=root(index);
+                    if(!labels.has(representative))labels.set(representative,labels.size+1);
+                    memberships[index].push({name:group.name||`Group ${groupIndex+1}`,overlap:labels.get(representative)});
+                }
+            });
+            return memberships;
+        }
+        function renderSequenceCoverage(files, alignments) {
+            const host=document.getElementById('sequenceCoverageTable');
+            if(!host)return;
+            host.replaceChildren();
+            const proteins=Object.entries(modelData2.chains).filter(([,atoms])=>atoms.length&&(atoms[0].entityType||'protein')==='protein');
+            if(!proteins.length){host.textContent='No AlphaFold protein sequences are available.';return;}
+            const coverage=files.map((file,index)=>new Map(proteins.map(([key,atoms])=>{
+                const states=new Uint8Array(atoms.length);
+                for(const result of alignments[index]||[]){
+                    if(result.c2!==key||result.referenceOnly||result.entityType!=='protein')continue;
+                    for(const pair of result.alignedPairs||[]){
+                        if(pair.idx1==null||pair.idx2==null||pair.idx2<0||pair.idx2>=states.length)continue;
+                        const a=result.seq1?.[pair.idx1],b=atoms[pair.idx2]?.singleChar;
+                        if(!a||!b)continue;
+                        states[pair.idx2]=Math.max(states[pair.idx2],a===b?3:isSimilarAA(a,b)?2:1);
+                    }
+                }
+                return [key,states];
+            })));
+            const groups=multiReferenceBuild?.conformationGroups||conformationGroupsForFiles(files,typeof referenceConformationPlan==='undefined'?null:referenceConformationPlan);
+            const memberships=sequenceOverlapMembership(files,groups,coverage);
+            const table=document.createElement('table');
+            table.setAttribute('aria-label','Sequence coverage by protein and reference PDB');
+            const head=table.createTHead().insertRow();
+            for(const label of ['Protein',...files.map(file=>file.pdbId)]){const th=document.createElement('th');th.scope='col';th.textContent=label;head.append(th);}
+            const body=table.createTBody();
+            for(const [label,value] of [['Conformational group',entry=>entry.name],['Sequence overlap group',entry=>`${entry.name}: ${entry.overlap}`]]){
+                const row=body.insertRow(),th=document.createElement('th');th.scope='row';th.textContent=label;row.append(th);
+                memberships.forEach(entries=>{const cell=row.insertCell();cell.textContent=entries.map(value).join('\n')||'—';cell.style.whiteSpace='pre-line';});
+            }
+            for(const [key,atoms] of proteins){
+                const row=body.insertRow(),th=document.createElement('th');th.scope='row';th.textContent=key;row.append(th);
+                files.forEach((file,index)=>{
+                    const states=coverage[index].get(key);
+                    const cell=row.insertCell(),bar=document.createElement('div');bar.className='sequence-coverage-bar';
+                    const counts=[0,0,0,0];states.forEach(state=>counts[state]++);
+                    bar.setAttribute('role','img');bar.setAttribute('aria-label',`${key}, ${file.pdbId}: ${counts[3]} identical, ${counts[2]} similar, ${counts[1]} different, ${counts[0]} absent residues`);
+                    bar.title=bar.getAttribute('aria-label');
+                    for(let start=0;start<states.length;){let end=start+1;while(end<states.length&&states[end]===states[start])end++;
+                        const segment=document.createElement('span');segment.className=`sequence-coverage-${states[start]}`;segment.style.flexGrow=String(end-start);bar.append(segment);start=end;}
+                    cell.append(bar);
+                });
+            }
+            host.append(table);
+        }
+        let latestCoverageResults=[];
         async function computeAllChainAlignments(){
             cancelModellingCalculations();
             const id=modellingCalculationVersion,generation=modelBuildGeneration;
@@ -11272,6 +11393,7 @@
                     return {...result,atoms1,atoms2:result.referenceOnly?atoms1:modelChains[result.c2]||[]};
                 });
                 alignmentResults=results;
+                latestCoverageResults=output.coverageResults;
                 globalThis.ChainMergingReport?.setAnnotations(uniProtAnnotations);
                 globalThis.ChainMergingReport?.update(results,{modelChains,referenceChains,reference:referenceFiles.map(file=>file.pdbId).join(', '),accessionForId:uniProtAccession});
                 PerfTracker.metrics.sequenceAlignments=output.sequenceAlignmentCount;automaticChainMatches.clear();
@@ -11405,7 +11527,7 @@
 // alignmentTable.js end
 
 // alignment3DViewer.js start
-        const viewerSizes = { alignment: { residue: 1, backbone: 2 }, physics: { residue: 1, backbone: 2, atom: 3, stick: 1, curve: 8, surface: 1.4 } };
+        const viewerSizes = { alignment: { residue: 1, backbone: 2 }, physics: { residue: 1, backbone: 2, atom: 3, stick: 1, curve: 8, surface: 0.6 } };
         let atomSizeByElement = 1;
         // Covalent radii in Å (Cordero et al., Dalton Trans. 2008, 2832–2838).
         // Ball-and-stick atoms use covalent rather than van der Waals radii.
@@ -11430,7 +11552,15 @@
                     }
                     instancedNodeMesh.instanceMatrix.needsUpdate = true;
                 }
-                if(kind==='surface')lastSurfaceUpdate=-Infinity;
+                if(kind==='surface') {
+                    lastSurfaceUpdate=-Infinity;
+                    if(physicsRepresentation==='surface' && homologyStructureVisible && atomRepresentation?.mode==='surface') {
+                        clearTimeout(atomRepresentation.loadingTimer);
+                        atomRepresentation.loadingStartedAt=performance.now();
+                        atomRepresentation.loadingSettled=false;
+                        document.getElementById('probeSurfaceLoading')?.classList.remove('hidden');
+                    }
+                }
                 updateAtomRepresentation();
                 if(showModel1Overlay&&physicsScene){if(model1OverlayGroup){physicsScene.remove(model1OverlayGroup);disposeModel1Overlay(model1OverlayGroup);}model1OverlayGroup=buildModel1OverlayGroup();physicsScene.add(model1OverlayGroup);}
                 if(patternExtensionUnits>0)updatePatternVariance(true);
@@ -12612,6 +12742,8 @@
 
         function clearModelUI() {
             globalThis.ChainMergingReport?.clear();
+            const coverageHost=document.getElementById('sequenceCoverageTable');
+            if(coverageHost)coverageHost.textContent='Sequence coverage appears after alignment.';
             if(typeof clearStagedBuild==='function')clearStagedBuild();
             disposePhysicsSimulationWorker();
             cancelModellingCalculations();
@@ -13047,7 +13179,25 @@
                 populateChainSelectors();
                 setBuildStatus('Mapping chains and aligning target sequences…');
                 if(directReferences) setDirectReferenceAlignments(modelData1.chains);
-                else if(!await computeAllChainAlignments()||generation!==modelBuildGeneration)return;
+                else if(multiReferenceBuild){
+                    const state=multiReferenceBuild;
+                    state.precomputedAlignments=[];
+                    for(let i=0;i<state.files.length;i++){
+                        const file=state.files[i];
+                        setBuildStatus(`Aligning sequences for ${file.pdbId} (${i+1}/${state.files.length})…`);
+                        referenceFiles=[file]; currentReferenceFile=file;
+                        modelData1.chains=file.parsed.chains; modelData1.caAtoms=file.parsed.allAtoms;
+                        if(!await computeAllChainAlignments()||generation!==modelBuildGeneration)return;
+                        state.precomputedAlignments.push({results:alignmentResults, coverage:latestCoverageResults, matches:new Map(automaticChainMatches)});
+                    }
+                    referenceFiles=[state.files[0]]; currentReferenceFile=referenceFiles[0];
+                    modelData1.chains=referenceFiles[0].parsed.chains; modelData1.caAtoms=referenceFiles[0].parsed.allAtoms;
+                    restoreStagedAlignments(state,0);
+                    renderSequenceCoverage(state.files,state.precomputedAlignments.map(item=>item.coverage));
+                } else {
+                    if(!await computeAllChainAlignments()||generation!==modelBuildGeneration)return;
+                    renderSequenceCoverage(referenceFiles,[latestCoverageResults]);
+                }
 
                 resetCanvasViews();
                 renderChainLegends();
@@ -14422,7 +14572,7 @@
             if(surfaceKey&&patternExtensionGroup?.patternSurfaceKey===surfaceKey){patternExtensionGroup.visible=homologyStructureVisible;return;}
             disposePatternExtensions();
             patternExtensionGroup=new THREE.Group();patternExtensionGroup.visible=homologyStructureVisible;physicsScene.add(patternExtensionGroup);
-            if(['curves','cartoon','surface'].includes(physicsRepresentation)){
+            if(['curves','cartoon','mol-cartoon','surface'].includes(physicsRepresentation)){
                 const target=patternExtensionGroup,lifecycle={cancelled:false};target.patternLifecycle=lifecycle;target.patternSurfaceKey=surfaceKey;
                 for(const copy of copies){
                     const residues=patternCopyResidues(copy,templates.get(copy.source)).filter(atom=>isNodeVisibleInPhysics(physicsNodes[atom.nodeIndex]));
@@ -14904,6 +15054,26 @@
             const targetScale=Math.max(.05,quantile);
             state.scale+=(targetScale-state.scale)*(1-Math.exp(-elapsed/.5));
         }
+        function calculateBackboneIssueScores(nodes){
+            const scores=new Float32Array(nodes.length);
+            for(let i=0;i+1<nodes.length;i++){
+                const a=nodes[i],b=nodes[i+1];
+                if(a.blockIdx!==b.blockIdx||a.res.entityType==='other')continue;
+                const target=a.res.entityType==='nucleotide'?backboneRestLength(i):BACKBONE_BOND_LEN;
+                const error=Math.abs(Math.hypot(b.x-a.x,b.y-a.y,b.z-a.z)-target);
+                if(error<.005)continue;
+                scores[i]=Math.max(scores[i],error);scores[i+1]=Math.max(scores[i+1],error);
+            }
+            return scores;
+        }
+        const backboneIssueColourCache={nodes:null,at:-Infinity,scores:[]};
+        function backboneIssueColor(index){
+            const cache=backboneIssueColourCache,now=performance.now();
+            if(cache.nodes!==physicsNodes||now-cache.at>=250){
+                cache.scores=calculateBackboneIssueScores(physicsNodes);cache.nodes=physicsNodes;cache.at=now;
+            }
+            return stericClashScoreColor(Math.min(1,(cache.scores[index]??0)/2));
+        }
         function calculateStericClashScores(nodes,radius,rigid=false){
             const scores=new Float32Array(nodes.length);
             forEachNearbyPhysicsPair(nodes,Math.max(radius,radius*(2.2/MIN_RESIDUE_DIST)),(i,j)=>{
@@ -15299,6 +15469,8 @@
                     color = new THREE.Color(siteColors[i]);
                 } else if (mutationColors) {
                     color = new THREE.Color(mutationColors[i]);
+                } else if (physicsColorMode === 'backbone-issues') {
+                    color = new THREE.Color(backboneIssueColor(i));
                 } else if (physicsColorMode === 'steric-clashes') {
                     color = new THREE.Color(stericClashColor(i));
                 } else if (physicsColorMode === 'residue-speed') {
@@ -15553,7 +15725,7 @@
             if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.view==='aligned'){
                 if(['reference','chain','protein','equivalent','aligned','distance'].includes(mode)){multiReferenceBuild.alignedMode=mode;physicsColorMode=mode;syncPhysicsColorMenu();renderStagedPreview();}return;
             }
-            if (!['chain','chain-random','residue-index','uniform','protein-id','rotational-symmetry','pattern-variance','equivalent-protein-shape','keyframe-difference','residue-speed','running-simulation','steric-clashes','binding-sites','binding-site-type','mutation-effect-basic','constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','qmeandisco','element','side-chains','origin','aligned','locked','membrane','membrane-placement','charge','hydrophobicity','accessible-surface-area','secondary','plddt','difference','af-difference',...Object.keys(UNI_PROT_FEATURE_MODES)].includes(mode)) return;
+            if (!['chain','chain-random','residue-index','uniform','protein-id','rotational-symmetry','pattern-variance','equivalent-protein-shape','keyframe-difference','residue-speed','running-simulation','backbone-issues','steric-clashes','binding-sites','binding-site-type','mutation-effect-basic','constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','qmeandisco','element','side-chains','origin','aligned','locked','membrane','membrane-placement','charge','hydrophobicity','accessible-surface-area','secondary','plddt','difference','af-difference',...Object.keys(UNI_PROT_FEATURE_MODES)].includes(mode)) return;
             if(['residue-speed','running-simulation'].includes(mode)&&!['residue-speed','running-simulation'].includes(physicsColorMode))resetResidueSpeedTracking();
             if(mode==='accessible-surface-area')accessibleSurfaceCache=null;
             physicsColorMode = mode;
@@ -15585,6 +15757,7 @@
                 'pattern-variance':'Pattern variance: <span style="color:#38bdf8">low deviation</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">high</span>; repeated translations and rotations of equivalent proteins, scored in Å using corresponding residues; grey: no supported pattern. Pattern markers show cyan local helical centre axes and 3D arrows at protein centres pointing along the repeat, with lines connecting the centres. Separate repeats are fitted independently; two-copy patterns establish a movement but cannot validate its repetition.',
                 'equivalent-protein-shape':'Equivalent protein shape: <span style="color:#38bdf8">low difference</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">high</span>; each residue is scored by deviations in its distances to other residues from the across-chain average; dark grey: no equivalent protein comparison.',
                 'keyframe-difference':`Keyframe conformation difference: <span style="color:#38bdf8">little change</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">large change</span> in distances to sampled residues across saved keyframes. ${keyframeDifferenceNormalized?'Colours are scaled to the current model’s 95th percentile.':'Medium change: 2.5 Å; large change: 5 Å or more (mean variation).'} Grey: unavailable. <button id="keyframeDifferenceNormalize" type="button" aria-pressed="${keyframeDifferenceNormalized}" class="bg-slate-800 rounded-lg px-2 py-1">Normalised: ${keyframeDifferenceNormalized?'True':'False'}</button>`,
+                'backbone-issues':'Backbone issues: grey means the adjacent backbone distances are within 0.005 Å of their targets; yellow → red shows increasing deviation, reaching red at 1 Å. Each residue shows the worst deviation of its adjacent bonds. Protein targets are 3.8 Å; nucleotide targets follow the backbone restraint.',
                 'steric-clashes':'Steric clashes: grey means no clash; yellow → red shows increasing overlap relative to the simulation’s steric exclusion distance. Each residue shows its worst overlap. Bonded neighbours and rigid internal contacts are excluded. This is a residue-level check, not an all-atom clash score.',
                 'running-simulation':'Running simulation: cores use residue speed (<span style="color:#38bdf8">blue</span> → <span style="color:#facc15">yellow</span> → <span style="color:#ef4444">red</span>); active neighbours use darker speed colours · <span style="color:#166534">Dark green: processed core</span> · <span style="color:#8eafbd">Dull light blue: previously active neighbour</span> · <span style="color:#d1d5db">Grey: waiting in pass 1</span> · <span style="color:#a4bca2">Dull light green: waiting in pass 2</span>. Progress resets for pass 2.',
                 'residue-speed':'Residue speed: <span style="color:#38bdf8">stationary or slow</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">fast</span>. Colours use smoothed movement in Å/s; non-protein atoms are grey. The scale is fixed unless normalisation is enabled.',
@@ -15669,6 +15842,7 @@
         let cartoonRepresentation = null;
         let curveRepresentation = null;
         let lastSurfaceUpdate = 0;
+        let gpuSurfaceFailed = false;
 
         function syncPhysicsRepresentationMenu() {
             const select=document.getElementById('physicsRepresentationSelect');
@@ -15727,7 +15901,7 @@
             jiggleControls.classList.toggle('hidden', !['ball-stick'].includes(mode));
             jiggleControls.classList.toggle('flex', ['ball-stick'].includes(mode));
             document.getElementById('sideChainJiggleBtn').classList.toggle('hidden', mode !== 'ball-stick');
-            for(const [id,visible] of [['physicsResidueSizeControl',mode==='backbone'],['physicsBackboneSizeControl',mode==='backbone'||mode==='cartoon'],['physicsAtomSizeControl',['ball-stick'].includes(mode)||mode==='curves'],['physicsElementSizeControl',['ball-stick'].includes(mode)||mode==='curves'],['physicsStickSizeControl',mode==='ball-stick'||mode==='curves'],['physicsSurfaceSizeControl',mode==='surface'],['physicsCurveSizeControl',mode==='curves']])document.getElementById(id).classList.toggle('hidden',!visible);
+            for(const [id,visible] of [['physicsResidueSizeControl',mode==='backbone'],['physicsBackboneSizeControl',mode==='backbone'||mode==='cartoon'||mode==='mol-cartoon'],['physicsAtomSizeControl',['ball-stick'].includes(mode)||mode==='curves'],['physicsElementSizeControl',['ball-stick'].includes(mode)||mode==='curves'],['physicsStickSizeControl',mode==='ball-stick'||mode==='curves'],['physicsSurfaceSizeControl',mode==='surface'],['physicsCurveSizeControl',mode==='curves']])document.getElementById(id).classList.toggle('hidden',!visible);
             if (atomRepresentation && atomRepresentation.mode !== mode) disposeAtomRepresentation();
             lastSurfaceUpdate = -Infinity;
             updateAtomRepresentation();
@@ -15751,9 +15925,15 @@
             clearTimeout(atomRepresentation.loadingTimer);
             if (atomRepresentation.mode === 'surface') atomRepresentation.cancelled = true;
             for (const mesh of [atomRepresentation.balls, atomRepresentation.sticks,atomRepresentation.atomGlow].filter(Boolean)) {
-                physicsScene?.remove(mesh); mesh.dispose?.();mesh.geometry.dispose(); mesh.material.dispose();
+                physicsScene?.remove(mesh); disposePhysicsSurfaceObject(mesh);
             }
             atomRepresentation = null;
+        }
+
+        function disposePhysicsSurfaceObject(object) {
+            if(object.isGroup){for(const child of object.children)disposePhysicsSurfaceObject(child);return;}
+            object.dispose?.();object.userData.volumeTexture?.dispose();object.geometry?.dispose();
+            if(Array.isArray(object.material))object.material.forEach(material=>material.dispose());else object.material?.dispose();
         }
 
         function disposeCartoonRepresentation() {
@@ -15764,25 +15944,37 @@
             cartoonRepresentation = null;
         }
 
-        function createCartoonRibbon(nodes, colorAt, visibleAt, pulseAt, sizeAt, opacityAt=()=>1) {
-            const steps = nodes.length > 3000 ? 1 : nodes.length > 1200 ? 2 : 4;
+        function createCartoonRibbon(nodes, colorAt, visibleAt, pulseAt, sizeAt, opacityAt=()=>1, rounded=false) {
+            const steps = rounded ? 8 : nodes.length > 3000 ? 1 : nodes.length > 1200 ? 2 : 4;
             const samples = (nodes.length - 1) * steps + 1;
             const geometry = new THREE.BufferGeometry();
-            const positions = new Float32Array(samples * 12), colors = new Float32Array(samples * 12), pulse = new Float32Array(samples * 4);
+            const radial = rounded ? 12 : 4;
+            const positions = new Float32Array(samples * radial * 3), colors = new Float32Array(samples * radial * 3), pulse = new Float32Array(samples * radial);
             geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
             geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
             geometry.setAttribute('ribbonPulse', new THREE.BufferAttribute(pulse, 1));
-            const conformationAlpha=new Float32Array(samples*4).fill(1);
+            const conformationAlpha=new Float32Array(samples*radial).fill(1);
             geometry.setAttribute('conformationAlpha',new THREE.BufferAttribute(conformationAlpha,1));
             const indices = [];
-            for (let s = 0; s < samples - 1; s++) {
-                const a=4*s,b=a+4;
-                indices.push(a,a+1,b, a+1,b+1,b, b+2,a+3,a+2, b+2,b+3,a+3,
-                    a+2,a,b+2, a,b,b+2, a+1,a+3,b+1, a+3,b+3,b+1);
+            if (rounded) {
+                for (let s=0;s<samples-1;s++) for(let v=0;v<radial;v++) {
+                    const a=s*radial+v,b=s*radial+(v+1)%radial,c=a+radial,d=b+radial;
+                    indices.push(a,b,c,b,d,c);
+                }
+                for(let v=1;v<radial-1;v++) {
+                    indices.push(0,v+1,v);
+                    const last=(samples-1)*radial;indices.push(last,last+v,last+v+1);
+                }
+            } else {
+                for (let s = 0; s < samples - 1; s++) {
+                    const a=4*s,b=a+4;
+                    indices.push(a,a+1,b, a+1,b+1,b, b+2,a+3,a+2, b+2,b+3,a+3,
+                        a+2,a,b+2, a,b,b+2, a+1,a+3,b+1, a+3,b+3,b+1);
+                }
+                indices.push(0,2,1, 1,2,3);
+                const last=4*(samples-1);
+                indices.push(last,last+1,last+2, last+1,last+3,last+2);
             }
-            indices.push(0,2,1, 1,2,3);
-            const last=4*(samples-1);
-            indices.push(last,last+1,last+2, last+1,last+3,last+2);
             geometry.setIndex(indices);
             const material = new THREE.MeshPhongMaterial({ vertexColors: true, side: THREE.DoubleSide, shininess: 55, transparent: true, depthWrite: true });
             material.onBeforeCompile = shader => {
@@ -15798,10 +15990,10 @@
             mesh.userData.colorAt = colorAt;
             const centers = new Float32Array(samples * 3), sampleWidth = new Float32Array(samples), samplePulse = new Float32Array(samples);
             const nodeColors = nodes.map(() => new THREE.Color());
-            const tangent = new THREE.Vector3(), side = new THREE.Vector3(), normal = new THREE.Vector3();
+            const tangent = new THREE.Vector3(), side = new THREE.Vector3(), normal = new THREE.Vector3(), strandSide = new THREE.Vector3(), helixAxis = new THREE.Vector3();
             mesh.userData.updateRibbon = () => {
                 for(let i=0;i<nodes.length;i++)mesh.userData.colorAt(i,nodeColors[i]);
-                const baseWidth = type => type === 'helix' ? 1.3 : type === 'sheet' ? 2.2 : .45;
+                const baseWidth = type => type === 'helix' ? (rounded ? 2.0 : 1.3) : type === 'sheet' ? 2.2 : .45;
                 for (let s = 0; s < samples; s++) {
                     const edge = Math.min(nodes.length-2, Math.floor(s/steps));
                     const t = s === samples-1 ? 1 : (s-edge*steps)/steps;
@@ -15813,14 +16005,22 @@
                     }
                     const ease=t*t*(3-2*t), type1=p1.secondaryType, type2=p2.secondaryType;
                     let width=baseWidth(type1)*(1-ease)+baseWidth(type2)*ease;
-                    if(type1==='sheet'&&type2==='sheet'&&p3.secondaryType!=='sheet') {
+                    if (rounded) {
+                        // Keep helices and strands full width up to their boundary.
+                        width=baseWidth(t<.5 ? type1 : type2);
+                        if (type1==='sheet' && type2!=='sheet') {
+                            // Widen at the last strand residue, then taper toward
+                            // the outgoing coil over most of the following segment.
+                            width=t<.875 ? 3.3+(0.45-3.3)*t/.875 : .45;
+                        }
+                    } else if(type1==='sheet'&&type2==='sheet'&&p3.secondaryType!=='sheet') {
                         width=t<.4?2.2+1.0*t/.4:3.2-(3.05*(t-.4)/.6);
                     }
                     const visibility=(visibleAt(edge)?1:0)*(1-ease)+(visibleAt(edge+1)?1:0)*ease;
                     sampleWidth[s]=width*visibility*sizeAt()/2;
                     samplePulse[s]=(pulseAt(edge)?1:0)*(1-t)+(pulseAt(edge+1)?1:0)*t;
                     const c1=nodeColors[edge],c2=nodeColors[edge+1],r=c1.r*(1-t)+c2.r*t,g=c1.g*(1-t)+c2.g*t,b=c1.b*(1-t)+c2.b*t;
-                    for(let vertex=0;vertex<4;vertex++){const offset=(s*4+vertex)*3;colors[offset]=r;colors[offset+1]=g;colors[offset+2]=b;pulse[s*4+vertex]=samplePulse[s];conformationAlpha[s*4+vertex]=opacityAt(edge)*(1-t)+opacityAt(edge+1)*t;}
+                    for(let vertex=0;vertex<radial;vertex++){const offset=(s*radial+vertex)*3;colors[offset]=r;colors[offset+1]=g;colors[offset+2]=b;pulse[s*radial+vertex]=samplePulse[s];conformationAlpha[s*radial+vertex]=opacityAt(edge)*(1-t)+opacityAt(edge+1)*t;}
                 }
                 side.set(0,0,1);
                 for(let s=0;s<samples;s++){
@@ -15830,10 +16030,54 @@
                     side.addScaledVector(tangent,-side.dot(tangent));
                     if(side.lengthSq()<1e-8)side.set(1,0,0).addScaledVector(tangent,-tangent.x);
                     side.normalize();
-                    const width=sampleWidth[s]*.5, thickness=Math.min(.16,width*.35);
+                    const nodeIndex=Math.min(nodes.length-1,Math.round(s/steps));
+                    const type=nodes[nodeIndex].secondaryType;
+                    const arrowEdge=Math.min(nodes.length-2,Math.floor(s/steps));
+                    const inArrow=rounded && nodes[arrowEdge].secondaryType==='sheet' && nodes[arrowEdge+1].secondaryType!=='sheet' && s/steps-arrowEdge<.875;
+                    const orientationIndex=inArrow ? arrowEdge : nodeIndex;
+                    if (rounded && type==='helix') {
+                        // A helix turn spans roughly 3.6 residues. A longer
+                        // backbone chord estimates its axis without following
+                        // each turn of the trace; its projection sets the ribbon width.
+                        const edge=Math.min(nodes.length-2,Math.floor(s/steps)), t=s/steps-edge;
+                        const axisAt=i=>{
+                            let lo=i,hi=i;
+                            while(lo>0 && i-lo<2 && nodes[lo-1].secondaryType==='helix')lo--;
+                            while(hi<nodes.length-1 && hi-i<2 && nodes[hi+1].secondaryType==='helix')hi++;
+                            return [nodes[hi].x-nodes[lo].x,nodes[hi].y-nodes[lo].y,nodes[hi].z-nodes[lo].z];
+                        };
+                        const a=axisAt(edge), b=axisAt(edge+1);
+                        helixAxis.set(a[0]*(1-t)+b[0]*t,a[1]*(1-t)+b[1]*t,a[2]*(1-t)+b[2]*t);
+                        helixAxis.addScaledVector(tangent,-helixAxis.dot(tangent));
+                        if(helixAxis.lengthSq()>1e-8){
+                            helixAxis.normalize();
+                            if(helixAxis.dot(side)<0)helixAxis.negate();
+                            side.copy(helixAxis);
+                        }
+                    }
+                    if (rounded && (type==='sheet' || inArrow) && orientationIndex>0 && orientationIndex<nodes.length-1) {
+                        // The C-alpha zigzag approximates the sheet normal. The
+                        // broad direction is perpendicular to both it and the trace.
+                        const prev=nodes[orientationIndex-1], current=nodes[orientationIndex], next=nodes[orientationIndex+1];
+                        strandSide.set(prev.x+next.x-2*current.x,prev.y+next.y-2*current.y,prev.z+next.z-2*current.z);
+                        strandSide.addScaledVector(tangent,-strandSide.dot(tangent));
+                        if (strandSide.lengthSq()>1e-8) {
+                            strandSide.normalize();
+                            strandSide.crossVectors(tangent,strandSide).normalize();
+                            if(strandSide.dot(side)<0)strandSide.negate();
+                            side.lerp(strandSide,.35).normalize();
+                        }
+                    }
+                    const width=sampleWidth[s]*.5;
+                    const thickness=rounded && type!=='helix' && type!=='sheet' && !inArrow ? width : Math.min(.16,width*.35);
                     normal.set(tangent.y*side.z-tangent.z*side.y,tangent.z*side.x-tangent.x*side.z,tangent.x*side.y-tangent.y*side.x).normalize();
-                    for(let vertex=0;vertex<4;vertex++){
-                        const offset=(s*4+vertex)*3, edge=vertex%2?-1:1, face=vertex<2?1:-1;
+                    for(let vertex=0;vertex<radial;vertex++){
+                        const angle=2*Math.PI*vertex/radial;
+                        const c=Math.cos(angle), sn=Math.sin(angle), flatSheet=rounded && (type==='sheet' || inArrow);
+                        // A rounded rectangle preserves broad, flat sheet faces.
+                        const edge=rounded?(flatSheet?Math.sign(c)*Math.pow(Math.abs(c),.25):c):(vertex%2?-1:1);
+                        const face=rounded?(flatSheet?Math.sign(sn)*Math.pow(Math.abs(sn),.25):sn):(vertex<2?1:-1);
+                        const offset=(s*radial+vertex)*3;
                         positions[offset]=centers[s*3]+side.x*width*edge+normal.x*thickness*face;
                         positions[offset+1]=centers[s*3+1]+side.y*width*edge+normal.y*thickness*face;
                         positions[offset+2]=centers[s*3+2]+side.z*width*edge+normal.z*thickness*face;
@@ -15850,10 +16094,13 @@
         }
 
         function updateCartoonRepresentation() {
-            if (physicsRepresentation !== 'cartoon' || !homologyStructureVisible || !physicsNodes.length || !physicsScene) {
+            if (!['cartoon','mol-cartoon'].includes(physicsRepresentation) || !homologyStructureVisible || !physicsNodes.length || !physicsScene) {
                 if (cartoonRepresentation) for (const mesh of cartoonRepresentation.meshes) mesh.visible = false;
                 return;
             }
+            const moving=(physicsRunning && simulationPhase===2 && !modelLoading) || animationPlaying || !!draggedResidue || (!spinPaused && (allSymmetryRotationGroups().some(group=>Math.abs(group.angle||0)>1e-12) || [...singleChainRotations.values()].some(entry=>entry.overridden&&Math.abs(entry.angle||0)>1e-12)));
+            const rounded=physicsRepresentation==='mol-cartoon' && !moving;
+            if(cartoonRepresentation && cartoonRepresentation.rounded!==rounded) disposeCartoonRepresentation();
             if (!cartoonRepresentation) {
                 const meshes=[],pointIndices=[];
                 for(let start=0;start<physicsNodes.length;){
@@ -15869,7 +16116,7 @@
                             i=>isNodeVisibleInPhysics(nodes[i].node),
                             i=>isModel2Only(nodes[i].node),
                             ()=>viewerSizes.physics.backbone,
-                            i=>conformationNodeOpacity(first+i));
+                            i=>conformationNodeOpacity(first+i),rounded);
                         physicsScene.add(ribbon);meshes.push(ribbon);
                     }
                     start=end;
@@ -15891,7 +16138,7 @@
                     };
                     physicsScene.add(points);meshes.push(points);
                 }
-                cartoonRepresentation={meshes};
+                cartoonRepresentation={meshes,rounded};
             }
             for(const mesh of cartoonRepresentation.meshes){mesh.visible=true;mesh.userData.updateRibbon();}
         }
@@ -16439,8 +16686,7 @@
             }).catch(error=>{if(molecularBondJob===job){state.bondsPending=false;if(error.name!=='AbortError')reportBackgroundError(error);}});
         }
 
-        // A union of probe-expanded van der Waals spheres supplies the surface field.
-        // Marching tetrahedra extracts its boundary; atom fields are never added.
+        // Smoothly blend probe-expanded atomic fields and extract their boundary.
         function updateProbeSurface() {
             if(!homologyStructureVisible){
                 if(instancedNodeMesh)instancedNodeMesh.visible=false;
@@ -16450,7 +16696,7 @@
             if (!physicsNodes.length || !physicsScene) return;
             if (!atomRepresentation) {
                 const entries=simulationAtomEntries();
-                const balls=new THREE.Mesh(new THREE.BufferGeometry(),new THREE.MeshPhongMaterial({vertexColors:true,side:THREE.DoubleSide,shininess:12,specular:0x202428}));
+                const balls=new THREE.Mesh(new THREE.BufferGeometry(),new THREE.MeshPhongMaterial({vertexColors:true,side:THREE.DoubleSide,shininess:12,specular:0x101214}));
                 balls.frustumCulled=false;
                 balls.visible=false;
                 physicsScene.add(balls);
@@ -16459,9 +16705,10 @@
                     shader.vertexShader='attribute float conformationAlpha; varying float conformationWeight;\n'+shader.vertexShader;
                     shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nconformationWeight=conformationAlpha;');
                     shader.fragmentShader='varying float conformationWeight;\n'+shader.fragmentShader;
-                    shader.fragmentShader=shader.fragmentShader.replace('#include <color_fragment>','#include <color_fragment>\ndiffuseColor.a*=conformationWeight; if(diffuseColor.a<=0.0)discard;');
+                    shader.fragmentShader=shader.fragmentShader.replace('#include <color_fragment>','#include <color_fragment>\ndiffuseColor.rgb=mix(diffuseColor.rgb,vec3(dot(diffuseColor.rgb,vec3(.2126,.7152,.0722))),.1);\ndiffuseColor.a*=conformationWeight; if(diffuseColor.a<=0.0)discard;');
                 };
-                atomRepresentation={entries,bonds:[],balls,sticks:null,mode:'surface',pending:false,cancelled:false,ready:false};
+                const gpuSurface=!gpuSurfaceFailed && MolecularImpostors.gpu.state==='hardware' && !!physicsRenderer?.capabilities.isWebGL2 && !!THREE.DataTexture3D;
+                atomRepresentation={entries,bonds:[],balls,sticks:null,mode:'surface',pending:false,cancelled:false,ready:false,gpuSurface};
                 atomRepresentation.loadingStartedAt=performance.now();
                 document.getElementById('probeSurfaceLoading')?.classList.remove('hidden');
             }
@@ -16482,11 +16729,20 @@
                 const atomColor=physicsAtomColor(physicsColorMode,entry.source,node.res.atoms2[node.idx2],color,1);
                 atomsByChain.get(chainKey).push({x:p.x,y:p.y,z:p.z,nodeIndex:entry.nodeIndex,r:(vdw[entry.source.element]||1.7)+viewerSizes.physics.surface,c:[atomColor.r,atomColor.g,atomColor.b]});
             }
+            const surfaceRadius=viewerSizes.physics.surface;
             state.pending=true;
-            buildSeparatedProbeSurfaceGeometry([...atomsByChain.values()],()=>state.cancelled||atomRepresentation!==state||physicsRepresentation!=='surface',geometry=>{
+            const build=state.gpuSurface?buildProbeSurfaceVolume:buildSeparatedProbeSurfaceGeometry;
+            const chainCount=new Set(state.entries.map(entry=>physicsNodes[entry.nodeIndex].blockIdx)).size;
+            build([...atomsByChain.values()],()=>state.cancelled||atomRepresentation!==state||physicsRepresentation!=='surface',geometry=>{
                 state.pending=false;
-                if(state.cancelled||atomRepresentation!==state){geometry?.dispose();return;}
-                if(geometry){state.balls.dispose?.();state.balls.geometry.dispose();state.balls.geometry=geometry;state.ready=true;state.balls.visible=homologyStructureVisible;}
+                if(state.cancelled||atomRepresentation!==state){if(state.gpuSurface&&geometry)disposePhysicsSurfaceObject(geometry);else geometry?.dispose();return;}
+                if(surfaceRadius!==viewerSizes.physics.surface){if(state.gpuSurface&&geometry)disposePhysicsSurfaceObject(geometry);else geometry?.dispose();lastSurfaceUpdate=-Infinity;updateAtomRepresentation();return;}
+                if(!geometry&&state.gpuSurface){gpuSurfaceFailed=true;disposeAtomRepresentation();lastSurfaceUpdate=-Infinity;updateAtomRepresentation();return;}
+                if(geometry){
+                    if(state.gpuSurface){physicsScene.remove(state.balls);disposePhysicsSurfaceObject(state.balls);state.balls=geometry;physicsScene.add(geometry);}
+                    else {state.balls.dispose?.();state.balls.geometry.dispose();state.balls.geometry=geometry;}
+                    state.ready=true;state.balls.visible=homologyStructureVisible;
+                }
                 else { state.balls.visible=false; state.failed=true; }
                 if (!state.loadingSettled) {
                     state.loadingSettled=true;
@@ -16495,13 +16751,14 @@
                     },Math.max(0,500-(performance.now()-state.loadingStartedAt)));
                 }
                 if(instancedNodeMesh)instancedNodeMesh.visible=homologyStructureVisible&&!state.ready;
-            });
+            },chainCount>30);
         }
 
-        function buildProbeSurfaceGeometry(atoms,cancelled,finished,occlusion=0,valueBudget=6000000) {
+        function buildProbeSurfaceGeometry(atoms,cancelled,finished,occlusion=0,valueBudget=6000000,fieldOnly=false) {
             if(!atoms.length){finished(null);return;}
             let min=[Infinity,Infinity,Infinity],max=[-Infinity,-Infinity,-Infinity];
-            for(const a of atoms)for(let k=0;k<3;k++){const v=a[['x','y','z'][k]],margin=a.r+1.04;min[k]=Math.min(min[k],v-margin);max[k]=Math.max(max[k],v+margin);}
+            const blend=1.4;
+            for(const a of atoms)for(let k=0;k<3;k++){const v=a[['x','y','z'][k]],margin=a.r+blend+1.04;min[k]=Math.min(min[k],v-margin);max[k]=Math.max(max[k],v+margin);}
             const size=max.map((v,k)=>v-min[k]);
             // Sample each chain at 0.30 Å, with an adaptive budget for large chains.
             // Separate grids retain detail without spending samples between chains.
@@ -16510,25 +16767,33 @@
             while(dims.reduce((a,b)=>a*b,1)>150000){spacing*=1.15;dims=size.map(v=>Math.ceil(v/spacing)+1);}
             const [nx,ny,nz]=dims;
             const field=new Float32Array(nx*ny*nz),red=new Float32Array(field.length),green=new Float32Array(field.length),blue=new Float32Array(field.length);
-            field.fill(-spacing);
+            field.fill(-blend*2);
             const index=(x,y,z)=>(z*ny+y)*nx+x, iso=0;
             let atomIndex=0;
             function deposit(){
                 if(cancelled())return;
                 const deadline=performance.now()+8;
                 while(atomIndex<atoms.length&&performance.now()<deadline){
-                    const a=atoms[atomIndex++],reach=a.r+spacing;
+                    const a=atoms[atomIndex++],reach=a.r+blend+spacing;
                     const lo=[a.x,a.y,a.z].map((v,k)=>Math.max(0,Math.floor((v-reach-min[k])/spacing)));
                     const hi=[a.x,a.y,a.z].map((v,k)=>Math.min(dims[k]-1,Math.ceil((v+reach-min[k])/spacing)));
                     for(let z=lo[2];z<=hi[2];z++)for(let y=lo[1];y<=hi[1];y++)for(let x=lo[0];x<=hi[0];x++){
                         const dx=min[0]+x*spacing-a.x,dy=min[1]+y*spacing-a.y,dz=min[2]+z*spacing-a.z;
-                        // Union of probe-expanded van der Waals spheres, rather than additive metaballs.
                         const distance=a.r-Math.hypot(dx,dy,dz),j=index(x,y,z);
-                        if(distance<=field[j])continue;
-                        field[j]=distance;red[j]=a.c[0];green[j]=a.c[1];blue[j]=a.c[2];
+                        const previous=field[j],h=Math.max(blend-Math.abs(previous-distance),0)/blend;
+                        field[j]=Math.max(previous,distance)+h*h*blend*.25;
+                        if(distance>previous){red[j]=a.c[0];green[j]=a.c[1];blue[j]=a.c[2];}
                     }
                 }
-                if(atomIndex<atoms.length)setTimeout(deposit,0);else setTimeout(extract,0);
+                if(atomIndex<atoms.length)setTimeout(deposit,0);
+                else if(fieldOnly){
+                    const rgba=new Uint8Array(field.length*4);
+                    for(let i=0;i<field.length;i++){
+                        const j=i*4;rgba[j]=Math.round(255*Math.max(0,Math.min(1,red[i])));rgba[j+1]=Math.round(255*Math.max(0,Math.min(1,green[i])));rgba[j+2]=Math.round(255*Math.max(0,Math.min(1,blue[i])));
+                        rgba[j+3]=Math.round(255*Math.max(0,Math.min(1,.5+field[i]/(blend*4))));
+                    }
+                    finished({rgba,dims,min,spacing});
+                }else setTimeout(extract,0);
             }
             const corners=[[0,0,0],[1,0,0],[1,1,0],[0,1,0],[0,0,1],[1,0,1],[1,1,1],[0,1,1]];
             const tetra=[[0,5,1,6],[0,1,2,6],[0,2,3,6],[0,3,7,6],[0,7,4,6],[0,4,5,6]];
@@ -16617,6 +16882,98 @@
             setTimeout(deposit,0);
         }
 
+        // Ray-cast the same sampled field used for mesh export, without polygonising it.
+        function createProbeSurfaceVolume(volume) {
+            const {rgba,dims,min,spacing}=volume;
+            const gl=physicsRenderer.getContext(),maxSize=gl.getParameter(gl.MAX_3D_TEXTURE_SIZE);
+            if(dims.some(d=>d>maxSize))throw Error('Surface volume exceeds GPU texture limits');
+            const texture=new THREE.DataTexture3D(rgba,...dims);
+            texture.format=THREE.RGBAFormat;texture.type=THREE.UnsignedByteType;
+            texture.minFilter=texture.magFilter=THREE.LinearFilter;texture.unpackAlignment=1;texture.needsUpdate=true;
+            const lower=new THREE.Vector3(...min),extent=new THREE.Vector3(...dims.map(d=>(d-1)*spacing));
+            const uniforms={volume:{value:texture},lower:{value:lower},extent:{value:extent},gridSize:{value:new THREE.Vector3(...dims)},stepSize:{value:Math.max(spacing*.5,extent.length()/1000)},ortho:{value:0},cameraForward:{value:new THREE.Vector3()},sliceEnabled:{value:0},slicePlane:{value:new THREE.Vector4()},lightLevels:{value:new THREE.Vector3()},keyDirection:{value:new THREE.Vector3()},fillDirection:{value:new THREE.Vector3()}};
+            const material=new THREE.ShaderMaterial({glslVersion:THREE.GLSL3,side:THREE.BackSide,uniforms,vertexShader:`
+                out vec3 worldPosition;
+                void main(){vec4 p=modelMatrix*vec4(position,1.);worldPosition=p.xyz;gl_Position=projectionMatrix*viewMatrix*p;}
+            `,fragmentShader:`
+                precision highp float; precision highp sampler3D;
+                uniform mat4 projectionMatrix;
+                uniform sampler3D volume;uniform vec3 lower,extent,gridSize,cameraForward,lightLevels,keyDirection,fillDirection;uniform float stepSize,ortho,sliceEnabled;uniform vec4 slicePlane;
+                in vec3 worldPosition;out vec4 outputColor;
+                vec4 sampleField(vec3 p){vec3 grid=(p-lower)/extent*(gridSize-1.);return texture(volume,(grid+.5)/gridSize);}
+                void main(){
+                    vec3 rd=ortho>.5?normalize(cameraForward):normalize(worldPosition-cameraPosition);
+                    vec3 ro=ortho>.5?worldPosition-rd*length(extent)*2.:cameraPosition;
+                    vec3 inv=1./(rd+vec3(1.e-12));vec3 a=(lower-ro)*inv,b=(lower+extent-ro)*inv;
+                    float start=max(0.,max(max(min(a.x,b.x),min(a.y,b.y)),min(a.z,b.z)));
+                    float end=min(min(max(a.x,b.x),max(a.y,b.y)),max(a.z,b.z));
+                    if(end<start)discard;
+                    float previous=start;float old=sampleField(ro+rd*start).a-.5;float hit=-1.;
+                    for(int i=0;i<1024;i++){
+                        float t=min(end,start+float(i+1)*stepSize);vec3 p=ro+rd*t;float value=sampleField(p).a-.5;
+                        if(old<0.&&value>=0.){
+                            float lo=previous,hi=t;
+                            for(int j=0;j<5;j++){float mid=(lo+hi)*.5;if(sampleField(ro+rd*mid).a>=.5)hi=mid;else lo=mid;}
+                            vec3 candidate=ro+rd*hi;
+                            if(sliceEnabled<.5||dot(slicePlane.xyz,candidate)+slicePlane.w>=0.){hit=hi;break;}
+                        }
+                        previous=t;old=value;if(t>=end)break;
+                    }
+                    if(hit<0.)discard;vec3 p=ro+rd*hit;vec3 e=vec3(stepSize,0.,0.);
+                    vec3 n=normalize(-vec3(sampleField(p+e.xyy).a-sampleField(p-e.xyy).a,sampleField(p+e.yxy).a-sampleField(p-e.yxy).a,sampleField(p+e.yyx).a-sampleField(p-e.yyx).a));
+                    vec3 base=sampleField(p).rgb;base=mix(base,vec3(dot(base,vec3(.2126,.7152,.0722))),.1);
+                    float diffuse=lightLevels.x+lightLevels.y*max(0.,dot(n,keyDirection))+lightLevels.z*max(0.,dot(n,fillDirection));
+                    vec4 clip=projectionMatrix*viewMatrix*vec4(p,1.);gl_FragDepth=clip.z/clip.w*.5+.5;
+                    outputColor=vec4(base*diffuse,1.);
+                }
+            `});
+            const mesh=new THREE.Mesh(new THREE.BoxGeometry(extent.x,extent.y,extent.z),material);
+            mesh.position.copy(lower).addScaledVector(extent,.5);mesh.frustumCulled=false;mesh.userData.volumeTexture=texture;
+            mesh.onBeforeRender=(_renderer,_scene,camera)=>{
+                uniforms.ortho.value=camera.isOrthographicCamera?1:0;camera.getWorldDirection(uniforms.cameraForward.value);
+                uniforms.sliceEnabled.value=proteinSliced&&proteinSlicePlane?1:0;if(proteinSlicePlane)uniforms.slicePlane.value.set(proteinSlicePlane.normal.x,proteinSlicePlane.normal.y,proteinSlicePlane.normal.z,proteinSlicePlane.constant);
+                const settings=physicsMaterialSettings,angle=settings.azimuth*Math.PI/180,custom=physicsMaterialOverrides.has('azimuth');
+                uniforms.lightLevels.value.set(settings.ambient,settings.key,settings.fill);
+                uniforms.keyDirection.value.set(custom?Math.cos(angle)*70:50,100,custom?Math.sin(angle)*70:50).normalize();
+                uniforms.fillDirection.value.set(custom?-Math.cos(angle)*70:-50,-50,custom?-Math.sin(angle)*70:-50).normalize();
+            };
+            // Use the same volume for picking so the bounding box is never selected.
+            const box=new THREE.Box3(lower.clone(),lower.clone().add(extent));
+            function sampleAlpha(p){
+                const x=(p.x-lower.x)/spacing,y=(p.y-lower.y)/spacing,z=(p.z-lower.z)/spacing;
+                const x0=Math.max(0,Math.min(dims[0]-1,Math.floor(x))),y0=Math.max(0,Math.min(dims[1]-1,Math.floor(y))),z0=Math.max(0,Math.min(dims[2]-1,Math.floor(z)));
+                const x1=Math.min(x0+1,dims[0]-1),y1=Math.min(y0+1,dims[1]-1),z1=Math.min(z0+1,dims[2]-1);
+                const fx=Math.max(0,Math.min(1,x-x0)),fy=Math.max(0,Math.min(1,y-y0)),fz=Math.max(0,Math.min(1,z-z0));
+                let result=0;
+                for(let dz=0;dz<2;dz++)for(let dy=0;dy<2;dy++)for(let dx=0;dx<2;dx++){
+                    const ix=dx?x1:x0,iy=dy?y1:y0,iz=dz?z1:z0;
+                    result+=rgba[((iz*dims[1]+iy)*dims[0]+ix)*4+3]*(dx?fx:1-fx)*(dy?fy:1-fy)*(dz?fz:1-fz);
+                }
+                return result;
+            }
+            mesh.raycast=(raycaster,hits)=>{
+                const entry=raycaster.ray.intersectBox(box,new THREE.Vector3());if(!entry)return;
+                let t=box.containsPoint(raycaster.ray.origin)?0:raycaster.ray.origin.distanceTo(entry),point=new THREE.Vector3();
+                let previous=sampleAlpha(raycaster.ray.at(t,point));
+                for(let i=0;i<1024;i++){
+                    t+=uniforms.stepSize.value;raycaster.ray.at(t,point);if(!box.containsPoint(point))break;
+                    const value=sampleAlpha(point);
+                    if(previous<127.5&&value>=127.5&&isPhysicsPickPointVisible(point)&&t>=raycaster.near&&t<=raycaster.far){hits.push({distance:t,point:point.clone(),object:mesh});break;}
+                    previous=value;
+                }
+            };
+            return mesh;
+        }
+
+        function buildProbeSurfaceVolume(chains,cancelled,finished,combineChains=false){
+            const groups=combineChains?[chains.flat()]:chains,lane=`probe-volume:${++probeSurfaceJobId}`,controller=new AbortController();
+            const timer=setInterval(()=>{if(cancelled())controller.abort();},100);
+            runBackgroundTask(lane,[buildProbeSurfaceGeometry],{groups},async function(){const volumes=[];for(const atoms of groups){const volume=await new Promise(resolve=>buildProbeSurfaceGeometry(atoms,()=>false,resolve,0,6000000,true));if(volume)volumes.push(volume);}return volumes;},controller.signal)
+                .then(volumes=>{if(cancelled())return;const group=new THREE.Group();try{for(const volume of volumes)group.add(createProbeSurfaceVolume(volume));finished(group.children.length?group:null);}catch(error){disposePhysicsSurfaceObject(group);console.warn('GPU surface unavailable; using mesh.',error);finished(null);}})
+                .catch(error=>{if(error.name!=='AbortError'){console.warn('GPU surface unavailable; using mesh.',error);if(!cancelled())finished(null);}})
+                .finally(()=>clearInterval(timer));
+        }
+
         let probeSurfaceJobId=0;
         function buildSeparatedProbeSurfaceGeometry(chains,cancelled,finished) {
             const lane=`probe-surface:${++probeSurfaceJobId}`;
@@ -16661,7 +17018,7 @@
             }
             if (instancedNodeMesh) instancedNodeMesh.visible = homologyStructureVisible && !active && physicsNodes.length > 0;
             if (backboneLinesGroup) backboneLinesGroup.visible = homologyStructureVisible && physicsRepresentation === 'backbone' && physicsNodes.length > 0;
-            if (physicsRepresentation === 'cartoon' && instancedNodeMesh) instancedNodeMesh.visible = false;
+            if (['cartoon','mol-cartoon'].includes(physicsRepresentation) && instancedNodeMesh) instancedNodeMesh.visible = false;
             if (!active || !homologyStructureVisible || !physicsNodes.length || !physicsScene || !instancedNodeMesh) {
                 if (atomRepresentation) { atomRepresentation.balls.visible = false; if(atomRepresentation.sticks) atomRepresentation.sticks.visible = false; if(atomRepresentation.atomGlow)atomRepresentation.atomGlow.visible=false; }
                 return;
@@ -17014,7 +17371,7 @@
             while(homologyStructureVisible && state && !state.ready && !state.failed && atomRepresentation===state && Date.now()-start<120000) await new Promise(resolve=>setTimeout(resolve,100));
             if(homologyStructureVisible && (!state?.ready || atomRepresentation!==state)){showError('The surface could not be loaded for download.');return;}
             let geometry=state?.balls.geometry;
-            const rebuildWithoutHighlight=!visibleOnly || selectionOnly || ((format==='glb'||format==='obj') && selectionGlowVisible && !!linkedSelection);
+            const rebuildWithoutHighlight=!!state?.gpuSurface || !visibleOnly || selectionOnly || ((format==='glb'||format==='obj') && selectionGlowVisible && !!linkedSelection);
             if(rebuildWithoutHighlight){
                 const entries=state?.entries || simulationAtomEntries(), coords=simulationAtomCoordinates(entries,false), chains=new Map(), vdw={H:1.2,D:1.2,C:1.7,N:1.55,O:1.52,S:1.8,P:1.8,SE:1.9}, color=new THREE.Color();
                 for(let i=0;i<entries.length;i++){const entry=entries[i],node=physicsNodes[entry.nodeIndex],p=coords[i];if((selectionOnly&&!atomEntrySelected(entry))||(visibleOnly&&!isNodeVisibleInPhysics(node))||!Number.isFinite(p.x+p.y+p.z))continue;color.set(sequenceBaseColors.get(node)||'#94a3b8');const atomColor=physicsAtomColor(physicsColorMode,entry.source,node.res.atoms2[node.idx2],color,1);if(!chains.has(node.blockIdx))chains.set(node.blockIdx,[]);chains.get(node.blockIdx).push({x:p.x,y:p.y,z:p.z,nodeIndex:entry.nodeIndex,r:(vdw[entry.source.element]||1.7)+viewerSizes.physics.surface,c:[atomColor.r,atomColor.g,atomColor.b]});}
@@ -17964,7 +18321,7 @@
             const colorOptions=new Map([...physicsColorSelect.options].map(option=>[option.value,option]));
             const colorColumns=[
                 [['Main',['running-simulation','chain','chain-random','protein-id','residue-index','secondary','model-confidence','uniform']],
-                 ['Properties',['steric-clashes','side-chains','element','charge','hydrophobicity','accessible-surface-area','mutation-effect-basic','residue-speed']]],
+                 ['Properties',['backbone-issues','steric-clashes','side-chains','element','charge','hydrophobicity','accessible-surface-area','mutation-effect-basic','residue-speed']]],
                 [['Regions',['binding-sites','binding-site-type','aligned','locked','origin']],
                  ['Comparison',['rotational-symmetry','pattern-variance','equivalent-protein-shape','keyframe-difference','difference','af-difference']],
                  ['Scores',['constraint-confidence','alpha-pae','plddt','spring-strain']]],
@@ -18184,6 +18541,7 @@
             if(document.getElementById('validationReport')?.open)renderValidationReport(true);
             const button=document.getElementById('themeToggle'),icon=document.getElementById('themeToggleIcon');
             button.setAttribute('aria-pressed',String(enabled));
+            document.getElementById('mobileThemeToggle')?.setAttribute('aria-checked',String(enabled));
             button.setAttribute('aria-label',enabled?'Switch to dark mode':'Switch to light mode');
             button.title=button.getAttribute('aria-label');
             icon.className=`fa-solid fa-${enabled?'sun':'moon'}`;
@@ -19893,7 +20251,7 @@
                 const special=names.filter(([,name])=>name.includes('atp synthase gamma chain')||name.includes('atp synthase epsilon chain'));
                 settings.chainRotations=[...(settings.chainRotations||[]).filter(item=>!special.some(([block])=>block===item.block)),...(special.length&&cGroup?special.map(([block])=>({block,angle:108*Math.PI/180,axisKey:`group:${cGroup.key}`,overridden:true})):[])];
             }
-            if(entries.some(entry=>entry.id===animationActiveId))applyAnimationSettings(animationFrames[animationSelected]?.settings);
+            if(!restoredAnimationPending&&entries.some(entry=>entry.id===animationActiveId))applyAnimationSettings(animationFrames[animationSelected]?.settings);
             saveAnimation();
         }
         function refreshAutomaticSpinGeometry(entries){
@@ -21394,6 +21752,7 @@ function physicsComparisonValues(mode){
     if(mode==='keyframe-difference'){keyframeDifferenceColors();scores=keyframeDifferenceCache.scores;}
     if(mode==='mutation-effect-basic'){mutationEffectColors();scores=mutationEffectCache.scores;}
     if(mode==='accessible-surface-area'){const values=accessibleSurfaceValues();scores=physicsNodes.map((node,index)=>values.get(index)??null);}
+    if(mode==='backbone-issues')scores=calculateBackboneIssueScores(physicsNodes);
     if(mode==='steric-clashes')scores=calculateStericClashScores(physicsNodes,stericClashRadius,rigidBodySimulation);
     if(mode==='residue-speed'){updateResidueSpeeds(performance.now());scores=residueSpeedState.speeds;}
     if(mode==='binding-sites'||mode==='binding-site-type')bindingSiteColors(mode==='binding-site-type');

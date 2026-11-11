@@ -384,6 +384,15 @@ async function captureStagedDraft(state){
     MemoryData.packAtoms({chains});
     return {id:`Draft ${state.index+1} · ${state.files[state.index].pdbId}`,chains,chainIdentities,springTargets:springTargets.finish(),viewState};
 }
+function restoreStagedAlignments(state,index){
+    const saved=state.precomputedAlignments[index];
+    alignmentResults=saved.results;
+    automaticChainMatches.clear();
+    for(const [chain,match] of saved.matches)automaticChainMatches.set(chain,match);
+    globalThis.ChainMergingReport?.setAnnotations(uniProtAnnotations);
+    globalThis.ChainMergingReport?.update(alignmentResults,{modelChains:modelData2.chains,referenceChains:modelData1.chains,reference:referenceFiles.map(file=>file.pdbId).join(', '),accessionForId:uniProtAccession});
+    matrixDataVersion++;renderAlignmentTable();buildMorphMatrixBlocks();
+}
 async function startStagedDraft(index,state){
     if(state.replaying)return resumePreparedStagedDraft(index,state);
     if(state.prepareOnly)pauseBeforeFirstBuildSimulation=true;
@@ -397,6 +406,7 @@ async function startStagedDraft(index,state){
     modelData1.matrixCache.clear();modelData2.matrixCache.clear();selectedPairKey=null;editedChainMatches.clear();
     populateChainSelectors();
     if(state.directReferences){modelData2.chains=modelData1.chains;modelData2.caAtoms=modelData1.caAtoms;setDirectReferenceAlignments(modelData1.chains);}
+    else if(state.precomputedAlignments?.[index])restoreStagedAlignments(state,index);
     else if(!await computeAllChainAlignments()||state!==multiReferenceBuild)return;
     await initPhysicsSimulation();resetPhysicsGraphHistory();renderChainLegends();resetCanvasViews();drawIndividualMatrices();drawDifferenceMatrix();drawMorphMatrix();
     modelLoading=false;state.busy=false;readyModelGeneration=state.generation;hidePhysicsViewerLoading();
@@ -605,8 +615,8 @@ function disposeStagedPreview(){
 function addStagedDraftGeometry(object,points,colors,lifecycle,render,colorMode=physicsColorMode){
     if(!points.length)return;
     const mode=physicsRepresentation,polymer=points[0].entityType!=='other';
-    if(mode==='cartoon'&&polymer&&points.length>1){
-        const ribbon=createCartoonRibbon(points,(i,target)=>target.copy(colors[i]),()=>true,()=>false,()=>viewerSizes.physics.backbone);
+    if(['cartoon','mol-cartoon'].includes(mode)&&polymer&&points.length>1){
+        const ribbon=createCartoonRibbon(points,(i,target)=>target.copy(colors[i]),()=>true,()=>false,()=>viewerSizes.physics.backbone,()=>1,mode==='mol-cartoon');
         object.add(ribbon);return;
     }
     if(mode==='curves'&&polymer&&points.length>1){
@@ -943,6 +953,7 @@ window.setAnimationDraftGroups=async(generation,groups)=>{
         state.groupAnimation=null;
     }
     state.conformationGroups=next;state.groupPoses=poses;activeConformationGroup=0;
+    if(state.precomputedAlignments)renderSequenceCoverage(state.files,state.precomputedAlignments.map(item=>item.coverage));
     renderStagedBuildControls();renderConformationGroupPill();
     if(next.length>1)await createGroupedConformationAnimation();
     return state===multiReferenceBuild&&generation===modelBuildGeneration&&(next.length<2||Boolean(state.groupAnimation));

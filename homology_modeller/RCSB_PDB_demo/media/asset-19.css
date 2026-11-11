@@ -1,0 +1,897 @@
+.break {
+    word-wrap: break-word;
+    word-break: break-all;
+}
+
+.break-macromolecule a {
+    word-wrap: break-word;
+    word-break: break-all;
+}
+
+
+
+/* qb select */
+select.search {
+    width: auto;
+}
+
+.stBtn {
+    background-color: #fff;
+}
+
+.stBtn:hover {
+    background-color: var(--gray1);
+}
+
+.btn[disabled] {
+    opacity: .5;
+}
+
+/* set position: relative so that #data-loading can be absolute  */
+#app {
+    position: relative;
+}
+
+/* #search-container {
+    margin: -10px;
+    padding: 0;
+} */
+
+
+#search-bar-container input:focus,
+#search-container input:focus,
+#search-container textarea:focus,
+#search-container select:focus {
+    outline: 0;
+}
+
+#search-bar-container input::placeholder,
+#search-container input::placeholder,
+#search-container textarea::placeholder {
+    color: #888;
+    /* font-style: italic; */
+}
+
+#search-bar-input-text.form-control {
+    border-color: var(--gray5);
+}
+
+.err-msg {
+    color: #f00;
+}
+
+.info {
+    color: #888
+}
+
+.gray {
+    color: #aaa;
+}
+
+.td-nowrap {
+    white-space: nowrap;
+}
+
+
+#html {
+    word-wrap: break-word;
+    word-break: break-all;
+}
+
+/* data-loading ********** */
+#data-loading {
+    position: fixed;
+    width: 400px;
+    height: 40px;
+    z-index: 1000;
+}
+
+#data-loading>div {
+    display: inline-block;
+    width: 400px;
+}
+
+#data-loading>div>div {
+    width: 100%;
+    height: 40px;
+}
+
+#data-loading .progress {
+    height: 40px;
+}
+
+#data-loading .progress-bar {
+    line-height: 40px;
+}
+
+/* END data-loading ********** */
+
+
+/* search bar ********** */
+#search-bar-container {
+    text-align: left;
+}
+
+.search-bar #search-bar-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.search-bar #search-bar-table>tbody>tr>td {
+    padding: 0;
+}
+
+.search-bar #search-bar-table,
+.search-bar #search-bar-table table,
+.search-bar #search-bar-table th,
+.search-bar #search-bar-table td {
+    border: none;
+}
+
+#search-bar-input {
+    width: 100%;
+    position: relative;
+}
+
+#search-bar-input-text {
+    padding: 0 10px;
+    height: 50px;
+    width: 100%;
+    border: 1px solid #ccc;
+    border-right: none;
+    border-top-left-radius: 4px;
+    border-bottom-left-radius: 4px;
+}
+
+#search-icon {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 50px;
+    height: 50px;
+    color: #fff;
+    background-color: var(--brand);
+    font-size: 22px;
+    border-top-right-radius: 5px;
+    border-bottom-right-radius: 5px;
+    cursor: pointer;
+}
+
+#search-icon:hover {
+    background-color: var(--brand-darker);
+}
+
+#search-icon .search-btn {
+    color: #fff;
+}
+
+#search-icon .search-btn.search-control {
+    color: #0f0;
+}
+
+#search-bar-menu {
+    position: absolute;
+    top: 49px;
+    z-index: 1050;
+    background-color: white;
+    border: 1px solid #aaa;
+    max-height: 330px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: auto;
+    box-shadow: 0px 10px 10px rgba(0, 0, 0, 0.2);
+    width: 100%;
+    cursor: pointer;
+    /* overflow: visible; */
+}
+
+#search-bar-menu .attribute,
+#search-bar-menu .value,
+#search-bar-menu .value-selected {
+    font-size: 12px;
+    padding: 2px 4px;
+    border-bottom: 1px solid #eee;
+}
+
+#search-bar-menu .attribute {
+    font-style: italic;
+    background-color: rgba(0, 0, 0, 0.04);
+}
+
+#search-bar-menu .value,
+#search-bar-menu .value-selected {
+    padding-left: 15px;
+}
+
+#search-bar-menu .value:hover {
+    color: #fff;
+    background-color: var(--logo);
+}
+
+#search-bar-menu .value-selected {
+    color: #fff;
+    background-color: var(--logo-lighter);
+}
+
+#search-bar-menu em {
+    font-weight: bold;
+    font-style: normal;
+}
+
+/* #search-bar-links td {
+    font-size: 12px;
+    padding: 5px 0;
+}
+
+#search-bar-links a {
+    cursor: pointer;
+}
+
+#search-bar-links .glyphicon {
+    font-size: 0.9em;
+}
+
+#search-bar-links div {
+    width: 50px;
+    text-align: right;
+} */
+
+/* replaced rgba definitions with solid colors so as to hide background graphic */
+.search-option {
+    background-color: #eee;
+}
+
+.search-option:hover {
+    background-color: #e8e8e8;
+}
+
+/* END search bar ********** */
+
+/* btn-search ********** */
+.btn-search {
+    height: 30px;
+}
+
+/* END btn-search ********** */
+
+span.sequence-wrap {
+    word-wrap: break-word;
+    word-break: break-all;
+}
+
+
+
+.qb-btn {
+    background-color: rgba(255, 255, 255, 0.5);
+}
+
+.qb-btn:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+/* qb terminal selector ********** */
+.selector-item-selected,
+.selector-item:hover {
+    background-color: #f8f8f8;
+}
+
+
+
+/* calendar widget overrides ********** */
+.input-group {
+    width: 100%;
+}
+
+.input-group-addon {
+    border: none;
+    cursor: default;
+    padding: 0;
+    width: 0;
+    margin: 0;
+}
+
+
+
+/* END calendar widget overrides ********** */
+
+/* Terminal Input */
+.Terminal.Component .Terminal_inputContainer .input-menu-container {
+    width: 100%;
+}
+
+.Terminal.Component .Terminal_inputContainer .input-menu-text,
+.Terminal.Component .Terminal_inputContainer input[type=text] {
+    min-width: 302px;
+}
+
+@media(max-width: 991px) {
+    .Terminal.Component>* {
+        margin-bottom: 2px;
+    }
+
+    .Terminal.Component .Terminal_inputContainer {
+        width: auto;
+    }
+}
+
+/* END Terminal Input */
+/* END qb terminal inputs ********** */
+
+/* menu ********** */
+.input-menu-container {
+    position: relative;
+    display: inline-block;
+}
+
+.input-menu-text {
+    width: 100%;
+    border: none;
+    height: 26px;
+    padding: 0;
+}
+
+.input-menu {
+    position: absolute;
+    /*width: 100%; note: set width using menuStyle in parent component */
+    top: 40px;
+    max-height: 330px;
+    /* 15 entries */
+    z-index: 1000;
+    background-color: white;
+    border: 1px solid #aaa;
+    overflow-y: auto;
+    font-size: 12px;
+    box-shadow: 0px 10px 10px rgba(0, 0, 0, 0.2);
+}
+
+.input-menu div {
+    overflow-x: hidden;
+    white-space: nowrap;
+    padding: 5px 10px;
+    font-size: 14px;
+}
+
+.input-menu div:last-child {
+    border-bottom: none;
+}
+
+.input-menu div:hover,
+.input-menu div:hover b {
+    background-color: #eee;
+}
+
+.input-menu div.selected,
+.input-menu div.selected b {}
+
+.input-menu em {
+    font-weight: bold;
+    font-style: normal;
+}
+
+/* END menu ********** */
+/* END qb terminal ********** */
+/* END query builder ********** */
+
+#search-summary tr {
+    vertical-align: middle;
+}
+
+#search-summary td {
+    font-size: 12px;
+}
+
+#search-summary td:nth-child(1) {
+    white-space: nowrap;
+    padding-right: 8px;
+}
+
+#search-summary td:nth-child(2) {
+    font-size: 12px;
+    padding: 0px 8px;
+    border-left: 1px solid #ddd;
+}
+
+/* refinements ********** */
+
+
+div.refinement {
+    padding: 10px 4px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+div.refinement:last-child {
+    border-bottom: none;
+}
+
+div.refinement h5 {
+    color: #666;
+    font-weight: bold;
+}
+
+div.refinement table {
+    margin-top: 10px;
+    width: 100%;
+    word-wrap: break-word;
+    table-layout: fixed;
+}
+
+div.refinement table>tbody>tr>td:first-child {
+    width: 18px;
+}
+
+div.refinement .more {
+    text-indent: 18px;
+    color: #337ab7;
+    cursor: pointer;
+}
+
+div.refinement label,
+div.refinement input {
+    font-weight: 400;
+    cursor: pointer
+}
+
+
+/* END refinements ********** */
+
+/* results ********** */
+.results-item {
+    margin-right: 0px;
+    margin-left: 0px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+    padding: 10px 0;
+}
+
+.results-item:last-child {
+    border: none;
+}
+
+.results-item-info {
+    padding: 0 0 0 10px;
+}
+
+.results-item-row {
+    margin: 0
+}
+
+.center-content {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+    /* Or set to the height you prefer */
+}
+
+.results-item-img {
+    padding-left: 0;
+    position: relative;
+}
+
+.results-item-img>.group-img-indicator {
+    position: absolute;
+    top: 4px;
+    right: 15px;
+}
+
+.results-item-img>.group-img-indicator>span {
+    transform: rotate(90deg);
+}
+
+table.results-item-header {
+    width: 100%;
+}
+
+table.results-item-data td:first-child {
+    padding: 1px 20px 1px 0;
+    font-weight: bold;
+    white-space: nowrap;
+}
+
+table.results-item-data td:last-child {
+    padding: 1px 0;
+}
+
+table.results-item-data div {
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+table.results-item-data div:last-child {
+    border: none;
+}
+
+.id_divider {
+    color: #ddd;
+    font-weight: 200;
+    padding: 0 15px 0 15px;
+}
+
+/* https://stackoverflow.com/questions/1236148/html-css-how-to-stop-a-table-cell-from-expanding */
+.no-break-out {
+    /* These are technically the same, but use both */
+    overflow-wrap: break-word;
+    word-wrap: break-word;
+
+    -ms-word-break: break-all;
+    /* This is the dangerous one in WebKit, as it breaks things wherever */
+    word-break: break-all;
+    /* Instead use this non-standard one: */
+    word-break: break-word;
+
+    /* Adds a hyphen where the word breaks, if supported (No Blink) */
+    -ms-hyphens: auto;
+    -moz-hyphens: auto;
+    -webkit-hyphens: auto;
+    hyphens: auto;
+}
+
+/* gallery-view ********** */
+#gallery-items {
+    border-collapse: collapse;
+    width: 100%;
+}
+
+.gallery-item {
+    border: 1px solid #eee;
+}
+
+.gallery-item>div {
+    position: relative;
+    padding: 4px;
+}
+
+.gallery-item>div>table {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+}
+
+.gallery-item>div>table td {
+    padding: 4px;
+}
+
+.gallery-item>div>table td.identifier {
+    width: 100%;
+}
+
+.gallery-item-img {
+    margin: auto;
+    max-height: 215px;
+}
+
+/* END gallery-view ********** */
+
+/* compact-view ********** */
+#compact-view {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+#compact-view th {
+    font-weight: bold;
+}
+
+#compact-view th,
+#compact-view td {
+    padding: 2px 4px;
+}
+
+#compact-view td {
+    border-top: 1px solid #ddd;
+}
+
+#compact-view tr:nth-child(even) {
+    background-color: #f8f8f8;
+}
+
+/* END compact-view ********** */
+
+/* END results ********** */
+
+/* tree-browser ********** */
+.btn-tree-browse {
+    color: #fff;
+    background-color: #6493c2;
+    border-color: #6493c2;
+}
+
+.btn-tree-browse-all {
+    margin-bottom: 4px;
+}
+
+.tree-node,
+.tree-node-selected {
+    border-bottom: 1px dotted #ddd;
+    padding: 2px 4px;
+}
+
+.tree-node-selected {
+    color: #fff;
+    background-color: #6493c2;
+}
+
+.tree-node-selected a {
+    color: #cdf;
+}
+
+#tree-browse .glyphicon {
+    margin-right: 5px;
+    font-size: 10px;
+    top: 0px;
+}
+
+.tree-browse-header,
+.tree-browse-header-external {
+    padding: 8px;
+    font-weight: bold;
+    border-radius: 4px;
+}
+
+.tree-browse-header {
+    background-color: #6493c2;
+    color: #fff;
+}
+
+.tree-browse-header-external {
+    background-color: #ffa420;
+}
+
+.tree-browser-link {
+    cursor: pointer;
+}
+
+#tree {
+    font-size: 12px;
+}
+
+.go-footer {
+    font-size: 12px;
+
+}
+
+
+
+.TreeSearchBar.Component {
+    width: 100%;
+    max-width: 355px;
+}
+
+/* END tree-browser ********** */
+
+
+/* tabular reports ********** */
+table.tabular-report {
+    max-width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+table.tabular-report th {
+    font-weight: bold;
+    background-color: #eee;
+}
+
+table.tabular-report th,
+table.tabular-report td {
+    padding: 2px 4px;
+    border: 1px solid #ddd;
+}
+
+table.tabular-report th.tabular-report-core {
+    font-weight: normal;
+    background-color: rgb(94, 105, 115);
+    color: #fff;
+    text-align: center;
+}
+
+table.tabular-report td {
+    padding: 2px 4px;
+    border: 1px solid #ddd;
+}
+
+table.tabular-report tr.even {
+    background-color: #f8f8f8;
+}
+
+table.tabular-report tr.odd {
+    background-color: #fff;
+}
+
+td.tabular-report-ligand-image img {
+    min-width: 100px;
+}
+
+td.tabular-report-oligosaccharide-image img {
+    min-width: 300px;
+}
+
+td.nowrap {
+    white-space: nowrap;
+}
+
+td.break {
+    word-wrap: break-word;
+    word-break: break-all;
+}
+
+/* END tabular reports ********** */
+
+.mypdb-logo {
+    margin-right: 5px;
+}
+
+.help-page img {
+    border: 1px solid #ddd;
+}
+
+.search-help-menu:hover {
+    cursor: pointer;
+    background-color: #f8f8f8;
+}
+
+#search-help-content hr {
+    margin: 20px 0;
+}
+
+table.help-attribute-details {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+table.help-attribute-details tr {
+    border-top: 1px solid #ddd;
+}
+
+table.help-attribute-details tr:first-child {
+    border: none;
+}
+
+table.help-attribute-details td {
+    padding: 2px 4px;
+}
+
+table.help-attribute-details td:first-child {
+    white-space: nowrap;
+    width: 150px;
+}
+
+table.help-attribute-details td.nested {
+    padding-left: 30px;
+}
+
+div.help-attribute-details-example {
+    border-top: 1px dotted #ddd;
+}
+
+div.help-attribute-details-example:first-child {
+    border: none;
+}
+
+.ellipsis-container {
+    display: table;
+    table-layout: fixed;
+    width: 100%;
+}
+
+.ellipsis {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: table-cell;
+}
+
+table.search-tooltip-html {
+    width: 100%;
+}
+
+table.search-tooltip-html td {
+    padding: 2px 0;
+}
+
+table.search-tooltip-html td:last-child {
+    padding: 2px 0 2px 8px;
+}
+
+table.search-tooltip-html div.ex {
+    border-bottom: 1px dotted #888;
+}
+
+table.search-tooltip-html div.ex:last-child {
+    border-bottom: none;
+}
+
+table.custom-report-cores {
+    width: 100%;
+}
+
+table.custom-report-cores td.core {
+    width: 25%;
+}
+
+table.custom-report-cores td.space {
+    width: 10px;
+}
+
+/* for external link btn - copied from staticpages.css - TODO this should be moved to build file */
+.label-external {
+    background-color: #DB9128;
+    font-weight: normal;
+    font-size: 12px;
+}
+
+/*override for bootstrap padding*/
+.label {
+    padding: .3em .6em;
+}
+
+.label-external a {
+    color: #ffffff;
+}
+
+/* dev only */
+#dev-tools {
+    font-size: 12px;
+    margin-top: -15px;
+}
+
+#dev-tools pre {
+    word-wrap: break-word;
+    word-break: break-all;
+}
+
+pre#state {
+    background-color: #fff;
+}
+
+/* obj */
+table.obj {
+    border-collapse: collapse;
+    font-size: 12px;
+
+}
+
+table.obj tbody.tbody {
+    display: none;
+}
+
+table.obj tr th {
+    font-weight: bold;
+    white-space: nowrap;
+}
+
+table.obj tr th.object {
+    background-color: #ddf;
+}
+
+table.obj tr th.array {
+    background-color: #dfd;
+}
+
+table.obj tr th,
+table.obj tr td {
+    padding: 2px 4px;
+    border: 1px solid #ccc;
+}
+
+/* END obj */
+
+/* editQuery - dev only */
+#edit-query {
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 4px;
+    padding: 10px;
+    background-color: rgba(0, 0, 0, 0.08);
+}
+
+#edit-query-text {
+    width: 100%;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    padding: 5px;
+    font-size: 14px;
+
+    font-family: monospace;
+}
+
+/* END editQuery - dev only */
+
+/* END dev only */
