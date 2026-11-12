@@ -64,7 +64,7 @@ handle.addEventListener('pointerdown', event => {
   const stop = () => { handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', stop); handle.removeEventListener('pointercancel', stop); };
   handle.addEventListener('pointermove', move); handle.addEventListener('pointerup', stop); handle.addEventListener('pointercancel', stop);
 });
-loadReference('6K73');
+loadReference('2D9Q');
 function confidenceCounts(residues) {
   const counts = [0, 0, 0, 0, 0];
   for (const {plddt} of residues) {
@@ -141,7 +141,7 @@ function showResidueSummary(residues, pdbId, sequenceResidues, usedSequenceFallb
   residueSummary.append(title);
   const note = document.createElement('p');
   note.className = 'note';
-  note.textContent = `Added residues refer to those not in ${pdbId}. The AlphaFold predictions for each protein present in ${pdbId} were fetched from the AlphaFold database${usedSequenceFallback ? " (the protein sequences from UniProt were used instead if no AlphaFold predictions were available)" : ""}. The AlphaFold predictions were structurally aligned with their respective proteins in ${pdbId} and any AlphaFold residues present in ${pdbId} were locked onto their ${pdbId} coordinates. AlphaFold residues missing from ${pdbId} were then iteratively moved to try to fix backbone distance issues and steric clashes. The result was then loaded into the 3D viewer. The chain breakdown below shows the AlphaFold pLDDT scores of the added residues; unavailable scores are counted separately.`;
+  note.textContent = `The structure of the added residues is based on AlphaFold predictions. The AlphaFold predictions for each protein present in ${pdbId} were fetched from the AlphaFold database${usedSequenceFallback ? " (the protein sequences from UniProt were used instead if no AlphaFold predictions were available)" : ""}. The AlphaFold predictions were structurally aligned with their respective proteins in ${pdbId} and any AlphaFold residues present in ${pdbId} were locked onto their ${pdbId} coordinates. AlphaFold residues missing from ${pdbId} were then iteratively moved to try to fix backbone distance issues and steric clashes. The result was then loaded into the 3D viewer. The chain breakdown below shows the AlphaFold pLDDT scores of the added residues (higher score means AlphaFold has higher confidence that the structure is accurate).`;
   residueSummary.append(note);
   const details = document.createElement('div');
   const chains = new Map();

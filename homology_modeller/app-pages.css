@@ -18,7 +18,7 @@ body > header { flex-shrink:0; }
 .menu-open .app-page-shadow::after { opacity:1; }
 body:not(.light-mode) .app-page-shadow { box-shadow:0 2px 8px #0003; }
 body:not(.light-mode) .app-page-shadow::after { box-shadow:0 8px 28px #0009; }
-.app-menu-toggle { position:absolute; top:1rem; left:1rem; z-index:100; width:2.8rem; height:2.8rem; border:1px solid #475569; border-radius:50%; background:#1e293b; color:#f8fafc; cursor:pointer; }
+.app-menu-toggle { position:absolute; top:1rem; left:1rem; z-index:100; width:2.8rem; height:2.8rem; border:0; border-radius:50%; background:#334155; color:#f8fafc; cursor:pointer; }
 .app-page-content { height:100%; overflow:auto; padding:4.5rem 4.2rem 1rem; }
 .app-page > * + * { margin-top:1rem; }
 .app-page-content:has(.app-page[data-page="3"]:not([hidden])) { padding-top:1rem; }
@@ -29,7 +29,7 @@ body:not(.light-mode) .app-page-shadow::after { box-shadow:0 8px 28px #0009; }
 .physics-page .app-physics-viewer { flex-basis:58%; opacity:1; pointer-events:auto; }
 .app-physics-viewer #physicsContainer { height:100%; border:0; border-radius:1rem; }
 .app-page #homologyPhysicsSimulation { margin:0; background:transparent; }
-body.light-mode .app-menu-toggle { background:#f8fafc; border-color:#cbd5e1; color:#1e293b; }
+body.light-mode .app-menu-toggle { background:#e2e8f0; color:#1e293b; }
 body.light-mode .app-shell { background:#f1f5f9; }
 body.light-mode .app-page-layer { background:#f8fafc; }
 body.light-mode .app-page-menu { color:#0f172a; }
@@ -116,11 +116,12 @@ body:not(.light-mode) .app-physics-viewer #physicsContainer { background:#01030a
 /* Keep the simulation controls beneath the menu button and closer to the edges. */
 .app-page-content:has(.app-page[data-page="3"]:not([hidden])) { padding:4.5rem 1rem 1rem; }
 #aboutProteinComplex, body.light-mode #aboutProteinComplex { background:transparent; }
-#aboutProteinComplex > h2 { font-size:1.4rem; line-height:1.4; padding-top:1.1rem; }
+#aboutProteinComplex > h2 { font-size:1.4rem; line-height:1.4; padding:1.1rem .75rem .75rem; }
 body.light-mode #aboutProteinComplex > h2 { color:#172033; }
-#aboutProteinComplex .complex-ai, body.light-mode #aboutProteinComplex .complex-ai { margin:1rem 1.25rem; padding:0; border:0; border-radius:0; background:transparent; }
+#aboutProteinComplex .complex-ai, body.light-mode #aboutProteinComplex .complex-ai { margin:1rem .75rem; padding:0; border:0; border-radius:0; background:transparent; }
 .complex-ai-motion-overview { margin-top:.75rem; }
-#uniProtInfoDisclosure > summary { display:flex; align-items:center; justify-content:flex-start; gap:.5rem; padding:.75rem 1.25rem; font-weight:600; cursor:pointer; list-style:none; }
+#uniProtInfoDisclosure > summary { display:flex; align-items:center; justify-content:flex-start; gap:.5rem; padding:.75rem; font-weight:600; cursor:pointer; list-style:none; }
+#aboutProteinComplexContent { padding-left:.75rem; padding-right:.75rem; }
 #uniProtInfoDisclosure > summary::-webkit-details-marker { display:none; }
 #uniProtInfoDisclosure[open] > summary > i, #aboutProteinComplexContent details[open] > summary .uniprot-annotations-chevron { transform:rotate(180deg); }
 #aboutProteinComplexContent .uniprot-annotations-chevron { margin-left:.25rem; transition:transform .15s ease; }
@@ -133,6 +134,7 @@ body.light-mode #probeSurfaceLoading { background:rgba(248,250,252,.95); border-
 #physicsSelectionInfo { box-shadow:0 4px 16px #0003; }
 #physicsSelectionInfo .selection-glow-button { color:#422006; }
 #homologyPhysicsSimulation > #createAnimationBtn { display:flex; align-items:center; gap:.5rem; width:100%; padding:.75rem 1.25rem; border:0; border-bottom:1px solid #1e293b; border-radius:0; background:rgba(15,23,42,.9); color:#fff; font-size:.875rem; font-weight:600; text-align:left; }
+#homologyPhysicsSimulation > :is(#createAnimationBtn,#physicsVisibilityButton,#physicsLightingButton,#physicsMembraneDetailsButton,#physicsOtherSettingsButton) { padding-top:.55rem; padding-bottom:.55rem; border-top:0; }
 #homologyPhysicsSimulation > #createAnimationBtn:hover { background:#1e293b; }
 #homologyPhysicsSimulation > #createAnimationBtn > .fa-film { color:#34d399; }
 #homologyPhysicsSimulation > #createAnimationBtn > .animation-editor-chevron { margin-left:auto; transition:transform .15s ease; }
@@ -218,7 +220,7 @@ body.light-mode #physicsWebGLStatus:not([hidden]) { background:#e2e8f0; color:#1
  .physics-page.mobile-sheet-dragging .app-page-layer { transition:none; }
  .physics-page .app-page-content:has(.app-page[data-page="3"]:not([hidden])) { padding:.5rem .75rem 1rem; }
  .physics-page #homologyPhysicsSimulation > #aboutProteinComplex { order:-1; border-top:0; }
- .physics-page #aboutProteinComplex > h2 { display:flex; align-items:center; gap:.6rem; cursor:ns-resize; touch-action:none; user-select:none; padding:1rem .5rem .75rem; }
+ .physics-page #aboutProteinComplex > h2 { display:flex; align-items:center; gap:.6rem; cursor:ns-resize; touch-action:none; user-select:none; padding:1rem .75rem .75rem; }
  .physics-page #aboutProteinComplex > h2::after { content:""; flex:none; width:.55rem; height:.55rem; border-right:2px solid currentColor; border-bottom:2px solid currentColor; transform:rotate(45deg) translateY(-.15rem); }
  .physics-page .mobile-sheet-handle { display:block; position:absolute; z-index:6; top:0; left:0; right:0; height:14px; cursor:ns-resize; touch-action:none; }
  .physics-page .mobile-sheet-handle::after { content:""; display:block; width:2.5rem; height:4px; margin:5px auto 0; border-radius:999px; background:#64748b; }
@@ -545,3 +547,11 @@ body.light-mode .model-overview .overview-binding-summary-total { color:#334155;
 body.light-mode .model-overview .overview-binding-summary-total strong,body.light-mode .model-overview .overview-binding-summary-list li strong { color:#0369a1; }
 body.light-mode .model-overview .overview-binding-summary-categories span { background:#dbeafe; color:#075985; }
 body.light-mode .model-overview .overview-binding-summary-list li { border-color:#cbd5e180; }
+
+.viewer-model-actions { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem; padding:.25rem 1.25rem 1rem .75rem; }
+body:not(.awaiting-model-refinement) #homologyPhysicsSimulation:has(#groupSimulationStatus:not([style*="display: none"])) .viewer-model-actions { padding-top:1rem; }
+.viewer-model-action { display:inline-flex; align-items:center; gap:.4rem; padding:.375rem .625rem; border:0; border-radius:.6rem; background:#7c3aed; color:#fff; font-size:.75rem; line-height:1rem; font-weight:600; cursor:pointer; }
+#complexAiRefresh { font-size:.75rem; line-height:1rem; }
+.viewer-model-action:hover { background:#6d28d9; }
+body.light-mode .viewer-model-action, body.light-mode .viewer-model-action:hover { background:#8849ee; color:#fff; }
+body.awaiting-model-refinement #groupSimulationStatus { display:none !important; }

@@ -233,6 +233,7 @@
     window.DeveloperLog?.mount();
     const mobileSheet=window.createMobilePhysicsSheet({main,layer,burger,viewer:viewerBox,content,heading:document.querySelector('#aboutProteinComplex > h2'),chatInput:document.getElementById('complexAiQuestion')});
     let current = 1, overviewScrollTop = 0;
+    document.getElementById('viewerModelOverview').addEventListener('click', () => navigate(12));
     const buttons = menuItems.map(([number, label, icon]) => {
         const button = document.createElement('button'); button.type = 'button';
         button.innerHTML = `<i class="fa-solid ${icon}" aria-hidden="true"></i><span>${label}</span>`;

@@ -153,6 +153,7 @@ function mergeDraftModels(assembly,drafts,weights,allowed=null,unionOnly=false){
             const atom={...exemplar,...point,chainId:group.key,groupKey:group.key,resSeq:index+1,
                 afResSeq:exemplar.afResSeq??exemplar.resSeq,fileIndex:exemplar.afFileIndex??exemplar.fileIndex,
                 sourcePdbId:exemplar.afSourcePdbId??exemplar.sourcePdbId,sourceAtoms:(exemplar.sourceAtoms||[]).map(source=>({...source,x:source.x+point.x-exemplar.x,y:source.y+point.y-exemplar.y,z:source.z+point.z-exemplar.z})),
+                alignmentEvidence:Math.max(...items.map(item=>item.atom.alignmentEvidence??0)),
                 draftOrigins:items.map(item=>({draft:item.draft,resSeq:item.atom.resSeq,node:item.atom.draftNodeIndex})),mergedNodeIndex:nodeInfo.length};
             items.forEach(item=>nodeMaps[item.draft].set(item.atom.draftNodeIndex,atom.mergedNodeIndex));
             nodeInfo.push({chain:group.key,atom});return atom;
@@ -346,6 +347,15 @@ function buildStagedFullNetwork(input,state){
         worker.postMessage({command:'buildSprings',input,returnInput:true,revision:1,cutoff:springCutoffVal,influences:referenceInfluences.slice(),culling:springCullingSettings()},MemoryData.buffers(input));
     });
 }
+function draftAlignmentEvidence(node){
+    if(!node.usedInAlignment)return 0;
+    const reference=node.idx1!=null?node.res.atoms1[node.idx1]:null;
+    const target=node.idx2!=null?node.res.atoms2[node.idx2]:null;
+    const refCode=reference?.singleChar?.toUpperCase(),targetCode=target?.singleChar?.toUpperCase();
+    if(refCode&&targetCode&&refCode===targetCode)return 3;
+    if(refCode&&targetCode&&reference?.entityType!=='nucleotide'&&target?.entityType!=='nucleotide'&&isSimilarAA(refCode,targetCode))return 2;
+    return 1;
+}
 async function captureStagedDraft(state){
     const entries=simulationAtomEntries(),coordinates=simulationAtomCoordinates(entries,false),fullAtoms=physicsNodes.map(()=>[]);
     entries.forEach((entry,index)=>fullAtoms[entry.nodeIndex].push({...entry.source,...coordinates[index]}));
@@ -355,6 +365,10 @@ async function captureStagedDraft(state){
         if(!chains[chain])chains[chain]=[];
         if(!chainIdentities[chain]){
             const ids=new Set(),names=new Set(),addName=value=>{if(value?.trim())names.add(value.trim().toLowerCase().replace(/\s+/g,' '));};
+            let target=node.res.c2;
+            const seenAliases=new Set();
+            while(target&&state.bridgeProteinAliases?.has(target)&&!seenAliases.has(target)){seenAliases.add(target);target=state.bridgeProteinAliases.get(target);}
+            if(target&&state.bridgeProteinAliases?.size)ids.add(`BRIDGE:${target}`);
             const accession=uniProtAccession(original.sourcePdbId||'');
             if(accession){ids.add(accession);const annotation=uniProtAnnotations.get(accession);addName(annotation?.name);
                 for(const gene of annotation?.raw?.genes||[])addName(gene.geneName?.value);}
@@ -367,7 +381,7 @@ async function captureStagedDraft(state){
             }
             chainIdentities[chain]={ids:[...ids],names:[...names]};
         }
-        chains[chain].push({...original,x:node.x,y:node.y,z:node.z,sourceAtoms:fullAtoms[index],draftNodeIndex:index,
+        chains[chain].push({...original,x:node.x,y:node.y,z:node.z,sourceAtoms:fullAtoms[index],draftNodeIndex:index,alignmentEvidence:draftAlignmentEvidence(node),
             afResSeq:original.resSeq,afFileIndex:original.fileIndex,afSourcePdbId:original.sourcePdbId});
     });
     const viewState={groupSimulation,occlusion:Float32Array.from(physicsOcclusionFactors),residueSpeeds:residueSpeedState.speeds.slice(),residueSpeedScale:residueSpeedState.scale,nodes:physicsNodes,alignments:alignmentResults,blocks:morphMatrixBlocks,springs:physicsSprings,positions:physicsPositions,offset:{...physicsCenterOffset},
@@ -864,8 +878,10 @@ function updateStagedBuildETC(now,force=false){
 function applyGroupFramePresence(a,b,t){
     if(!a.groupPresence&&!b.groupPresence){conformationNodePresence=null;activeConformationGroup=null;return;}
     conformationNodePresence=physicsNodes.map((_,i)=>{const from=a.groupPresence?.[i]??1,to=b.groupPresence?.[i]??1;return from+(to-from)*t;});
+    const previousGroup=activeConformationGroup;
     activeConformationGroup=t<.5?a.conformationGroup:b.conformationGroup;
     updateConformationGroupPill();
+    if(previousGroup!==activeConformationGroup&&physicsColorMode==='aligned')updatePhysicsNodeColors();
 }
 function updateConformationGroupPill(){
     const host=document.getElementById('conformationGroupPill');if(!host)return;
@@ -913,6 +929,7 @@ function selectConformationGroup(index){
     const morph=conformationSelectionMorph={resumePhysics:physicsRunning,request:0,start:null};
     physicsRunning=false;
     activeConformationGroup=index;updateConformationGroupPill();
+    if(physicsColorMode==='aligned')updatePhysicsNodeColors();
     const duration=Math.min(600,Math.max(1,animationSegmentFrames(target))*1000/30);
     const step=now=>{
         if(conformationSelectionMorph!==morph)return;

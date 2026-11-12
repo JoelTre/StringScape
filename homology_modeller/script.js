@@ -432,6 +432,7 @@
             for(const result of results)if(result.status==='rejected')console.warn('UniProt annotation unavailable:',result.reason);
             renderAboutProteinComplex();updateUniProtChainLabels();refreshMembranePresence();updateMembraneSideNames();updateSymmetryRotationControls();configureAutoSpinAnimation();
             schedulePreparedOverviewCapture();
+            if(document.getElementById('validationReport')?.open)renderValidationReport(true);
             if(UNI_PROT_FEATURE_MODES[physicsColorMode]){renderUniProtFeatureKey();updatePhysicsNodeColors();updateAtomRepresentation();updateModel1AlignmentColors();}
         }
 // uniProtAnnotations.js end
@@ -798,8 +799,104 @@
             if(counts.size===1)return `There are ${selections.length} other ${counts.keys().next().value} selected.`;
             return `There are ${[...counts].map(([type,count])=>`${count} ${type}`).join(', ')} selected.`;
         }
+        // Mutation records are kept separately from the general UniProt annotation cache:
+        // their lookup has a specific 404-only STRING fallback and retains evidence.
+        let mutationGeneration=-1, mutationRequest=0, mutationRecords=new Map(), mutationStatus='';
+        function mutationIdentity(res) {
+            const atom=res?.atoms2?.[0]||res?.atoms1?.[0];
+            const accession=uniProtAccession(atom?.sourcePdbId);
+            const matches=typeof stringMatchReview!=='undefined'&&currentStringReviewValid()?stringMatchReview.response.matches:[];
+            const match=matches.find(item=>item.accession===accession&&accession)||matches.find(item=>item.chain===res?.c1);
+            const raw=String(atom?.sourcePdbId||'');
+            const nodeId=match?.protein||(/^\d+\.[^\s]+$/.test(raw)?raw:null);
+            return {accession,nodeId,key:accession||nodeId||`chain:${res?.c1}`};
+        }
+        async function loadMutations() {
+            const generation=modelBuildGeneration, request=++mutationRequest;
+            mutationGeneration=generation;mutationRecords=new Map();const records=new Map();mutationStatus='Loading mutation data…';renderMutationInfo();
+            const identities=new Map();
+            for(const node of physicsNodes)if((node.res?.entityType||'protein')==='protein'){
+                const identity=mutationIdentity(node.res);identities.set(identity.key,identity);
+            }
+            await Promise.all([...identities.values()].map(async identity=>{
+                try {
+                    let data=null;
+                    if(identity.accession){
+                        const response=await fetch(`https://rest.uniprot.org/uniprotkb/${encodeURIComponent(identity.accession)}.json`,{headers:{Accept:'application/json'}});
+                        if(response.ok)data=await response.json();
+                        else if(response.status!==404)throw new Error(`UniProt ${identity.accession}: HTTP ${response.status}`);
+                    }
+                    if(!data&&identity.nodeId){
+                        const query=new URLSearchParams({query:`xref:STRING-${identity.nodeId}`,format:'json',size:'1'});
+                        const response=await fetch(`https://rest.uniprot.org/uniprotkb/search?${query}`,{headers:{Accept:'application/json'}});
+                        if(!response.ok)throw new Error(`UniProt STRING ${identity.nodeId}: HTTP ${response.status}`);
+                        data=(await response.json()).results?.[0]||null;
+                    }
+                    if(!data&&!identity.nodeId)throw new Error(identity.accession?`UniProt ${identity.accession} returned 404 and no STRING ID is available`:`No UniProt accession or STRING ID available for ${identity.key}`);
+                    records.set(identity.key,{features:(data?.features||[]).filter(feature=>['Mutagenesis','Natural variant','Sequence variant','Variant'].includes(feature.type)).map(feature=>({
+                        ...feature,start:Number(feature.location?.start?.value),end:Number(feature.location?.end?.value??feature.location?.start?.value)
+                    })).filter(feature=>Number.isInteger(feature.start)&&Number.isInteger(feature.end))});
+                } catch(error){records.set(identity.key,{error:error.message||'Request failed'});}
+            }));
+            if(request!==mutationRequest||generation!==modelBuildGeneration)return;
+            mutationRecords=records;mutationStatus='';renderMutationInfo();
+            if(physicsColorMode==='mutations'){updatePhysicsNodeColors();updateModel1AlignmentColors();updateAtomRepresentation();updateCartoonRepresentation();}
+        }
+        function mutationFeatures(node) {
+            if(!node||(node.res?.entityType||'protein')!=='protein')return [];
+            const atom=node.idx2!==null?node.res.atoms2?.[node.idx2]:node.res.atoms1?.[node.idx1];
+            const position=Number(atom?.afResSeq??atom?.resSeq);
+            return (mutationRecords.get(mutationIdentity(node.res).key)?.features||[]).filter(feature=>position>=feature.start&&position<=feature.end);
+        }
+        function renderMutationInfo() {
+            const box=document.getElementById('mutationInfo');if(!box)return;
+            box.classList.toggle('hidden',physicsColorMode!=='mutations'||(!linkedSelection&&!mutationStatus&&!([...mutationRecords.values()].some(record=>record.error))));
+            if(physicsColorMode!=='mutations')return;
+            box.replaceChildren();const heading=document.createElement('h2');heading.className='font-semibold text-white mb-2';heading.textContent='Mutations';box.append(heading);
+            if(mutationStatus){const p=document.createElement('p');p.textContent=mutationStatus;box.append(p);return;}
+            const errors=[...mutationRecords.entries()].filter(([,record])=>record.error);
+            for(const [key,record] of errors){const p=document.createElement('p');p.className='text-red-300';p.textContent=`${key}: ${record.error}`;box.append(p);}
+            if(!linkedSelection)return;
+            const rows=new Map();
+            for(const node of physicsNodes)if(selectionMatches(node))for(const feature of mutationFeatures(node)){
+                const identity=mutationIdentity(node.res);rows.set(`${identity.key}:${JSON.stringify(feature)}`,feature);
+            }
+            if(!rows.size){const p=document.createElement('p');p.textContent='No mutation or variant annotations for the selected residues.';box.append(p);return;}
+            for(const [label,features] of [['Mutations',[...rows.values()].filter(feature=>feature.type==='Mutagenesis')],['Variants',[...rows.values()].filter(feature=>feature.type!=='Mutagenesis')]]){
+            if(!features.length)continue;
+            const subheading=document.createElement('h3');subheading.className='font-semibold mt-3 mb-1';subheading.textContent=label;box.append(subheading);
+            const scroll=document.createElement('div');scroll.className='overflow-x-auto';
+            const table=document.createElement('table');table.className='w-full text-left border-collapse';
+            const head=document.createElement('thead'),tr=document.createElement('tr');
+            for(const title of ['Residue',label==='Mutations'?'Mutation':'Variant','Effect','Source']){const th=document.createElement('th');th.className='border-b border-slate-700 p-2';th.textContent=title;tr.append(th);}head.append(tr);table.append(head);
+            const body=document.createElement('tbody');
+            for(const feature of features){
+                const row=document.createElement('tr'),seq=feature.alternativeSequence||{},alternatives=seq.alternativeSequences||[];
+                const variant=seq.originalSequence||alternatives.length?`${seq.originalSequence||'—'} → ${alternatives.length>1?'['+alternatives.join(', ')+']':alternatives[0]||'—'}`:'—';
+                const values=[feature.start===feature.end?String(feature.start):`${feature.start}–${feature.end}`,variant,feature.description||'—'];
+                for(const value of values){const td=document.createElement('td');td.className='border-b border-slate-800 p-2 align-top';td.textContent=value;row.append(td);}
+                const source=document.createElement('td');source.className='border-b border-slate-800 p-2 align-top';
+                for(const evidence of feature.evidences||[]){
+                    const div=document.createElement('div');
+                    if(evidence.evidenceCode)div.append(document.createTextNode(`Evidence code: ${evidence.evidenceCode}`));
+                    if(evidence.source){
+                        if(evidence.evidenceCode)div.append(document.createTextNode(' · '));
+                        div.append(document.createTextNode(`${evidence.source}: `));
+                        if(evidence.source.toLowerCase()==='pubmed'&&/^\d+$/.test(String(evidence.id||''))){
+                            const link=document.createElement('a');link.href=`https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(evidence.id)}/`;
+                            link.target='_blank';link.rel='noopener noreferrer';link.className='text-teal-500 underline';link.textContent=evidence.id;div.append(link);
+                        }else div.append(document.createTextNode(evidence.id||''));
+                    }
+                    source.append(div);
+                }
+                if(!source.childNodes.length)source.textContent='—';row.append(source);body.append(row);
+            }
+            table.append(body);scroll.append(table);box.append(scroll);
+            }
+        }
         function updatePhysicsSelectionInfo() {
             updateAboutProteinSelection();
+            renderMutationInfo();
             const box=document.getElementById('physicsSelectionInfo');
             if (!box) return;
             if (!linkedSelection) {box.classList.add('hidden');box.replaceChildren();return;}
@@ -6333,9 +6430,10 @@
                     document.getElementById('physicsPauseText').textContent='Start Simulation';
                     document.getElementById('physicsStatusBadge').textContent='Simulation (Paused)';
                     const status=document.getElementById('groupSimulationStatusText');
-                    const start=document.createElement('button');start.type='button';start.innerHTML='Run simulation to improve model <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>';
-                    start.className='px-3 py-1.5 rounded-md bg-cyan-600 hover:bg-cyan-500 text-white font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300';
-                    start.addEventListener('click',togglePhysicsRun);status.replaceChildren(start);
+                    document.getElementById('refineModelButton')?.remove();
+                    const start=document.createElement('button');start.id='refineModelButton';start.type='button';start.innerHTML='Refine model <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>';
+                    start.className='viewer-model-action';
+                    start.addEventListener('click',()=>{start.remove();togglePhysicsRun();});status.replaceChildren();document.getElementById('viewerDownloadBtn').parentElement.before(start);
                 }
             }
             updatePatternVariance(true);
@@ -7241,6 +7339,7 @@
                     : mode === 'uniform' ? '#94a3b8'
                     : mode === 'protein-id' ? getProteinIdColor(sourceByChain.get(chainId))
                     : mode === 'origin' ? '#3498db'
+                    : mode==='mutations' ? (mutationFeatures(physicsNodes[referenceNodeIndex]).length?'#ef4444':'#94a3b8')
                     : UNI_PROT_FEATURE_MODES[mode] ? uniProtFeatureColor(afAtom,mode)
                     : mode === 'plddt' ? physicsResidueColor(afAtom, 'plddt')
                     : mode === 'difference' ? alignmentDistanceColor(distanceByChain.get(chainId)?.get(atomIdx) ?? null)
@@ -10882,7 +10981,7 @@
         // Match outgoing to incoming fragment slots using minimum-cost maximum flow.
         // Sequence order makes the resulting cover acyclic, even for non-bipartite
         // undirected fragment graphs. Small length-constrained cases remain exact.
-        function mergeReferenceFragments(results,onProgress=()=>{}) {
+        function mergeReferenceFragments(results,onProgress=()=>{},withinReference=false) {
             onProgress({stage:'merge-graph',completed:0,total:1});
             const mergeSegments=pairs=>{
                 const segments=[];
@@ -10903,7 +11002,7 @@
                 const first=pairs[0],last=pairs[pairs.length-1];
                 const entry={result,first,last,segments:mergeSegments(pairs),index:candidates.length};
                 candidates.push(entry);edges.push([]);
-                const key=JSON.stringify([result.c2,result.atoms1[0]?.fileIndex]);
+                const key=JSON.stringify([result.c2,withinReference?null:result.atoms1[0]?.fileIndex]);
                 if(!groups.has(key))groups.set(key,[]);
                 groups.get(key).push(entry);
             }
@@ -11136,7 +11235,7 @@
             });
 
             const coverageResults=alignmentResults.filter(result=>!result.referenceOnly&&result.entityType==='protein').map(result=>({c2:result.c2,entityType:result.entityType,seq1:result.seq1,alignedPairs:result.alignedPairs}));
-            alignmentResults=mergeReferenceFragments(alignmentResults,onProgress);
+            alignmentResults=mergeReferenceFragments(alignmentResults,onProgress,Boolean(data.mergeAcrossReferenceSources));
             addNonPolymerAlignments(chains1,chains2,alignmentResults,modelData1.chains,modelData2.chains);
 
             for(let index=0;index<alignmentResults.length;index++){
@@ -11257,6 +11356,8 @@
             }
             const candidates={};
             for(const [chain,atoms] of Object.entries(modelData1.chains)){
+                const preferred=references.length===1&&references[0].mergedReference?references[0].targetChains?.[chain]:undefined;
+                if(preferred&&modelData2.chains[preferred]){candidates[chain]=[preferred];continue;}
                 const accessions=new Set(),chainRecords=[];
                 references.forEach((file,index)=>{
                     const original=referenceAssembly?.residueMaps.get(`${chain}\u0000${index}`)?.entry.chain||chain;
@@ -11292,27 +11393,244 @@
             }
             return candidates;
         }
+        // A coverage map contains one array per target protein. Each non-zero
+        // position represents a residue present in at least one reference chain.
+        function sharedCoverageCount(first,second,limit=Infinity) {
+            let shared=0;
+            for(const [protein,positions] of first){
+                const other=second.get(protein);if(!other)continue;
+                for(let k=0;k<Math.min(positions.length,other.length);k++){
+                    if(positions[k]&&other[k]&&++shared>=limit)return shared;
+                }
+            }
+            return shared;
+        }
+        function sequenceOverlapComponents(indices,coverage) {
+            const parent=new Map(indices.map(index=>[index,index]));
+            const root=index=>{while(parent.get(index)!==index)index=parent.get(index);return index;};
+            for(let i=0;i<indices.length;i++)for(let j=i+1;j<indices.length;j++){
+                const a=indices[i],b=indices[j];
+                if(sharedCoverageCount(coverage[a],coverage[b],5)>=5)parent.set(root(b),root(a));
+            }
+            const components=new Map();
+            for(const index of indices){const key=root(index);if(!components.has(key))components.set(key,[]);components.get(key).push(index);}
+            return [...components.values()];
+        }
+        // Match target proteins once per pair of references. Multiple chains of
+        // the same target must count as one protein when ranking a bridge.
+        function matchBridgeProteins(firstKeys,secondKeys,chains,threshold) {
+            const pairs=[];
+            for(const first of new Set(firstKeys))for(const second of new Set(secondKeys)){
+                const a=chains[first],b=chains[second];
+                if(!a?.length||!b?.length)continue;
+                const seq1=a.map(atom=>atom.singleChar).join(''),seq2=b.map(atom=>atom.singleChar).join('');
+                if(!seq1||!seq2)continue;
+                const alignment=alignProteinSequences(seq1,seq2);
+                if(alignment.identity<threshold)continue;
+                pairs.push({first,second,alignment,rank:alignment.identity*1000+(alignment.score||0)});
+            }
+            pairs.sort((a,b)=>b.rank-a.rank||a.first.localeCompare(b.first)||a.second.localeCompare(b.second));
+            const matchedFirst=new Set(),matchedSecond=new Set(),matches=[];
+            for(const pair of pairs){
+                if(matchedFirst.has(pair.first)||matchedSecond.has(pair.second))continue;
+                matchedFirst.add(pair.first);matchedSecond.add(pair.second);matches.push(pair);
+            }
+            return matches;
+        }
+        function rankBridgeCandidates(indices,components,alignments,chains,threshold) {
+            const componentOf=new Map();components.forEach((component,index)=>component.forEach(file=>componentOf.set(file,index)));
+            const proteinKeys=index=>[...new Set((alignments[index]||[]).filter(result=>result.entityType==='protein'&&!result.referenceOnly&&result.c2).map(result=>result.c2))];
+            const candidates=[];
+            for(let i=0;i<indices.length;i++)for(let j=i+1;j<indices.length;j++){
+                const first=indices[i],second=indices[j];
+                if(componentOf.get(first)===componentOf.get(second))continue;
+                const matches=matchBridgeProteins(proteinKeys(first),proteinKeys(second),chains,threshold);
+                if(matches.length)candidates.push({first,second,matches});
+            }
+            return candidates.sort((a,b)=>b.matches.length-a.matches.length||a.first-b.first||a.second-b.second);
+        }
+        function invertRigidPoint(point,fit) {
+            const p=[point.x-fit.t[0],point.y-fit.t[1],point.z-fit.t[2]],r=fit.R;
+            return {x:r[0][0]*p[0]+r[1][0]*p[1]+r[2][0]*p[2],
+                y:r[0][1]*p[0]+r[1][1]*p[1]+r[2][1]*p[2],
+                z:r[0][2]*p[0]+r[1][2]*p[1]+r[2][2]*p[2]};
+        }
+        function bridgePoint(point,firstFit,targetFit,secondFit) {
+            return referenceTransformPoint(referenceTransformPoint(invertRigidPoint(point,secondFit),targetFit),firstFit);
+        }
+        function bridgeHasUsableGeometry(points) {
+            if(points.length<3)return false;
+            const origin=points[0];
+            if(!origin||![origin.x,origin.y,origin.z].every(Number.isFinite))return false;
+            const valid=points.filter(p=>p&&[p.x,p.y,p.z].every(Number.isFinite));
+            const axis=valid.find(p=>dist3d(origin,p)>1e-3);
+            if(!axis)return false;
+            const u=[axis.x-origin.x,axis.y-origin.y,axis.z-origin.z];
+            return valid.some(p=>{
+                const v=[p.x-origin.x,p.y-origin.y,p.z-origin.z];
+                return Math.hypot(u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0])>1e-4;
+            });
+        }
+        function selectBridgePlacement(candidate,precomputed,chains) {
+            let best=null;
+            for(const match of candidate.matches){
+                const firstAtoms=chains[match.first],secondAtoms=chains[match.second];
+                if(!firstAtoms?.length||!secondAtoms?.length||firstAtoms.some(a=>a.sequenceOnly)||secondAtoms.some(a=>a.sequenceOnly))continue;
+                const {P,Q}=extractEquivalentPairs(firstAtoms,secondAtoms,match.alignment.alignedPairs);
+                if(!bridgeHasUsableGeometry(P)||!bridgeHasUsableGeometry(Q))continue;
+                const targetFit=superposeWeightedIterative(P,Q);
+                if(!Number.isFinite(targetFit.tmScore)||targetFit.tmScore<.35)continue;
+                const firstResults=precomputed[candidate.first].results.filter(r=>r.c2===match.first&&!r.referenceOnly);
+                const secondResults=precomputed[candidate.second].results.filter(r=>r.c2===match.second&&!r.referenceOnly);
+                for(const first of firstResults)for(const second of secondResults){
+                    const firstFit=first.modellingFit,secondFit=second.modellingFit;
+                    if(!firstFit||!secondFit||firstFit.numEquiv<3||secondFit.numEquiv<3||
+                        !Number.isFinite(firstFit.tmScore)||!Number.isFinite(secondFit.tmScore)||
+                        firstFit.tmScore<.35||secondFit.tmScore<.35)continue;
+                    const firstPairs=extractEquivalentPairs(first.atoms1,first.atoms2,first.alignedPairs);
+                    const secondPairs=extractEquivalentPairs(second.atoms1,second.atoms2,second.alignedPairs);
+                    if(!bridgeHasUsableGeometry(firstPairs.P)||!bridgeHasUsableGeometry(firstPairs.Q)||
+                        !bridgeHasUsableGeometry(secondPairs.P)||!bridgeHasUsableGeometry(secondPairs.Q))continue;
+                    const score=Math.min(firstFit.tmScore,secondFit.tmScore,targetFit.tmScore);
+                    if(!best||score>best.score)best={firstFit,secondFit,targetFit,score,match,firstChain:first.c1,secondChain:second.c1};
+                }
+            }
+            return best;
+        }
+        function createBridgeReference(firstFile,secondFile,firstAlignment,secondAlignment,candidate,placement) {
+            const chains={},targetChains={},used=new Set();
+            const secondToFirst=new Map(candidate.matches.map(match=>[match.second,match.first]));
+            const resultTargets=alignment=>{
+                const targets=new Map();
+                for(const result of alignment.results||[]){
+                    if(result.referenceOnly||!result.c2)continue;
+                    for(const chain of result.sourceChains||[result.c1])targets.set(chain,result.c2);
+                }
+                return targets;
+            };
+            const firstTargets=resultTargets(firstAlignment),secondTargets=resultTargets(secondAlignment);
+            const append=(file,targets,move)=>{
+                for(const [original,atoms] of Object.entries(file.parsed.chains)){
+                    let key=`${file.pdbId}:${original}`,suffix=2;
+                    while(used.has(key))key=`${file.pdbId}:${original}:${suffix++}`;
+                    used.add(key);
+                    const transform=point=>move?bridgePoint(point,placement.firstFit,placement.targetFit,placement.secondFit):{x:point.x,y:point.y,z:point.z};
+                    chains[key]=atoms.map(atom=>({...atom,...transform(atom),sourceAtoms:(atom.sourceAtoms||[]).map(source=>({...source,...transform(source)}))}));
+                    const target=targets.get(original);
+                    if(target)targetChains[key]=move?(secondToFirst.get(target)||target):target;
+                }
+            };
+            append(firstFile,firstTargets,false);append(secondFile,secondTargets,true);
+            const pdbId=`${firstFile.pdbId}+${secondFile.pdbId}`;
+            return {pdbId,mergedReference:true,targetChains,sourceReferences:[...(firstFile.sourceReferences||[firstFile.pdbId]),...(secondFile.sourceReferences||[secondFile.pdbId])],
+                parsed:{chains,allAtoms:Object.values(chains).flat(),title:pdbId}};
+        }
+        function planConformationBridges(files,groups,precomputed,chains,threshold) {
+            const alignments=precomputed.map(item=>item.coverage||[]);
+            const coverage=alignments.map(results=>{
+                const byProtein=new Map();
+                for(const result of results){
+                    const atoms=chains[result.c2];
+                    if(result.entityType!=='protein'||!atoms?.length)continue;
+                    if(!byProtein.has(result.c2))byProtein.set(result.c2,new Uint8Array(atoms.length));
+                    const positions=byProtein.get(result.c2);
+                    for(const pair of result.alignedPairs||[]){
+                        if(pair.idx1!=null&&pair.idx2!=null&&pair.idx2>=0&&pair.idx2<positions.length)positions[pair.idx2]=1;
+                    }
+                }
+                return byProtein;
+            });
+            return groups.map(group=>{
+                const indices=files.flatMap((file,index)=>group.pdbIds.includes(file.pdbId.toUpperCase())?[index]:[]);
+                const components=sequenceOverlapComponents(indices,coverage);
+                return {name:group.name,indices,components,candidates:components.length>1?rankBridgeCandidates(indices,components,alignments,chains,threshold):[]};
+            });
+        }
+        function bridgeOverlapComponents(indices,precomputed,chains,threshold) {
+            const alignments=precomputed.map(item=>item.coverage||[]);
+            const targets=index=>[...new Set(alignments[index].filter(r=>r.entityType==='protein'&&r.c2).map(r=>r.c2))];
+            const positions=(index,key)=>{
+                const out=new Set();
+                for(const r of alignments[index])if(r.c2===key)for(const p of r.alignedPairs||[])if(p.idx1!=null&&p.idx2!=null)out.add(p.idx2);
+                return out;
+            };
+            const parents=new Map(indices.map(index=>[index,index]));
+            const root=index=>{while(parents.get(index)!==index)index=parents.get(index);return index;};
+            for(let i=0;i<indices.length;i++)for(let j=i+1;j<indices.length;j++){
+                const a=indices[i],b=indices[j];let shared=0;
+                for(const match of matchBridgeProteins(targets(a),targets(b),chains,threshold)){
+                    const left=positions(a,match.first),right=positions(b,match.second);
+                    for(const pair of match.alignment.alignedPairs)if(pair.idx1!=null&&pair.idx2!=null&&left.has(pair.idx1)&&right.has(pair.idx2))shared++;
+                    if(shared>=5)break;
+                }
+                if(shared>=5)parents.set(root(b),root(a));
+            }
+            const components=new Map();for(const index of indices){const key=root(index);if(!components.has(key))components.set(key,[]);components.get(key).push(index);}
+            return [...components.values()];
+        }
+        async function prepareBridgeReferences(state,generation,setBuildStatus) {
+            const threshold=parseFloat(document.getElementById('similarityThreshold').value)||25;
+            const warnings=[];state.bridgeProteinAliases=new Map();
+            const aliasRoot=key=>{while(state.bridgeProteinAliases.has(key)&&state.bridgeProteinAliases.get(key)!==key)key=state.bridgeProteinAliases.get(key);return key;};
+            for(const group of state.conformationGroups){
+                let failed=new Set();
+                while(true){
+                    const indices=state.files.flatMap((file,index)=>group.pdbIds.includes(file.pdbId.toUpperCase())?[index]:[]);
+                    const components=bridgeOverlapComponents(indices,state.precomputedAlignments,modelData2.chains,threshold);
+                    if(components.length<2)break;
+                    const candidates=rankBridgeCandidates(indices,components,state.precomputedAlignments.map(item=>item.coverage),modelData2.chains,threshold);
+                    let joined=false;
+                    for(const candidate of candidates){
+                        const signature=`${candidate.first}:${candidate.second}`;if(failed.has(signature))continue;
+                        const placement=selectBridgePlacement(candidate,state.precomputedAlignments,modelData2.chains);
+                        if(!placement){failed.add(signature);continue;}
+                        const first=state.files[candidate.first],second=state.files[candidate.second];
+                        const file=createBridgeReference(first,second,state.precomputedAlignments[candidate.first],state.precomputedAlignments[candidate.second],candidate,placement);
+                        if(state.files.some(existing=>existing.pdbId===file.pdbId)){failed.add(signature);continue;}
+                        setBuildStatus(`Preparing merged reference ${file.pdbId} for ${group.name}…`);
+                        referenceFiles=[file];currentReferenceFile=file;modelData1.chains=file.parsed.chains;modelData1.caAtoms=file.parsed.allAtoms;
+                        editedChainMatches.clear();
+                        if(!await computeAllChainAlignments()||generation!==modelBuildGeneration)return false;
+                        const alignment={results:alignmentResults,coverage:latestCoverageResults,matches:new Map(automaticChainMatches)};
+                        const trialFiles=[...state.files,file],trialAlignments=[...state.precomputedAlignments,alignment],trialIndices=[...indices,state.files.length];
+                        if(bridgeOverlapComponents(trialIndices,trialAlignments,modelData2.chains,threshold).length>=components.length){failed.add(signature);continue;}
+                        state.files.push(file);state.precomputedAlignments.push(alignment);state.weights.push((state.weights[candidate.first]+state.weights[candidate.second])/2);
+                        group.pdbIds.push(file.pdbId.toUpperCase());
+                        for(const match of candidate.matches){const a=aliasRoot(match.first),b=aliasRoot(match.second);if(a!==b)state.bridgeProteinAliases.set(b,a);}
+                        failed=new Set();joined=true;break;
+                    }
+                    if(!joined){warnings.push(`${group.name}: no reliable AlphaFold-mediated bridge connects all reference groups.`);break;}
+                }
+            }
+            if(warnings.length)showWarning(warnings.join('\n\n'),'Reference merge warning');
+            return true;
+        }
+        function selectDraftReferences(state) {
+            const sourceSet=file=>new Set((file.sourceReferences||[file.pdbId]).map(id=>id.toUpperCase()));
+            const byId=new Map(state.files.map(file=>[file.pdbId.toUpperCase(),file]));
+            for(const group of state.conformationGroups){
+                const members=group.pdbIds.map(id=>byId.get(id.toUpperCase())).filter(Boolean);
+                const sources=new Map(members.map(file=>[file,sourceSet(file)]));
+                group.pdbIds=group.pdbIds.filter(id=>{
+                    const file=byId.get(id.toUpperCase());if(!file)return true;
+                    const contained=sources.get(file);
+                    return !members.some(other=>other!==file&&other.mergedReference&&sources.get(other).size>contained.size&&
+                        [...contained].every(source=>sources.get(other).has(source)));
+                });
+            }
+            const selected=new Set(state.conformationGroups.flatMap(group=>group.pdbIds.map(id=>id.toUpperCase())));
+            const indices=state.files.flatMap((file,index)=>selected.has(file.pdbId.toUpperCase())?[index]:[]);
+            state.files=indices.map(index=>state.files[index]);
+            state.precomputedAlignments=indices.map(index=>state.precomputedAlignments[index]);
+            state.weights=indices.map(index=>state.weights[index]);
+        }
         function sequenceOverlapMembership(files, groups, coverage) {
             const memberships=files.map(()=>[]);
             groups.forEach((group,groupIndex)=>{
                 const indices=files.flatMap((file,index)=>group.pdbIds.includes(file.pdbId.toUpperCase())?[index]:[]);
-                const parent=new Map(indices.map(index=>[index,index]));
-                const root=index=>{while(parent.get(index)!==index)index=parent.get(index);return index;};
-                for(let i=0;i<indices.length;i++)for(let j=i+1;j<indices.length;j++){
-                    const a=indices[i],b=indices[j];let shared=0;
-                    for(const [protein,positions] of coverage[a]){
-                        const other=coverage[b].get(protein);if(!other)continue;
-                        for(let k=0;k<positions.length&&shared<5;k++)if(positions[k]&&other[k])shared++;
-                        if(shared>=5)break;
-                    }
-                    if(shared>=5)parent.set(root(b),root(a));
-                }
-                const labels=new Map();
-                for(const index of indices){
-                    const representative=root(index);
-                    if(!labels.has(representative))labels.set(representative,labels.size+1);
-                    memberships[index].push({name:group.name||`Group ${groupIndex+1}`,overlap:labels.get(representative)});
-                }
+                sequenceOverlapComponents(indices,coverage).forEach((component,index)=>{
+                    for(const fileIndex of component)memberships[fileIndex].push({name:group.name||`Group ${groupIndex+1}`,overlap:index+1});
+                });
             });
             return memberships;
         }
@@ -11372,7 +11690,7 @@
             if(modelLoading)document.getElementById('modelBuildTime').textContent='Looking up reference chain mappings…';
             const chainCandidates=await mappedAlignmentCandidates(sequenceFallbackChains);
             if(generation!==modelBuildGeneration)return false;
-            const data={id,chainCandidates,sequenceFallbackChains:[...sequenceFallbackChains],chains1:snapshot(referenceChains),chains2:snapshot(modelChains),
+            const data={id,chainCandidates,sequenceFallbackChains:[...sequenceFallbackChains],mergeAcrossReferenceSources:referenceFiles.length===1&&Boolean(referenceFiles[0].mergedReference),chains1:snapshot(referenceChains),chains2:snapshot(modelChains),
                 threshold:parseFloat(document.getElementById('similarityThreshold').value)||25,
                 editedMatches:[...editedChainMatches],settings:{mode:alignmentMode,gapOpen:alignmentGapOpen,gapExtend:alignmentGapExtend}};
             try{
@@ -13002,6 +13320,7 @@
             }));}catch {/* Input validation is reported by the model loader. */}
             preSimulationAnalysisGeneration=null;
             pauseBeforeFirstBuildSimulation=!document.getElementById('autoRunBuildSimulation').checked;
+            document.body.classList.toggle('awaiting-model-refinement',pauseBeforeFirstBuildSimulation);
             globalThis.BuildTimeline?.beginBuild();
             modelBuildStartedAt = performance.now();
             buildSettingsChanged = false;
@@ -13190,10 +13509,18 @@
                         if(!await computeAllChainAlignments()||generation!==modelBuildGeneration)return;
                         state.precomputedAlignments.push({results:alignmentResults, coverage:latestCoverageResults, matches:new Map(automaticChainMatches)});
                     }
+                    state.bridgePlans=planConformationBridges(state.files,state.conformationGroups,state.precomputedAlignments,modelData2.chains,
+                        parseFloat(document.getElementById('similarityThreshold').value)||25);
+                    if(!await prepareBridgeReferences(state,generation,setBuildStatus)||generation!==modelBuildGeneration)return;
+                    renderSequenceCoverage(state.files,state.precomputedAlignments.map(item=>item.coverage));
+                    selectDraftReferences(state);
                     referenceFiles=[state.files[0]]; currentReferenceFile=referenceFiles[0];
                     modelData1.chains=referenceFiles[0].parsed.chains; modelData1.caAtoms=referenceFiles[0].parsed.allAtoms;
+                    modelData1.pdbId=referenceFiles[0].pdbId;
+                    modelData1.matrixCache.clear();modelData2.matrixCache.clear();
+                    document.getElementById('PDBTitle').textContent=modelData1.pdbId;
+                    populateChainSelectors();
                     restoreStagedAlignments(state,0);
-                    renderSequenceCoverage(state.files,state.precomputedAlignments.map(item=>item.coverage));
                 } else {
                     if(!await computeAllChainAlignments()||generation!==modelBuildGeneration)return;
                     renderSequenceCoverage(referenceFiles,[latestCoverageResults]);
@@ -13209,11 +13536,16 @@
                 await initPhysicsSimulation();
                 if(generation!==modelBuildGeneration)return;
                 if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild){multiReferenceBuild.busy=false;renderStagedReferenceControls();renderStagedBuildControls();}
-                const accuracyWarning = [directReferences?'':modelAccuracyWarning(physicsNodes),currentStringReviewValid()?stringPartialBuildWarning(stringMatchReview.response.matches):''].filter(Boolean).join('\n\n');
+                const mergedReferenceWarning=multiReferenceBuild?.files.some(file=>file.mergedReference)
+                    ? 'At least one reference has no sequence overlap with the other references. The app has merged this reference with another, using AlphaFold models as a template, to estimate how these references are positioned relative to one another in space. Note that the app currently struggles in these situations, so the model is likely to be inaccurate.' : '';
+                const existingWarning=mergedReferenceWarning&&!document.getElementById('errorModal').classList.contains('hidden')&&document.getElementById('errorModal').classList.contains('warning-modal')
+                    ? document.getElementById('errorMessage').textContent : '';
+                const accuracyWarning = [existingWarning,mergedReferenceWarning,directReferences?'':modelAccuracyWarning(physicsNodes),currentStringReviewValid()?stringPartialBuildWarning(stringMatchReview.response.matches):''].filter(Boolean).join('\n\n');
                 if (accuracyWarning) showWarning(accuracyWarning);
                 if(!physicsNodes.length)hidePhysicsViewerLoading();
                 if (backboneLinesGroup) backboneLinesGroup.visible = true;
                 readyModelGeneration = generation;
+                if(physicsColorMode==='mutations')void loadMutations();
                 modelLoading = false;
                 modelBuildAbortController = null;
                 schedulePreparedOverviewCapture();
@@ -13548,6 +13880,7 @@
 
         function togglePhysicsRun() {
             if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.busy)return;
+            document.body.classList.remove('awaiting-model-refinement');
             if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.awaitingSimulation){void beginPreparedStagedSimulation();return;}
             if(groupSimulation?.complete)return;
             if (physicsRepresentation === 'surface') { syncSurfacePhysicsPause(); return; }
@@ -15452,6 +15785,8 @@
                 } else if (physicsColorMode === 'protein-id') {
                     const atom = node.idx2 !== null ? node.res.atoms2[node.idx2] : null;
                     color = new THREE.Color(getProteinIdColor(atom?.sourcePdbId));
+                } else if (physicsColorMode==='mutations') {
+                    color = new THREE.Color(mutationFeatures(node).length?'#ef4444':'#94a3b8');
                 } else if (UNI_PROT_FEATURE_MODES[physicsColorMode]) {
                     const atom = node.idx2 !== null ? node.res.atoms2[node.idx2] : null;
                     color = new THREE.Color(uniProtFeatureColor(atom,physicsColorMode));
@@ -15480,7 +15815,13 @@
                 } else {
                     const atom = node.idx2 !== null ? node.res.atoms2[node.idx2] : null;
                     const referenceAtom = node.idx1 !== null ? node.res.atoms1[node.idx1] : null;
-                    color = new THREE.Color(physicsResidueColor(atom, physicsColorMode, node.usedInAlignment, referenceAtom));
+                    const mergedIndex=atom?.mergedNodeIndex;
+                    const groupAtom=Number.isInteger(mergedIndex)&&Number.isInteger(activeConformationGroup)
+                        ? multiReferenceBuild?.groupPoses?.[activeConformationGroup]?.atoms?.[mergedIndex] : null;
+                    const evidence=groupAtom?.alignmentEvidence??atom?.alignmentEvidence;
+                    color = new THREE.Color(physicsColorMode==='aligned'&&evidence!==undefined
+                        ? evidence===0?'#64748b':evidence===2?'#f97316':'#ef4444'
+                        : physicsResidueColor(atom, physicsColorMode, node.usedInAlignment, referenceAtom));
                 }
                 // Origin colours above are shared constants; copy before shading
                 // so one buried residue cannot darken every subsequent instance.
@@ -15689,6 +16030,7 @@
             return isSimilarAA(a, b) ? '#f97316' : '#ef4444';
         }
         function physicsResidueColor(atom, mode, aligned = false, counterpart = null) {
+            if (mode === 'mutations') { const node=physicsNodes.find(item=>(item.idx2!==null&&item.res.atoms2?.[item.idx2]===atom)||(item.idx1!==null&&item.res.atoms1?.[item.idx1]===atom)); return mutationFeatures(node).length?'#ef4444':'#94a3b8'; }
             if (mode === 'aligned') return alignedResidueColor(atom, counterpart, aligned);
             if (mode === 'charge') {
                 const aa=atom?.singleChar;
@@ -15725,10 +16067,12 @@
             if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.view==='aligned'){
                 if(['reference','chain','protein','equivalent','aligned','distance'].includes(mode)){multiReferenceBuild.alignedMode=mode;physicsColorMode=mode;syncPhysicsColorMenu();renderStagedPreview();}return;
             }
-            if (!['chain','chain-random','residue-index','uniform','protein-id','rotational-symmetry','pattern-variance','equivalent-protein-shape','keyframe-difference','residue-speed','running-simulation','backbone-issues','steric-clashes','binding-sites','binding-site-type','mutation-effect-basic','constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','qmeandisco','element','side-chains','origin','aligned','locked','membrane','membrane-placement','charge','hydrophobicity','accessible-surface-area','secondary','plddt','difference','af-difference',...Object.keys(UNI_PROT_FEATURE_MODES)].includes(mode)) return;
+            if (!['chain','chain-random','residue-index','uniform','protein-id','rotational-symmetry','pattern-variance','equivalent-protein-shape','keyframe-difference','residue-speed','running-simulation','backbone-issues','steric-clashes','binding-sites','binding-site-type','mutations','mutation-effect-basic','constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','qmeandisco','element','side-chains','origin','aligned','locked','membrane','membrane-placement','charge','hydrophobicity','accessible-surface-area','secondary','plddt','difference','af-difference',...Object.keys(UNI_PROT_FEATURE_MODES)].includes(mode)) return;
             if(['residue-speed','running-simulation'].includes(mode)&&!['residue-speed','running-simulation'].includes(physicsColorMode))resetResidueSpeedTracking();
             if(mode==='accessible-surface-area')accessibleSurfaceCache=null;
             physicsColorMode = mode;
+            if(mode==='mutations'&&mutationGeneration!==modelBuildGeneration)void loadMutations();
+            renderMutationInfo();
             if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild&&stagedLiveView())multiReferenceBuild.liveColorMode=mode;
             syncPhysicsColorMenu();
             updateUniProtFetchingBadge();
@@ -15763,12 +16107,13 @@
                 'residue-speed':'Residue speed: <span style="color:#38bdf8">stationary or slow</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">fast</span>. Colours use smoothed movement in Å/s; non-protein atoms are grey. The scale is fixed unless normalisation is enabled.',
                 'binding-sites':'Binding sites: each distinct contact patch has its own colour; grey residues are outside binding sites.',
                 'binding-site-type':'Binding site type: contact patches between the same pair of molecule types share a colour; grey residues are outside binding sites.',
+                mutations:'Mutations: <span style="color:#ef4444">red</span> residues have UniProt mutation or variant annotations; grey residues have none or data is unavailable.',
                 'mutation-effect-basic':'Mutation effect (basic): <span style="color:#38bdf8">low</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">high</span> structural priority from burial, inter-protein binding sites, plausible salt bridges and hydrogen bonds, disulfides, ligand contacts, and membrane association. This is a heuristic, not a measured or predicted mutation effect; grey means structure coordinates are unavailable.',
                 'constraint-confidence':'Constraint confidence: continuous <span style="color:#FF7D45">orange</span> → <span style="color:#FFDB13">yellow</span> → <span style="color:#65CBF3">light blue</span> → <span style="color:#0053D6">dark blue</span> (weak → strong) evidence support, averaged over active restraints at each residue. PAE is weighted more than pLDDT; grey means unavailable.',
                 'spring-strain':'Spring compression / stretch: <span style="color:#38bdf8">compressed</span> ← <span style="color:#a855f7">at target</span> → <span style="color:#ef4444">stretched</span>. Each residue shows the mean signed strain of its active distance restraints; grey means no scored restraints.',
                 'membrane-score':'Membrane placement confidence: <span style="color:#ef4444">low</span> → <span style="color:#38bdf8">high</span> confidence in the inferred membrane placement. Grey means unavailable or no membrane detected.',
-                'alpha-pae':'AlphaFold PAE: <span style="color:#38bdf8">low error</span> → <span style="color:#ef4444">high error</span>, averaged over active pairs with available PAE. Grey means unavailable. PAE describes predicted relative-position error, not model accuracy.',
-                'model-confidence':'Model confidence: continuous <span style="color:#FF7D45">orange</span> → <span style="color:#FFDB13">yellow</span> → <span style="color:#65CBF3">light blue</span> → <span style="color:#0053D6">dark blue</span> (low → high) local heuristic combining evidence support and restraint satisfaction. Grey means unavailable.',
+                'alpha-pae':'AlphaFold PAE: <span style="color:#38bdf8">low error</span> → <span style="color:#ef4444">high error</span>, averaged over other represented residues in the same AlphaFold chain. Grey means PAE or a comparison residue is unavailable. PAE describes predicted relative-position error, not model accuracy.',
+                'model-confidence':'Model confidence: continuous <span style="color:#FF7D45">orange</span> → <span style="color:#FFDB13">yellow</span> → <span style="color:#65CBF3">light blue</span> → <span style="color:#0053D6">dark blue</span> (low → high) pre-simulation heuristic using reference alignment, pLDDT and PAE. Grey means unavailable.',
                 qmeandisco:validationState.qmean
                     ? 'QMEANDisCo: <span style="color:#ef4444">low</span> → <span style="color:#38bdf8">high</span> independent per-residue model quality estimate. Grey means unavailable. <button id="qmeanKeyUpdate" type="button" class="bg-slate-800 rounded-lg px-2 py-1">Resubmit model to update scores</button>'
                     : '<span class="qmean-pending">QMEANDisCo has not been calculated yet. Submit model for calculation in the Validation report section below.</span><button id="qmeanKeyUpdate" type="button" class="bg-slate-800 rounded-lg px-2 py-1">Open Validation report</button>',
@@ -17136,7 +17481,7 @@
             if(primary)primary.secondGeometry=copy(secondMembrane);
             return primary;
         }
-        function generateSimulationMmCifString(membraneGeometry = simulationMembraneSnapshot(), selectionOnly = false, visibleOnly = false) {
+        function generateSimulationMmCifString(membraneGeometry = simulationMembraneSnapshot(), selectionOnly = false, visibleOnly = false, referenceFrame = false) {
             if (!physicsNodes || !physicsNodes.length) return null;
 
             const lines = [];
@@ -17204,9 +17549,9 @@
                     ? (1.0 - morphAlpha) + morphAlpha * 2.0
                     : 2.0;
 
-                const x = coordinates[k].x.toFixed(3);
-                const y = coordinates[k].y.toFixed(3);
-                const z = coordinates[k].z.toFixed(3);
+                const x = (coordinates[k].x+(referenceFrame?physicsCenterOffset.cx:0)).toFixed(3);
+                const y = (coordinates[k].y+(referenceFrame?physicsCenterOffset.cy:0)).toFixed(3);
+                const z = (coordinates[k].z+(referenceFrame?physicsCenterOffset.cz:0)).toFixed(3);
                 const occ = Number(source.occupancy ?? 1).toFixed(2);
                 const bIso = originValue.toFixed(2);
                 const authAsym = chainId;
@@ -17381,9 +17726,10 @@
             }
             try {saveSurfaceBlob(encodeSurface(geometry,format),format,format==='glb'?'model/gltf-binary':format==='stl'?'model/stl':'text/plain');} finally {if(rebuildWithoutHighlight)geometry.dispose();}
         }
-        const downloadMenu=document.getElementById('downloadMenu'), downloadButton=document.getElementById('downloadMmCifBtn');
-        downloadButton.addEventListener('click',()=>{const open=downloadMenu.classList.toggle('hidden')===false;downloadButton.setAttribute('aria-expanded',String(open));});
-        document.addEventListener('click',event=>{if(!downloadMenu.contains(event.target)&&!downloadButton.contains(event.target)){downloadMenu.classList.add('hidden');downloadButton.setAttribute('aria-expanded','false');}});
+        const downloadMenu=document.getElementById('downloadMenu'), downloadButtons=[document.getElementById('downloadMmCifBtn'),document.getElementById('viewerDownloadBtn')];
+        let downloadButton=downloadButtons[0];
+        downloadButtons.forEach(button=>button.addEventListener('click',()=>{const open=downloadButton!==button||downloadMenu.classList.contains('hidden');downloadButtons.forEach(item=>item.setAttribute('aria-expanded','false'));downloadButton=button;button.parentElement.append(downloadMenu);downloadMenu.classList.toggle('hidden',!open);button.setAttribute('aria-expanded',String(open));}));
+        document.addEventListener('click',event=>{if(!downloadMenu.contains(event.target)&&!downloadButtons.some(button=>button.contains(event.target))){downloadMenu.classList.add('hidden');downloadButton.setAttribute('aria-expanded','false');}});
         document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!downloadMenu.classList.contains('hidden')){downloadMenu.classList.add('hidden');downloadButton.setAttribute('aria-expanded','false');downloadButton.focus();}});
         downloadMenu.addEventListener('click',async event=>{const button=event.target.closest('[data-download-format]');if(!button)return;const format=button.dataset.downloadFormat, selected=document.getElementById('downloadSelectionOnly').checked, visible=document.getElementById('downloadVisibleOnly').checked;downloadMenu.classList.add('hidden');downloadButton.setAttribute('aria-expanded','false');if(format==='session'){document.getElementById('sessionDownload').click();return;}if(format==='cif'){downloadSimulationAsMmCif(selected,visible);return;}const badge=document.getElementById('surfaceDownloadLoading'), viewer=document.getElementById('physicsContainer');
             if(!badge.classList.contains('hidden'))return;
@@ -18321,7 +18667,7 @@
             const colorOptions=new Map([...physicsColorSelect.options].map(option=>[option.value,option]));
             const colorColumns=[
                 [['Main',['running-simulation','chain','chain-random','protein-id','residue-index','secondary','model-confidence','uniform']],
-                 ['Properties',['backbone-issues','steric-clashes','side-chains','element','charge','hydrophobicity','accessible-surface-area','mutation-effect-basic','residue-speed']]],
+                 ['Properties',['backbone-issues','steric-clashes','side-chains','element','charge','hydrophobicity','accessible-surface-area','mutations','mutation-effect-basic','residue-speed']]],
                 [['Regions',['binding-sites','binding-site-type','aligned','locked','origin']],
                  ['Comparison',['rotational-symmetry','pattern-variance','equivalent-protein-shape','keyframe-difference','difference','af-difference']],
                  ['Scores',['constraint-confidence','alpha-pae','plddt','spring-strain']]],
@@ -20870,10 +21216,85 @@
             })();}
             if(version!==validationState.version)return;
             validationState.paeLoading=false;
-            if(validationElement('validationReport')?.open)renderValidationReport();
+            if(validationElement('validationReport')?.open)renderValidationReport(true);
             if(['alpha-pae','constraint-confidence','model-confidence'].includes(physicsColorMode)){
                 calculateValidationPairs();updatePhysicsNodeColors();if(showModel1Overlay&&referenceColorMode==='same')updateModel1AlignmentColors();
             }
+        }
+        // PAE is pairwise: colour each residue by its mean error to the other
+        // represented residues from the same AlphaFold chain, without spring filtering.
+        let residuePaeCache=null;
+        function calculateResiduePae(){
+            const key=[validationState.version,springPaeRevision].join(':');
+            if(residuePaeCache?.nodes===physicsNodes&&residuePaeCache.key===key)return residuePaeCache.scores;
+            const groups=new Map(),scores=Array(physicsNodes.length).fill(null);
+            physicsNodes.forEach((node,index)=>{
+                if(node.res.entityType!=='protein')return;
+                const atom=validationAtom(node,'af');
+                if(!atom||!validationState.pae.has(atom.fileIndex))return;
+                let chains=groups.get(atom.fileIndex);
+                if(!chains){chains=new Map();groups.set(atom.fileIndex,chains);}
+                let entries=chains.get(atom.groupKey);
+                if(!entries){entries=[];chains.set(atom.groupKey,entries);}
+                entries.push({atom,index});
+            });
+            for(const chains of groups.values())for(const entries of chains.values()){
+                const sums=new Float64Array(entries.length),counts=new Uint32Array(entries.length);
+                for(let i=0;i<entries.length;i++)for(let j=i+1;j<entries.length;j++){
+                    const value=validationPae(entries[i].atom,entries[j].atom);
+                    if(!Number.isFinite(value)||value<0)continue;
+                    sums[i]+=value;sums[j]+=value;counts[i]++;counts[j]++;
+                }
+                entries.forEach((entry,i)=>{if(counts[i])scores[entry.index]=sums[i]/counts[i];});
+            }
+            residuePaeCache={nodes:physicsNodes,key,scores};
+            return scores;
+        }
+        // Input-only residue confidence; independent of springs and simulation coordinates.
+        let modelConfidenceCache=null;
+        function calculateModelConfidence(){
+            const key=[validationState.version,springPaeRevision,activeConformationGroup].join(':');
+            if(modelConfidenceCache?.nodes===physicsNodes&&modelConfidenceCache.key===key)return modelConfidenceCache.result;
+            const rows=physicsNodes.map(node=>{
+                if(node.res.entityType!=='protein')return null;
+                const atom=validationAtom(node,'af'),ref=validationAtom(node,'reference');
+                const groupAtom=Number.isInteger(atom?.mergedNodeIndex)&&Number.isInteger(activeConformationGroup)
+                    ? multiReferenceBuild?.groupPoses?.[activeConformationGroup]?.atoms?.[atom.mergedNodeIndex] : null;
+                const evidence=groupAtom?.alignmentEvidence??atom?.alignmentEvidence;
+                const colour=evidence!==undefined?(evidence===0?'grey':evidence===2?'orange':'red'):
+                    alignedResidueColor(atom,ref,node.usedInAlignment)==='#64748b'?'grey':
+                    alignedResidueColor(atom,ref,node.usedInAlignment)==='#f97316'?'orange':'red';
+                return {atom,ref,colour};
+            });
+            let aligned=0,partial=0,total=0;
+            const scores=rows.map((row,i)=>{
+                if(!row)return null;
+                total++;
+                if(row.colour!=='grey'){
+                    aligned++;
+                    if(row.colour==='red')return 1;
+                    const a=row.atom?.singleChar?.toUpperCase(),b=row.ref?.singleChar?.toUpperCase();
+                    const blosum=a&&b?getBLOSUM62Score(a,b):null;
+                    // Positive BLOSUM62 substitutions retain 90–99% of reference credit.
+                    return Number.isFinite(blosum)?Math.min(.99,.9+.02*Math.max(0,blosum)):.9;
+                }
+                const plddt=Number.isFinite(row.atom?.plddt)&&row.atom.plddt>=0&&row.atom.plddt<=100?row.atom.plddt/100:null;
+                const groups=[[],[]];
+                if(row.atom&&validationState.pae.has(row.atom.fileIndex))rows.forEach((other,j)=>{
+                    if(i===j||!other)return;
+                    const pae=validationPae(row.atom,other.atom);
+                    if(Number.isFinite(pae)&&pae>=0)groups[other.colour==='grey'?1:0].push(1/(1+pae/5));
+                });
+                const means=groups.map(validationMean),pae=means[0]!==null&&means[1]!==null?(2*means[0]+means[1])/3:means[0]??means[1];
+                if(plddt===null||pae===null)partial++;
+                return plddt!==null&&pae!==null?(plddt+pae)/2:plddt??pae;
+            });
+            const values=scores.filter(Number.isFinite);
+            const unalignedScores=scores.filter((score,i)=>rows[i]?.colour==='grey'&&Number.isFinite(score));
+            const unalignedIndices=new Set(rows.flatMap((row,i)=>row?.colour==='grey'?[i]:[]));
+            const result={scores,unalignedIndices,overall:validationMean(values),unalignedOverall:validationMean(unalignedScores),aligned,total,scored:values.length,partial};
+            modelConfidenceCache={nodes:physicsNodes,key,result};
+            return result;
         }
         function validationMembraneNodeScores(){
             const confidence=validationMembraneDetectionConfidence();
@@ -20927,6 +21348,7 @@
                 return result;
             }).then(result=>{
                 if(nodes!==physicsNodes||springs!==physicsSprings||key!==validationSettingsKey())throw new DOMException('Validation snapshot superseded','AbortError');
+                result.overall=calculateModelConfidence().overall;
                 result.pairs=validationPairDetails(result.pairs,springs,nodes,referenceFiles);
                 if(snapshotId===null){validationState.pairs=result.pairs;validationState.byPair=validationPairLookup(result.pairs,nodes.length);validationState.nodeColors=null;}
                 return result;
@@ -21078,18 +21500,36 @@
                 drawValidationMatrix(id,kind,validationState.pairs);
             validationElement('validationReport')?.classList.toggle('matrix-zoomed',validationState.matrixView.zoom>1||validationState.matrixView.x!==0||validationState.matrixView.y!==0);
         }
-        function drawValidationHistogram(id,kind,pairs){
+        function drawValidationHistogram(id,kind,pairs,colorForValue=null){
             const canvas=validationElement(id),{ctx,width,height}=validationCanvas(canvas),bins=new Uint32Array(32);
             const values=pairs.map(entry=>kind==='strain'?entry.strain:entry[kind]).filter(Number.isFinite);
             for(const value of values){const fraction=kind==='strain'?validationClamp((Math.max(-1,Math.min(1,value))+1)/2):validationClamp(value);bins[Math.min(31,Math.floor(fraction*32))]++;}
             const max=Math.max(1,...bins),plotHeight=height-24;
             ctx.clearRect(0,0,width,height);
             for(let i=0;i<32;i++){const value=kind==='strain'?(i+.5)/16-1:(i+.5)/32;
-                ctx.fillStyle=validationColor(kind,value);ctx.fillRect(i*width/32,plotHeight-bins[i]/max*(plotHeight-4),Math.max(1,width/32-1),bins[i]/max*(plotHeight-4));}
+                ctx.fillStyle=colorForValue?colorForValue(value):validationColor(kind,value);ctx.fillRect(i*width/32,plotHeight-bins[i]/max*(plotHeight-4),Math.max(1,width/32-1),bins[i]/max*(plotHeight-4));}
             ctx.strokeStyle=document.body.classList.contains('light-mode')?'#64748b':'#cbd5e1';ctx.lineWidth=1;
             ctx.beginPath();ctx.moveTo(.5,plotHeight+.5);ctx.lineTo(width-.5,plotHeight+.5);ctx.stroke();
             ctx.fillStyle=document.body.classList.contains('light-mode')?'#475569':'#94a3b8';ctx.font='10px sans-serif';ctx.textBaseline='bottom';
             ctx.fillText(kind==='strain'?'−100%':'0',2,height-2);ctx.textAlign='right';ctx.fillText(kind==='strain'?'+100%':'1',width-2,height-2);
+        }
+        function validationScoreColor(value,light=false){
+            const fraction=validationClamp(value),low=light?[185,28,28]:[248,113,113],high=light?[29,78,216]:[96,165,250];
+            return `rgb(${low.map((channel,i)=>Math.round(channel+(high[i]-channel)*fraction)).join(' ')})`;
+        }
+        function setValidationScore(id,value,unavailable='Unavailable'){
+            const element=validationElement(id);
+            const available=Number.isFinite(value);
+            element.textContent=available?`${(value*100).toFixed(1)}%`:unavailable;
+            if(available){
+                element.dataset.score='';
+                element.style.setProperty('--validation-score-dark',validationScoreColor(value));
+                element.style.setProperty('--validation-score-light',validationScoreColor(value,true));
+            }else{
+                delete element.dataset.score;
+                element.style.removeProperty('--validation-score-dark');
+                element.style.removeProperty('--validation-score-light');
+            }
         }
         function renderValidationSequence(){
             const rows=validationElement('validationSequenceRows');rows.replaceChildren();
@@ -21111,7 +21551,7 @@
                     const cell=document.createElement('td');cell.className='p-2';cell.textContent=value;row.append(cell);
                 }rows.append(row);
             }
-            validationElement('validationCoverage').textContent=total?`${(covered/total*100).toFixed(1)}%`:'Unavailable';
+            setValidationScore('validationCoverage',total?covered/total:null);
         }
         function renderValidationPairDetails(){
             const box=validationElement('validationPairDetails'),pair=validationState.selected;
@@ -21191,7 +21631,10 @@
             if(!physicsNodes.length){validationElement('validationStatus').textContent='Build a model to calculate this report.';return;}
             if(!calculated){
                 const selection=validationElement('validationKeyframeSelect')?.value;
-                if(validationReportPending?.selection===selection&&validationReportPending.nodes===physicsNodes)return;
+                if(validationReportPending?.selection===selection&&validationReportPending.nodes===physicsNodes){
+                    if(force)validationReportPending.refresh=true;
+                    return;
+                }
                 const pending={selection,nodes:physicsNodes};validationReportPending=pending;
                 const frame=selection!=='current'?animationFrames[Number(selection)]:null;
                 const originals=frame?.coords?.length===physicsNodes.length?physicsNodes.map(n=>[n.x,n.y,n.z]):null;
@@ -21199,7 +21642,11 @@
                     if(originals)physicsNodes.forEach((n,i)=>{[n.x,n.y,n.z]=frame.coords[i];});
                     calculateValidationPairsAsync(originals?frame:null).then(result=>{
                         if(validationElement('validationKeyframeSelect')?.value===selection)renderValidationReport(true,result);
-                    }).catch(reportBackgroundError).finally(()=>{if(validationReportPending===pending)validationReportPending=null;});
+                    }).catch(reportBackgroundError).finally(()=>{
+                        if(validationReportPending!==pending)return;
+                        validationReportPending=null;
+                        if(pending.refresh)renderValidationReport(true);
+                    });
                 }finally{if(originals)physicsNodes.forEach((n,i)=>{[n.x,n.y,n.z]=originals[i];});}
                 return;
             }
@@ -21229,11 +21676,24 @@
                     ...validationState.selected,modelDistance:Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z)
                 };
             }
-            const overall=validationMean(combined),satisfaction=validationMean(pairs.map(pair=>pair.satisfaction));
-            validationElement('validationOverall').textContent=overall===null?'Unavailable':`${(overall*100).toFixed(1)}%`;
-            validationElement('validationSatisfaction').textContent=satisfaction===null?'Unavailable':`${(satisfaction*100).toFixed(1)}%`;
-            validationElement('validationMembrane').textContent=membrane===null?'No membrane':`${(membrane*100).toFixed(1)}%`;
-            validationElement('validationStatus').textContent=`${pairs.length.toLocaleString()} active protein-distance restraints · PAE available for ${pairs.reduce((count,pair)=>count+Number(pair.pae!==null),0).toLocaleString()} pairs`;
+            const modelScore=calculateModelConfidence(),overall=modelScore.overall,pairOverall=validationMean(combined),satisfaction=validationMean(pairs.map(pair=>pair.satisfaction));
+            setValidationScore('validationOverall',overall);
+            setValidationScore('validationUnalignedOverall',modelScore.unalignedOverall);
+            const unalignedScored=physicsNodes.map((node,i)=>({atom:validationAtom(node,'af'),score:modelScore.scores[i]}))
+                .filter((row,i)=>Number.isFinite(row.score)&&modelScore.unalignedIndices.has(i));
+            const annotationsAvailable=unalignedScored.every(({atom})=>uniProtAnnotationForAtom(atom)&&Number.isInteger(Number(atom?.afResSeq??atom?.resSeq)));
+            const orderedScores=annotationsAvailable?unalignedScored.filter(({atom})=>{
+                const position=Number(atom?.afResSeq??atom?.resSeq);
+                return !uniProtAnnotationForAtom(atom).features.some(feature=>feature.type==='Region'&&feature.description.trim().toLowerCase()==='disordered'&&position>=feature.start&&position<=feature.end);
+            }).map(row=>row.score):[];
+            const orderedOverall=annotationsAvailable?validationMean(orderedScores):null;
+            setValidationScore('validationUnalignedOrdered',orderedOverall);
+            for(const [id,values] of [['validationOverallHistogram',modelScore.scores.filter(Number.isFinite)],['validationUnalignedHistogram',unalignedScored.map(row=>row.score)],['validationOrderedHistogram',orderedScores]]){
+                drawValidationHistogram(id,'confidence',values.map(confidence=>({confidence})),value=>validationScoreColor(value,document.body.classList.contains('light-mode')));
+                validationElement(`${id}Count`).textContent=values.length?`${values.length.toLocaleString()} residue score${values.length===1?'':'s'} · 0 to 1`:'No scores available';
+            }
+            setValidationScore('validationMembrane',membrane,'No membrane');
+            validationElement('validationStatus').textContent=validationState.paeLoading?'Loading AlphaFold PAE…':'';
             renderValidationSequence();
             redrawValidationMatrices();
             for(const [id,kind] of [['validationConfidenceHistogram','confidence'],['validationStrainHistogram','strain'],['validationCombinedHistogram','combined']])drawValidationHistogram(id,kind,pairs);
@@ -21241,9 +21701,8 @@
             validationElement('validationStrainAverage').textContent=pairs.length
                 ?`Mean strain: ${(validationMean(pairs.map(pair=>pair.strain))*100).toFixed(1)}% · mean absolute strain: ${(validationMean(pairs.map(pair=>Math.abs(pair.strain)))*100).toFixed(1)}%`
                 :'Mean spring strain: unavailable';
-            validationElement('validationCombinedAverage').textContent=`Mean combined score: ${overall===null?'unavailable':overall.toFixed(2)}`;
-            validationElement('validationInterpretation').textContent=overall===null?'There are no active protein-distance restraints to score. StringScape homology modeller has not been benchmarked for accuracy.'
-                :`The local combined score is ${(overall*100).toFixed(1)}%, reflecting evidence support, spring-length agreement. ${pairs.some(pair=>pair.pae===null)?'Some pairs lack PAE, so evidence support is less certain. ':''}This is a heuristic consistency measure, not an experimentally validated probability that the model is correct. StringScape homology modeller has not been benchmarked for accuracy.`;
+            validationElement('validationCombinedAverage').textContent=`Mean combined score: ${pairOverall===null?'unavailable':pairOverall.toFixed(2)}`;
+            validationElement('validationInterpretation').textContent=`Reference-aligned: ${modelScore.aligned}/${modelScore.total} protein residues. Scored: ${modelScore.scored}/${modelScore.total}; ${modelScore.partial} unaligned residues have incomplete pLDDT or PAE. Model confidence uses pre-simulation inputs and is a heuristic, not a calibrated probability.`;
             if(!originalPositions)recordValidationGraphSample(overall,membrane,satisfaction,performance.now());
             renderValidationPairDetails();renderValidationExtraEvidence();validationState.lastDraw=performance.now();validationState.lastReportDraw=validationState.lastDraw;
             validationElement('validationReport').classList.toggle('matrix-zoomed',validationState.matrixView.zoom>1||validationState.matrixView.x!==0||validationState.matrixView.y!==0);
@@ -21258,13 +21717,6 @@
             if(!event.currentTarget.closest('.app-page[data-page="9"]'))event.currentTarget.scrollIntoView({block:'start'});
             renderValidationReport(true);void loadValidationPae();
         });
-        document.querySelectorAll('.validation-score-graph').forEach(button=>button.addEventListener('click',()=>{
-            const controls=document.getElementById('physicsControlsToggle');
-            if(controls?.getAttribute('aria-expanded')!=='true')controls?.click();
-            const graph=document.getElementById('physicsGraphPanel');
-            if(graph)graph.open=true;
-            controls?.scrollIntoView({behavior:'smooth',block:'start'});
-        }));
         validationElement('validationReport')?.querySelectorAll('.validation-matrix-reset').forEach(button=>button.addEventListener('click',()=>{
             validationState.matrixView={zoom:1,x:0,y:0};
             clearTimeout(validationState.matrixRedrawTimer);validationState.matrixRedrawTimer=null;
@@ -21319,8 +21771,10 @@
             return {generated:new Date().toISOString(),theme:document.body.classList.contains('light-mode')?'light':'dark',
                 reference:modelData1.pdbId,alphaFold:modelData2.pdbId,
                 keyframe:validationElement('validationKeyframeSelect')?.selectedOptions[0]?.textContent||'Currently viewed keyframe',
-                scores:[['Sequence coverage',read('validationCoverage')],['Restraint satisfaction',read('validationSatisfaction')],
-                    ['Membrane placement',read('validationMembrane')],['Overall confidence',read('validationOverall')]],
+                scores:[['Sequence coverage',read('validationCoverage')],['Membrane placement',read('validationMembrane')],
+                    ['Overall confidence',read('validationOverall')],['Overall confidence of unaligned residues',read('validationUnalignedOverall')],
+                    ['Confidence of unaligned non-disordered residues',read('validationUnalignedOrdered')]],
+                scoreHistograms:['validationOverallHistogram','validationUnalignedHistogram','validationOrderedHistogram'].map(id=>({image:canvasImage(id),aspect:canvasAspect(id),count:read(`${id}Count`)})),
                 status:read('validationStatus'),note:read('validationInterpretation'),
                 sequence:[...validationElement('validationSequenceRows').rows].map(row=>[...row.cells].map(cell=>cell.textContent.trim())),
                 figures:figureIds.map(([title,description,matrix,histogram,average])=>({title,description,matrix:canvasImage(matrix),histogram:canvasImage(histogram),histogramAspect:canvasAspect(histogram),average:read(average)})),
@@ -21342,7 +21796,7 @@
                 :root{font-family:Arial,sans-serif;color-scheme:dark;--bg:#0f172a;--card:#172236;--head:#1d2d43;--text:#e2e8f0;--muted:#94a3b8;--line:#334155;--accent:#67e8f9}
                 .light{color-scheme:light;--bg:#fff;--card:#f8fafc;--head:#e8f0f6;--text:#172033;--muted:#475569;--line:#cbd5e1;--accent:#0e7490}
                 *{box-sizing:border-box}body{margin:0;padding:2rem;background:var(--bg);color:var(--text)}main{max-width:1100px;margin:auto}h1{color:var(--accent)}h2{margin-top:2rem}h3{margin:.2rem 0;color:var(--accent)}p{line-height:1.5;color:var(--muted)}.scores,.figures{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:1rem;break-inside:avoid}.score{border:0}.score strong{display:block;color:var(--accent);font-size:1.7rem;margin-top:.35rem}.figures .card{display:flex;flex-direction:column;gap:.35rem}.matrix{width:min(100%,350px);align-self:center;image-rendering:pixelated}.histogram{width:100%;max-height:130px;object-fit:contain}.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;font-size:.85rem}th,td{padding:.55rem;text-align:left;border-bottom:1px solid var(--line)}th{background:var(--head)}.note{padding:1rem;background:var(--card);border-left:3px solid var(--accent)}@media(max-width:700px){body{padding:1rem}.scores,.figures{grid-template-columns:1fr}}@media print{body{print-color-adjust:exact;-webkit-print-color-adjust:exact}.card{break-inside:avoid}}
-                </style></head><body><main><h1>StringScape validation report</h1><p>Generated ${escape(report.generated)} · Reference ${escape(report.reference)} · AlphaFold ${escape(report.alphaFold)} · ${escape(report.keyframe)}</p><p>${escape(report.status)}</p><div class="scores">${report.scores.map(([name,value])=>`<div class="card score">${escape(name)}<strong>${escape(value)}</strong></div>`).join('')}</div><h2>Sequence alignment by AlphaFold chain</h2>${rows(['AlphaFold chain','Reference matches','Coverage','Average identity','Average similarity'],report.sequence)}<h2>Distance restraint assessment</h2><div class="figures">${figures}</div><p class="note">${escape(report.note)}</p>${report.selectedPair?`<h2>Selected residue pair</h2><p class="note">${escape(report.selectedPair)}</p>`:''}${report.extraRows.length?`<h2>Manually added evidence</h2><p>${escape(report.extra)}</p>${rows(['Type','Residue pair','Observed','Target / upper bound','Satisfaction'],report.extraRows)}`:''}<h2>Independent model-quality assessment</h2><p>QMEANDisCo Global: ${escape(report.qmean)} · ${escape(report.qmeanStatus)}</p>${report.qmeanChart?`<img class="histogram" src="${report.qmeanChart}" alt="Per-residue QMEANDisCo scores">`:''}<p>StringScape homology modeller has not been benchmarked for accuracy.</p></main></body></html>`;
+                </style></head><body><main><h1>StringScape validation report</h1><p>Generated ${escape(report.generated)} · Reference ${escape(report.reference)} · AlphaFold ${escape(report.alphaFold)} · ${escape(report.keyframe)}</p><p>${escape(report.status)}</p><div class="scores">${report.scores.map(([name,value],index)=>`<div class="card score">${escape(name)}<strong>${escape(value)}</strong>${report.scoreHistograms[index-2]?.image?`<img class="histogram" src="${report.scoreHistograms[index-2].image}" alt="${escape(name)} score distribution"><p>${escape(report.scoreHistograms[index-2].count)}</p>`:''}</div>`).join('')}</div><h2>Sequence alignment by AlphaFold chain</h2>${rows(['AlphaFold chain','Reference matches','Coverage','Average identity','Average similarity'],report.sequence)}<h2>Distance restraint assessment</h2><div class="figures">${figures}</div><p class="note">${escape(report.note)}</p>${report.selectedPair?`<h2>Selected residue pair</h2><p class="note">${escape(report.selectedPair)}</p>`:''}${report.extraRows.length?`<h2>Manually added evidence</h2><p>${escape(report.extra)}</p>${rows(['Type','Residue pair','Observed','Target / upper bound','Satisfaction'],report.extraRows)}`:''}<h2>Independent model-quality assessment</h2><p>QMEANDisCo Global: ${escape(report.qmean)} · ${escape(report.qmeanStatus)}</p>${report.qmeanChart?`<img class="histogram" src="${report.qmeanChart}" alt="Per-residue QMEANDisCo scores">`:''}<p>StringScape homology modeller has not been benchmarked for accuracy.</p></main></body></html>`;
         }
         validationElement('validationDownload')?.addEventListener('click',()=>{
             const {figures,qmeanChart,...report}=validationReportSnapshot(false);
@@ -21387,12 +21841,17 @@
             y=write(report.status,margin,y+8,pageWidth-margin*2,10,muted)+16;
             const cardWidth=(pageWidth-margin*2-10)/2;
             report.scores.forEach(([label,value],index)=>{
-                const x=margin+(index%2)*(cardWidth+10),top=y+Math.floor(index/2)*76;
-                pdf.setFillColor(...card);pdf.roundedRect(x,top,cardWidth,68,7,7,'F');
+                const column=index%2;
+                if(column===0&&y+154>pageHeight-margin){newPage();y=55;}
+                const x=margin+column*(cardWidth+10),top=y,chart=report.scoreHistograms[index-2];
+                pdf.setFillColor(...card);pdf.roundedRect(x,top,cardWidth,146,7,7,'F');
                 write(label,x+12,top+19,cardWidth-24,10,muted);
-                pdf.setFont('helvetica','bold');pdf.setFontSize(20);color(accent);pdf.text(plain(value),x+12,top+48);
+                pdf.setFont('helvetica','bold');pdf.setFontSize(20);color(accent);pdf.text(plain(value),x+12,top+54);
+                if(chart?.image){addFittedImage(chart.image,chart.aspect,x+12,top+64,cardWidth-24,55);write(chart.count,x+12,top+136,cardWidth-24,8,muted);}
+                if(column===1||index===report.scores.length-1)y+=154;
             });
-            y+=164;
+            y+=12;
+            if(y>pageHeight-100){newPage();y=55;}
             pdf.setFont('helvetica','bold');pdf.setFontSize(13);color(accent);pdf.text('Sequence alignment by AlphaFold chain',margin,y);y+=20;
             const headers=['AlphaFold chain','Reference matches','Coverage','Identity','Similarity'];
             const widths=[80,155,84,90,90],total=widths.reduce((sum,width)=>sum+width,0),scale=(pageWidth-margin*2)/total;
@@ -21542,6 +22001,8 @@
         function validationNodeColor(index,mode){
             if(index===undefined||index<0||!physicsNodes[index]||physicsNodes[index].res.entityType!=='protein')return '#64748b';
             if(mode==='membrane-score')return validationColor('confidence',validationMembraneDetectionConfidence());
+            if(mode==='model-confidence'){const score=calculateModelConfidence().scores[index];return Number.isFinite(score)?modelConfidenceColor(score):'#64748b';}
+            if(mode==='alpha-pae'){const score=calculateResiduePae()[index];return Number.isFinite(score)?new THREE.Color('#38bdf8').lerp(new THREE.Color('#ef4444'),validationClamp(score/30)).getStyle():'#64748b';}
             if(!validationState.nodeColors||validationState.nodeColors.mode!==mode||validationState.nodeColors.length!==physicsNodes.length){
                 const sums=new Float64Array(physicsNodes.length),counts=new Uint32Array(physicsNodes.length);
                 if(mode==='qmeandisco'){
@@ -21598,13 +22059,14 @@
         });
         function resetValidationReportUI(){
             const keyframeSelect=validationElement('validationKeyframeSelect');if(keyframeSelect)keyframeSelect.value='current';
-            for(const id of ['validationOverall','validationCoverage','validationSatisfaction','validationMembrane'])validationElement(id).textContent='—';
+            for(const id of ['validationOverall','validationCoverage','validationUnalignedOverall','validationUnalignedOrdered','validationMembrane'])setValidationScore(id,null,'—');
             validationElement('validationStatus').textContent='Build a model to calculate this report.';
             validationElement('validationSequenceRows').replaceChildren();validationElement('validationExtraRows').replaceChildren();
             validationElement('validationExtraEvidence').classList.add('hidden');
             validationElement('validationPairDetails').classList.add('hidden');
             validationElement('validationInterpretation').textContent='';
-            for(const id of ['validationConfidenceMatrix','validationStrainMatrix','validationCombinedMatrix','validationConfidenceHistogram','validationStrainHistogram','validationCombinedHistogram','validationExtraHistogram']){
+            for(const id of ['validationOverallHistogramCount','validationUnalignedHistogramCount','validationOrderedHistogramCount'])validationElement(id).textContent='No scores available';
+            for(const id of ['validationConfidenceMatrix','validationStrainMatrix','validationCombinedMatrix','validationConfidenceHistogram','validationStrainHistogram','validationCombinedHistogram','validationExtraHistogram','validationOverallHistogram','validationUnalignedHistogram','validationOrderedHistogram']){
                 const canvas=validationElement(id);canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);
             }
         }
@@ -21613,7 +22075,7 @@
 
 
 // benchmarkApi.js start — input-only contract; no experimental scoring data enters here.
-window.buildHomologyModel = async function({referenceStructure, uniprotIds, convergenceThreshold=0.02, phase2TimeoutMs=20000, seed=1, requireAlphaFoldForEveryProteinChain=false, requiredChainAccessions=null, captureModelImage=false, signal, onProgress=()=>{}}) {
+window.buildHomologyModel = async function({referenceStructure, uniprotIds, convergenceThreshold=0.02, phase2TimeoutMs=20000, seed=1, requireAlphaFoldForEveryProteinChain=false, requiredChainAccessions=null, captureModelImage=false, runSimulation=true, fullReferenceStructure=null, preservedResidues=null, signal, onProgress=()=>{}}) {
     if (window.__benchmarkRun) throw new Error('A benchmark model is already running');
     if (!window.stringScapeReady) throw new Error('Modeller is not ready');
     if (typeof referenceStructure !== 'string' || !Array.isArray(uniprotIds) || !uniprotIds.length) throw new Error('Reference and UniProt IDs required');
@@ -21629,6 +22091,10 @@ window.buildHomologyModel = async function({referenceStructure, uniprotIds, conv
     const originalRandom=Math.random;let randomState=seed>>>0;
     Math.random=()=>{randomState+=0x6D2B79F5;let t=randomState;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return ((t^t>>>14)>>>0)/4294967296;};
     try {
+        document.getElementById('autoRunBuildSimulation').checked=runSimulation;
+        document.getElementById('useReferencesDirectly').checked=false;
+        document.getElementById('lockAlignedResiduesDistance').value='0';
+        lockAlignedResiduesDistance=0;
         assignStructureFiles('reference',[new File([referenceStructure],'benchmark-reference.cif',{type:'text/plain'})]);
         clearUploadedStructure('alphaFold');
         await loadModelPair('benchmark-reference.cif',uniprotIds.join(', '));
@@ -21646,7 +22112,8 @@ window.buildHomologyModel = async function({referenceStructure, uniprotIds, conv
         if(alphaFoldMolstarFiles.some(file=>!file.alphaFoldCoordinates))throw new Error('AlphaFold coordinates unavailable for one or more inputs; synthetic sequence fallback is excluded from benchmarking');
         if(readyModelGeneration!==modelBuildGeneration||!physicsNodes.length)throw new Error(document.getElementById('errorMessage').textContent||'Model build failed');
         const samples=[];let previous=physicsNodes.map(n=>[n.x,n.y,n.z]),last=performance.now(),lastSteps=run.steps,status='timed out';
-        while(true){
+        if(!runSimulation)status='not run';
+        while(runSimulation){
             await new Promise(resolve=>setTimeout(resolve,200));
             if(signal?.aborted)throw new DOMException('Stopped','AbortError');
             const now=performance.now(),elapsed=(now-last)/1000;
@@ -21654,8 +22121,9 @@ window.buildHomologyModel = async function({referenceStructure, uniprotIds, conv
             physicsNodes.forEach((n,i)=>{if(n.res.entityType==='protein'){total+=Math.hypot(n.x-previous[i][0],n.y-previous[i][1],n.z-previous[i][2])/elapsed;count++;}});
             const speed=count?total/count:null,phase2Ms=now-run.phase2StartedAt;
             samples.push({phase2Ms,averageResidueVelocity:speed,physicsSteps:run.steps,stepsSinceSample:run.steps-lastSteps});onProgress(samples.at(-1));
-            if(phase2Ms>=phase2TimeoutMs)break;
-            if(physicsRunning&&run.steps>lastSteps&&phase2Ms>=400&&speed!==null&&speed<convergenceThreshold){status='converged';break;}
+            if(groupSimulation?.complete){status='completed';break;}
+            if(phase2Ms>=phase2TimeoutMs)throw new Error('Simulation timed out before completion');
+            if(run.phase2StartedAt===null && now-run.startedAt>=phase2TimeoutMs)throw new Error('Simulation did not start before timeout');
             previous=physicsNodes.map(n=>[n.x,n.y,n.z]);last=now;lastSteps=run.steps;
         }
         physicsRunning=false;
@@ -21663,6 +22131,8 @@ window.buildHomologyModel = async function({referenceStructure, uniprotIds, conv
         const paeDeadline=performance.now()+15000;
         await Promise.race([loadValidationPae(),new Promise(resolve=>setTimeout(resolve,15000))]);
         while(validationState.paeLoading&&performance.now()<paeDeadline)await new Promise(resolve=>setTimeout(resolve,100));
+        const annotationDeadline=performance.now()+60000;
+        while(uniProtLookupPending && performance.now()<annotationDeadline) { if(signal?.aborted)throw new DOMException('Stopped','AbortError'); await new Promise(resolve=>setTimeout(resolve,100)); }
         document.getElementById('validationReport').open=true;renderValidationReport(true);
         const cleanAtom=a=>a?{chain:a.chainId,resSeq:a.resSeq,insertionCode:a.sourceAtoms?.[0]?.insertionCode||'',accession:a.sourcePdbId,xyz:[a.x,a.y,a.z],plddt:a.plddt,aa:a.singleChar}:null;
         const report=validationReportSnapshot(false);
@@ -21678,13 +22148,15 @@ window.buildHomologyModel = async function({referenceStructure, uniprotIds, conv
             physicsRenderer.render(physicsScene,physicsCamera);
             modelImage=physicsRenderer.domElement.toDataURL('image/png');
         }
-        return {model:generateSimulationMmCifString(),modelImage,validationReport:report,
-            convergenceData:{status,threshold:convergenceThreshold,phase2TimeoutMs,samples,phase2Ms:modelCompletedAt-run.phase2StartedAt},
+        const benchmarkComparison=fullReferenceStructure ? benchmarkCompareFullReference(fullReferenceStructure,preservedResidues||[]) : null;
+        if(fullReferenceStructure)modelImage=window.getModelOverviewSnapshot()||null;
+        return {model:fullReferenceStructure?generateSimulationMmCifString(null,false,false,true):generateSimulationMmCifString(),modelImage,validationReport:report,benchmarkComparison,
+            convergenceData:{status,threshold:convergenceThreshold,phase2TimeoutMs,samples,phase2Ms:run.phase2StartedAt===null?null:modelCompletedAt-run.phase2StartedAt},
             runtime:{modelMs:modelCompletedAt-run.startedAt,totalMs:performance.now()-run.startedAt},
             nodes:physicsNodes.map((n,index)=>n.res.entityType==='protein'?{index,xyz:[n.x,n.y,n.z],referenceChain:n.res.c1,reference:cleanAtom(validationAtom(n,'reference')),alphaFold:cleanAtom(validationAtom(n,'alphaFold'))}:null).filter(Boolean),
             alphaFold:modelData2.caAtoms.filter(a=>a.entityType==='protein').map(cleanAtom),
             pae:Object.fromEntries(modelData2.files.map(f=>[f.pdbId,validationPaeExport(validationState.pae.get(f.fileIndex))])),
-            settings:{morphAlpha,springCutoffVal,seed,requireAlphaFoldForEveryProteinChain,apiVersion:2}};
+            settings:{morphAlpha,springCutoffVal,seed,requireAlphaFoldForEveryProteinChain,apiVersion:2,script:document.getElementById('appScript')?.src,buildSettings:Object.fromEntries([...document.querySelectorAll('#buildSettingsContent input[id],#buildSettingsContent select[id]')].map(element=>[element.id,element.type==='checkbox'?element.checked:element.value]))}};
     } finally {clearInterval(physicsTimer);physicsRunning=false;Math.random=originalRandom;window.__benchmarkRun=null;}
 };
 if(new URLSearchParams(location.search).has('benchmark')){
@@ -21693,13 +22165,16 @@ if(new URLSearchParams(location.search).has('benchmark')){
     window.addEventListener('message',async event=>{
         if(event.source!==parent||event.origin!==parentOrigin)return;
         const {type,id,input}=event.data||{};
+        if(type==='benchmark-ping'){if(window.stringScapeReady)parent.postMessage({type:'benchmark-ready'},parentOrigin);return;}
         if(type==='benchmark-stop'){controller?.abort();modelBuildAbortController?.abort();physicsRunning=false;return;}
+        if(type==='benchmark-prepare'){try{const result=benchmarkPrepareReference(input);parent.postMessage({type:'benchmark-result',id,result},parentOrigin);}catch(error){parent.postMessage({type:'benchmark-error',id,error:error.message},parentOrigin);}return;}
         if(type!=='benchmark-build')return;
         controller=new AbortController();
         try {const result=await window.buildHomologyModel({...input,signal:controller.signal,onProgress:sample=>parent.postMessage({type:'benchmark-progress',id,sample},parentOrigin)});parent.postMessage({type:'benchmark-result',id,result},parentOrigin);}
         catch(error){parent.postMessage({type:'benchmark-error',id,error:error.message,code:error.code||null,missingChains:error.missingChains||[]},parentOrigin);}
     });
     window.addEventListener('stringscape-ready',()=>parent.postMessage({type:'benchmark-ready'},parentOrigin));
+    if(window.stringScapeReady)parent.postMessage({type:'benchmark-ready'},parentOrigin);
 }
 // benchmarkApi.js end
 
@@ -21736,7 +22211,9 @@ if(window.AppPerformanceDiagnostics){
 function physicsComparisonValues(mode){
     const scoreModes={'constraint-confidence':'confidence','spring-strain':'strain','membrane-score':'membraneScore','model-confidence':'combined','alpha-pae':'pae'};
     let scores=null;
-    if(scoreModes[mode]){
+    if(mode==='model-confidence')scores=calculateModelConfidence().scores;
+    else if(mode==='alpha-pae')scores=calculateResiduePae();
+    else if(scoreModes[mode]){
         const sums=new Float64Array(physicsNodes.length),counts=new Uint32Array(physicsNodes.length);
         for(const pair of validationState.pairs){const value=pair[scoreModes[mode]];if(!Number.isFinite(value))continue;for(const i of [pair.i,pair.j]){sums[i]+=value;counts[i]++;}}
         scores=Array.from(sums,(value,i)=>counts[i]?value/counts[i]:null);

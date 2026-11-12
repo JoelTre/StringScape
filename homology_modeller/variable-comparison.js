@@ -15,7 +15,7 @@
     add('mutation-effect-basic membrane-placement','continuous','residue','0–1');
     add('constraint-confidence membrane-score model-confidence qmeandisco','continuous','residue','0–1; mean of incident restraints where applicable');
     add('spring-strain','continuous','residue','fraction; mean of incident restraints');
-    add('alpha-pae','continuous','residue','Å; mean of incident restraints');
+    add('alpha-pae','continuous','residue','Å; mean PAE against other represented residues in the same AlphaFold chain');
     const featureNames='topological domain transmembrane intramembrane active-site binding-site signal transit region motif modified glycosylation disulfide';
     featureNames.split(' ').forEach(name=>metadata['uniprot-'+name]={type:'categorical',level:'residue',unit:''});
     function plan(x,y){
