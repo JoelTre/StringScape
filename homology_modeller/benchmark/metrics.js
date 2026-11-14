@@ -20,14 +20,14 @@ function benchmarkBackboneMetrics(chains){
             r.phiDifference=before?diff(benchmarkDihedral(prev.reference.C,ref.N,ref.CA,ref.C),benchmarkDihedral(prev.predicted.C,pred.N,pred.CA,pred.C)):null;
             r.psiDifference=after?diff(benchmarkDihedral(ref.N,ref.CA,ref.C,next.reference.N),benchmarkDihedral(pred.N,pred.CA,pred.C,next.predicted.N)):null;
             const angles=[r.phiDifference,r.psiDifference].filter(Number.isFinite);r.torsionDifference=angles.length?angles.reduce((a,b)=>a+b,0)/angles.length:null;
-            r.lddtEligible=0;r.lddtCompared=0;r.lddtMissing=0;r.lddtPasses=0;r.lddt=null;residues.push(r);
+            r.lddtEligible=0;r.lddtCompared=0;r.lddtMissing=0;r.lddtPasses=0;r.lddt=null;r.neighbourSources={alphafold:{eligible:0,compared:0},uniprot:{eligible:0,compared:0},unknown:{eligible:0,compared:0}};residues.push(r);
         }
     }
     const grid=new Map(),cell=15,key=(x,y,z)=>`${x},${y},${z}`;let eligiblePairs=0,comparedPairs=0,passes=0;
     for(const r of residues){const ca=r.reference?.CA;if(!ca)continue;const x=Math.floor(ca.x/cell),y=Math.floor(ca.y/cell),z=Math.floor(ca.z/cell);
-        for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)for(let dz=-1;dz<=1;dz++)for(const other of grid.get(key(x+dx,y+dy,z+dz))||[]){const refDistance=distance(ca,other.reference.CA);if(refDistance>=15)continue;eligiblePairs++;r.lddtEligible++;other.lddtEligible++;
+        for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)for(let dz=-1;dz<=1;dz++)for(const other of grid.get(key(x+dx,y+dy,z+dz))||[]){const refDistance=distance(ca,other.reference.CA);if(refDistance>=15)continue;eligiblePairs++;r.lddtEligible++;other.lddtEligible++;const source=x=>x.source==='AlphaFold'?'alphafold':x.source==='UniProt sequence'?'uniprot':'unknown';r.neighbourSources[source(other)].eligible++;other.neighbourSources[source(r)].eligible++;
             if(!r.predicted?.CA||!other.predicted?.CA){r.lddtMissing++;other.lddtMissing++;continue;}
-            const error=Math.abs(distance(r.predicted.CA,other.predicted.CA)-refDistance),passed=[.5,1,2,4].filter(threshold=>error<threshold).length;comparedPairs++;passes+=passed;r.lddtCompared++;other.lddtCompared++;r.lddtPasses+=passed;other.lddtPasses+=passed;
+            const error=Math.abs(distance(r.predicted.CA,other.predicted.CA)-refDistance),passed=[.5,1,2,4].filter(threshold=>error<threshold).length;comparedPairs++;r.neighbourSources[source(other)].compared++;other.neighbourSources[source(r)].compared++;passes+=passed;r.lddtCompared++;other.lddtCompared++;r.lddtPasses+=passed;other.lddtPasses+=passed;
         }
         const cellKey=key(x,y,z);if(!grid.has(cellKey))grid.set(cellKey,[]);grid.get(cellKey).push(r);
     }

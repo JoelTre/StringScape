@@ -1900,7 +1900,7 @@
                         ? sources.find(atom=>atom.atomName==='P')||sources.find(atom=>["C4'",'C4*',"C1'",'C1*'].includes(atom.atomName))||sources[0]
                         : null;
                 const makeEntry=(atom,sourceAtoms)=>({resName, singleChar:type==='protein'?(AA_3TO1[resName]||'X'):type==='nucleotide'?(NUCLEOTIDE_CODES[resName]||'N'):'X',
-                    resSeq:group.resSeq,chainId:chainKey,groupKey:chainKey,entityType:type,
+                    resSeq:group.resSeq,chainId:chainKey,groupKey:chainKey,entityType:type,polymerPosition:atom.polymerPosition??null,
                     x:atom.x,y:atom.y,z:atom.z,plddt:type==='protein'?(atom.bFactor??null):null,sourceAtoms});
                 const entries=type==='other'?sources.map((atom,i)=>makeEntry(atom,MemoryData.list(recordTable,sourceStart+i,1,orderedIndices))):representative?[makeEntry(representative,sources)]:[];
                 if(!entries.length)continue;
@@ -2630,13 +2630,22 @@
 
 // mmcifParsing.js start
         function parseMmCifCalpha(text,includeOther=true) {
-            const tokens=cifTokens(text),records=MemoryData.recordBuilder(['atomName','element','x','y','z','occupancy','insertionCode','resName','chainId','resSeq','bFactor','groupPdb']);
-            let next=tokens.next(),firstModel=null,title='';
+            const tokens=cifTokens(text),records=MemoryData.recordBuilder(['atomName','element','x','y','z','occupancy','insertionCode','resName','chainId','resSeq','bFactor','groupPdb','polymerPosition']);
+            let next=tokens.next(),firstModel=null,title='';const polymerEntities=new Map(),chainEntities=new Map();
             while(!next.done){
                 if(next.value==='_struct.title'){next=tokens.next();title=next.value||'';next=tokens.next();continue;}
                 if(next.value!=='loop_'){next=tokens.next();continue;}
                 const fields=[];next=tokens.next();
                 while(!next.done&&next.value.startsWith('_')){fields.push(next.value);next=tokens.next();}
+                if(fields[0]?.startsWith('_entity_poly_seq.')||fields[0]?.startsWith('_pdbx_poly_seq_scheme.')||fields[0]?.startsWith('_struct_asym.')){
+                    const category=fields[0].split('.')[0],indices=Object.fromEntries(fields.map((field,i)=>[field.slice(category.length+1),i]));
+                    while(!next.done&&!/^(?:_|loop_|data_|save_|stop_)/.test(next.value)){
+                        const row=[];for(let i=0;i<fields.length&&!next.done;i++){row.push(next.value);next=tokens.next();}if(row.length!==fields.length)break;
+                        const get=name=>row[indices[name]];
+                        if(category==='_entity_poly_seq'){const id=get('entity_id'),position=Number(get('num')),monomer=get('mon_id');if(id&&Number.isInteger(position)&&position>0){if(!polymerEntities.has(id))polymerEntities.set(id,new Map());const map=polymerEntities.get(id);if(map.has(position)&&map.get(position)!==monomer)map.set(position,null);else map.set(position,monomer);}}
+                        else {const chain=get(category==='_struct_asym'?'id':'asym_id'),entity=get('entity_id');if(chain&&entity&&chain!=='.'&&entity!=='.'&&entity!=='?')chainEntities.set(chain,entity);}
+                    }continue;
+                }
                 if(!fields[0]?.startsWith('_atom_site.'))continue;
                 const index=Object.fromEntries(fields.map((field,i)=>[field.slice(11),i]));
                 while(!next.done&&!/^(?:_|loop_|data_|save_|stop_)/.test(next.value)){
@@ -2644,6 +2653,7 @@
                     for(let i=0;i<fields.length&&!next.done;i++){row.push(next.value);next=tokens.next();}
                     if(row.length!==fields.length)throw new Error('Incomplete mmCIF atom record.');
                     const get=(...names)=>{for(const name of names){const value=row[index[name]];if(value!==undefined&&value!=='.'&&value!=='?')return value;}return null;};
+                    const atomChain=get('label_asym_id','auth_asym_id'),atomEntity=get('label_entity_id');if(atomChain&&atomEntity)chainEntities.set(atomChain,atomEntity);
                     const groupPdb=get('group_PDB');if(groupPdb!=='ATOM'&&groupPdb!=='HETATM')continue;
                     const alt=get('label_alt_id');if(alt&&alt!=='A')continue;
                     const model=get('pdbx_PDB_model_num')||'1';
@@ -2654,10 +2664,19 @@
                     records.push({atomName,element:(get('type_symbol')||atomName.replace(/^[0-9]+/,'')[0]||'C').toUpperCase(),
                         x,y,z,occupancy:Number(get('occupancy')||1),insertionCode:get('pdbx_PDB_ins_code')||'',
                         resName:get('label_comp_id','auth_comp_id')||'UNK',chainId:get('label_asym_id','auth_asym_id')||'A',
-                        resSeq:Number(get('auth_seq_id','label_seq_id'))||Number(get('id'))||0,bFactor:get('B_iso_or_equiv') === null ? null : Number(get('B_iso_or_equiv')),groupPdb});
+                        resSeq:Number(get('auth_seq_id','label_seq_id'))||Number(get('id'))||0,bFactor:get('B_iso_or_equiv') === null ? null : Number(get('B_iso_or_equiv')),groupPdb,polymerPosition:Number(get('label_seq_id'))||null});
                 }
             }
-            return assembleStructureEntities(records.finish(),includeOther,title);
+            const parsed=assembleStructureEntities(records.finish(),includeOther,title);
+            for(const [chain,atoms] of Object.entries(parsed.chains)){
+                const monomers=polymerEntities.get(chainEntities.get(chain));if(!monomers||!atoms.length||atoms[0].entityType!=='protein')continue;
+                const length=Math.max(...monomers.keys());if(length!==monomers.size||length>100000)continue;
+                const names=Array.from({length},(_,i)=>monomers.get(i+1));if(names.some(name=>!name))continue;
+                const sequence=names.map(name=>AA_3TO1[String(name).toUpperCase()]||'X').join('');
+                if(atoms.some(atom=>!Number.isInteger(atom.polymerPosition)||atom.polymerPosition<1||atom.polymerPosition>length||(sequence[atom.polymerPosition-1]!=='X'&&sequence[atom.polymerPosition-1]!==atom.singleChar)))continue;
+                atoms.forEach(atom=>{atom.polymerSequence=sequence;atom.polymerMonomers=names;});
+            }
+            return parsed;
         }
 
 // mmcifParsing.js end
@@ -3680,6 +3699,14 @@
 // modelInput.js start
         async function resolveUniProtInput(entry, signal) {
             const accession = entry.id;
+            const forceSequence=window.__benchmarkRun?.forceSequenceAccessions?.has(accession.toUpperCase());
+            if(forceSequence){
+                const response=await fetch(`https://rest.uniprot.org/uniprotkb/${encodeURIComponent(accession)}.fasta`,{signal});
+                if(!response.ok)throw new Error(`Forced UniProt sequence lookup failed for ${accession} (HTTP ${response.status}).`);
+                const fasta=await response.text(),records=parseModelInputs(fasta);
+                if(!fasta.trim().startsWith('>')||records.length!==1||!records[0].sequence)throw new Error(`Invalid UniProt sequence for ${accession}.`);
+                return {text:sequenceToPdb(records[0].sequence),sequence:records[0].sequence,fallbackReason:'forced'};
+            }
             const response = await fetch(`https://alphafold.ebi.ac.uk/api/prediction/${encodeURIComponent(accession)}`, {signal});
             if (!response.ok && response.status !== 404) {
                 throw new Error(`AlphaFold lookup for ${accession} failed (HTTP ${response.status}). Please retry.`);
@@ -3699,13 +3726,13 @@
             if (!fasta.trim().startsWith('>')) throw new Error(`UniProt returned an invalid sequence for ${accession}.`);
             const records = parseModelInputs(fasta);
             if (records.length !== 1 || !records[0].sequence) throw new Error(`Expected one UniProt sequence for ${accession}.`);
-            return { text: sequenceToPdb(records[0].sequence), sequence: records[0].sequence };
+            return { text: sequenceToPdb(records[0].sequence), sequence: records[0].sequence, fallbackReason:'alphafold-unavailable' };
         }
 
         async function loadModelInput(entry,includeOther=false,signal) {
             let sequence = entry.sequence;
             let text;
-            let alphaFoldCoordinates = Boolean(entry.uploadFile);
+            let alphaFoldCoordinates = Boolean(entry.uploadFile), fallbackReason=null;
             if (entry.uploadFile) {
                 text = await entry.uploadFile.text();
                 if (!text.trim()) throw new Error(`Uploaded structure ${entry.id} is empty.`);
@@ -3717,6 +3744,7 @@
                 const resolved = await resolveUniProtInput(entry,signal);
                 text = resolved.text;
                 sequence = resolved.sequence;
+                fallbackReason = resolved.fallbackReason || null;
                 alphaFoldCoordinates = !resolved.sequence;
             } else text = sequence ? sequenceToPdb(sequence) : await fetchPdbData(entry.id,signal);
             if (signal?.aborted) throw new DOMException('Model build cancelled', 'AbortError');
@@ -3731,9 +3759,10 @@
             if (sequence) parsed.allAtoms.forEach((atom, i) => {
                 atom.singleChar = sequence[i];
                 atom.sequenceOnly = true;
+                atom.sequenceFallbackReason = fallbackReason || 'sequence-input';
             });
             if (!alphaFoldCoordinates) parsed.allAtoms.forEach(atom => { atom.plddt = null; });
-            return { pdbId: entry.id, parsed, text, format, sequenceOnly: Boolean(sequence), sequenceFallback: Boolean(sequence && !entry.sequence), alphaFoldCoordinates };
+            return { pdbId: entry.id, parsed, text, format, sequenceOnly: Boolean(sequence), sequenceFallback: Boolean(sequence && !entry.sequence), fallbackReason, alphaFoldCoordinates };
         }
 
         function buildModel2FromFiles(fileResults) {
@@ -6343,6 +6372,7 @@
             }else{
                 applyReferenceCoordinateLocks();
                 propagateInitialReferenceLockDisplacements();
+                initializeSequenceFromReference();
                 const combined=typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.kind==='combined';
                 const preview=combined?null:createPreparationBackbonePreview();
                 if(preview){
@@ -6875,6 +6905,112 @@
             }
         }
 
+        // Seed sequence-only chains from their aligned reference residues. The
+        // guide is only an initial CA trace; it is not a predicted structure.
+        function initializeSequenceFromReference() {
+            const nodes=physicsNodes, step=BACKBONE_BOND_LEN, cell=8, grid=new Map();let unreachable=0;
+            const key=(x,y,z)=>`${x},${y},${z}`;
+            const addObstacle=(point,index)=>{
+                const x=Math.floor(point.x/cell),y=Math.floor(point.y/cell),z=Math.floor(point.z/cell),k=key(x,y,z);
+                if(!grid.has(k))grid.set(k,[]);
+                grid.get(k).push({point,index});
+            };
+            const penalty=(point,index)=>{
+                const x=Math.floor(point.x/cell),y=Math.floor(point.y/cell),z=Math.floor(point.z/cell);let score=0;
+                for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)for(let dz=-1;dz<=1;dz++)
+                    for(const other of grid.get(key(x+dx,y+dy,z+dz))||[]){
+                        if(nodes[index].blockIdx===nodes[other.index].blockIdx&&Math.abs(nodes[index].idx2-nodes[other.index].idx2)<=2)continue;
+                        const d=point.distanceTo(other.point);if(d<5)score+=(5-d)*(5-d);
+                    }
+                return score;
+            };
+            const vector=node=>new THREE.Vector3(node.x,node.y,node.z);
+            const set=(node,p)=>{node.x=p.x;node.y=p.y;node.z=p.z;node.initX=node.phase1X=p.x;node.initY=node.phase1Y=p.y;node.initZ=node.phase1Z=p.z;};
+            const isSequence=node=>node?.res.entityType==='protein'&&node.res.atoms2?.[node.idx2]?.sequenceOnly;
+            const referencePoint=node=>{
+                if(!node.usedInAlignment||node.idx1==null)return null;
+                if(node.referenceLockTarget)return new THREE.Vector3(node.referenceLockTarget.x,node.referenceLockTarget.y,node.referenceLockTarget.z);
+                const count=referenceAssembly?referenceFiles.length:1,p=new THREE.Vector3();let total=0;
+                for(let i=0;i<count;i++){
+                    const r=referenceLockResidue(node,i),w=referenceAssembly?(referenceInfluences[i]??1):model1Influence;
+                    if(r&&[r.x,r.y,r.z].every(Number.isFinite)&&w>0){p.addScaledVector(new THREE.Vector3(r.x,r.y,r.z),w);total+=w;}
+                }
+                if(!total){
+                    for(let i=0;i<count;i++){const r=referenceLockResidue(node,i);if(r&&[r.x,r.y,r.z].every(Number.isFinite)){p.add(new THREE.Vector3(r.x,r.y,r.z));total++;}}
+                }
+                if(!total)return null;
+                return p.multiplyScalar(1/total).sub(new THREE.Vector3(physicsCenterOffset.cx,physicsCenterOffset.cy,physicsCenterOffset.cz));
+            };
+            const anchors=new Set();
+            nodes.forEach((node,i)=>{if(isSequence(node)){const p=referencePoint(node);if(p){set(node,p);anchors.add(i);}}});
+            nodes.forEach((node,i)=>{if(!isSequence(node)||anchors.has(i))addObstacle(vector(node),i);});
+            const axisFor=(anchor,inside)=>{
+                const a=vector(nodes[anchor]);
+                if(inside!==null){const d=a.clone().sub(vector(nodes[inside]));if(d.lengthSq()>1e-8)return d.normalize();}
+                return new THREE.Vector3(1,0,0);
+            };
+            const normalFor=axis=>new THREE.Vector3().crossVectors(axis,Math.abs(axis.z)<.9?new THREE.Vector3(0,0,1):new THREE.Vector3(0,1,0)).normalize();
+            for(let start=0;start<nodes.length;){
+                if(!isSequence(nodes[start])||anchors.has(start)){start++;continue;}
+                let end=start;while(end+1<nodes.length&&isSequence(nodes[end+1])&&nodes[end+1].blockIdx===nodes[start].blockIdx&&nodes[end+1].idx2===nodes[end].idx2+1&&!anchors.has(end+1))end++;
+                const left=start>0&&nodes[start-1].blockIdx===nodes[start].blockIdx&&nodes[start-1].idx2===nodes[start].idx2-1&&anchors.has(start-1)?start-1:null;
+                const right=end+1<nodes.length&&nodes[end+1].blockIdx===nodes[end].blockIdx&&nodes[end+1].idx2===nodes[end].idx2+1&&anchors.has(end+1)?end+1:null;
+                const count=end-start+1;
+                const inner=(anchor,dir)=>{const i=anchor+dir;return i>=0&&i<nodes.length&&anchors.has(i)&&nodes[i].blockIdx===nodes[anchor].blockIdx&&Math.abs(nodes[i].idx2-nodes[anchor].idx2)===1?i:null;};
+                let best=null,bestScore=Infinity;
+                if(left!==null&&right!==null){
+                    const a=vector(nodes[left]),b=vector(nodes[right]),distance=a.distanceTo(b),length=(count+1)*step;
+                    const out=axisFor(left,inner(left,-1)),back=axisFor(right,inner(right,1)),normal=normalFor(b.clone().sub(a).lengthSq()>1e-8?b.clone().sub(a).normalize():out);
+                    // When closure is impossible, retain ordinary spacing in the
+                    // middle and leave the excess symmetrically at the boundaries.
+                    if(distance>length){unreachable++;const dir=b.clone().sub(a).normalize(),middle=a.clone().add(b).multiplyScalar(.5);best=Array.from({length:count},(_,j)=>middle.clone().addScaledVector(dir,(j-(count-1)/2)*step));}
+                    else for(let rotation=0;rotation<8;rotation++)for(const factor of [.25,.5,1,2,4]){
+                        const chord=b.clone().sub(a),rotationAxis=chord.lengthSq()>1e-8?chord.normalize():out;
+                        const bend=normal.clone().applyAxisAngle(rotationAxis,rotation*Math.PI/4);
+                        const handle=Math.max(step,distance*.33)*factor;
+                        const p1=a.clone().addScaledVector(out,handle).addScaledVector(bend,handle*.35),p2=b.clone().addScaledVector(back,handle).addScaledVector(bend,handle*.35);
+                        const curve=new THREE.CubicBezierCurve3(a,p1,p2,b),samples=curve.getSpacedPoints(Math.max(32,(count+1)*6));
+                        let arc=0;for(let j=1;j<samples.length;j++)arc+=samples[j].distanceTo(samples[j-1]);
+                        const points=Array.from({length:count},(_,j)=>curve.getPointAt((j+1)/(count+1)));
+                        let score=Math.abs(arc-length)*2;
+                        score+=(1-p1.clone().sub(a).normalize().dot(out))*4+(1-p2.clone().sub(b).normalize().dot(back))*4;
+                        const local=new Map();
+                        for(let j=0;j<count;j++){
+                            const p=points[j],gx=Math.floor(p.x/cell),gy=Math.floor(p.y/cell),gz=Math.floor(p.z/cell);
+                            score+=penalty(p,start+j)*2;const prev=j?points[j-1]:a;score+=Math.abs(p.distanceTo(prev)-step)*4;
+                            for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)for(let dz=-1;dz<=1;dz++)for(const prior of local.get(key(gx+dx,gy+dy,gz+dz))||[]){if(j-prior.j>2){const d=p.distanceTo(prior.p);if(d<5)score+=(5-d)*(5-d)*2;}}
+                            const k=key(gx,gy,gz);if(!local.has(k))local.set(k,[]);local.get(k).push({p,j});
+                        }
+                        score+=Math.abs(b.distanceTo(points[count-1])-step)*4;
+                        if(score<bestScore){bestScore=score;best=points;}
+                    }
+                }else if(left!==null||right!==null){
+                    const anchor=left??right,dir=left!==null?1:-1,origin=vector(nodes[anchor]),axis=axisFor(anchor,inner(anchor,-dir)),normal=normalFor(axis);
+                    for(let rotation=0;rotation<8;rotation++){
+                        const side=normal.clone().applyAxisAngle(axis,rotation*Math.PI/4),points=[];let score=0;
+                        for(let j=1;j<=count;j++){
+                            // Alternating CA offsets give an extended, non-collinear trace.
+                            const p=origin.clone().addScaledVector(axis,j*3.3).addScaledVector(side,j%2?1.88:0);
+                            const index=anchor+dir*j;points[index-start]=p;score+=penalty(p,index);
+                        }
+                        if(score<bestScore){bestScore=score;best=points;}
+                    }
+                }else{
+                    // With no reference anchors there is no meaningful absolute
+                    // orientation, but an extended trace avoids a compact bundle.
+                    const origin=vector(nodes[start]),axis=new THREE.Vector3(1,0,0),normal=normalFor(axis);
+                    for(let rotation=0;rotation<8;rotation++){
+                        const side=normal.clone().applyAxisAngle(axis,rotation*Math.PI/4),points=[];let score=0;
+                        for(let j=0;j<count;j++){const p=origin.clone().addScaledVector(axis,j*3.3).addScaledVector(side,j%2?1.88:0);points.push(p);score+=penalty(p,start+j);}
+                        if(score<bestScore){bestScore=score;best=points;}
+                    }
+                }
+                if(best)best.forEach((p,j)=>{set(nodes[start+j],p);addObstacle(p,start+j);});
+                start=end+1;
+            }
+            if(unreachable)showWarning(`${unreachable} sequence-only gap${unreachable===1?' is':'s are'} too short to connect its reference anchors at normal backbone spacing; the initial boundary bonds are stretched.`);
+        }
+
         // Backbone Line objects with pre-allocated Float32Array geometries (NO TubeGeometry recreation per frame!)
         let backboneChains = [];
         function createBackboneLineObjects() {
@@ -7329,7 +7465,7 @@
                     : mode==='backbone-issues' ? backboneIssueColor(referenceNodeIndex)
                     : mode==='steric-clashes' ? stericClashColor(referenceNodeIndex)
                     : mode==='residue-speed' ? residueSpeedColor(referenceNodeIndex)
-                    : ['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','qmeandisco'].includes(mode) ? validationNodeColor(referenceNodeIndex,mode)
+                    : ['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','local-confidence','placement-2','placement-5','qmeandisco'].includes(mode) ? validationNodeColor(referenceNodeIndex,mode)
                     : mode === 'residue-index' ? residueIndexColor(physicsNodes[referenceNodeIndex], atomIdx)
                     : mode === 'chain' ? (proteinChainColors.get(groupKeyByChain.get(chainId)) || getChainColor(chainId, chainKeys))
                     : mode === 'chain-random' || mode === 'side-chains' ? getChainColor(chainId, chainKeys)
@@ -10844,9 +10980,9 @@
             // Refresh against the current conformation at display cadence, including
             // animation playback when the physics step itself is paused.
             if(['residue-speed','running-simulation'].includes(physicsColorMode)||(groupSimulation&&!groupSimulation.complete))updateResidueSpeeds(performance.now());
-            if((physicsColorMode==='af-difference'||['residue-speed','running-simulation','backbone-issues','steric-clashes'].includes(physicsColorMode)||['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence'].includes(physicsColorMode))&&
-                (++physicsAfDifferenceFrame%2===0)&&(!['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence'].includes(physicsColorMode)||performance.now()-validationState.lastDraw>1000)){
-                if(['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence'].includes(physicsColorMode)){
+            if((physicsColorMode==='af-difference'||['residue-speed','running-simulation','backbone-issues','steric-clashes'].includes(physicsColorMode)||['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','local-confidence','placement-2','placement-5'].includes(physicsColorMode))&&
+                (++physicsAfDifferenceFrame%2===0)&&(!['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','local-confidence','placement-2','placement-5'].includes(physicsColorMode)||performance.now()-validationState.lastDraw>1000)){
+                if(['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','local-confidence','placement-2','placement-5'].includes(physicsColorMode)){
                     calculateValidationPairs();validationState.lastDraw=performance.now();
                 }
                 updatePhysicsNodeColors();
@@ -11169,6 +11305,17 @@
             }
             return results.filter(r=>!removed.has(r)).map(r=>replacements.get(r)||r);
         }
+        // Align the complete declared polymer sequence, then project only observed
+        // coordinates into the resulting alignment. Unobserved positions remain gaps.
+        function projectReferencePolymerAlignment(atoms, targetSequence, align){
+            const sequence=atoms[0]?.polymerSequence;if(!sequence||atoms.some(a=>a.polymerSequence!==sequence||!Number.isInteger(a.polymerPosition)))return null;
+            const positions=new Map();for(let i=0;i<atoms.length;i++){const pos=atoms[i].polymerPosition-1;if(pos<0||pos>=sequence.length||positions.has(pos))return null;positions.set(pos,i);}
+            const full=align(sequence,targetSequence),pairs=[];
+            for(const p of full.alignedPairs){const observed=p.idx1===null?null:positions.get(p.idx1)??null;if(observed!==null||p.idx2!==null)pairs.push({idx1:observed,idx2:p.idx2});}
+            if(new Set(pairs.filter(p=>p.idx1!==null).map(p=>p.idx1)).size!==atoms.length)return null;
+            const seq1=atoms.map(a=>a.singleChar).join(''),aligned=pairs.filter(p=>p.idx1!==null&&p.idx2!==null),denominator=Math.min(seq1.length,targetSequence.length);
+            return {...full,seq1,seq2:targetSequence,alignedPairs:pairs,map1To2:new Map(aligned.map(p=>[p.idx1,p.idx2])),map2To1:new Map(aligned.map(p=>[p.idx2,p.idx1])),align1:pairs.map(p=>p.idx1===null?'-':seq1[p.idx1]).join(''),align2:pairs.map(p=>p.idx2===null?'-':targetSequence[p.idx2]).join(''),identity:denominator?100*aligned.filter(p=>seq1[p.idx1]===targetSequence[p.idx2]).length/denominator:0,similarity:denominator?100*aligned.filter(p=>seq1[p.idx1]===targetSequence[p.idx2]||isSimilarAA(seq1[p.idx1],targetSequence[p.idx2])).length/denominator:0,polymerSequenceAlignment:true};
+        }
         function computeModellingAlignments(data,onProgress=()=>{}) {
             const modelData1={chains:data.chains1},modelData2={chains:data.chains2};
             let alignmentResults=[];const automaticChainMatches=new Map(),editedChainMatches=new Map(data.editedMatches);
@@ -11193,7 +11340,7 @@
                     if(entityType==='other'||(atoms2[0]?.entityType||'protein')!==entityType)return;
                     const seq2 = atoms2.map(a => a.singleChar).join('');
 
-                    const align=cachedAlignment(seq1,seq2,entityType==='nucleotide');
+                    const align=(entityType==='protein'&&projectReferencePolymerAlignment(atoms1,seq2,(a,b)=>cachedAlignment(a,b,false)))||cachedAlignment(seq1,seq2,entityType==='nucleotide');
                     if(entityType==='nucleotide')align.similarity=align.identity;
                     if(data.sequenceFallbackChains?.includes(c1)&&align.identity<threshold)return;
                     align.c1 = c1;
@@ -11215,7 +11362,7 @@
                 if (chosen && modelData2.chains[chosen]?.[0]?.entityType === entityType) {
                     const atoms2 = modelData2.chains[chosen];
                     const seq2 = atoms2.map(a => a.singleChar).join('');
-                    bestMatch=cachedAlignment(seq1,seq2,entityType==='nucleotide');
+                    bestMatch=(entityType==='protein'&&projectReferencePolymerAlignment(atoms1,seq2,(a,b)=>cachedAlignment(a,b,false)))||cachedAlignment(seq1,seq2,entityType==='nucleotide');
                     Object.assign(bestMatch, { c1, c2: chosen, atoms1, atoms2, entityType, editedMatch: true });
                     if (entityType === 'nucleotide') bestMatch.similarity = bestMatch.identity;
                 }
@@ -11288,7 +11435,7 @@
                 superposeWeightedIterative,scoreFitUnderTransform,isEquivalentPair,extractEquivalentPairs,
                 computeChainTmAlignment,nonPolymerAtomKey,nonPolymerSignature,nonPolymerPairs,
                 transformedPoint,referenceCenter,dist3d,addNonPolymerAlignments,
-                calculatePairTmMetrics,calculateAlignmentDistances,mergeReferenceFragments,computeModellingAlignments,
+                calculatePairTmMetrics,calculateAlignmentDistances,mergeReferenceFragments,projectReferencePolymerAlignment,computeModellingAlignments,
                 referenceSequence,referenceIsWaterEntry,referenceAlignment,referenceTypeCompatible,
                 referenceFingerprint,referenceFingerprintCost,referenceAssign,refineReferenceChainAssignments,
                 referenceTransformPoint,calculateReferenceAssembly];
@@ -11303,7 +11450,7 @@
         function modellingAtomSnapshot(atom){
             // Keep renderer, annotations and full polymer atom lists out of messages.
             const snapshot={x:atom.x,y:atom.y,z:atom.z,singleChar:atom.singleChar,
-                entityType:atom.entityType,fileIndex:atom.fileIndex,resName:atom.resName,
+                entityType:atom.entityType,fileIndex:atom.fileIndex,resName:atom.resName,polymerSequence:atom.polymerSequence,polymerPosition:atom.polymerPosition,
                 atomName:atom.atomName,element:atom.element};
             if(atom.entityType==='other'&&atom.sourceAtoms?.length)
                 snapshot.sourceAtoms=atom.sourceAtoms.map(source=>({x:source.x,y:source.y,z:source.z,atomName:source.atomName,element:source.element}));
@@ -13344,7 +13491,7 @@
             return modelLoadQueue;
         }
         async function loadModelPairCurrent(pdbId1, pdbId2Raw, generation, buildSignal) {
-            const setBuildStatus=text=>{if(generation===modelBuildGeneration){const status=document.getElementById('groupSimulationStatusText');if(status)status.textContent=text;}};
+            const setBuildStatus=text=>{if(generation===modelBuildGeneration){const status=document.getElementById('groupSimulationStatusText');if(status)status.textContent=text;window.__benchmarkRun?.progress?.({stage:text});}};
             document.getElementById('modelBuildTime').textContent = 'Building model…';
             simulationAutoRendered = false;
             updateProgressBar(15);
@@ -13434,7 +13581,7 @@
                 const fallbackIds = fileResults2.filter(file => file.sequenceFallback).map(file => file.pdbId);
                 const notice = document.getElementById('sequenceOnlyNotice');
                 notice.textContent = sequenceCount || file1.sequenceOnly
-                    ? 'Sequence inputs start as compact synthetic Cα chains. Their synthetic distances are blank in the matrix and do not set non-backbone spring lengths. Expect low model accuracy. For higher accuracy, run the missing sequences through AlphaFold and upload them to this box.' : '';
+                    ? 'Sequence inputs use reference-guided synthetic Cα chains where aligned reference coordinates are available. Their synthetic distances are blank in the matrix and do not set non-backbone spring lengths. Expect low model accuracy. For higher accuracy, run the missing sequences through AlphaFold and upload them to this box.' : '';
                 if (fallbackIds.length) notice.textContent = `No AlphaFold model found for ${fallbackIds.join(', ')}; using UniProt sequences with approximate side chains. ` + notice.textContent;
                 notice.classList.toggle('hidden', !notice.textContent);
                 if (fallbackIds.length) {
@@ -13589,6 +13736,7 @@
                 globalThis.BuildTimeline?.finish('Failed');
                 document.getElementById("modelBuildTime").textContent = "Model build failed";
                 setBuildStatus('Model build failed.');
+                if(window.__benchmarkRun)window.__benchmarkRun.loadError=err;
                 console.error("Error loading models:", err);
                 showError(err.message || "Failed to load protein structures.");
             } finally {
@@ -15810,7 +15958,7 @@
                     color = new THREE.Color(stericClashColor(i));
                 } else if (physicsColorMode === 'residue-speed') {
                     color = new THREE.Color(residueSpeedColor(i));
-                } else if (['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','qmeandisco'].includes(physicsColorMode)) {
+                } else if (['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','local-confidence','placement-2','placement-5','qmeandisco'].includes(physicsColorMode)) {
                     color = new THREE.Color(validationNodeColor(i,physicsColorMode));
                 } else {
                     const atom = node.idx2 !== null ? node.res.atoms2[node.idx2] : null;
@@ -16067,7 +16215,7 @@
             if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.view==='aligned'){
                 if(['reference','chain','protein','equivalent','aligned','distance'].includes(mode)){multiReferenceBuild.alignedMode=mode;physicsColorMode=mode;syncPhysicsColorMenu();renderStagedPreview();}return;
             }
-            if (!['chain','chain-random','residue-index','uniform','protein-id','rotational-symmetry','pattern-variance','equivalent-protein-shape','keyframe-difference','residue-speed','running-simulation','backbone-issues','steric-clashes','binding-sites','binding-site-type','mutations','mutation-effect-basic','constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','qmeandisco','element','side-chains','origin','aligned','locked','membrane','membrane-placement','charge','hydrophobicity','accessible-surface-area','secondary','plddt','difference','af-difference',...Object.keys(UNI_PROT_FEATURE_MODES)].includes(mode)) return;
+            if (!['chain','chain-random','residue-index','uniform','protein-id','rotational-symmetry','pattern-variance','equivalent-protein-shape','keyframe-difference','residue-speed','running-simulation','backbone-issues','steric-clashes','binding-sites','binding-site-type','mutations','mutation-effect-basic','constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','local-confidence','placement-2','placement-5','qmeandisco','element','side-chains','origin','aligned','locked','membrane','membrane-placement','charge','hydrophobicity','accessible-surface-area','secondary','plddt','difference','af-difference',...Object.keys(UNI_PROT_FEATURE_MODES)].includes(mode)) return;
             if(['residue-speed','running-simulation'].includes(mode)&&!['residue-speed','running-simulation'].includes(physicsColorMode))resetResidueSpeedTracking();
             if(mode==='accessible-surface-area')accessibleSurfaceCache=null;
             physicsColorMode = mode;
@@ -16076,7 +16224,7 @@
             if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild&&stagedLiveView())multiReferenceBuild.liveColorMode=mode;
             syncPhysicsColorMenu();
             updateUniProtFetchingBadge();
-            if(mode==='alpha-pae'||mode==='constraint-confidence'||mode==='model-confidence')void loadValidationPae();
+            if(mode==='alpha-pae'||mode==='constraint-confidence'||['model-confidence','local-confidence','placement-2','placement-5'].includes(mode))void loadValidationPae();
             if(mode==='qmeandisco'&&!validationState.qmean){document.getElementById('validationReport').open=true;renderValidationReport();}
             updateBindingSiteToggleVisibility();
             if(mode==='pattern-variance')updatePatternVariance(true);
@@ -16113,7 +16261,10 @@
                 'spring-strain':'Spring compression / stretch: <span style="color:#38bdf8">compressed</span> ← <span style="color:#a855f7">at target</span> → <span style="color:#ef4444">stretched</span>. Each residue shows the mean signed strain of its active distance restraints; grey means no scored restraints.',
                 'membrane-score':'Membrane placement confidence: <span style="color:#ef4444">low</span> → <span style="color:#38bdf8">high</span> confidence in the inferred membrane placement. Grey means unavailable or no membrane detected.',
                 'alpha-pae':'AlphaFold PAE: <span style="color:#38bdf8">low error</span> → <span style="color:#ef4444">high error</span>, averaged over other represented residues in the same AlphaFold chain. Grey means PAE or a comparison residue is unavailable. PAE describes predicted relative-position error, not model accuracy.',
-                'model-confidence':'Model confidence: continuous <span style="color:#FF7D45">orange</span> → <span style="color:#FFDB13">yellow</span> → <span style="color:#65CBF3">light blue</span> → <span style="color:#0053D6">dark blue</span> (low → high) pre-simulation heuristic using reference alignment, pLDDT and PAE. Grey means unavailable.',
+                'local-confidence':'Estimated local lDDT-Cα (0–1); grey means unavailable. Exploratory no-simulation model.',
+                'placement-2':'Estimated probability of placement within 2 Å; grey means unavailable. Exploratory no-simulation model.',
+                'placement-5':'Estimated probability of placement within 5 Å; grey means unavailable. Exploratory no-simulation model.',
+                'model-confidence':'Model confidence: continuous <span style="color:#FF7D45">orange</span> → <span style="color:#FFDB13">yellow</span> → <span style="color:#65CBF3">light blue</span> → <span style="color:#0053D6">dark blue</span> (low → high) exploratory joint probability of lDDT-Cα ≥ 0.7 and placement within 5 Å. Grey means unavailable.',
                 qmeandisco:validationState.qmean
                     ? 'QMEANDisCo: <span style="color:#ef4444">low</span> → <span style="color:#38bdf8">high</span> independent per-residue model quality estimate. Grey means unavailable. <button id="qmeanKeyUpdate" type="button" class="bg-slate-800 rounded-lg px-2 py-1">Resubmit model to update scores</button>'
                     : '<span class="qmean-pending">QMEANDisCo has not been calculated yet. Submit model for calculation in the Validation report section below.</span><button id="qmeanKeyUpdate" type="button" class="bg-slate-800 rounded-lg px-2 py-1">Open Validation report</button>',
@@ -18666,7 +18817,7 @@
         if (physicsColorSelect && physicsColorMenu && physicsColorMenuButton) {
             const colorOptions=new Map([...physicsColorSelect.options].map(option=>[option.value,option]));
             const colorColumns=[
-                [['Main',['running-simulation','chain','chain-random','protein-id','residue-index','secondary','model-confidence','uniform']],
+                [['Main',['running-simulation','chain','chain-random','protein-id','residue-index','secondary','model-confidence','local-confidence','placement-2','placement-5','uniform']],
                  ['Properties',['backbone-issues','steric-clashes','side-chains','element','charge','hydrophobicity','accessible-surface-area','mutations','mutation-effect-basic','residue-speed']]],
                 [['Regions',['binding-sites','binding-site-type','aligned','locked','origin']],
                  ['Comparison',['rotational-symmetry','pattern-variance','equivalent-protein-shape','keyframe-difference','difference','af-difference']],
@@ -21190,7 +21341,7 @@
             const version=validationState.version;
             const status=validationElement('validationStatus');
             status.textContent='Loading available AlphaFold PAE, then calculating validation metrics…';
-            const files=modelData2.files.filter(file=>/^(?:AF[-_])?([A-Z0-9]{6,10})(?:[-_]F\d+)?$/i.test(file.pdbId));
+            const files=modelData2.files.filter(file=>!alphaFoldMolstarFiles.find(f=>f.pdbId===file.pdbId)?.sequenceOnly && /^(?:AF[-_])?([A-Z0-9]{6,10})(?:[-_]F\d+)?$/i.test(file.pdbId));
             for(const file of files){await (async()=>{
                 if(validationState.pae.has(file.fileIndex))return;
                 try{
@@ -21217,7 +21368,7 @@
             if(version!==validationState.version)return;
             validationState.paeLoading=false;
             if(validationElement('validationReport')?.open)renderValidationReport(true);
-            if(['alpha-pae','constraint-confidence','model-confidence'].includes(physicsColorMode)){
+            if(['alpha-pae','constraint-confidence','model-confidence','local-confidence','placement-2','placement-5'].includes(physicsColorMode)){
                 calculateValidationPairs();updatePhysicsNodeColors();if(showModel1Overlay&&referenceColorMode==='same')updateModel1AlignmentColors();
             }
         }
@@ -21250,51 +21401,20 @@
             residuePaeCache={nodes:physicsNodes,key,scores};
             return scores;
         }
-        // Input-only residue confidence; independent of springs and simulation coordinates.
+        // Run-5 fits are supported only before simulation, for unaligned residues with complete inputs.
         let modelConfidenceCache=null;
         function calculateModelConfidence(){
-            const key=[validationState.version,springPaeRevision,activeConformationGroup].join(':');
+            const simulated=window.getComplexAiState().simulationStarted!==false;
+            const key=[validationState.version,springPaeRevision,activeConformationGroup,stericClashRadius,rigidBodySimulation,simulated].join(':');
             if(modelConfidenceCache?.nodes===physicsNodes&&modelConfidenceCache.key===key)return modelConfidenceCache.result;
-            const rows=physicsNodes.map(node=>{
-                if(node.res.entityType!=='protein')return null;
-                const atom=validationAtom(node,'af'),ref=validationAtom(node,'reference');
-                const groupAtom=Number.isInteger(atom?.mergedNodeIndex)&&Number.isInteger(activeConformationGroup)
-                    ? multiReferenceBuild?.groupPoses?.[activeConformationGroup]?.atoms?.[atom.mergedNodeIndex] : null;
-                const evidence=groupAtom?.alignmentEvidence??atom?.alignmentEvidence;
-                const colour=evidence!==undefined?(evidence===0?'grey':evidence===2?'orange':'red'):
-                    alignedResidueColor(atom,ref,node.usedInAlignment)==='#64748b'?'grey':
-                    alignedResidueColor(atom,ref,node.usedInAlignment)==='#f97316'?'orange':'red';
-                return {atom,ref,colour};
-            });
-            let aligned=0,partial=0,total=0;
-            const scores=rows.map((row,i)=>{
-                if(!row)return null;
-                total++;
-                if(row.colour!=='grey'){
-                    aligned++;
-                    if(row.colour==='red')return 1;
-                    const a=row.atom?.singleChar?.toUpperCase(),b=row.ref?.singleChar?.toUpperCase();
-                    const blosum=a&&b?getBLOSUM62Score(a,b):null;
-                    // Positive BLOSUM62 substitutions retain 90–99% of reference credit.
-                    return Number.isFinite(blosum)?Math.min(.99,.9+.02*Math.max(0,blosum)):.9;
-                }
-                const plddt=Number.isFinite(row.atom?.plddt)&&row.atom.plddt>=0&&row.atom.plddt<=100?row.atom.plddt/100:null;
-                const groups=[[],[]];
-                if(row.atom&&validationState.pae.has(row.atom.fileIndex))rows.forEach((other,j)=>{
-                    if(i===j||!other)return;
-                    const pae=validationPae(row.atom,other.atom);
-                    if(Number.isFinite(pae)&&pae>=0)groups[other.colour==='grey'?1:0].push(1/(1+pae/5));
-                });
-                const means=groups.map(validationMean),pae=means[0]!==null&&means[1]!==null?(2*means[0]+means[1])/3:means[0]??means[1];
-                if(plddt===null||pae===null)partial++;
-                return plddt!==null&&pae!==null?(plddt+pae)/2:plddt??pae;
-            });
-            const values=scores.filter(Number.isFinite);
-            const unalignedScores=scores.filter((score,i)=>rows[i]?.colour==='grey'&&Number.isFinite(score));
-            const unalignedIndices=new Set(rows.flatMap((row,i)=>row?.colour==='grey'?[i]:[]));
-            const result={scores,unalignedIndices,overall:validationMean(values),unalignedOverall:validationMean(unalignedScores),aligned,total,scored:values.length,partial};
-            modelConfidenceCache={nodes:physicsNodes,key,result};
-            return result;
+            const pae=calculateResiduePae();
+            const features=simulated?[]:benchmarkFeatures(physicsNodes,n=>validationAtom(n,'af'),n=>validationAtom(n,'reference'),validationState.pae,[],calculateStericClashScores(physicsNodes,stericClashRadius,rigidBodySimulation));
+            const all=physicsNodes.map((node,index)=>node.res.entityType==='protein'&&!node.usedInAlignment&&!node.referenceLockTarget&&!simulated?run5Confidence(features[index],validationAtom(node,'af')?.plddt,pae[index]):{local:null,placement2:null,placement5:null,model:null});
+            const scores=all.map(x=>x.model),local=all.map(x=>x.local),placement2=all.map(x=>x.placement2),placement5=all.map(x=>x.placement5);
+            const protein=physicsNodes.map((n,i)=>n.res.entityType==='protein'?i:-1).filter(i=>i>=0),unalignedIndices=new Set(protein.filter(i=>!physicsNodes[i].usedInAlignment));
+            const values=scores.filter(Number.isFinite),unalignedScores=values;
+            const result={scores,local,placement2,placement5,unalignedIndices,overall:validationMean(values),unalignedOverall:validationMean(unalignedScores),aligned:protein.length-unalignedIndices.size,total:protein.length,scored:values.length,partial:unalignedIndices.size-values.length,simulated};
+            modelConfidenceCache={nodes:physicsNodes,key,result};return result;
         }
         function validationMembraneNodeScores(){
             const confidence=validationMembraneDetectionConfidence();
@@ -21362,7 +21482,7 @@
             if(!validationRefreshPending){
                 validationRefreshPending=true;
                 calculateValidationPairsAsync().then(result=>{
-                    if(['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence'].includes(physicsColorMode))updatePhysicsNodeColors();
+                    if(['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','local-confidence','placement-2','placement-5'].includes(physicsColorMode))updatePhysicsNodeColors();
                     if(validationElement('validationReport')?.open&&(!validationElement('validationKeyframeSelect')||validationElement('validationKeyframeSelect').value==='current'))renderValidationReport(true,result);
                 }).catch(reportBackgroundError).finally(()=>{validationRefreshPending=false;});
             }
@@ -21678,6 +21798,8 @@
             }
             const modelScore=calculateModelConfidence(),overall=modelScore.overall,pairOverall=validationMean(combined),satisfaction=validationMean(pairs.map(pair=>pair.satisfaction));
             setValidationScore('validationOverall',overall);
+            for(const [id,field] of [['validationLocal','local'],['validationPlacement2','placement2'],['validationPlacement5','placement5']])setValidationScore(id,validationMean(modelScore[field].filter(Number.isFinite)));
+            const paeValues=calculateResiduePae().filter(Number.isFinite);validationElement('validationPaeMean').textContent=paeValues.length?`${validationMean(paeValues).toFixed(2)} Å`:'—';
             setValidationScore('validationUnalignedOverall',modelScore.unalignedOverall);
             const unalignedScored=physicsNodes.map((node,i)=>({atom:validationAtom(node,'af'),score:modelScore.scores[i]}))
                 .filter((row,i)=>Number.isFinite(row.score)&&modelScore.unalignedIndices.has(i));
@@ -21702,7 +21824,7 @@
                 ?`Mean strain: ${(validationMean(pairs.map(pair=>pair.strain))*100).toFixed(1)}% · mean absolute strain: ${(validationMean(pairs.map(pair=>Math.abs(pair.strain)))*100).toFixed(1)}%`
                 :'Mean spring strain: unavailable';
             validationElement('validationCombinedAverage').textContent=`Mean combined score: ${pairOverall===null?'unavailable':pairOverall.toFixed(2)}`;
-            validationElement('validationInterpretation').textContent=`Reference-aligned: ${modelScore.aligned}/${modelScore.total} protein residues. Scored: ${modelScore.scored}/${modelScore.total}; ${modelScore.partial} unaligned residues have incomplete pLDDT or PAE. Model confidence uses pre-simulation inputs and is a heuristic, not a calibrated probability.`;
+            validationElement('validationInterpretation').textContent=`Reference-aligned: ${modelScore.aligned}/${modelScore.total} protein residues. Scored: ${modelScore.scored}/${modelScore.total}; ${modelScore.partial} unaligned residues have incomplete pLDDT or PAE. Run-5 exploratory estimates apply only to unaligned residues before simulation with complete inputs; they are not yet independently calibrated.`;
             if(!originalPositions)recordValidationGraphSample(overall,membrane,satisfaction,performance.now());
             renderValidationPairDetails();renderValidationExtraEvidence();validationState.lastDraw=performance.now();validationState.lastReportDraw=validationState.lastDraw;
             validationElement('validationReport').classList.toggle('matrix-zoomed',validationState.matrixView.zoom>1||validationState.matrixView.x!==0||validationState.matrixView.y!==0);
@@ -21772,7 +21894,7 @@
                 reference:modelData1.pdbId,alphaFold:modelData2.pdbId,
                 keyframe:validationElement('validationKeyframeSelect')?.selectedOptions[0]?.textContent||'Currently viewed keyframe',
                 scores:[['Sequence coverage',read('validationCoverage')],['Membrane placement',read('validationMembrane')],
-                    ['Overall confidence',read('validationOverall')],['Overall confidence of unaligned residues',read('validationUnalignedOverall')],
+                    ['Model confidence',read('validationOverall')],['Local structure confidence',read('validationLocal')],['Placement confidence (2 Å)',read('validationPlacement2')],['Placement confidence (5 Å)',read('validationPlacement5')],['AlphaFold PAE',read('validationPaeMean')],['Overall confidence of unaligned residues',read('validationUnalignedOverall')],
                     ['Confidence of unaligned non-disordered residues',read('validationUnalignedOrdered')]],
                 scoreHistograms:['validationOverallHistogram','validationUnalignedHistogram','validationOrderedHistogram'].map(id=>({image:canvasImage(id),aspect:canvasAspect(id),count:read(`${id}Count`)})),
                 status:read('validationStatus'),note:read('validationInterpretation'),
@@ -21796,7 +21918,7 @@
                 :root{font-family:Arial,sans-serif;color-scheme:dark;--bg:#0f172a;--card:#172236;--head:#1d2d43;--text:#e2e8f0;--muted:#94a3b8;--line:#334155;--accent:#67e8f9}
                 .light{color-scheme:light;--bg:#fff;--card:#f8fafc;--head:#e8f0f6;--text:#172033;--muted:#475569;--line:#cbd5e1;--accent:#0e7490}
                 *{box-sizing:border-box}body{margin:0;padding:2rem;background:var(--bg);color:var(--text)}main{max-width:1100px;margin:auto}h1{color:var(--accent)}h2{margin-top:2rem}h3{margin:.2rem 0;color:var(--accent)}p{line-height:1.5;color:var(--muted)}.scores,.figures{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:1rem;break-inside:avoid}.score{border:0}.score strong{display:block;color:var(--accent);font-size:1.7rem;margin-top:.35rem}.figures .card{display:flex;flex-direction:column;gap:.35rem}.matrix{width:min(100%,350px);align-self:center;image-rendering:pixelated}.histogram{width:100%;max-height:130px;object-fit:contain}.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;font-size:.85rem}th,td{padding:.55rem;text-align:left;border-bottom:1px solid var(--line)}th{background:var(--head)}.note{padding:1rem;background:var(--card);border-left:3px solid var(--accent)}@media(max-width:700px){body{padding:1rem}.scores,.figures{grid-template-columns:1fr}}@media print{body{print-color-adjust:exact;-webkit-print-color-adjust:exact}.card{break-inside:avoid}}
-                </style></head><body><main><h1>StringScape validation report</h1><p>Generated ${escape(report.generated)} · Reference ${escape(report.reference)} · AlphaFold ${escape(report.alphaFold)} · ${escape(report.keyframe)}</p><p>${escape(report.status)}</p><div class="scores">${report.scores.map(([name,value],index)=>`<div class="card score">${escape(name)}<strong>${escape(value)}</strong>${report.scoreHistograms[index-2]?.image?`<img class="histogram" src="${report.scoreHistograms[index-2].image}" alt="${escape(name)} score distribution"><p>${escape(report.scoreHistograms[index-2].count)}</p>`:''}</div>`).join('')}</div><h2>Sequence alignment by AlphaFold chain</h2>${rows(['AlphaFold chain','Reference matches','Coverage','Average identity','Average similarity'],report.sequence)}<h2>Distance restraint assessment</h2><div class="figures">${figures}</div><p class="note">${escape(report.note)}</p>${report.selectedPair?`<h2>Selected residue pair</h2><p class="note">${escape(report.selectedPair)}</p>`:''}${report.extraRows.length?`<h2>Manually added evidence</h2><p>${escape(report.extra)}</p>${rows(['Type','Residue pair','Observed','Target / upper bound','Satisfaction'],report.extraRows)}`:''}<h2>Independent model-quality assessment</h2><p>QMEANDisCo Global: ${escape(report.qmean)} · ${escape(report.qmeanStatus)}</p>${report.qmeanChart?`<img class="histogram" src="${report.qmeanChart}" alt="Per-residue QMEANDisCo scores">`:''}<p>StringScape homology modeller has not been benchmarked for accuracy.</p></main></body></html>`;
+                </style></head><body><main><h1>StringScape validation report</h1><p>Generated ${escape(report.generated)} · Reference ${escape(report.reference)} · AlphaFold ${escape(report.alphaFold)} · ${escape(report.keyframe)}</p><p>${escape(report.status)}</p><div class="scores">${report.scores.map(([name,value],index)=>`<div class="card score">${escape(name)}<strong>${escape(value)}</strong>${report.scoreHistograms[({2:0,7:1,8:2})[index]]?.image?`<img class="histogram" src="${report.scoreHistograms[({2:0,7:1,8:2})[index]].image}" alt="${escape(name)} score distribution"><p>${escape(report.scoreHistograms[({2:0,7:1,8:2})[index]].count)}</p>`:''}</div>`).join('')}</div><h2>Sequence alignment by AlphaFold chain</h2>${rows(['AlphaFold chain','Reference matches','Coverage','Average identity','Average similarity'],report.sequence)}<h2>Distance restraint assessment</h2><div class="figures">${figures}</div><p class="note">${escape(report.note)}</p>${report.selectedPair?`<h2>Selected residue pair</h2><p class="note">${escape(report.selectedPair)}</p>`:''}${report.extraRows.length?`<h2>Manually added evidence</h2><p>${escape(report.extra)}</p>${rows(['Type','Residue pair','Observed','Target / upper bound','Satisfaction'],report.extraRows)}`:''}<h2>Independent model-quality assessment</h2><p>QMEANDisCo Global: ${escape(report.qmean)} · ${escape(report.qmeanStatus)}</p>${report.qmeanChart?`<img class="histogram" src="${report.qmeanChart}" alt="Per-residue QMEANDisCo scores">`:''}<p>Confidence models are exploratory and require independent calibration.</p></main></body></html>`;
         }
         validationElement('validationDownload')?.addEventListener('click',()=>{
             const {figures,qmeanChart,...report}=validationReportSnapshot(false);
@@ -21843,7 +21965,7 @@
             report.scores.forEach(([label,value],index)=>{
                 const column=index%2;
                 if(column===0&&y+154>pageHeight-margin){newPage();y=55;}
-                const x=margin+column*(cardWidth+10),top=y,chart=report.scoreHistograms[index-2];
+                const x=margin+column*(cardWidth+10),top=y,chart=report.scoreHistograms[({2:0,7:1,8:2})[index]];
                 pdf.setFillColor(...card);pdf.roundedRect(x,top,cardWidth,146,7,7,'F');
                 write(label,x+12,top+19,cardWidth-24,10,muted);
                 pdf.setFont('helvetica','bold');pdf.setFontSize(20);color(accent);pdf.text(plain(value),x+12,top+54);
@@ -22001,7 +22123,7 @@
         function validationNodeColor(index,mode){
             if(index===undefined||index<0||!physicsNodes[index]||physicsNodes[index].res.entityType!=='protein')return '#64748b';
             if(mode==='membrane-score')return validationColor('confidence',validationMembraneDetectionConfidence());
-            if(mode==='model-confidence'){const score=calculateModelConfidence().scores[index];return Number.isFinite(score)?modelConfidenceColor(score):'#64748b';}
+            if(['model-confidence','local-confidence','placement-2','placement-5'].includes(mode)){const field={'model-confidence':'scores','local-confidence':'local','placement-2':'placement2','placement-5':'placement5'}[mode],score=calculateModelConfidence()[field][index];return Number.isFinite(score)?modelConfidenceColor(score):'#64748b';}
             if(mode==='alpha-pae'){const score=calculateResiduePae()[index];return Number.isFinite(score)?new THREE.Color('#38bdf8').lerp(new THREE.Color('#ef4444'),validationClamp(score/30)).getStyle():'#64748b';}
             if(!validationState.nodeColors||validationState.nodeColors.mode!==mode||validationState.nodeColors.length!==physicsNodes.length){
                 const sums=new Float64Array(physicsNodes.length),counts=new Uint32Array(physicsNodes.length);
@@ -22075,12 +22197,13 @@
 
 
 // benchmarkApi.js start — input-only contract; no experimental scoring data enters here.
-window.buildHomologyModel = async function({referenceStructure, uniprotIds, convergenceThreshold=0.02, phase2TimeoutMs=20000, seed=1, requireAlphaFoldForEveryProteinChain=false, requiredChainAccessions=null, captureModelImage=false, runSimulation=true, fullReferenceStructure=null, preservedResidues=null, signal, onProgress=()=>{}}) {
+window.buildHomologyModel = async function({referenceStructure, uniprotIds, convergenceThreshold=0.02, phase2TimeoutMs=20000, seed=1, requireAlphaFoldForEveryProteinChain=false, requiredChainAccessions=null, forceSequenceAccessions=[], captureModelImage=false, runSimulation=true, fullReferenceStructure=null, preservedResidues=null, signal, onProgress=()=>{}}) {
     if (window.__benchmarkRun) throw new Error('A benchmark model is already running');
     if (!window.stringScapeReady) throw new Error('Modeller is not ready');
     if (typeof referenceStructure !== 'string' || !Array.isArray(uniprotIds) || !uniprotIds.length) throw new Error('Reference and UniProt IDs required');
     if (!uniprotIds.every(id=>/^(?:[OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9](?:[A-Z][A-Z0-9]{2}[0-9]){1,2})(?:-[0-9]+)?$/.test(id))) throw new Error('Only UniProt accessions are allowed');
-    const run=window.__benchmarkRun={startedAt:performance.now(),phase2StartedAt:null,steps:0};
+    const run=window.__benchmarkRun={startedAt:performance.now(),phase2StartedAt:null,steps:0,progress:onProgress,forceSequenceAccessions:new Set(forceSequenceAccessions.map(id=>String(id).toUpperCase()))};
+    const reportStage=async stage=>{onProgress({stage});await new Promise(resolve=>setTimeout(resolve,0));};
     // requestAnimationFrame is suspended for off-screen iframes; benchmarking must
     // never report artificial convergence simply because its viewer is off-screen.
     const physicsTimer=setInterval(()=>{
@@ -22091,6 +22214,7 @@ window.buildHomologyModel = async function({referenceStructure, uniprotIds, conv
     const originalRandom=Math.random;let randomState=seed>>>0;
     Math.random=()=>{randomState+=0x6D2B79F5;let t=randomState;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return ((t^t>>>14)>>>0)/4294967296;};
     try {
+        await reportStage('Preparing model inputs…');
         document.getElementById('autoRunBuildSimulation').checked=runSimulation;
         document.getElementById('useReferencesDirectly').checked=false;
         document.getElementById('lockAlignedResiduesDistance').value='0';
@@ -22099,17 +22223,21 @@ window.buildHomologyModel = async function({referenceStructure, uniprotIds, conv
         clearUploadedStructure('alphaFold');
         await loadModelPair('benchmark-reference.cif',uniprotIds.join(', '));
         if(signal?.aborted)throw new DOMException('Stopped','AbortError');
+        if(run.loadError)throw run.loadError;
+        if(readyModelGeneration!==modelBuildGeneration||!physicsNodes.length)throw Object.assign(new Error(document.getElementById('errorMessage').textContent||'Model build failed'),{code:'MODEL_BUILD_FAILED'});
         const missingChains=alignmentResults.filter(pair=>pair.entityType==='protein' &&
             (pair.referenceOnly || !pair.c2 || !pair.isEquivalent ||
                 (requiredChainAccessions && !requiredChainAccessions[pair.c1]) ||
                 !modelData2.chains[pair.c2]?.some(atom=>atom.entityType==='protein' && atom.sourcePdbId &&
                     (!requiredChainAccessions || uniProtAccession(atom.sourcePdbId)===requiredChainAccessions[pair.c1]) &&
                     alphaFoldMolstarFiles.some(file=>file.pdbId===atom.sourcePdbId && file.alphaFoldCoordinates)))).map(pair=>pair.c1);
+        const badMappings=alignmentResults.filter(pair=>pair.entityType==='protein' && (pair.referenceOnly || !pair.c2 || !pair.isEquivalent || (requiredChainAccessions && !requiredChainAccessions[pair.c1]) || !modelData2.chains[pair.c2]?.some(atom=>atom.entityType==='protein'&&atom.sourcePdbId&&(!requiredChainAccessions||uniProtAccession(atom.sourcePdbId)===requiredChainAccessions[pair.c1])))).map(pair=>pair.c1);
+        if(badMappings.length){const error=new Error(`Missing or invalid target mapping for protein chain(s): ${badMappings.join(', ')}`);error.code='INVALID_CHAIN_MAPPING';error.missingChains=badMappings;throw error;}
         if(requireAlphaFoldForEveryProteinChain && missingChains.length){
             const error=new Error(`Missing AlphaFold model for protein chain${missingChains.length===1?'':'s'} ${missingChains.join(', ')}`);
             error.code='MISSING_ALPHAFOLD';error.missingChains=missingChains;throw error;
         }
-        if(alphaFoldMolstarFiles.some(file=>!file.alphaFoldCoordinates))throw new Error('AlphaFold coordinates unavailable for one or more inputs; synthetic sequence fallback is excluded from benchmarking');
+        if(forceSequenceAccessions.some(id=>!alphaFoldMolstarFiles.some(file=>file.pdbId.toUpperCase()===id.toUpperCase() && file.sequenceOnly && file.fallbackReason==='forced')))throw new Error('Forced UniProt sequence input was not used for every requested accession');
         if(readyModelGeneration!==modelBuildGeneration||!physicsNodes.length)throw new Error(document.getElementById('errorMessage').textContent||'Model build failed');
         const samples=[];let previous=physicsNodes.map(n=>[n.x,n.y,n.z]),last=performance.now(),lastSteps=run.steps,status='timed out';
         if(!runSimulation)status='not run';
@@ -22128,11 +22256,14 @@ window.buildHomologyModel = async function({referenceStructure, uniprotIds, conv
         }
         physicsRunning=false;
         const modelCompletedAt=performance.now();
+        await reportStage('Loading AlphaFold prediction errors…');
         const paeDeadline=performance.now()+15000;
         await Promise.race([loadValidationPae(),new Promise(resolve=>setTimeout(resolve,15000))]);
         while(validationState.paeLoading&&performance.now()<paeDeadline)await new Promise(resolve=>setTimeout(resolve,100));
+        await reportStage('Waiting for UniProt annotations…');
         const annotationDeadline=performance.now()+60000;
         while(uniProtLookupPending && performance.now()<annotationDeadline) { if(signal?.aborted)throw new DOMException('Stopped','AbortError'); await new Promise(resolve=>setTimeout(resolve,100)); }
+        await reportStage('Calculating validation metrics…');
         document.getElementById('validationReport').open=true;renderValidationReport(true);
         const cleanAtom=a=>a?{chain:a.chainId,resSeq:a.resSeq,insertionCode:a.sourceAtoms?.[0]?.insertionCode||'',accession:a.sourcePdbId,xyz:[a.x,a.y,a.z],plddt:a.plddt,aa:a.singleChar}:null;
         const report=validationReportSnapshot(false);
@@ -22148,7 +22279,9 @@ window.buildHomologyModel = async function({referenceStructure, uniprotIds, conv
             physicsRenderer.render(physicsScene,physicsCamera);
             modelImage=physicsRenderer.domElement.toDataURL('image/png');
         }
-        const benchmarkComparison=fullReferenceStructure ? benchmarkCompareFullReference(fullReferenceStructure,preservedResidues||[]) : null;
+        await reportStage('Comparing model with full reference…');
+        const benchmarkComparison=fullReferenceStructure ? benchmarkCompareFullReference(fullReferenceStructure,preservedResidues||[],requiredChainAccessions) : null;
+        await reportStage('Preparing model output…');
         if(fullReferenceStructure)modelImage=window.getModelOverviewSnapshot()||null;
         return {model:fullReferenceStructure?generateSimulationMmCifString(null,false,false,true):generateSimulationMmCifString(),modelImage,validationReport:report,benchmarkComparison,
             convergenceData:{status,threshold:convergenceThreshold,phase2TimeoutMs,samples,phase2Ms:run.phase2StartedAt===null?null:modelCompletedAt-run.phase2StartedAt},
@@ -22156,7 +22289,7 @@ window.buildHomologyModel = async function({referenceStructure, uniprotIds, conv
             nodes:physicsNodes.map((n,index)=>n.res.entityType==='protein'?{index,xyz:[n.x,n.y,n.z],referenceChain:n.res.c1,reference:cleanAtom(validationAtom(n,'reference')),alphaFold:cleanAtom(validationAtom(n,'alphaFold'))}:null).filter(Boolean),
             alphaFold:modelData2.caAtoms.filter(a=>a.entityType==='protein').map(cleanAtom),
             pae:Object.fromEntries(modelData2.files.map(f=>[f.pdbId,validationPaeExport(validationState.pae.get(f.fileIndex))])),
-            settings:{morphAlpha,springCutoffVal,seed,requireAlphaFoldForEveryProteinChain,apiVersion:2,script:document.getElementById('appScript')?.src,buildSettings:Object.fromEntries([...document.querySelectorAll('#buildSettingsContent input[id],#buildSettingsContent select[id]')].map(element=>[element.id,element.type==='checkbox'?element.checked:element.value]))}};
+            settings:{morphAlpha,springCutoffVal,seed,requireAlphaFoldForEveryProteinChain,forceSequenceAccessions,sourceInputs:alphaFoldMolstarFiles.map(file=>({accession:file.pdbId,sequenceOnly:file.sequenceOnly,reason:file.fallbackReason||null,alphaFoldCoordinates:file.alphaFoldCoordinates})),apiVersion:2,script:document.getElementById('appScript')?.src,buildSettings:Object.fromEntries([...document.querySelectorAll('#buildSettingsContent input[id],#buildSettingsContent select[id]')].map(element=>[element.id,element.type==='checkbox'?element.checked:element.value]))}};
     } finally {clearInterval(physicsTimer);physicsRunning=false;Math.random=originalRandom;window.__benchmarkRun=null;}
 };
 if(new URLSearchParams(location.search).has('benchmark')){
@@ -22211,7 +22344,7 @@ if(window.AppPerformanceDiagnostics){
 function physicsComparisonValues(mode){
     const scoreModes={'constraint-confidence':'confidence','spring-strain':'strain','membrane-score':'membraneScore','model-confidence':'combined','alpha-pae':'pae'};
     let scores=null;
-    if(mode==='model-confidence')scores=calculateModelConfidence().scores;
+    if(['model-confidence','local-confidence','placement-2','placement-5'].includes(mode))scores=calculateModelConfidence()[{'model-confidence':'scores','local-confidence':'local','placement-2':'placement2','placement-5':'placement5'}[mode]];
     else if(mode==='alpha-pae')scores=calculateResiduePae();
     else if(scoreModes[mode]){
         const sums=new Float64Array(physicsNodes.length),counts=new Uint32Array(physicsNodes.length);

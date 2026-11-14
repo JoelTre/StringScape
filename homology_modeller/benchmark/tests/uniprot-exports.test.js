@@ -1,0 +1,10 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const code=fs.readFileSync(require.resolve('../app.js'),'utf8');const take=(start,end)=>{let a=code.indexOf(start),b=code.indexOf(end,a);assert.ok(a>=0&&b>a);return code.slice(a,b);};
+const ctx={Number,JSON,Math};vm.createContext(ctx);
+vm.runInContext(take('function cleanValue(', '// Write bounded chunks')+take('function predictionResultRows(', '// Measure encoding and file operations')+'\nthis.out={resultRows,predictionResultRows,benchmarkChainSummaries};',ctx);
+const f={block:0,afPosition:2,referenceChain:'A',gapType:'internal',anchorSpan:7.6,anchorCapacity:11.4,anchorReachRatio:2/3,anchorCount:2};
+const r={features:f,chain:'A',referenceNumber:2,referenceInsertion:'A',residue:'ALA 2A',source:'UniProt sequence',sourceReason:'forced',accession:'P12345',predictionPosition:{chain:'A',residue:2},kept:false,aligned:false,locked:false,plddt:null,pae:null,lddt:.5,lddtEligible:3,lddtCompared:2,lddtMissing:1,neighbourSources:{alphafold:{eligible:1,compared:1},uniprot:{eligible:1,compared:1},unknown:{eligible:1,compared:0}}};
+const refs=ctx.out.resultRows('1ABC',{rows:[r]}),pred=ctx.out.predictionResultRows('1ABC',[r]);
+assert.equal(refs[0]['Input source'],'UniProt sequence');assert.equal(refs[0]['Fallback reason'],'forced');assert.equal(refs[0]['Reference insertion code'],'A');assert.equal(refs[0]['AlphaFold pLDDT'],null);assert.equal(refs[0]['lDDT unknown-source eligible neighbours'],1);assert.equal(pred[0]['Target sequence position'],2);assert.equal(pred[0]['Anchor span (Å)'],7.6);assert.equal(pred[0]['AlphaFold PAE (Å)'],null);
+console.log('UniProt residue export tests passed');

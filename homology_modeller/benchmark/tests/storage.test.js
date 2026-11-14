@@ -1,0 +1,14 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {packBenchmarkResult,unpackBenchmarkResult}=require('../storage.js');
+const shared='[{"position":1,"residueToAnchor":2}]';
+const input={summary:{value:1},residues:[{'Directional anchor PAE pairs':shared,id:1},{id:2}],predictionResidues:[{'Directional anchor PAE pairs':shared,id:3},{'Directional anchor PAE pairs':'[]',id:4}]};
+const packed=packBenchmarkResult(input);
+assert.equal(packed.anchorPairValues.length,2);
+assert.equal(packed.residues[0]['Directional anchor PAE pairs'],packed.predictionResidues[0]['Directional anchor PAE pairs']);
+const unpacked=unpackBenchmarkResult(JSON.parse(JSON.stringify(packed)));
+assert.deepEqual(unpacked.residues,input.residues);
+assert.deepEqual(unpacked.predictionResidues,input.predictionResidues);
+assert.strictEqual(unpackBenchmarkResult(input),input);
+assert.throws(()=>unpackBenchmarkResult({anchorPairEncoding:'dictionary-v1',anchorPairValues:[],residues:[{'Directional anchor PAE pairs':1}]}),/Invalid/);
+console.log('benchmark storage tests passed');
