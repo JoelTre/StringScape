@@ -22105,7 +22105,10 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const cleanIds = Array.from(new Set((pdbIds || []).map(id => String(id || '').trim().toUpperCase()).filter(Boolean)));
         const missingIds = cleanIds.filter(id => !proteinComplexStructuresMetadataById.has(id));
         if (!missingIds.length) return proteinComplexStructuresMetadataById;
-        if (proteinComplexStructuresLoadPromise) return proteinComplexStructuresLoadPromise;
+        if (proteinComplexStructuresLoadPromise) {
+            await proteinComplexStructuresLoadPromise;
+            return fetchProteinComplexStructuresMetadata(cleanIds);
+        }
 
         proteinComplexStructuresLoadPromise = (async () => {
             try {
@@ -22125,6 +22128,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                     }
 
                     const payload = await response.json();
+                    if (payload?.errors?.length || !Array.isArray(payload?.data?.entries)) {
+                        throw new Error(payload?.errors?.map(error => error.message).filter(Boolean).join('; ') || 'Invalid RCSB response');
+                    }
                     const entries = Array.isArray(payload?.data?.entries) ? payload.data.entries : [];
                     entries.forEach(entry => {
                         const pdbId = String(entry?.rcsb_id || '').trim().toUpperCase();
@@ -22452,7 +22458,11 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
         const title = document.createElement('div');
         title.className = 'protein-complex-name';
-        title.textContent = entry.title || `Protein complex ${entry.pdbId}`;
+        const cardTitle = entry.title || `Protein complex ${entry.pdbId}`;
+        // Older PDB entries often provide their titles entirely in uppercase.
+        title.textContent = cardTitle !== entry.pdbId && /[A-Z]/.test(cardTitle) && cardTitle === cardTitle.toUpperCase()
+            ? cardTitle.toLowerCase().replace(/[a-z]/, letter => letter.toUpperCase())
+            : cardTitle;
 
         const speciesMeta = document.createElement('div');
         speciesMeta.className = 'protein-complex-meta';
@@ -22627,6 +22637,102 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         return view.structuresState.observer;
     }
 
+    function openStructuresBatchCsvDialog() {
+        const dialog = document.createElement('dialog');
+        dialog.className = 'structures-batch-dialog';
+        dialog.setAttribute('aria-labelledby', 'structures-batch-title');
+        const heading = document.createElement('h2');
+        heading.id = 'structures-batch-title';
+        heading.textContent = 'Batch CSVs';
+        const description = document.createElement('p');
+        description.textContent = 'The CSVs below can be downloaded and batch processed through stringscape.net/homology_modeller/batch. Click on a CSV below to download it';
+        const list = document.createElement('div');
+        list.className = 'structures-batch-list';
+        const status = document.createElement('p');
+        status.setAttribute('role', 'status');
+        const close = document.createElement('button');
+        close.type = 'button';
+        close.textContent = 'Close';
+        close.className = 'structures-batch-close';
+        close.addEventListener('click', () => dialog.close());
+        const names = ['All_PDB_IDs_one_per_row', 'All_PDB_IDs_grouped_by_complex', 'One_representative_PDB_ID_per_complex', 'All_complexes_AI_Input'];
+        names.forEach(name => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            const label = document.createElement('span');
+            label.textContent = name;
+            const loading = document.createElement('span');
+            loading.className = 'structures-batch-loading';
+            button.append(label, loading);
+            button.addEventListener('click', async () => {
+                list.querySelectorAll('button').forEach(item => { item.disabled = true; });
+                status.textContent = '';
+                loading.textContent = 'Creating...';
+                try {
+                    // Let the browser paint the loading message before processing the data.
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                    await downloadStructuresBatchCsv(name);
+                } catch (error) {
+                    status.textContent = `Could not create CSV: ${error?.message || 'Unknown error'}`;
+                } finally {
+                    loading.textContent = '';
+                    list.querySelectorAll('button').forEach(item => { item.disabled = false; });
+                }
+            });
+            list.appendChild(button);
+        });
+        dialog.append(heading, description, list, status, close);
+        document.body.appendChild(dialog);
+        dialog.addEventListener('close', () => dialog.remove(), { once: true });
+        dialog.showModal();
+    }
+
+    async function downloadStructuresBatchCsv(name) {
+        const entries = getProteinComplexStructureEntries();
+        const byId = new Map(entries.map(entry => [entry.pdbId, entry]));
+        const accessions = nodeIds => Array.from(new Set(nodeIds.map(getPreferredUniProtAliasForProtein).filter(Boolean)));
+        const combined = ensureCombinedPdbColorState().groups;
+        const groupedIds = new Set(combined.flatMap(group => group.pdbIds));
+        // Structures with only one associated protein are not in the complex colour key,
+        // but still belong in the all-PDB grouped export.
+        const groups = combined.map(group => ({ ...group }));
+        entries.filter(entry => !groupedIds.has(entry.pdbId)).forEach(entry => {
+            groups.push({ pdbIds: [entry.pdbId], members: new Set(entry.nodeIds) });
+        });
+        let rows;
+        if (name === 'All_PDB_IDs_one_per_row') {
+            rows = entries.map(entry => ['', entry.pdbId, accessions(entry.nodeIds).join(', ')]);
+        } else if (name === 'All_PDB_IDs_grouped_by_complex') {
+            rows = groups.map(group => ['', group.pdbIds.join(', '), accessions(Array.from(group.members)).join(', ')]);
+        } else if (name === 'One_representative_PDB_ID_per_complex') {
+            rows = groups.map(group => {
+                const candidates = group.pdbIds.map(id => byId.get(id)).filter(Boolean);
+                const best = candidates.reduce((a, b) => accessions(b.nodeIds).length > accessions(a.nodeIds).length ? b : a);
+                return ['', best.pdbId, accessions(best.nodeIds).join(', ')];
+            });
+        } else {
+            rows = await Promise.all(combined.map(async group => {
+                const taxa = Array.from(new Set(Array.from(group.members, id => String(id).split('.')[0]).filter(id => /^\d+$/.test(id))));
+                const species = (await Promise.all(taxa.map(loadHomologySpeciesName))).join(', ') || 'Unknown species';
+                const labelTokens = new Set(group.label.toUpperCase().match(/[A-Z0-9]+/g) || []);
+                const label = group.pdbIds.every(id => labelTokens.has(id.toUpperCase()))
+                    ? group.label : `${group.label} (${group.pdbIds.join(', ')})`;
+                return [`I want a model of this protein complex from ${species} (See suggested PDB IDs to use. You can use all or a few of them (a few is best if there are many in the list), but also feel free to find others if you think a reference from another strain or species would be useful to use, such as if it is a better model of the same protein complex with more of it experimentally determined): ${label}`, '', ''];
+            }));
+        }
+        const csvCell = value => `"${String(value).replace(/"/g, '""')}"`;
+        const headers = ['What do you want a model of?', 'Reference PDB IDs', 'AlphaFold IDs, UniProt IDs, or PDB IDs'];
+        const csv = [headers, ...rows].map(row => row.map(csvCell).join(',')).join('\r\n') + '\r\n';
+        const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${name}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
     async function renderProteinComplexStructuresView(pane = 'primary') {
         const view = ensureProteinComplexStructuresView(pane);
         const state = view.structuresState;
@@ -22658,6 +22764,40 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
 
         const toolbar = document.createElement('div');
         toolbar.className = 'structures-toolbar';
+        const csvButton = document.createElement('button');
+        csvButton.type = 'button';
+        csvButton.className = 'structures-batch-button structures-csv-button';
+        csvButton.disabled = true;
+        const csvIcon = document.createElement('i');
+        csvIcon.className = 'fa-solid fa-download';
+        csvIcon.setAttribute('aria-hidden', 'true');
+        csvButton.append(csvIcon, ' CSV');
+        csvButton.addEventListener('click', () => {
+            const csvCell = value => `"${String(value).replace(/"/g, '""')}"`;
+            const rows = structureEntries.filter(entry => proteinComplexStructuresMetadataById.has(entry.pdbId)).map(entry => {
+                const meta = proteinComplexStructuresMetadataById.get(entry.pdbId);
+                const proteins = Array.from(new Set(entry.nodeIds.map(nodeId =>
+                    String(proteinMetadata.get(nodeId)?.preferred_name || nodeId || '').trim()).filter(Boolean)));
+                return [entry.pdbId, meta.title, meta.species.join(', '), proteins.join(', ')];
+            });
+            const csv = [['PDB ID', 'PDB title', 'Species of origin', 'Proteins in complex'], ...rows]
+                .map(row => row.map(csvCell).join(',')).join('\r\n') + '\r\n';
+            const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'structures.csv';
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        });
+        toolbar.appendChild(csvButton);
+        const batchButton = document.createElement('button');
+        batchButton.type = 'button';
+        batchButton.className = 'structures-batch-button';
+        batchButton.textContent = 'Batch CSVs';
+        batchButton.addEventListener('click', openStructuresBatchCsvDialog);
+        toolbar.appendChild(batchButton);
         const searchWrap = document.createElement('label');
         searchWrap.className = 'structures-search';
         const searchLabel = document.createElement('span');
@@ -22740,10 +22880,9 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const structureEntries = getProteinComplexStructureEntries();
         const renderLoadingSkeletons = () => {
 
-            const skeletonCount = Math.max(4, Math.min(8, Math.ceil((structureEntries.length || 6) / 2)));
-            for (let index = 0; index < skeletonCount; index += 1) {
-                const target = index < Math.ceil(skeletonCount / 2) ? thisGrid : otherGrid;
-                target.appendChild(buildProteinComplexStructureSkeletonCard());
+            for (let index = 0; index < 10; index += 1) {
+                thisGrid.appendChild(buildProteinComplexStructureSkeletonCard());
+                otherGrid.appendChild(buildProteinComplexStructureSkeletonCard());
             }
         };
 
@@ -22763,18 +22902,18 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         }
 
         renderLoadingSkeletons();
-
-        try {
-            await fetchProteinComplexStructuresMetadata(structureEntries.map(entry => entry.pdbId));
-        } catch (error) {
-            if (renderToken !== state.renderToken) return;
-            status.textContent = `Unable to load RCSB metadata: ${error?.message || 'Unknown error'}`;
-        }
-
-        if (renderToken !== state.renderToken || (view.dataset.pane === 'secondary' ? secondaryViewId : currentViewId) !== 'Protein Complex Structures') return;
-        state.loading = false;
-
-        const records = structureEntries.map(entry => ({
+        const isCurrent = () => renderToken === state.renderToken &&
+            (view.dataset.pane === 'secondary' ? secondaryViewId : currentViewId) === 'Protein Complex Structures';
+        const processed = new Set(structureEntries.filter(entry => proteinComplexStructuresMetadataById.has(entry.pdbId)).map(entry => entry.pdbId));
+        const cardsById = new Map();
+        let loadingError = '';
+        const renderLoadedCards = () => {
+        if (!isCurrent()) return;
+        state.observer?.disconnect();
+        pinnedGrid.replaceChildren();
+        thisGrid.replaceChildren();
+        otherGrid.replaceChildren();
+        const records = structureEntries.filter(entry => processed.has(entry.pdbId)).map(entry => ({
             ...entry,
             meta: proteinComplexStructuresMetadataById.get(entry.pdbId) || { title: '', species: [] }
         }));
@@ -22804,7 +22943,6 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         const pinnedCards = [];
         const thisSpeciesCards = [];
         const otherSpeciesCards = [];
-        let firstRealCardRendered = false;
         records.forEach(record => {
             const titleText = String(record.meta?.title || '').trim() || record.pdbId;
             const speciesList = Array.from(new Set(Array.isArray(record.meta?.species) ? record.meta.species : []));
@@ -22820,7 +22958,8 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 return [nodeId, meta.preferred_name, getProteinInfoAnnotation(nodeId), getProteinInfoDescription(nodeId), ...Object.values(accessoryVariableValues || {}).flatMap(vars => Object.values(vars || {}).filter(values => values instanceof Map).map(values => values.get(nodeId)))].filter(Boolean).join(' ');
             })].join(' ').toLowerCase();
             const isPinned = proteinComplexStructuresPinnedPdbIds.has(record.pdbId);
-            const card = buildProteinComplexStructureCard({ ...record, title: titleText, speciesLabel }, speciesLabel, isPinned, pdbId => {
+            let card = cardsById.get(record.pdbId);
+            if (!card) card = buildProteinComplexStructureCard({ ...record, title: titleText, speciesLabel }, speciesLabel, isPinned, pdbId => {
                 if (proteinComplexStructuresPinnedPdbIds.has(pdbId)) {
                     proteinComplexStructuresPinnedPdbIds.delete(pdbId);
                 } else {
@@ -22828,18 +22967,22 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
                 }
                 refreshProteinComplexStructuresViewIfOpen();
             });
+            cardsById.set(record.pdbId, card);
             card.querySelector('.protein-complex-card').dataset.searchText = searchText;
             card.querySelector('.protein-complex-card').proteinNodeIds = record.nodeIds;
-            if (!firstRealCardRendered) {
-                clearProteinComplexStructuresLoadingState(view);
-                firstRealCardRendered = true;
-            }
             if (isPinned) pinnedCards.push(card);
             else if (isThisSpecies) thisSpeciesCards.push(card);
             else otherSpeciesCards.push(card);
         });
 
-        status.textContent = `${records.length} protein structure${records.length === 1 ? '' : 's'} loaded from RCSB PDB${dominantSpeciesLabel ? ` for ${dominantSpeciesLabel}` : ''}.`;
+        csvButton.disabled = state.loading || records.length === 0;
+        status.replaceChildren(document.createTextNode(`${records.length} of ${structureEntries.length} protein structures loaded from `));
+        const rcsbLink = document.createElement('a');
+        rcsbLink.href = 'https://www.rcsb.org/';
+        rcsbLink.target = '_blank';
+        rcsbLink.rel = 'noopener noreferrer';
+        rcsbLink.textContent = 'RCSB Protein Data Bank';
+        status.append(rcsbLink, document.createTextNode(`${dominantSpeciesLabel ? ` for ${dominantSpeciesLabel}` : ''}${state.loading ? '...' : '.'}${loadingError ? ` ${loadingError}` : ''}`));
 
         if (!pinnedCards.length) {
             const empty = document.createElement('div');
@@ -22872,9 +23015,31 @@ function renderUploadedFileList(containerId, fileNames, options = {}) {
         view.querySelectorAll('img[data-src]').forEach(img => observer.observe(img));
         applyProteinComplexStructuresSearchFilter(view);
 
-        if (!firstRealCardRendered) {
-            clearProteinComplexStructuresLoadingState(view);
+        };
+
+        if (processed.size) renderLoadedCards();
+        const pending = structureEntries.filter(entry => !processed.has(entry.pdbId))
+            .sort((a, b) => a.nodeIds.length - b.nodeIds.length || a.pdbId.localeCompare(b.pdbId));
+        for (const batch of chunkArray(pending, 80)) {
+            try {
+                await fetchProteinComplexStructuresMetadata(batch.map(entry => entry.pdbId));
+                batch.forEach(entry => {
+                    if (proteinComplexStructuresMetadataById.has(entry.pdbId)) processed.add(entry.pdbId);
+                });
+            } catch (error) {
+                loadingError = `Unable to load RCSB metadata: ${error?.message || 'Unknown error'}`;
+                break;
+            }
+            if (!isCurrent()) return;
+            renderLoadedCards();
         }
+        if (!isCurrent()) return;
+        state.loading = false;
+        if (!loadingError && processed.size < structureEntries.length) {
+            const missingCount = structureEntries.length - processed.size;
+            loadingError = `Metadata was not returned for ${missingCount} ${missingCount === 1 ? 'structure' : 'structures'}.`;
+        }
+        renderLoadedCards();
     }
 
     function refreshProteinComplexStructuresViewIfOpen() {

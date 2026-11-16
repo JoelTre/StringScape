@@ -4446,6 +4446,17 @@
             border-bottom: 1px solid var(--border-color);
         }
         .protein-complex-structures-view .structures-toolbar { flex-wrap: wrap; gap: 12px; }
+        .structures-batch-button, .structures-batch-close { padding: 8px 14px; border: 1px solid var(--border-color-strong); border-radius: 8px; background: var(--button-bg); color: var(--text-color); cursor: pointer; white-space: nowrap; }
+        .protein-complex-structures-view .structures-batch-button { width: auto; flex: 0 0 auto; margin: 0; }
+        .protein-complex-structures-view .structures-batch-button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .structures-batch-dialog { width: min(560px, calc(100vw - 48px)); box-sizing: border-box; border: 1px solid var(--border-color-strong); border-radius: 16px; padding: 24px; background: var(--surface-color-panel); color: var(--text-color); box-shadow: 0 12px 40px var(--shadow-color); }
+        .structures-batch-dialog::backdrop { background: rgba(0, 0, 0, .6); }
+        .structures-batch-dialog h2 { margin: 0 0 12px; }
+        .structures-batch-dialog p { line-height: 1.5; }
+        .structures-batch-list { display: flex; flex-direction: column; gap: 8px; }
+        .structures-batch-list button { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px; text-align: left; overflow-wrap: anywhere; border: 1px solid var(--border-color); border-radius: 8px; background: var(--button-bg); color: var(--accent-color-soft); cursor: pointer; }
+        .structures-batch-loading { flex: 0 0 auto; margin-left: auto; }
+        .structures-batch-list button:disabled { opacity: .6; cursor: wait; }
         .structures-sort { position: relative; color: var(--accent-color-soft); }
         .structures-sort summary { cursor: pointer; font-weight: bold; padding: 4px 8px; border-radius: 8px; list-style: none; }
         .structures-sort summary:hover { background: var(--button-bg); }
@@ -4472,14 +4483,20 @@
             font-size: 13px;
             line-height: 1.4;
         }
+        .protein-complex-structures-view .structures-status a {
+            color: var(--accent-color-soft);
+        }
         .protein-complex-structures-view .structures-toolbar {
             display: flex;
-            align-items: flex-start;
+            align-items: center;
             justify-content: flex-end;
             margin-left: auto;
+            min-width: 0;
         }
         .protein-complex-structures-view .structures-search {
-            width: min(760px, 100%);
+            width: min(600px, 100%);
+            flex: 1 1 360px;
+            min-width: 0;
             display: flex;
             flex-direction: row;
             align-items: center;
@@ -4497,7 +4514,7 @@
         .protein-complex-structures-view .structures-search input {
             width: 100%;
             flex: 1 1 auto;
-            min-width: 309px;
+            min-width: 0;
             box-sizing: border-box;
             border-radius: 999px;
             border: 1px solid var(--input-border);
