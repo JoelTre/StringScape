@@ -1,0 +1,10 @@
+'use strict';
+const fs=require('fs'),vm=require('vm'),assert=require('assert');
+const source=fs.readFileSync(require('path').join(__dirname,'../app.js'),'utf8');
+const parse=source.slice(source.indexOf('function parseCSV('),source.indexOf('function table('));
+const summary=source.slice(source.indexOf('function summary('),source.indexOf('function card('));
+const ctx={columns:['What do you want a model of?','Reference PDB IDs','AlphaFold IDs, UniProt IDs, or PDB IDs'],Number,Error};vm.createContext(ctx);vm.runInContext(parse+summary,ctx);
+const csv='What do you want a model of?,Reference PDB IDs,"AlphaFold IDs, UniProt IDs, or PDB IDs"\r\n"a, b",,"Q12345"\r\n';
+const rows=ctx.parseCSV(csv);assert.equal(rows.length,1);assert.equal(rows[0][ctx.columns[0]],'a, b');assert.equal(rows[0][ctx.columns[1]],'');assert.throws(()=>ctx.parseCSV('wrong,headers\n1,2'));
+assert.equal(ctx.summary([1,0,0.5,NaN]).median,0.5);assert.equal(ctx.summary([0,1]).median,0.5);assert.equal(ctx.summary([]).mean,null);
+console.log('Batch CSV and confidence summary tests passed');

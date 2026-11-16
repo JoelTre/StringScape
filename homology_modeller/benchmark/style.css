@@ -13,3 +13,40 @@
 @media(max-width:600px){header{display:flex;align-items:flex-start;gap:12px}.header-actions{flex-shrink:0}.theme-toggle{font-size:13px;padding:6px 9px}}
 
 #diagnostics-dialog{width:min(760px,calc(100% - 32px));max-height:min(85vh,800px);overflow:auto;background:#101e30;color:#dbe8f7;border:1px solid #345269;border-radius:12px;padding:22px}#diagnostics-dialog::backdrop{background:rgba(0,0,0,.7)}#diagnostics-dialog h3{margin:18px 0 8px}#diagnostics-dialog .table-wrap{max-height:none}:root[data-theme="light"] #diagnostics-dialog{background:#fff;color:#172b3c;border-color:#9db5c3}
+
+.run-progress{display:flex;height:20px;overflow:hidden;border-radius:2px;background:#536579}
+.run-progress-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:1em}
+.run-progress-heading h3,.run-progress-heading p{margin:0 0 8px}
+#run-status{margin:8px 0 0}
+.run-progress-segment{flex:1 1 0;min-width:0;border-right:1px solid #101e30}
+.run-progress-segment:last-child{border-right:0}
+.run-progress .attempted,.run-progress-legend .attempted::before{background:#22b8a7}
+.run-progress .completed,.run-progress-legend .completed::before{background:#3988e8}
+.run-progress .pending,.run-progress-legend .pending::before{background:#718096}
+.run-progress .failed,.run-progress-legend .failed::before{background:#e25d68}
+.run-progress .skipped,.run-progress-legend .skipped::before{background:#e5a545}
+.run-progress-legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin:8px 0;color:#92a8bc;font-size:12px}
+.run-progress-legend span{display:inline-flex;align-items:center;gap:5px}
+.run-progress-legend span::before{content:'';width:10px;height:10px;border-radius:2px}
+:root[data-theme="light"] .run-progress-legend{color:#526b7c}
+
+#results-status.loading{display:flex;align-items:center;gap:12px;padding:14px 16px;border:1px solid #52d4c2;border-radius:8px;background:#123a40;color:#c8fff5;font-size:16px;font-weight:700}
+#results-status.loading::before{content:"";width:18px;height:18px;flex:none;border:3px solid #568b88;border-top-color:#70e2d2;border-radius:50%;animation:results-spin .8s linear infinite}
+:root[data-theme="light"] #results-status.loading{background:#e4f8f4;border-color:#087d72;color:#075e56}
+:root[data-theme="light"] #results-status.loading::before{border-color:#a2d5cc;border-top-color:#087d72}
+@keyframes results-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){#results-status.loading::before{animation:none}}
+
+#export-aggregate{margin-bottom:12px}
+
+#plot-source-filter{border:1px solid #345269;border-radius:8px;margin:16px 0;padding:10px 14px}#plot-source-filter label{display:inline-flex;align-items:center;gap:6px;margin:4px 18px 4px 0}#plot-source-filter p{margin:6px 0 0}:root[data-theme="light"] #plot-source-filter{border-color:#9db5c3}
+
+.scatter-dot-size{display:flex!important;align-items:center;gap:10px;margin:10px 0 6px!important;font-size:13px}.scatter-dot-size input[type=range]{width:min(220px,45%);margin:0}.scatter-dot-size output{min-width:2.5em}
+
+.af-triangle-card{--af-diagram-accent:#57d8c3;background:#101e30;border:1px solid #30485b;border-radius:10px;padding:16px;margin:16px 0}.af-triangle-card svg{display:block;width:min(100%,600px);height:auto;margin:auto}:root[data-theme=light] .af-triangle-card{--af-diagram-bg:#fff;--af-diagram-accent:#087d72;background:#fff;border-color:#cfdee7}
+
+.density-gradient{display:inline-block;width:160px;height:14px;align-self:center;border:1px solid #8999a4;border-radius:3px;background:linear-gradient(to right,rgb(110,0,0),rgb(255,0,0),rgb(255,220,0))}
+
+button[id^="af-test-"][id$="-log"]{margin-bottom:16px}
+
+.result-download-controls{display:flex;align-items:flex-start;gap:4px;overflow-x:auto;margin-top:10px}.result-download-controls>button{flex:none;white-space:nowrap}#af-build-potential{flex:1;min-width:max-content}#af-build-potential summary{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;list-style:none;font:700 13.3333px Arial,sans-serif}#af-build-potential summary::-webkit-details-marker{display:none}#af-build-potential summary::after{content:"";width:7px;height:7px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(45deg);margin-top:-4px}#af-build-potential[open] summary::after{transform:rotate(225deg);margin-top:4px}

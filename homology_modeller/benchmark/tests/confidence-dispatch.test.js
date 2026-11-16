@@ -1,0 +1,16 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const {residueConfidence}=require('../features.js');
+const source=fs.readFileSync(require.resolve('../../script.js'),'utf8');
+const start=source.indexOf('        let modelConfidenceCache=null;'),end=source.indexOf('        function validationMembraneNodeScores()',start);
+assert.ok(start>=0&&end>start);
+let simulated=false;
+const seq={sequenceOnly:true},af={sequenceOnly:false,plddt:85};
+const feature={gapType:'internal',nearestDistance:10,gapLength:20,anchorReachRatio:.75,clash:.1,anchorCount:50,alignmentIdentity:85,paeOutMean:5,paeInMean:6};
+const nodes=[{res:{entityType:'protein'},atom:seq},{res:{entityType:'protein'},atom:af},{res:{entityType:'protein'},atom:seq,usedInAlignment:true},{res:{entityType:'protein'},atom:seq,referenceLockTarget:{}}];
+const ctx={window:{getComplexAiState:()=>({simulationStarted:simulated})},physicsNodes:nodes,validationState:{version:1,pae:new Map()},springPaeRevision:0,physicsLockTargetRevision:0,activeConformationGroup:0,stericClashRadius:3.8,rigidBodySimulation:false,calculateResiduePae:()=>[null,8,null,null],benchmarkFeatures:()=>nodes.map(()=>feature),validationAtom:n=>n.atom,calculateStericClashScores:()=>[],residueConfidence,validationMean:a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:null,Number,Set};
+vm.createContext(ctx);vm.runInContext(source.slice(start,end)+'\nthis.calculate=calculateModelConfidence;',ctx);
+const result=ctx.calculate();assert.ok(Number.isFinite(result.local[0]));assert.ok(Number.isFinite(result.local[1]));assert.equal(result.local[2],null);assert.equal(result.local[3],1);assert.equal(result.placement2[3],1);assert.equal(result.placement5[3],1);assert.equal(result.scores[3],1);assert.notEqual(result.local[0],result.local[1]);assert.equal(result.scored,3);assert.equal(result.overall,(result.scores[0]+result.scores[1])/2);assert.equal(result.overallIncludingLocked,(result.scores[0]+result.scores[1]+1)/3);
+simulated=true;const after=ctx.calculate();assert.equal(after.scored,1);assert.equal(after.overall,null);assert.equal(after.overallIncludingLocked,1);assert.deepEqual(Array.from(after.scores),[null,null,null,1]);
+simulated=false;nodes[3].referenceLockTarget=null;ctx.physicsLockTargetRevision++;const unlocked=ctx.calculate();assert.notEqual(unlocked.scores[3],1);assert.equal(unlocked.locked,0);assert.equal(unlocked.overall,unlocked.overallIncludingLocked);
+console.log('Confidence source and simulation dispatch tests passed');

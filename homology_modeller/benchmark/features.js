@@ -22,7 +22,6 @@ function benchmarkFeatures(nodes, atomFor, referenceFor, matrices, strainPairs, 
     }
     return result;
 }
-if(typeof module!=='undefined')module.exports={benchmarkFeatures};
 // Run-5 exploratory fits. Missing or unsupported inputs are deliberately unscored.
 function run5Confidence(f,plddt,wholePae){
     const empty={local:null,placement2:null,placement5:null,model:null};
@@ -35,4 +34,26 @@ function run5Confidence(f,plddt,wholePae){
     const q=sig(-.85142+4.69579*p+.75707*n+.20472*g+.11413*I-.42183*N+.30770*C+.03904*w-.95667*o-.95048*i-.72048*c+.10585*a);
     return {local,placement2,placement5,model:placement5*q};
 }
-if(typeof module!=='undefined')module.exports={benchmarkFeatures,run5Confidence};
+// Exploratory sequence-only fits from the held-out run study. No AlphaFold features are used.
+function uniprotSequenceConfidence(f){
+    const empty={local:null,placement2:null,placement5:null,model:null};
+    if(!f||!['internal','N-terminal','C-terminal'].includes(f.gapType)||
+       ![f.nearestDistance,f.gapLength,f.clash,f.anchorCount,f.alignmentIdentity].every(Number.isFinite)||
+       f.anchorCount<=0||(f.gapType==='internal'&&!Number.isFinite(f.anchorReachRatio)))return empty;
+    const cap=(x,max)=>Math.max(0,Math.min(max,x)),sig=x=>1/(1+Math.exp(-x));
+    const n=Math.log1p(cap(f.nearestDistance,1000)),g=Math.log1p(cap(f.gapLength,1500)),
+          r=f.gapType==='internal'?cap(f.anchorReachRatio,3):0,c=cap(f.clash,1),
+          a=Math.log1p(cap(f.anchorCount,500)),u=cap(f.alignmentIdentity,100)/100,
+          I=+(f.gapType==='internal'),N=+(f.gapType==='N-terminal'),C=+(f.gapType==='C-terminal');
+    const local=cap(.604288-.043393*n-.001441*g+.028163*I-.008102*N-.020061*C+.153677*r+.007329*c-.013970*a-.248128*u,1);
+    const z5=1.213341-2.456795*n+.069026*g+.050973*I+.255179*N-.306152*C+1.602254*r+.265441*c+.041333*a-.397577*u;
+    const z2=-.233438-.411834*n-.402603*g-.378421*I-.446297*N+.824718*C+1.848414*r+.090025*c-.134862*a+.124280*u;
+    const zj=1.944474-.737669*n-1.477569*g+.810076*I-.551773*N-.258303*C+.759341*r-.043717*c-.313608*a-.030093*u;
+    const placement5=sig(z5);
+    return {local,placement2:placement5*sig(z2),placement5,model:placement5*sig(zj)};
+}
+function residueConfidence(f,atom,wholePae){
+    if(!atom)return {local:null,placement2:null,placement5:null,model:null};
+    return atom.sequenceOnly?uniprotSequenceConfidence(f):run5Confidence(f,atom.plddt,wholePae);
+}
+if(typeof module!=='undefined')module.exports={benchmarkFeatures,run5Confidence,uniprotSequenceConfidence,residueConfidence};

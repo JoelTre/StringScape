@@ -1,5 +1,6 @@
 'use strict';
 // Runs in the modeller's same-origin frame and reuses its parser and scoring code.
+function benchmarkCoordinateDistance(a,b){return a&&b&&[a.x,a.y,a.z,b.x,b.y,b.z].every(Number.isFinite)?Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z):null;}
 function benchmarkResidueKey(chain,atom){return JSON.stringify([chain,atom.resSeq,atom.sourceAtoms?.[0]?.insertionCode||'']);}
 function benchmarkParse(text){return /^\s*data_/i.test(text)?parseMmCifCalpha(text,true):parsePDBCalpha(text,true);}
 function benchmarkPrepareReference({text,distance,seed}){
@@ -37,6 +38,10 @@ function benchmarkPrepareReference({text,distance,seed}){
     }
     return {aliases,masked:lines.join('\n')+'\n#\n',preserved,fallback,proteinResidues:[...chainResidues.values()].reduce((a,b)=>a+b.length,0),kept:keep.size,chains:[...chainResidues.keys()]};
 }
+function benchmarkReferenceGroups(chain,groups,alignments){
+    const mergedNames=new Set(alignments.filter(pair=>pair.entityType==='protein'&&pair.sourceChains?.includes(chain)).map(pair=>pair.c1));
+    return [...groups.values()].filter(group=>group[0].node.res.c1===chain||mergedNames.has(group[0].node.res.c1));
+}
 function benchmarkCompareFullReference(text,preserved,requiredChainAccessions=null){
     const parsed=benchmarkParse(text),kept=new Set(preserved),scores=calculateModelConfidence(),paeScores=calculateResiduePae(),features=benchmarkFeatures(physicsNodes,n=>validationAtom(n,'af'),n=>validationAtom(n,'reference'),validationState.pae,computeValidationPairs().pairs,calculateStericClashScores(physicsNodes,stericClashRadius,rigidBodySimulation)),rows=[],matchedNodes=new Set(),matchedRows=new Map(),metricChains=[];
     const predictionPositions=new Map(),ordinals=new Map();physicsNodes.forEach((node,index)=>{const block=node.blockIdx,ordinal=(ordinals.get(block)||0)+1;ordinals.set(block,ordinal);predictionPositions.set(index,{chain:node.res.c1||node.res.c2||'A',residue:ordinal});});
@@ -45,7 +50,7 @@ function benchmarkCompareFullReference(text,preserved,requiredChainAccessions=nu
     const groups=new Map();physicsNodes.forEach((node,index)=>{if(node.res.entityType!=='protein'||!node.res.c1||node.idx2===null)return;const key=`${node.blockIdx}\0${node.res.c1}`;if(!groups.has(key))groups.set(key,[]);groups.get(key).push({node,index});});
     for(const [chain,reference] of Object.entries(parsed.chains)){
         if(reference[0]?.entityType!=='protein')continue;
-        const candidates=[...groups.values()].filter(g=>g[0].node.res.c1===chain);
+        const candidates=benchmarkReferenceGroups(chain,groups,alignmentResults);
         // A reference chain must map to exactly one model block; ambiguous matches are left unmatched.
         const group=candidates.length===1?candidates[0]:null;const expectedAccession=requiredChainAccessions?.[chain]||null,expectedFile=alphaFoldMolstarFiles.find(file=>file.pdbId===expectedAccession);const expectedSource=expectedFile?(expectedFile.sequenceOnly?'UniProt sequence':'AlphaFold'):null;
         const byIndex=new Map(group?.map(item=>[item.node.idx2,item])||[]),target=group?.[0]?.node.res.atoms2;
@@ -56,10 +61,15 @@ function benchmarkCompareFullReference(text,preserved,requiredChainAccessions=nu
             if(annotation&&Number.isInteger(position))ordered=!annotation.features.some(f=>f.type==='Region'&&String(f.description||'').trim().toLowerCase()==='disordered'&&position>=f.start&&position<=f.end);
             const xyz=node?[node.x+physicsCenterOffset.cx,node.y+physicsCenterOffset.cy,node.z+physicsCenterOffset.cz]:null;
             const d=xyz?Math.hypot(xyz[0]-atom.x,xyz[1]-atom.y,xyz[2]-atom.z):null;
+            const baseline=node?.benchmarkInitialCoordinate;
+            const chunk=node?.benchmarkChunkCoordinate;
+            const chunkDistance=benchmarkCoordinateDistance(chunk,atom),chunkMovement=benchmarkCoordinateDistance(chunk,xyz&&{x:xyz[0],y:xyz[1],z:xyz[2]}),initialChunkMovement=benchmarkCoordinateDistance(baseline,chunk);
+            const baselineDistance=baseline&&[baseline.x,baseline.y,baseline.z,atom.x,atom.y,atom.z].every(Number.isFinite)?Math.hypot(baseline.x-atom.x,baseline.y-atom.y,baseline.z-atom.z):null;
+            const baselineMovement=baseline&&xyz&&[baseline.x,baseline.y,baseline.z,...xyz].every(Number.isFinite)?Math.hypot(baseline.x-xyz[0],baseline.y-xyz[1],baseline.z-xyz[2]):null;
             if(item)matchedNodes.add(item.index);
             const referenceBackbone={};for(const source of atom.sourceAtoms||[])if(['N','CA','C'].includes(source.atomName))referenceBackbone[source.atomName]={x:source.x,y:source.y,z:source.z};
             const source=af?(af.sequenceOnly?'UniProt sequence':'AlphaFold'):expectedSource,reason=af?.sequenceFallbackReason||expectedFile?.fallbackReason||null;const metrics={reference:referenceBackbone,predicted:item?(predictedAtoms.get(item.index)||{}):{},source};metricChain.push(metrics);
-            rows.push({features:item?features[item.index]:null,metrics,source,sourceReason:reason,accession:af?.sourcePdbId||expectedAccession,plddt:af?.plddt,pae:item?paeScores[item.index]:null,predictionPosition:item?predictionPositions.get(item.index):null,chain,referenceNumber:atom.resSeq,referenceInsertion:atom.sourceAtoms?.[0]?.insertionCode||'',residue:`${atom.resName} ${atom.resSeq}${atom.sourceAtoms?.[0]?.insertionCode||''}`,distance:d,confidence:item?scores.scores[item.index]:null,localConfidence:item?scores.local[item.index]:null,placement2:item?scores.placement2[item.index]:null,placement5:item?scores.placement5[item.index]:null,aligned:node?Boolean(node.usedInAlignment):null,ordered,kept:kept.has(benchmarkResidueKey(chain,atom)),locked:node?Boolean(node.referenceLockTarget):null});
+            rows.push({features:item?features[item.index]:null,metrics,source,sourceReason:reason,accession:af?.sourcePdbId||expectedAccession,plddt:af?.plddt,pae:item?paeScores[item.index]:null,predictionPosition:item?predictionPositions.get(item.index):null,chain,referenceNumber:atom.resSeq,referenceInsertion:atom.sourceAtoms?.[0]?.insertionCode||'',residue:`${atom.resName} ${atom.resSeq}${atom.sourceAtoms?.[0]?.insertionCode||''}`,distance:d,baselineDistance,baselineMovement,chunkDistance,chunkMovement,initialChunkMovement,initialCoordinate:baseline||null,chunkCoordinate:chunk||null,finalCoordinate:xyz,confidence:item?scores.scores[item.index]:null,localConfidence:item?scores.local[item.index]:null,placement2:item?scores.placement2[item.index]:null,placement5:item?scores.placement5[item.index]:null,aligned:node?Boolean(node.usedInAlignment):null,ordered,kept:kept.has(benchmarkResidueKey(chain,atom)),locked:node?Boolean(node.referenceLockTarget):null});
             if(item)matchedRows.set(item.index,rows[rows.length-1]);
         });
     }
@@ -67,7 +77,7 @@ function benchmarkCompareFullReference(text,preserved,requiredChainAccessions=nu
         if(node.res.entityType!=='protein'||node.idx2===null)return [];
         const atom=validationAtom(node,'af'),annotation=atom&&uniProtAnnotationForAtom(atom),position=Number(atom?.afResSeq??atom?.resSeq),reference=matchedRows.get(index);let ordered=null;
         if(annotation&&Number.isInteger(position))ordered=!annotation.features.some(feature=>feature.type==='Region'&&String(feature.description||'').trim().toLowerCase()==='disordered'&&position>=feature.start&&position<=feature.end);
-        return [{features:features[index],source:atom?.sequenceOnly?'UniProt sequence':'AlphaFold',sourceReason:atom?.sequenceFallbackReason||null,predictionPosition:predictionPositions.get(index),accession:atom?.sourcePdbId||null,plddt:atom?.plddt,pae:paeScores[index],confidence:scores.scores[index],localConfidence:scores.local[index],placement2:scores.placement2[index],placement5:scores.placement5[index],aligned:Boolean(node.usedInAlignment),locked:Boolean(node.referenceLockTarget),ordered,distance:reference?.distance??null}];
+        return [{features:features[index],source:atom?.sequenceOnly?'UniProt sequence':'AlphaFold',sourceReason:atom?.sequenceFallbackReason||null,predictionPosition:predictionPositions.get(index),accession:atom?.sourcePdbId||null,plddt:atom?.plddt,pae:paeScores[index],confidence:scores.scores[index],localConfidence:scores.local[index],placement2:scores.placement2[index],placement5:scores.placement5[index],aligned:Boolean(node.usedInAlignment),locked:Boolean(node.referenceLockTarget),ordered,distance:reference?.distance??null,initialCoordinate:node.benchmarkInitialCoordinate||null,chunkCoordinate:node.benchmarkChunkCoordinate||null,finalCoordinate:[node.x+physicsCenterOffset.cx,node.y+physicsCenterOffset.cy,node.z+physicsCenterOffset.cz]}];
     });
     const localMetrics=benchmarkBackboneMetrics(metricChains);
     for(const row of rows){const m=row.metrics;Object.assign(row,{phiDifference:m.phiDifference,psiDifference:m.psiDifference,torsionDifference:m.torsionDifference,lddt:m.lddt,lddtEligible:m.lddtEligible,lddtCompared:m.lddtCompared,lddtMissing:m.lddtMissing,neighbourSources:m.neighbourSources});delete row.metrics;}

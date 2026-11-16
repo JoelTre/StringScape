@@ -1,0 +1,10 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const bridge=fs.readFileSync(require.resolve('../bridge.js'),'utf8');
+const start=bridge.indexOf('function benchmarkCoordinateDistance('),end=bridge.indexOf('\n',start);
+const distance=vm.runInNewContext(`(${bridge.slice(start,end)})`);
+const initial={x:0,y:0,z:0},chunk={x:3,y:0,z:0},final={x:3,y:4,z:0},reference={x:0,y:4,z:0};
+assert.equal(distance(initial,chunk),3);assert.equal(distance(chunk,final),4);assert.equal(distance(initial,final),5);
+assert.equal(distance(initial,reference),4);assert.equal(distance(chunk,reference),5);assert.equal(distance(final,reference),3);
+assert.equal(distance(null,reference),null);assert.equal(distance({x:NaN,y:0,z:0},reference),null);
+console.log('Chunk comparison coordinate-distance tests passed');

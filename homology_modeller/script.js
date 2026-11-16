@@ -1870,8 +1870,9 @@
             const recordDescriptor=MemoryData.descriptor(records),recordTable={length:recordDescriptor.table.length,columns:Object.fromEntries(Object.entries(recordDescriptor.table.columns).map(([key,column])=>[key,{...column}]))},orderedIndices=new Uint32Array(records.length);let orderedOffset=0;
             for(let recordIndex=0;recordIndex<records.length;recordIndex++){const record=records[recordIndex];
                 const key=[record.chainId,record.resSeq,record.insertionCode,record.resName].join(':');
-                if(!residues.has(key))residues.set(key,{chainId:record.chainId,resSeq:record.resSeq,resName:record.resName,insertionCode:record.insertionCode,atoms:[],names:new Set()});
+                if(!residues.has(key))residues.set(key,{chainId:record.chainId,resSeq:record.resSeq,resName:record.resName,insertionCode:record.insertionCode,atoms:[],names:new Set(),polymerRecord:false});
                 const group=residues.get(key);
+                if(record.groupPdb==='ATOM'||Number.isInteger(record.polymerPosition))group.polymerRecord=true;
                 if(!group.names.has(record.atomName)){group.names.add(record.atomName);group.atoms.push(recordDescriptor.indices?recordDescriptor.indices[recordDescriptor.start+recordIndex]:recordDescriptor.start+recordIndex);}
             }
             const chainTypes=new Map();
@@ -1879,7 +1880,7 @@
                 const resName=group.resName.toUpperCase();
                 const names=group.names;
                 const sugar=names.has("C1'")||names.has('C1*')||names.has("C4'")||names.has('C4*');
-                const peptideBackbone=names.has('CA')&&names.has('N')&&names.has('C');
+                const peptideBackbone=group.polymerRecord&&names.has('CA')&&names.has('N')&&names.has('C');
                 const type=AA_3TO1[resName]||peptideBackbone?'protein':NUCLEOTIDE_CODES[resName]||sugar?'nucleotide':'other';
                 if(type==='other'&&!includeOther)continue;
                 let chainKey;
@@ -2390,7 +2391,17 @@
                             return hits;
                         }catch(error){record.error=error.message;throw error;}
                     };
-                    const decision=await window.ModellerAI.searchReferences({query:searchQuery,sequences,searchPdb,signal:controller.signal,input:original,onStatus:message=>{if(isCurrent())report(message);}});
+                    const viewPdbIds=async ids=>{
+                        const hits=ids.map(identifier=>({identifier}));
+                        for(let index=0;index<hits.length;index+=4){
+                            if(!isCurrent()){controller.abort();throw Error('Search cancelled');}
+                            await Promise.all(hits.slice(index,index+4).map(enrichReferenceSearchHit));
+                        }
+                        if(!isCurrent()){controller.abort();throw Error('Search cancelled');}
+                        if(searchTaxon)for(const hit of hits)hit.infoOnlyReason='The active species filter applies to reference selection; use Search_PDB to verify this ID against it.';
+                        return hits;
+                    };
+                    const decision=await window.ModellerAI.searchReferences({query:searchQuery,sequences,searchPdb,viewPdbIds,signal:controller.signal,input:original,onStatus:message=>{if(isCurrent())report(message);}});
                     if(!isCurrent())return;
                     referenceSearchResults=decision.results;referenceSearchSequences=sequences;referenceSearchQuery=mode==='query'?searchQuery:null;
                     referenceSearchSessionId ||= `search-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -3717,7 +3728,7 @@
             if (model) {
                 const file = await fetch(trustedAlphaFoldUrl(model.pdbUrl || model.cifUrl), {signal});
                 if (!file.ok) throw new Error(`Could not download AlphaFold model for ${accession} (HTTP ${file.status}). Please retry.`);
-                return { text: await file.text(), sequence: null };
+                return { text: await file.text(), sequence: null, alphaFoldEntryCount: models.filter(m => m.pdbUrl || m.cifUrl).length };
             }
             if (models.length) throw new Error(`AlphaFold returned no downloadable coordinates for ${accession}.`);
             const sequenceResponse = await fetch(`https://rest.uniprot.org/uniprotkb/${encodeURIComponent(accession)}.fasta`, {signal});
@@ -3732,7 +3743,7 @@
         async function loadModelInput(entry,includeOther=false,signal) {
             let sequence = entry.sequence;
             let text;
-            let alphaFoldCoordinates = Boolean(entry.uploadFile), fallbackReason=null;
+            let alphaFoldCoordinates = Boolean(entry.uploadFile), fallbackReason=null, alphaFoldEntryCount=null;
             if (entry.uploadFile) {
                 text = await entry.uploadFile.text();
                 if (!text.trim()) throw new Error(`Uploaded structure ${entry.id} is empty.`);
@@ -3745,6 +3756,7 @@
                 text = resolved.text;
                 sequence = resolved.sequence;
                 fallbackReason = resolved.fallbackReason || null;
+                alphaFoldEntryCount = resolved.alphaFoldEntryCount ?? (fallbackReason === 'alphafold-unavailable' ? 0 : null);
                 alphaFoldCoordinates = !resolved.sequence;
             } else text = sequence ? sequenceToPdb(sequence) : await fetchPdbData(entry.id,signal);
             if (signal?.aborted) throw new DOMException('Model build cancelled', 'AbortError');
@@ -3762,7 +3774,7 @@
                 atom.sequenceFallbackReason = fallbackReason || 'sequence-input';
             });
             if (!alphaFoldCoordinates) parsed.allAtoms.forEach(atom => { atom.plddt = null; });
-            return { pdbId: entry.id, parsed, text, format, sequenceOnly: Boolean(sequence), sequenceFallback: Boolean(sequence && !entry.sequence), fallbackReason, alphaFoldCoordinates };
+            return { pdbId: entry.id, parsed, text, format, sequenceOnly: Boolean(sequence), sequenceFallback: Boolean(sequence && !entry.sequence), fallbackReason, alphaFoldCoordinates, alphaFoldEntryCount };
         }
 
         function buildModel2FromFiles(fileResults) {
@@ -6352,12 +6364,15 @@
                     usedInAlignment: !pos.res.referenceOnly&&isEquivalentPair(pos.res.atoms1, pos.res.atoms2, pos.pair),
                     res: pos.res,
                     referenceLockTarget: null,
+                    benchmarkInitialCoordinate: window.__benchmarkRun?.captureAlphaFoldBaseline ? {x: initialCoords[i].x, y: initialCoords[i].y, z: initialCoords[i].z} : null,
                     referenceLockAtoms: null
                 });
             }
 
             physicsSetupPending=true;
             try{
+                if (!preparedNodes && !(typeof multiReferenceBuild !== 'undefined' && multiReferenceBuild?.kind === 'combined')) alignAlphaFoldChunks();
+                if(window.__benchmarkRun?.captureAlphaFoldBaseline&&!preparedNodes)for(const node of physicsNodes)node.benchmarkChunkCoordinate={x:node.x+physicsCenterOffset.cx,y:node.y+physicsCenterOffset.cy,z:node.z+physicsCenterOffset.cz};
                 if(!preparedNodes)await updateReferenceCoordinateLockTargetsAsync();
                 if(setupGeneration!==modelBuildGeneration||setupRevision!==physicsSetupRevision)throw new DOMException('Build superseded','AbortError');
                 if(physicsRepresentation==='ball-stick')await prepareAtomFrameData();
@@ -6756,6 +6771,84 @@
         function referenceLockResidueAtoms(residue) {
             const atoms = residue?.sourceAtoms?.length ? residue.sourceAtoms : residue ? [residue] : [];
             return new Map(atoms.filter(atom => atom.atomName).map(atom => [atom.atomName, atom]));
+        }
+
+        // Fit gap-centred groups after the initial whole-chain fit and before locks.
+        function alignAlphaFoldChunks() {
+            const container = document.getElementById('chunkAlignmentStats');
+            const chains = new Map();
+            physicsNodes.forEach((node, index) => {
+                if (node.res.entityType !== 'protein' || node.res.referenceOnly || node.idx2 == null || node.res.atoms2?.[node.idx2]?.sequenceOnly) return;
+                if (!chains.has(node.blockIdx)) chains.set(node.blockIdx, {blockIdx: node.blockIdx, nodes: []});
+                chains.get(node.blockIdx).nodes.push({node, index, aligned: node.usedInAlignment, point: node});
+            });
+            const padding = Math.max(0, Math.floor(Number(document.getElementById('chunkAlignmentPadding')?.value) || 0));
+            const distance = Math.max(0, Number(document.getElementById('chunkAlignmentDistance')?.value) || 0);
+            const together = document.getElementById('chunkAlignmentMode')?.value === 'together';
+            if (!window.ChunkAlignment?.buildGroups) throw new Error('Chunk alignment could not be loaded. Reload the modeller and ensure chunk-alignment.js is available on the server.');
+            const groups = window.ChunkAlignment.buildGroups([...chains.values()], padding, distance);
+            const warnings = [];
+            groups.forEach((members, groupIndex) => {
+                members.forEach(item => { item.group = groupIndex; });
+                const fits = together ? [members] : [...new Set(members.map(item => item.node.blockIdx))].map(block => members.filter(item => item.node.blockIdx === block));
+                for (const fitMembers of fits) {
+                    const P = [], Q = [];
+                    for (const item of fitMembers) {
+                        const node = item.node;
+                        if (!item.aligned) continue;
+                        const count = referenceAssembly ? referenceFiles.length : 1;
+                        let x = 0, y = 0, z = 0, total = 0;
+                        for (let i = 0; i < count; i++) {
+                            const ref = referenceLockResidue(node, i), weight = referenceAssembly ? (referenceInfluences[i] ?? 1) : model1Influence;
+                            if (ref && [ref.x, ref.y, ref.z].every(Number.isFinite) && weight > 0) { x += ref.x * weight; y += ref.y * weight; z += ref.z * weight; total += weight; }
+                        }
+                        if (!total) for (let i = 0; i < count; i++) {
+                            const ref = referenceLockResidue(node, i);
+                            if (ref && [ref.x, ref.y, ref.z].every(Number.isFinite)) { x += ref.x; y += ref.y; z += ref.z; total++; }
+                        }
+                        if (total) { P.push({x:x/total-physicsCenterOffset.cx,y:y/total-physicsCenterOffset.cy,z:z/total-physicsCenterOffset.cz}); Q.push({x:node.x,y:node.y,z:node.z}); }
+                    }
+                    const chainName = fitMembers.map(item => item.node.res.c1 || item.node.res.c2).filter((v,i,a) => a.indexOf(v) === i).join(', ');
+                    let degenerate = Q.length < 3;
+                    if (!degenerate) {
+                        const a = Q[0];
+                        const far = Q.reduce((best, p) => Math.hypot(p.x-a.x,p.y-a.y,p.z-a.z) > Math.hypot(best.x-a.x,best.y-a.y,best.z-a.z) ? p : best, a);
+                        const u = [far.x-a.x,far.y-a.y,far.z-a.z];
+                        degenerate = !Q.some(p => { const v=[p.x-a.x,p.y-a.y,p.z-a.z]; return Math.hypot(u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]) >= 1e-6; });
+                    }
+                    if (degenerate) warnings.push(`Group ${groupIndex + 1}, ${chainName}: ${Q.length} aligned residues; ${Q.length ? 'best available fit (rotation may be underdetermined)' : 'no fit available'}.`);
+                    if (!Q.length) continue;
+                    const {R,t} = hornQuaternionSuperposition(P,Q);
+                    for (const {node} of fitMembers) {
+                        const x=node.x,y=node.y,z=node.z;
+                        node.x=R[0][0]*x+R[0][1]*y+R[0][2]*z+t[0];
+                        node.y=R[1][0]*x+R[1][1]*y+R[1][2]*z+t[1];
+                        node.z=R[2][0]*x+R[2][1]*y+R[2][2]*z+t[2];
+                        node.initX=node.phase1X=node.x; node.initY=node.phase1Y=node.y; node.initZ=node.phase1Z=node.z;
+                        node.chunkAlignmentRotation=R;
+                    }
+                }
+            });
+            if (!container) return;
+            container.replaceChildren();
+            const table=document.createElement('table'); table.style.cssText='width:100%;text-align:left;font-size:12px;margin-bottom:12px';
+            const head=table.createTHead().insertRow(); ['Protein ID','Chain','Group count'].forEach(text=>{const th=document.createElement('th');th.textContent=text;head.appendChild(th);});
+            const body=table.createTBody();
+            for (const chain of chains.values()) {
+                const row=body.insertRow(), first=chain.nodes[0].node;
+                [first.res.c2 || 'Unknown',first.res.c1 || 'Unknown',new Set(chain.nodes.map(item=>item.group).filter(id=>id!==undefined)).size].forEach(value=>{row.insertCell().textContent=String(value);});
+            }
+            container.appendChild(table);
+            for (const chain of chains.values()) {
+                const label=document.createElement('div'); label.style.cssText='font-size:12px;margin:8px 0 3px'; label.textContent=`${chain.nodes[0].node.res.c2 || 'Unknown'} · ${chain.nodes[0].node.res.c1 || 'Unknown'}`; container.appendChild(label);
+                const bar=document.createElement('div'); bar.style.cssText='display:flex;height:16px;width:100%;background:#334155;overflow:hidden;border-radius:3px';
+                for (const item of chain.nodes) {
+                    const part=document.createElement('span'); part.style.cssText=`flex:1;min-width:0;background:${item.group===undefined?'#94a3b8':`hsl(${(item.group*137.508)%360} 75% 55%)`};opacity:${item.aligned?1:.6}`;
+                    part.title=`Residue ${item.node.idx2+1}: ${item.aligned?'aligned':'unaligned'}, ${item.group===undefined?'no group':`group ${item.group+1}`}`; bar.appendChild(part);
+                }
+                container.appendChild(bar);
+            }
+            const note=document.createElement('p'); note.style.cssText='font-size:12px;margin-top:10px'; note.textContent=warnings.length ? warnings.join(' ') : (groups.length ? 'All group fits have at least three non-collinear aligned residues.' : 'No unaligned gaps were found.'); container.appendChild(note);
         }
 
         let physicsLockTargetRevision=0;
@@ -7998,7 +8091,8 @@
             document.getElementById('physicsStatusBadge').textContent='Build complete';
             document.getElementById('physicsPauseText').textContent='Build complete';
             setPhysicsColorMode('chain');
-            if(sideChainJiggleEnabled!==(state.order.length<=30))toggleSideChainJiggle();
+            const jiggleAfterBuild=sideChainJiggleUserChoice??sideChainJiggleBuildDefault;
+            if(sideChainJiggleEnabled!==jiggleAfterBuild)toggleSideChainJiggle();
             globalThis.BuildTimeline?.finish();
             modelBuildCompleted=true;completedModelInputKey=modelBuildInputKey;updateBuildButtonState();
             // Refine small visible matrices after the simulation finishes. Large
@@ -13214,7 +13308,7 @@
             cancelModellingCalculations();
             uniProtLookupController?.abort();uniProtLookupController=null;uniProtLookupPending=false;updateUniProtFetchingBadge();uniProtAnnotations=new Map();topologicalDomainColors.clear();uniProtUnavailable=[];
             renderAboutProteinComplex();
-            validationState.version++;validationState.pairs=[];validationState.byPair.clear();validationState.pae.clear();validationState.selected=null;
+            window.batchViewOnlySession=false;validationState.version++;validationState.pairs=[];validationState.byPair.clear();validationState.pae.clear();validationState.compactResidueData=null;validationState.omittedPaeFileIndices=[];validationState.selected=null;updatePhysicsColourLoadingBadge();
             validationState.matrixView={zoom:1,x:0,y:0};
             validationState.matrixOverviews.clear();clearTimeout(validationState.matrixRedrawTimer);validationState.matrixRedrawTimer=null;
             validationState.lastDraw=0;validationState.lastReportDraw=0;
@@ -13397,6 +13491,7 @@
             });
         }
         async function loadModelPair(pdbId1, pdbId2Raw, referenceSource=null) {
+            if (new URLSearchParams(location.search).has('benchmark') && document.getElementById('errorModal').classList.contains('warning-modal')) closeErrorModal();
             if (referenceSource === 'example') clearReferenceSearchInput();
             if(referenceSource==='example' && pdbId1.trim().toUpperCase().replace(/\s/g,'')==='6IOK,6IOL'){
                 referenceConformationPlan={pdbIds:['6IOK','6IOL'],groups:[
@@ -13578,6 +13673,9 @@
                 else if (parsed1.title) document.getElementById('referenceStructureName').textContent = `Reference: ${parsed1.title}`;
                 updateProgressBar(45);
                 const sequenceCount = fileResults2.filter(file => file.sequenceOnly).length;
+                sideChainJiggleBuildDefault = sequenceCount === 0;
+                const desiredJiggle = sideChainJiggleUserChoice ?? sideChainJiggleBuildDefault;
+                if (sideChainJiggleEnabled !== desiredJiggle) toggleSideChainJiggle();
                 const fallbackIds = fileResults2.filter(file => file.sequenceFallback).map(file => file.pdbId);
                 const notice = document.getElementById('sequenceOnlyNotice');
                 notice.textContent = sequenceCount || file1.sequenceOnly
@@ -14027,6 +14125,8 @@
         }
 
         function togglePhysicsRun() {
+            if(window.batchViewOnlySession){showWarning('This batch result is a viewer snapshot and does not contain the simulation working data. Rebuild the model or save full session data to run a simulation.');return;}
+            if(!physicsRunning&&validationState.omittedPaeFileIndices?.length){showWarning('This compact session does not include pairwise PAE. Open the Validation report and select Reload pairwise PAE before starting or resuming simulation.');return;}
             if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.busy)return;
             document.body.classList.remove('awaiting-model-refinement');
             if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.awaitingSimulation){void beginPreparedStagedSimulation();return;}
@@ -14350,7 +14450,7 @@
 
             for (const eventType of ['input', 'change']) {
                 document.getElementById('buildSettingsContent').addEventListener(eventType, e => {
-                    if (!e.target.matches('input, select, textarea')) return;
+                    if (!e.target.matches('input, select, textarea') || e.target.id === 'autoBiologicalMotionAI') return;
                     if (modelBuildCompleted || buildSettingsChanged) {
                         buildSettingsChanged = true;
                         updateBuildButtonState();
@@ -14455,7 +14555,8 @@
                 updateReferenceCoordinateLockTargets();
                 rebuildCutoffSprings();
                 if (lockAlignedResiduesToReference) applyReferenceCoordinateLocks();
-                if(physicsColorMode==='locked')setPhysicsColorMode('locked');
+                if(['locked','constraint-confidence','model-confidence','local-confidence','placement-2','placement-5'].includes(physicsColorMode))setPhysicsColorMode(physicsColorMode);
+                if(validationElement('validationReport')?.open)renderValidationReport(true);
                 updateAtomRepresentation(); updateCartoonRepresentation();
             });
 
@@ -16225,6 +16326,7 @@
             syncPhysicsColorMenu();
             updateUniProtFetchingBadge();
             if(mode==='alpha-pae'||mode==='constraint-confidence'||['model-confidence','local-confidence','placement-2','placement-5'].includes(mode))void loadValidationPae();
+            if(['spring-strain','membrane-score'].includes(mode))calculateValidationPairs();
             if(mode==='qmeandisco'&&!validationState.qmean){document.getElementById('validationReport').open=true;renderValidationReport();}
             updateBindingSiteToggleVisibility();
             if(mode==='pattern-variance')updatePatternVariance(true);
@@ -16238,6 +16340,7 @@
             document.getElementById('physicsPulseKey')?.classList.toggle('hidden', physicsOriginColorMode);
             document.getElementById('physicsDifferenceKey')?.classList.toggle('hidden', !physicsDifferenceMode);
             document.getElementById('physicsColourKey')?.classList.toggle('hidden', physicsDifferenceMode);
+            document.getElementById('physicsLockedConfidenceKey')?.classList.toggle('hidden',!['constraint-confidence','model-confidence','local-confidence','placement-2','placement-5'].includes(mode));
             document.getElementById('originFilterBtns')?.classList.toggle('hidden', !physicsOriginColorMode);
             const keys = {
                 chain:'Chain: chains with the same protein ID share a colour family, with a different shade for each chain.',
@@ -16324,7 +16427,7 @@
             }
             physicsPulseUniform.value = physicsPulseOpacity(performance.now(), physicsOriginColorMode);
             lastSurfaceUpdate = 0;
-            applyPhysicsVisibility(); updatePhysicsNodeColors(); updateModel1AlignmentColors(); updateAtomRepresentation(); updateCartoonRepresentation(); renderPhysicsChainToggles();
+            applyPhysicsVisibility(); updatePhysicsNodeColors(); updateModel1AlignmentColors(); invalidatePhysicsSurfaceColours(); updateAtomRepresentation(); updateCartoonRepresentation(); renderPhysicsChainToggles(); requestVisualPhysicsMeshUpdate(); updatePhysicsColourLoadingBadge();
             if(typeof stagedLiveView==='function'&&!stagedLiveView())renderStagedPreview();
         }
 
@@ -16333,6 +16436,8 @@
 // physicsRepresentations.js start
         let physicsRepresentation = 'ball-stick';
         let sideChainJiggleEnabled = true;
+        let sideChainJiggleBuildDefault = true;
+        let sideChainJiggleUserChoice = null;
         let sideChainJiggleSpeed = 3.0;
         let atomRepresentation = null;
         let cartoonRepresentation = null;
@@ -16590,7 +16695,7 @@
         }
 
         function updateCartoonRepresentation() {
-            if (!['cartoon','mol-cartoon'].includes(physicsRepresentation) || !homologyStructureVisible || !physicsNodes.length || !physicsScene) {
+            if (!['cartoon','mol-cartoon'].includes(physicsRepresentation) || !homologyStructureVisible || !physicsNodes.length || !physicsScene || !instancedNodeMesh) {
                 if (cartoonRepresentation) for (const mesh of cartoonRepresentation.meshes) mesh.visible = false;
                 return;
             }
@@ -16876,7 +16981,9 @@
                     }
                 }
                 const initialR = morphMatrixBlocks[node.blockIdx]?.tmAlignment?.R || identity;
-                rotations.push(R.map(row => [0,1,2].map(k => row[0]*initialR[0][k] + row[1]*initialR[1][k] + row[2]*initialR[2][k])));
+                const chunkR = node.chunkAlignmentRotation || identity;
+                const combinedR = chunkR.map(row => [0,1,2].map(k => row[0]*initialR[0][k] + row[1]*initialR[1][k] + row[2]*initialR[2][k]));
+                rotations.push(R.map(row => [0,1,2].map(k => row[0]*combinedR[0][k] + row[1]*combinedR[1][k] + row[2]*combinedR[2][k])));
             }
             atomOrientationCache={nodes:physicsNodes,signature,rotations,scratch:cache?.signature};
             return rotations;
@@ -17182,6 +17289,12 @@
             }).catch(error=>{if(molecularBondJob===job){state.bondsPending=false;if(error.name!=='AbortError')reportBackgroundError(error);}});
         }
 
+        // A surface may still be building from an earlier colour selection.
+        function invalidatePhysicsSurfaceColours(){
+            if(physicsRepresentation!=='surface')return;
+            lastSurfaceUpdate=-Infinity;
+            if(atomRepresentation?.pending)atomRepresentation.colorRefreshPending=true;
+        }
         // Smoothly blend probe-expanded atomic fields and extract their boundary.
         function updateProbeSurface() {
             if(!homologyStructureVisible){
@@ -17189,7 +17302,7 @@
                 if(atomRepresentation)atomRepresentation.balls.visible=false;
                 return;
             }
-            if (!physicsNodes.length || !physicsScene) return;
+            if (!physicsNodes.length || !physicsScene || !instancedNodeMesh) return;
             if (!atomRepresentation) {
                 const entries=simulationAtomEntries();
                 const balls=new THREE.Mesh(new THREE.BufferGeometry(),new THREE.MeshPhongMaterial({vertexColors:true,side:THREE.DoubleSide,shininess:12,specular:0x101214}));
@@ -17247,6 +17360,8 @@
                     },Math.max(0,500-(performance.now()-state.loadingStartedAt)));
                 }
                 if(instancedNodeMesh)instancedNodeMesh.visible=homologyStructureVisible&&!state.ready;
+                if(state.colorRefreshPending){state.colorRefreshPending=false;lastSurfaceUpdate=-Infinity;updateAtomRepresentation();}
+                requestVisualPhysicsMeshUpdate();updatePhysicsColourLoadingBadge();
             },chainCount>30);
         }
 
@@ -18296,13 +18411,19 @@
 
         function showWarning(msg, title = 'Warning') {
             showError(msg);
-            document.getElementById('errorModal').classList.add('warning-modal');
+            const modal=document.getElementById('errorModal');
+            modal.classList.add('warning-modal');
+            if(new URLSearchParams(location.search).has('benchmark')) {
+                modal.classList.add('benchmark-warning');
+                modal.setAttribute('aria-modal','false');
+            }
             document.getElementById('errorModalTitle').textContent = title;
         }
 
         function showError(msg) {
             globalThis.DeveloperLog?.record(`Error: ${msg}`);
-            document.getElementById('errorModal').classList.remove('warning-modal');
+            document.getElementById('errorModal').classList.remove('warning-modal','benchmark-warning');
+            document.getElementById('errorModal').setAttribute('aria-modal','true');
             document.getElementById('errorModalTitle').textContent = 'Error Processing Request';
             document.getElementById('errorMessage').textContent = msg;
             document.getElementById('errorModal').classList.remove('hidden');
@@ -18382,7 +18503,7 @@
                 function() { setPhysicsRepresentation('ball-stick') },
                 function() { setPhysicsRepresentation('cartoon') },
                 function() { setPhysicsRepresentation('surface') },
-                function() { toggleSideChainJiggle() },
+                function() { const before=sideChainJiggleEnabled; toggleSideChainJiggle(); if(sideChainJiggleEnabled!==before)sideChainJiggleUserChoice=sideChainJiggleEnabled; },
                 function() { toggleOriginModelFilter(1) },
                 function() { toggleOriginModelFilter(2) },
                 function() { togglePhysicsSnapshot() },
@@ -19045,6 +19166,7 @@
             try { localStorage.setItem('stringscape-light-mode',enabled?'1':'0'); } catch (_) { /* Storage may be disabled. */ }
         }
         window.addEventListener('DOMContentLoaded', async () => {
+            document.getElementById('showLockedConfidence')?.addEventListener('change',()=>setPhysicsColorMode(physicsColorMode));
             document.getElementById('physicsViewerKeyToggle')?.addEventListener('click',function(){
                 const collapsed=document.getElementById('physicsViewerKey').classList.toggle('key-minimised');
                 this.setAttribute('aria-expanded',String(!collapsed));
@@ -21335,9 +21457,30 @@
             const ab=ArrayBuffer.isView(matrix.values)?(i<matrix.size&&j<matrix.size?matrix.values[i*matrix.size+j]:undefined):matrix[i]?.[j],ba=ArrayBuffer.isView(matrix.values)?(i<matrix.size&&j<matrix.size?matrix.values[j*matrix.size+i]:undefined):matrix[j]?.[i];
             return Number.isFinite(ab)&&Number.isFinite(ba)?(ab+ba)/2:Number.isFinite(ab)?ab:Number.isFinite(ba)?ba:null;
         }
-        async function loadValidationPae(){
+        function updatePhysicsColourLoadingBadge(){
+            const badge=document.getElementById('physicsColourLoadingBadge');if(!badge)return;
+            const scoreMode=['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','local-confidence','placement-2','placement-5'].includes(physicsColorMode);
+            const paeMode=['constraint-confidence','alpha-pae','model-confidence','local-confidence','placement-2','placement-5'].includes(physicsColorMode);
+            const paePending=paeMode&&validationState.paeLoading&&validationState.paeVersion===validationState.version;
+            const surfacePending=physicsRepresentation==='surface'&&Boolean(atomRepresentation?.pending);
+            if(!scoreMode||modelLoading){badge.classList.add('hidden');return;}
+            const pending=paePending||validationRefreshPending||surfacePending;
+            const ready=validationState.colourReadyVersions??(validationState.colourReadyVersions=new Map());
+            if(!pending)ready.set(physicsColorMode,validationState.version);
+            badge.classList.toggle('hidden',!pending||ready.get(physicsColorMode)===validationState.version);
+        }
+        // Async confidence data can arrive while the viewer is idle. Update all
+        // representations and schedule a frame, rather than waiting for orbit input.
+        function refreshValidationColourDisplay(){
+            updatePhysicsNodeColors();
+            if(showModel1Overlay&&referenceColorMode==='same')updateModel1AlignmentColors();
+            invalidatePhysicsSurfaceColours();updateAtomRepresentation();updateCartoonRepresentation();
+            requestVisualPhysicsMeshUpdate();
+        }
+        async function loadValidationPae(forceReload=false){
+            if(!forceReload && validationState.omittedPaeFileIndices?.length)return;
             if((validationState.paeLoading&&validationState.paeVersion===validationState.version)||!modelData2.files.length)return;
-            validationState.paeLoading=true;validationState.paeVersion=validationState.version;
+            validationState.paeLoading=true;validationState.paeVersion=validationState.version;updatePhysicsColourLoadingBadge();
             const version=validationState.version;
             const status=validationElement('validationStatus');
             status.textContent='Loading available AlphaFold PAE, then calculating validation metrics…';
@@ -21361,16 +21504,19 @@
                         if(matrix.some(row=>!Array.isArray(row)||row.length!==size))throw Error('Invalid PAE dimensions');
                         for(let i=0;i<size;i++){values.set(matrix[i],i*size);matrix[i]=null;}
                         validationState.pae.set(file.fileIndex,{size,values});
+                        if(validationState.omittedPaeFileIndices)validationState.omittedPaeFileIndices=validationState.omittedPaeFileIndices.filter(index=>index!==file.fileIndex);
                         springPaeRevision++;
                     }
                 }catch(error){console.warn('Validation PAE unavailable:',file.pdbId,error);}
             })();}
-            if(version!==validationState.version)return;
+            if(version!==validationState.version){updatePhysicsColourLoadingBadge();return;}
             validationState.paeLoading=false;
+            if(forceReload&&!validationState.omittedPaeFileIndices?.length)validationState.compactResidueData=null;
             if(validationElement('validationReport')?.open)renderValidationReport(true);
             if(['alpha-pae','constraint-confidence','model-confidence','local-confidence','placement-2','placement-5'].includes(physicsColorMode)){
-                calculateValidationPairs();updatePhysicsNodeColors();if(showModel1Overlay&&referenceColorMode==='same')updateModel1AlignmentColors();
+                calculateValidationPairs();refreshValidationColourDisplay();
             }
+            updatePhysicsColourLoadingBadge();
         }
         // PAE is pairwise: colour each residue by its mean error to the other
         // represented residues from the same AlphaFold chain, without spring filtering.
@@ -21398,22 +21544,26 @@
                 }
                 entries.forEach((entry,i)=>{if(counts[i])scores[entry.index]=sums[i]/counts[i];});
             }
+            const saved=validationState.compactResidueData;
+            if(saved?.nodes===physicsNodes&&Array.isArray(saved.pae))for(let i=0;i<scores.length;i++)if(!Number.isFinite(scores[i])&&Number.isFinite(saved.pae[i]))scores[i]=saved.pae[i];
             residuePaeCache={nodes:physicsNodes,key,scores};
             return scores;
         }
-        // Run-5 fits are supported only before simulation, for unaligned residues with complete inputs.
+        // Source-specific exploratory fits apply before simulation to unaligned residues with complete inputs.
         let modelConfidenceCache=null;
         function calculateModelConfidence(){
             const simulated=window.getComplexAiState().simulationStarted!==false;
-            const key=[validationState.version,springPaeRevision,activeConformationGroup,stericClashRadius,rigidBodySimulation,simulated].join(':');
+            const key=[validationState.version,springPaeRevision,activeConformationGroup,stericClashRadius,rigidBodySimulation,physicsLockTargetRevision,simulated].join(':');
             if(modelConfidenceCache?.nodes===physicsNodes&&modelConfidenceCache.key===key)return modelConfidenceCache.result;
+            const saved=validationState.compactResidueData;
+            if((validationState.omittedPaeFileIndices?.length||window.batchViewOnlySession)&&saved?.nodes===physicsNodes&&saved.confidence&&saved.activeConformationGroup===activeConformationGroup&&saved.stericClashRadius===stericClashRadius&&saved.rigidBodySimulation===rigidBodySimulation&&saved.simulationStarted===window.getComplexAiState().simulationStarted&&(saved.runtimeLockRevision===undefined||saved.runtimeLockRevision===physicsLockTargetRevision))return saved.confidence;
             const pae=calculateResiduePae();
             const features=simulated?[]:benchmarkFeatures(physicsNodes,n=>validationAtom(n,'af'),n=>validationAtom(n,'reference'),validationState.pae,[],calculateStericClashScores(physicsNodes,stericClashRadius,rigidBodySimulation));
-            const all=physicsNodes.map((node,index)=>node.res.entityType==='protein'&&!node.usedInAlignment&&!node.referenceLockTarget&&!simulated?run5Confidence(features[index],validationAtom(node,'af')?.plddt,pae[index]):{local:null,placement2:null,placement5:null,model:null});
+            const all=physicsNodes.map((node,index)=>node.res.entityType!=='protein'?{local:null,placement2:null,placement5:null,model:null}:node.referenceLockTarget?{local:1,placement2:1,placement5:1,model:1}:!node.usedInAlignment&&!simulated?residueConfidence(features[index],validationAtom(node,'af'),pae[index]):{local:null,placement2:null,placement5:null,model:null});
             const scores=all.map(x=>x.model),local=all.map(x=>x.local),placement2=all.map(x=>x.placement2),placement5=all.map(x=>x.placement5);
-            const protein=physicsNodes.map((n,i)=>n.res.entityType==='protein'?i:-1).filter(i=>i>=0),unalignedIndices=new Set(protein.filter(i=>!physicsNodes[i].usedInAlignment));
-            const values=scores.filter(Number.isFinite),unalignedScores=values;
-            const result={scores,local,placement2,placement5,unalignedIndices,overall:validationMean(values),unalignedOverall:validationMean(unalignedScores),aligned:protein.length-unalignedIndices.size,total:protein.length,scored:values.length,partial:unalignedIndices.size-values.length,simulated};
+            const protein=physicsNodes.map((n,i)=>n.res.entityType==='protein'?i:-1).filter(i=>i>=0),unalignedIndices=new Set(protein.filter(i=>!physicsNodes[i].usedInAlignment&&!physicsNodes[i].referenceLockTarget));
+            const values=scores.filter(Number.isFinite),unlockedScores=protein.filter(i=>!physicsNodes[i].referenceLockTarget).map(i=>scores[i]).filter(Number.isFinite),unalignedScores=[...unalignedIndices].map(i=>scores[i]).filter(Number.isFinite),locked=protein.filter(i=>physicsNodes[i].referenceLockTarget).length;
+            const result={scores,local,placement2,placement5,unalignedIndices,overall:validationMean(unlockedScores),overallIncludingLocked:validationMean(values),unalignedOverall:validationMean(unalignedScores),locked,aligned:protein.filter(i=>physicsNodes[i].usedInAlignment).length,total:protein.length,scored:values.length,partial:unalignedIndices.size-unalignedScores.length,simulated};
             modelConfidenceCache={nodes:physicsNodes,key,result};return result;
         }
         function validationMembraneNodeScores(){
@@ -21480,11 +21630,11 @@
         let validationRefreshPending=false;
         function calculateValidationPairs(){
             if(!validationRefreshPending){
-                validationRefreshPending=true;
+                validationRefreshPending=true;updatePhysicsColourLoadingBadge();
                 calculateValidationPairsAsync().then(result=>{
-                    if(['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','local-confidence','placement-2','placement-5'].includes(physicsColorMode))updatePhysicsNodeColors();
+                    if(['constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','local-confidence','placement-2','placement-5'].includes(physicsColorMode))refreshValidationColourDisplay();
                     if(validationElement('validationReport')?.open&&(!validationElement('validationKeyframeSelect')||validationElement('validationKeyframeSelect').value==='current'))renderValidationReport(true,result);
-                }).catch(reportBackgroundError).finally(()=>{validationRefreshPending=false;});
+                }).catch(reportBackgroundError).finally(()=>{validationRefreshPending=false;updatePhysicsColourLoadingBadge();});
             }
             const membrane=validationMembraneDetectionConfidence();return {pairs:validationState.pairs,membrane,membraneEvidence:membrane};
         }
@@ -21798,6 +21948,7 @@
             }
             const modelScore=calculateModelConfidence(),overall=modelScore.overall,pairOverall=validationMean(combined),satisfaction=validationMean(pairs.map(pair=>pair.satisfaction));
             setValidationScore('validationOverall',overall);
+            setValidationScore('validationOverallIncludingLocked',modelScore.overallIncludingLocked);
             for(const [id,field] of [['validationLocal','local'],['validationPlacement2','placement2'],['validationPlacement5','placement5']])setValidationScore(id,validationMean(modelScore[field].filter(Number.isFinite)));
             const paeValues=calculateResiduePae().filter(Number.isFinite);validationElement('validationPaeMean').textContent=paeValues.length?`${validationMean(paeValues).toFixed(2)} Å`:'—';
             setValidationScore('validationUnalignedOverall',modelScore.unalignedOverall);
@@ -21810,12 +21961,13 @@
             }).map(row=>row.score):[];
             const orderedOverall=annotationsAvailable?validationMean(orderedScores):null;
             setValidationScore('validationUnalignedOrdered',orderedOverall);
-            for(const [id,values] of [['validationOverallHistogram',modelScore.scores.filter(Number.isFinite)],['validationUnalignedHistogram',unalignedScored.map(row=>row.score)],['validationOrderedHistogram',orderedScores]]){
+            for(const [id,values] of [['validationOverallHistogram',modelScore.scores.filter((score,i)=>!physicsNodes[i]?.referenceLockTarget&&Number.isFinite(score))],['validationUnalignedHistogram',unalignedScored.map(row=>row.score)],['validationOrderedHistogram',orderedScores]]){
                 drawValidationHistogram(id,'confidence',values.map(confidence=>({confidence})),value=>validationScoreColor(value,document.body.classList.contains('light-mode')));
                 validationElement(`${id}Count`).textContent=values.length?`${values.length.toLocaleString()} residue score${values.length===1?'':'s'} · 0 to 1`:'No scores available';
             }
             setValidationScore('validationMembrane',membrane,'No membrane');
-            validationElement('validationStatus').textContent=validationState.paeLoading?'Loading AlphaFold PAE…':'';
+            validationElement('validationStatus').textContent=validationState.paeLoading?'Loading AlphaFold PAE…':validationState.omittedPaeFileIndices?.length?'Compact session: residue-level values are preserved for the saved model view; pairwise PAE is unavailable until reloaded.':'';
+            const reloadPae=validationElement('validationReloadPae');if(reloadPae){reloadPae.hidden=!validationState.omittedPaeFileIndices?.length;reloadPae.disabled=validationState.paeLoading;}
             renderValidationSequence();
             redrawValidationMatrices();
             for(const [id,kind] of [['validationConfidenceHistogram','confidence'],['validationStrainHistogram','strain'],['validationCombinedHistogram','combined']])drawValidationHistogram(id,kind,pairs);
@@ -21824,7 +21976,7 @@
                 ?`Mean strain: ${(validationMean(pairs.map(pair=>pair.strain))*100).toFixed(1)}% · mean absolute strain: ${(validationMean(pairs.map(pair=>Math.abs(pair.strain)))*100).toFixed(1)}%`
                 :'Mean spring strain: unavailable';
             validationElement('validationCombinedAverage').textContent=`Mean combined score: ${pairOverall===null?'unavailable':pairOverall.toFixed(2)}`;
-            validationElement('validationInterpretation').textContent=`Reference-aligned: ${modelScore.aligned}/${modelScore.total} protein residues. Scored: ${modelScore.scored}/${modelScore.total}; ${modelScore.partial} unaligned residues have incomplete pLDDT or PAE. Run-5 exploratory estimates apply only to unaligned residues before simulation with complete inputs; they are not yet independently calibrated.`;
+            validationElement('validationInterpretation').textContent=`Reference-aligned: ${modelScore.aligned}/${modelScore.total} protein residues. Scored including ${modelScore.locked} locked residues assigned 1: ${modelScore.scored}/${modelScore.total}; ${modelScore.partial} unaligned residues are unavailable due to missing inputs or unsupported conditions. Separate AlphaFold and sequence-only estimates apply before simulation; both are exploratory and not yet independently calibrated.`;
             if(!originalPositions)recordValidationGraphSample(overall,membrane,satisfaction,performance.now());
             renderValidationPairDetails();renderValidationExtraEvidence();validationState.lastDraw=performance.now();validationState.lastReportDraw=validationState.lastDraw;
             validationElement('validationReport').classList.toggle('matrix-zoomed',validationState.matrixView.zoom>1||validationState.matrixView.x!==0||validationState.matrixView.y!==0);
@@ -21894,7 +22046,7 @@
                 reference:modelData1.pdbId,alphaFold:modelData2.pdbId,
                 keyframe:validationElement('validationKeyframeSelect')?.selectedOptions[0]?.textContent||'Currently viewed keyframe',
                 scores:[['Sequence coverage',read('validationCoverage')],['Membrane placement',read('validationMembrane')],
-                    ['Model confidence',read('validationOverall')],['Local structure confidence',read('validationLocal')],['Placement confidence (2 Å)',read('validationPlacement2')],['Placement confidence (5 Å)',read('validationPlacement5')],['AlphaFold PAE',read('validationPaeMean')],['Overall confidence of unaligned residues',read('validationUnalignedOverall')],
+                    ['Model confidence excluding locked residues',read('validationOverall')],['Model confidence including locked residues',read('validationOverallIncludingLocked')],['Local structure confidence',read('validationLocal')],['Placement confidence (2 Å)',read('validationPlacement2')],['Placement confidence (5 Å)',read('validationPlacement5')],['AlphaFold PAE',read('validationPaeMean')],['Overall confidence of unaligned residues',read('validationUnalignedOverall')],
                     ['Confidence of unaligned non-disordered residues',read('validationUnalignedOrdered')]],
                 scoreHistograms:['validationOverallHistogram','validationUnalignedHistogram','validationOrderedHistogram'].map(id=>({image:canvasImage(id),aspect:canvasAspect(id),count:read(`${id}Count`)})),
                 status:read('validationStatus'),note:read('validationInterpretation'),
@@ -21918,7 +22070,7 @@
                 :root{font-family:Arial,sans-serif;color-scheme:dark;--bg:#0f172a;--card:#172236;--head:#1d2d43;--text:#e2e8f0;--muted:#94a3b8;--line:#334155;--accent:#67e8f9}
                 .light{color-scheme:light;--bg:#fff;--card:#f8fafc;--head:#e8f0f6;--text:#172033;--muted:#475569;--line:#cbd5e1;--accent:#0e7490}
                 *{box-sizing:border-box}body{margin:0;padding:2rem;background:var(--bg);color:var(--text)}main{max-width:1100px;margin:auto}h1{color:var(--accent)}h2{margin-top:2rem}h3{margin:.2rem 0;color:var(--accent)}p{line-height:1.5;color:var(--muted)}.scores,.figures{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:1rem;break-inside:avoid}.score{border:0}.score strong{display:block;color:var(--accent);font-size:1.7rem;margin-top:.35rem}.figures .card{display:flex;flex-direction:column;gap:.35rem}.matrix{width:min(100%,350px);align-self:center;image-rendering:pixelated}.histogram{width:100%;max-height:130px;object-fit:contain}.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;font-size:.85rem}th,td{padding:.55rem;text-align:left;border-bottom:1px solid var(--line)}th{background:var(--head)}.note{padding:1rem;background:var(--card);border-left:3px solid var(--accent)}@media(max-width:700px){body{padding:1rem}.scores,.figures{grid-template-columns:1fr}}@media print{body{print-color-adjust:exact;-webkit-print-color-adjust:exact}.card{break-inside:avoid}}
-                </style></head><body><main><h1>StringScape validation report</h1><p>Generated ${escape(report.generated)} · Reference ${escape(report.reference)} · AlphaFold ${escape(report.alphaFold)} · ${escape(report.keyframe)}</p><p>${escape(report.status)}</p><div class="scores">${report.scores.map(([name,value],index)=>`<div class="card score">${escape(name)}<strong>${escape(value)}</strong>${report.scoreHistograms[({2:0,7:1,8:2})[index]]?.image?`<img class="histogram" src="${report.scoreHistograms[({2:0,7:1,8:2})[index]].image}" alt="${escape(name)} score distribution"><p>${escape(report.scoreHistograms[({2:0,7:1,8:2})[index]].count)}</p>`:''}</div>`).join('')}</div><h2>Sequence alignment by AlphaFold chain</h2>${rows(['AlphaFold chain','Reference matches','Coverage','Average identity','Average similarity'],report.sequence)}<h2>Distance restraint assessment</h2><div class="figures">${figures}</div><p class="note">${escape(report.note)}</p>${report.selectedPair?`<h2>Selected residue pair</h2><p class="note">${escape(report.selectedPair)}</p>`:''}${report.extraRows.length?`<h2>Manually added evidence</h2><p>${escape(report.extra)}</p>${rows(['Type','Residue pair','Observed','Target / upper bound','Satisfaction'],report.extraRows)}`:''}<h2>Independent model-quality assessment</h2><p>QMEANDisCo Global: ${escape(report.qmean)} · ${escape(report.qmeanStatus)}</p>${report.qmeanChart?`<img class="histogram" src="${report.qmeanChart}" alt="Per-residue QMEANDisCo scores">`:''}<p>Confidence models are exploratory and require independent calibration.</p></main></body></html>`;
+                </style></head><body><main><h1>StringScape validation report</h1><p>Generated ${escape(report.generated)} · Reference ${escape(report.reference)} · AlphaFold ${escape(report.alphaFold)} · ${escape(report.keyframe)}</p><p>${escape(report.status)}</p><div class="scores">${report.scores.map(([name,value],index)=>`<div class="card score">${escape(name)}<strong>${escape(value)}</strong>${report.scoreHistograms[({2:0,8:1,9:2})[index]]?.image?`<img class="histogram" src="${report.scoreHistograms[({2:0,8:1,9:2})[index]].image}" alt="${escape(name)} score distribution"><p>${escape(report.scoreHistograms[({2:0,8:1,9:2})[index]].count)}</p>`:''}</div>`).join('')}</div><h2>Sequence alignment by AlphaFold chain</h2>${rows(['AlphaFold chain','Reference matches','Coverage','Average identity','Average similarity'],report.sequence)}<h2>Distance restraint assessment</h2><div class="figures">${figures}</div><p class="note">${escape(report.note)}</p>${report.selectedPair?`<h2>Selected residue pair</h2><p class="note">${escape(report.selectedPair)}</p>`:''}${report.extraRows.length?`<h2>Manually added evidence</h2><p>${escape(report.extra)}</p>${rows(['Type','Residue pair','Observed','Target / upper bound','Satisfaction'],report.extraRows)}`:''}<h2>Independent model-quality assessment</h2><p>QMEANDisCo Global: ${escape(report.qmean)} · ${escape(report.qmeanStatus)}</p>${report.qmeanChart?`<img class="histogram" src="${report.qmeanChart}" alt="Per-residue QMEANDisCo scores">`:''}<p>Confidence models are exploratory and require independent calibration.</p></main></body></html>`;
         }
         validationElement('validationDownload')?.addEventListener('click',()=>{
             const {figures,qmeanChart,...report}=validationReportSnapshot(false);
@@ -21965,7 +22117,7 @@
             report.scores.forEach(([label,value],index)=>{
                 const column=index%2;
                 if(column===0&&y+154>pageHeight-margin){newPage();y=55;}
-                const x=margin+column*(cardWidth+10),top=y,chart=report.scoreHistograms[({2:0,7:1,8:2})[index]];
+                const x=margin+column*(cardWidth+10),top=y,chart=report.scoreHistograms[({2:0,8:1,9:2})[index]];
                 pdf.setFillColor(...card);pdf.roundedRect(x,top,cardWidth,146,7,7,'F');
                 write(label,x+12,top+19,cardWidth-24,10,muted);
                 pdf.setFont('helvetica','bold');pdf.setFontSize(20);color(accent);pdf.text(plain(value),x+12,top+54);
@@ -22120,11 +22272,17 @@
             const t=(score-low)/(high-low);
             return `rgb(${start.map((component,i)=>Math.round(component+(end[i]-component)*t)).join(',')})`;
         }
+        document.getElementById('validationReloadPae')?.addEventListener('click',()=>void loadValidationPae(true));
         function validationNodeColor(index,mode){
             if(index===undefined||index<0||!physicsNodes[index]||physicsNodes[index].res.entityType!=='protein')return '#64748b';
             if(mode==='membrane-score')return validationColor('confidence',validationMembraneDetectionConfidence());
+            if(physicsNodes[index].referenceLockTarget&&['constraint-confidence','model-confidence','local-confidence','placement-2','placement-5'].includes(mode))return document.getElementById('showLockedConfidence')?.checked?modelConfidenceColor(1):'#374151';
             if(['model-confidence','local-confidence','placement-2','placement-5'].includes(mode)){const field={'model-confidence':'scores','local-confidence':'local','placement-2':'placement2','placement-5':'placement5'}[mode],score=calculateModelConfidence()[field][index];return Number.isFinite(score)?modelConfidenceColor(score):'#64748b';}
             if(mode==='alpha-pae'){const score=calculateResiduePae()[index];return Number.isFinite(score)?new THREE.Color('#38bdf8').lerp(new THREE.Color('#ef4444'),validationClamp(score/30)).getStyle():'#64748b';}
+            const compact=validationState.compactResidueData,compactField=mode==='constraint-confidence'?'constraint':mode==='spring-strain'?'strain':null;
+            if(compactField&&(validationState.omittedPaeFileIndices?.length||(typeof window!=='undefined'&&window.batchViewOnlySession))&&compact?.nodes===physicsNodes&&compact.activeConformationGroup===activeConformationGroup&&(compact.runtimeLockRevision===undefined||compact.runtimeLockRevision===physicsLockTargetRevision)){
+                const value=compact.pairMeans?.[compactField]?.[index];return Number.isFinite(value)?(compactField==='constraint'?modelConfidenceColor(value):validationColor('strain',value)):'#64748b';
+            }
             if(!validationState.nodeColors||validationState.nodeColors.mode!==mode||validationState.nodeColors.length!==physicsNodes.length){
                 const sums=new Float64Array(physicsNodes.length),counts=new Uint32Array(physicsNodes.length);
                 if(mode==='qmeandisco'){
@@ -22181,7 +22339,7 @@
         });
         function resetValidationReportUI(){
             const keyframeSelect=validationElement('validationKeyframeSelect');if(keyframeSelect)keyframeSelect.value='current';
-            for(const id of ['validationOverall','validationCoverage','validationUnalignedOverall','validationUnalignedOrdered','validationMembrane'])setValidationScore(id,null,'—');
+            for(const id of ['validationOverall','validationOverallIncludingLocked','validationCoverage','validationUnalignedOverall','validationUnalignedOrdered','validationMembrane'])setValidationScore(id,null,'—');
             validationElement('validationStatus').textContent='Build a model to calculate this report.';
             validationElement('validationSequenceRows').replaceChildren();validationElement('validationExtraRows').replaceChildren();
             validationElement('validationExtraEvidence').classList.add('hidden');
@@ -22197,12 +22355,24 @@
 
 
 // benchmarkApi.js start — input-only contract; no experimental scoring data enters here.
-window.buildHomologyModel = async function({referenceStructure, uniprotIds, convergenceThreshold=0.02, phase2TimeoutMs=20000, seed=1, requireAlphaFoldForEveryProteinChain=false, requiredChainAccessions=null, forceSequenceAccessions=[], captureModelImage=false, runSimulation=true, fullReferenceStructure=null, preservedResidues=null, signal, onProgress=()=>{}}) {
+function benchmarkPairHasTarget(pair, requiredChainAccessions, requireCoordinates) {
+    if (pair.referenceOnly || !pair.c2 || !pair.isEquivalent) return false;
+    const chains=pair.sourceChains?.length ? pair.sourceChains : [pair.c1];
+    return chains.every(chain => {
+        const required=requiredChainAccessions?.[chain];
+        if (requiredChainAccessions && !required) return false;
+        return modelData2.chains[pair.c2]?.some(atom => atom.entityType==='protein' && atom.sourcePdbId &&
+            (!required || uniProtAccession(atom.sourcePdbId)===required) &&
+            (!requireCoordinates || alphaFoldMolstarFiles.some(file=>file.pdbId===atom.sourcePdbId && file.alphaFoldCoordinates)));
+    });
+}
+window.buildHomologyModel = async function({referenceStructure, uniprotIds, convergenceThreshold=0.02, phase2TimeoutMs=20000, seed=1, requireAlphaFoldForEveryProteinChain=false, requiredChainAccessions=null, forceSequenceAccessions=[], captureModelImage=false, runSimulation=true, fullReferenceStructure=null, preservedResidues=null, captureAlphaFoldBaseline=false, signal, onProgress=()=>{}}) {
     if (window.__benchmarkRun) throw new Error('A benchmark model is already running');
     if (!window.stringScapeReady) throw new Error('Modeller is not ready');
     if (typeof referenceStructure !== 'string' || !Array.isArray(uniprotIds) || !uniprotIds.length) throw new Error('Reference and UniProt IDs required');
     if (!uniprotIds.every(id=>/^(?:[OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9](?:[A-Z][A-Z0-9]{2}[0-9]){1,2})(?:-[0-9]+)?$/.test(id))) throw new Error('Only UniProt accessions are allowed');
-    const run=window.__benchmarkRun={startedAt:performance.now(),phase2StartedAt:null,steps:0,progress:onProgress,forceSequenceAccessions:new Set(forceSequenceAccessions.map(id=>String(id).toUpperCase()))};
+    if (document.getElementById('errorModal').classList.contains('warning-modal')) closeErrorModal();
+    const run=window.__benchmarkRun={startedAt:performance.now(),phase2StartedAt:null,steps:0,progress:onProgress,captureAlphaFoldBaseline,forceSequenceAccessions:new Set(forceSequenceAccessions.map(id=>String(id).toUpperCase()))};
     const reportStage=async stage=>{onProgress({stage});await new Promise(resolve=>setTimeout(resolve,0));};
     // requestAnimationFrame is suspended for off-screen iframes; benchmarking must
     // never report artificial convergence simply because its viewer is off-screen.
@@ -22225,13 +22395,8 @@ window.buildHomologyModel = async function({referenceStructure, uniprotIds, conv
         if(signal?.aborted)throw new DOMException('Stopped','AbortError');
         if(run.loadError)throw run.loadError;
         if(readyModelGeneration!==modelBuildGeneration||!physicsNodes.length)throw Object.assign(new Error(document.getElementById('errorMessage').textContent||'Model build failed'),{code:'MODEL_BUILD_FAILED'});
-        const missingChains=alignmentResults.filter(pair=>pair.entityType==='protein' &&
-            (pair.referenceOnly || !pair.c2 || !pair.isEquivalent ||
-                (requiredChainAccessions && !requiredChainAccessions[pair.c1]) ||
-                !modelData2.chains[pair.c2]?.some(atom=>atom.entityType==='protein' && atom.sourcePdbId &&
-                    (!requiredChainAccessions || uniProtAccession(atom.sourcePdbId)===requiredChainAccessions[pair.c1]) &&
-                    alphaFoldMolstarFiles.some(file=>file.pdbId===atom.sourcePdbId && file.alphaFoldCoordinates)))).map(pair=>pair.c1);
-        const badMappings=alignmentResults.filter(pair=>pair.entityType==='protein' && (pair.referenceOnly || !pair.c2 || !pair.isEquivalent || (requiredChainAccessions && !requiredChainAccessions[pair.c1]) || !modelData2.chains[pair.c2]?.some(atom=>atom.entityType==='protein'&&atom.sourcePdbId&&(!requiredChainAccessions||uniProtAccession(atom.sourcePdbId)===requiredChainAccessions[pair.c1])))).map(pair=>pair.c1);
+        const missingChains=alignmentResults.filter(pair=>pair.entityType==='protein' && !benchmarkPairHasTarget(pair,requiredChainAccessions,true)).map(pair=>pair.c1);
+        const badMappings=alignmentResults.filter(pair=>pair.entityType==='protein' && !benchmarkPairHasTarget(pair,requiredChainAccessions,false)).map(pair=>pair.c1);
         if(badMappings.length){const error=new Error(`Missing or invalid target mapping for protein chain(s): ${badMappings.join(', ')}`);error.code='INVALID_CHAIN_MAPPING';error.missingChains=badMappings;throw error;}
         if(requireAlphaFoldForEveryProteinChain && missingChains.length){
             const error=new Error(`Missing AlphaFold model for protein chain${missingChains.length===1?'':'s'} ${missingChains.join(', ')}`);
@@ -22289,7 +22454,7 @@ window.buildHomologyModel = async function({referenceStructure, uniprotIds, conv
             nodes:physicsNodes.map((n,index)=>n.res.entityType==='protein'?{index,xyz:[n.x,n.y,n.z],referenceChain:n.res.c1,reference:cleanAtom(validationAtom(n,'reference')),alphaFold:cleanAtom(validationAtom(n,'alphaFold'))}:null).filter(Boolean),
             alphaFold:modelData2.caAtoms.filter(a=>a.entityType==='protein').map(cleanAtom),
             pae:Object.fromEntries(modelData2.files.map(f=>[f.pdbId,validationPaeExport(validationState.pae.get(f.fileIndex))])),
-            settings:{morphAlpha,springCutoffVal,seed,requireAlphaFoldForEveryProteinChain,forceSequenceAccessions,sourceInputs:alphaFoldMolstarFiles.map(file=>({accession:file.pdbId,sequenceOnly:file.sequenceOnly,reason:file.fallbackReason||null,alphaFoldCoordinates:file.alphaFoldCoordinates})),apiVersion:2,script:document.getElementById('appScript')?.src,buildSettings:Object.fromEntries([...document.querySelectorAll('#buildSettingsContent input[id],#buildSettingsContent select[id]')].map(element=>[element.id,element.type==='checkbox'?element.checked:element.value]))}};
+            settings:{morphAlpha,springCutoffVal,seed,requireAlphaFoldForEveryProteinChain,forceSequenceAccessions,sourceInputs:alphaFoldMolstarFiles.map(file=>({accession:file.pdbId,sequenceOnly:file.sequenceOnly,reason:file.fallbackReason||null,alphaFoldCoordinates:file.alphaFoldCoordinates,alphaFoldEntryCount:file.alphaFoldEntryCount})),apiVersion:2,script:document.getElementById('appScript')?.src,buildSettings:Object.fromEntries([...document.querySelectorAll('#buildSettingsContent input[id],#buildSettingsContent select[id]')].map(element=>[element.id,element.type==='checkbox'?element.checked:element.value]))}};
     } finally {clearInterval(physicsTimer);physicsRunning=false;Math.random=originalRandom;window.__benchmarkRun=null;}
 };
 if(new URLSearchParams(location.search).has('benchmark')){

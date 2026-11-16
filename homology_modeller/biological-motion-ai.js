@@ -144,21 +144,36 @@
         filamentButton.textContent=extensions.length?'AI extended some filaments':'AI did not extend filaments';
         filamentExplanation=[assessment.reason,...assessment.extensions.map(item=>`${item.key}: ${item.units} units. ${item.reason}`)].filter(Boolean).join('\n\n');
     }
+    const autoToggle=document.getElementById('autoBiologicalMotionAI');
+    const preferenceKey='homology-modeller.auto-biological-motion-ai.v1';
+    try{autoToggle.checked=localStorage.getItem(preferenceKey)==='true';}catch{}
+    autoToggle.addEventListener('change',()=>{try{localStorage.setItem(preferenceKey,String(autoToggle.checked));}catch{}});
+    let requested=null;
+    for(const [id,mode] of [['extendPatternsAiBtn','extensions'],['generateAnimationAiBtn','animation']]){
+        document.getElementById(id)?.addEventListener('click',()=>{
+            const state=window.getComplexAiState?.();
+            if(!window.ModellerAI?.connected()){status('Connect an AI to use this action.');alert('Connect an AI to use this action.');return;}
+            if(!state?.ready||!state.hasSubunits){alert('Wait until the model is ready before using this action.');return;}
+            if(task){alert('An AI assessment is already running.');return;}
+            if(mode==='extensions'){decision=null;applied='';}
+            requested=mode;
+        });
+    }
     setInterval(async()=>{
         try{
             const state=window.getComplexAiState?.();
             if(!state)return;
-            if(model!==state.generation){task?.abort();task=null;setCreatingAnimation(false);setFilamentStatus('reset');resetAnimationResult();model=state.generation;window.biologicalMotionAssessments={generation:model,filament:null,animation:null};window.complexAiMotionSummary=null;decision=null;applied='';attempted=false;status('');}
+            if(model!==state.generation){task?.abort();task=null;setCreatingAnimation(false);setFilamentStatus('reset');resetAnimationResult();model=state.generation;window.biologicalMotionAssessments={generation:model,filament:null,animation:null};window.complexAiMotionSummary=null;decision=null;applied='';attempted=false;requested=null;status('');}
             if(!window.ModellerAI?.connected()){task?.abort();task=null;setCreatingAnimation(false);if(filamentButton?.dataset.aiCreating==='true')setFilamentStatus('reset');attempted=false;return;}
             if(!state.ready||!state.hasSubunits||!window.ComplexPubMed||task)return;
             const context=window.getBiologicalMotionContext?.();if(!context||context.playing)return;
             const signature=JSON.stringify(context.animationIds);
-            if(decision){if(applied!==signature&&window.applyBiologicalMotion(model,decision,{createSpinAnimation:!applied}))applied=signature;return;}
-            if(attempted)return;
+            if(!requested&&decision){if(applied!==signature&&window.applyBiologicalMotion(model,decision,{createSpinAnimation:!applied}))applied=signature;return;}
+            if(!requested&&(!autoToggle.checked||attempted))return;
+            const mode=requested||'both';requested=null;
             if(!context.blocks.length&&!context.conformationGroups?.length&&!context.hasAutomaticSpin&&!context.patterns.length){attempted=true;status('ATP synthase uses fixed animation rules.');return;}
             attempted=true;const controller=new AbortController();task=controller;const generation=model;
-            setFilamentStatus('running');
-            status('AI is considering filament extensions…');
+            if(mode!=='animation'){setFilamentStatus('running');status('AI is considering filament extensions…');}
             // Separate conversations give independent group and per-protein axis decisions.
             // UniProt records can be large. Send each protein record once, with
             // accession IDs linking it to all of its subunit blocks.
@@ -166,14 +181,15 @@
             let first,second,extensionApplied=false,animationApplied=false;
             try{
                 const autoExtensions=context.automaticExtensions||[];
-                first=autoExtensions.length?{reason:'Extended automatically using the protein name rule.',extensions:autoExtensions.map(item=>({...item,reason:'Automatic protein name rule.'}))}:!context.patterns.length?{reason:'No patterns have an extendable end.',extensions:[]}:await decide(groupPrompt,input,controller.signal,data=>{if(!Array.isArray(data.extensions))throw Error('Missing extensions');const keys=new Set(context.patterns.map(item=>item.key));if(data.extensions.some(item=>!keys.has(item.key)||!Number.isInteger(item.units)||item.units<0||item.units>100||typeof item.reason!=='string'||!item.reason.trim()))throw Error('Invalid filament extension');checkAssessmentReason(data);});
+                first=mode==='animation'?(window.biologicalMotionAssessments?.generation===generation&&window.biologicalMotionAssessments.filament||{reason:'Existing pattern settings were retained.',extensions:[]}):autoExtensions.length?{reason:'Extended automatically using the protein name rule.',extensions:autoExtensions.map(item=>({...item,reason:'Automatic protein name rule.'}))}:!context.patterns.length?{reason:'No patterns have an extendable end.',extensions:[]}:await decide(groupPrompt,input,controller.signal,data=>{if(!Array.isArray(data.extensions))throw Error('Missing extensions');const keys=new Set(context.patterns.map(item=>item.key));if(data.extensions.some(item=>!keys.has(item.key)||!Number.isInteger(item.units)||item.units<0||item.units>100||typeof item.reason!=='string'||!item.reason.trim()))throw Error('Invalid filament extension');checkAssessmentReason(data);});
                 if(controller.signal.aborted||generation!==model)return;
-                if(context.hasAutomaticSpin&&!window.applyBiologicalExtensions?.(generation,first.extensions))throw Error('Could not apply filament extension assessment');
-                if(!context.hasAutomaticSpin&&!window.applyBiologicalMotion(generation,{extensions:first.extensions,groups:context.automaticSpin?.groups||[],rotations:context.automaticSpin?.rotations||[]},{createSpinAnimation:false}))throw Error('Could not apply filament extension assessment');
-                extensionApplied=first.extensions.some(item=>item.units>0);
+                if(mode!=='animation'&&context.hasAutomaticSpin&&!window.applyBiologicalExtensions?.(generation,first.extensions))throw Error('Could not apply filament extension assessment');
+                if(mode!=='animation'&&!context.hasAutomaticSpin&&!window.applyBiologicalMotion(generation,{extensions:first.extensions,groups:context.automaticSpin?.groups||[],rotations:context.automaticSpin?.rotations||[]},{createSpinAnimation:false}))throw Error('Could not apply filament extension assessment');
+                extensionApplied=mode!=='animation'&&first.extensions.some(item=>item.units>0);
                 window.biologicalMotionAssessments={generation,filament:first,animation:null};
-                if(autoExtensions.length||!context.patterns.length)setFilamentStatus('reset');else setFilamentStatus('complete',first);
-                if(context.hasAutomaticSpin){
+                if(mode!=='animation'){if(autoExtensions.length||!context.patterns.length)setFilamentStatus('reset');else setFilamentStatus('complete',first);}
+                if(mode==='extensions'){status('AI pattern assessment complete.');return;}
+                if(context.hasAutomaticSpin&&mode==='both'){
                     animationApplied=true;
                     return;
                 }
@@ -181,6 +197,7 @@
                 status('AI is planning animation…');
                 second=await decide(axisPrompt,{...input,filamentDecision:first},controller.signal,data=>{validate(first,data,context);checkAssessmentReason(data);});
                 const result=validate(first,second,context);
+                if(mode==='animation')result.extensions=[];
                 if(controller.signal.aborted||generation!==model||!window.ModellerAI?.connected())return;
                 if(result.draftGroups.length){
                     if(!await window.setAnimationDraftGroups?.(generation,result.draftGroups))throw Error('Could not create the selected draft groups');

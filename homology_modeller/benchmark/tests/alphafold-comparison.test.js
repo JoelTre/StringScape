@@ -1,0 +1,16 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const source=fs.readFileSync(require.resolve('../app.js'),'utf8');
+const fn=source.slice(source.indexOf('function alphaFoldTestSummary('),source.indexOf('async function runEntry('));
+const summarize=vm.runInNewContext(`(${fn.trim()})`);
+const base={'Input source':'AlphaFold','Aligned?':'No','Locked?':'No'};
+const row=(before,after,movement)=>({...base,'AlphaFold-to-reference distance (Å)':before,'Reference-to-predicted distance':after,'AlphaFold-to-final displacement (Å)':movement});
+const summary=summarize([row(3,1,2),row(4,2,3),row(null,1,1),{...row(8,1,1),'Aligned?':'Yes'}],[base,base,base]);
+assert.equal(summary['Paired comparable residues'],2);
+assert.equal(summary['Unpaired unaligned AlphaFold residues'],1);
+assert.equal(summary['AlphaFold vs reference RMSD (Å)'],Math.sqrt(12.5));
+assert.equal(summary['Final vs reference RMSD (Å)'],Math.sqrt(2.5));
+assert.equal(summary['Mean AlphaFold to final displacement (Å)'],2.5);
+assert.equal(summary['Residues closer to reference'],2);
+assert.equal(summarize([],[])['AlphaFold vs reference RMSD (Å)'],null);
+console.log('AlphaFold paired comparison tests passed');

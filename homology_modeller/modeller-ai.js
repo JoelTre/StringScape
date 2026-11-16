@@ -198,28 +198,43 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
         const rows=results.map(hit=>({pdbId:hit.identifier,title:hit.name||'',species:hit.species||[],score:hit.score,searchMatches:hit.searchMatches||[],proteins:hit.mapping?.records||[],notes:hit.mapping?.notes||[]}));
         return parseDecision(await askJson(referencePrompt(SYSTEM_PROMPT,input),{query:query||null,sequences:sequences||[],searches:searches||[],results:rows}),results);
     }
-    async function searchReferences({query,sequences,searchPdb,signal,onStatus=()=>{},input=query}) {
-        const system=referencePrompt(`You find experimental PDB references for a protein modelling request. Search the PDB and PubMed as often as useful, trying synonyms and alternative queries when needed. Inspect returned titles, protein names and mappings; respect the request and avoid inventing IDs or evidence. Select up to five relevant PDB IDs from actual PDB search results, covering requested components and distinct supported states. When searches are exhausted, explain the limitations and suggest refining the query or selecting PDBs manually. Do not assign conformation groups. Return only JSON: {"pdbIds":["1ABC"],"reason":"explanation"}. An empty array is allowed.`,input);
+    async function searchReferences({query,sequences,searchPdb,viewPdbIds,signal,onStatus=()=>{},input=query}) {
+        const system=referencePrompt(`You find experimental PDB references for a protein modelling request. Search the PDB and PubMed as often as useful, trying synonyms and alternative queries when needed. Inspect returned titles, protein names and mappings; respect the request and avoid inventing IDs or evidence. Use View_info_for_PDB_IDs to inspect known PDB IDs as needed. Select up to five relevant PDB IDs from verified search results or inspected IDs, covering requested components and distinct supported states. When searches are exhausted, explain the limitations and suggest refining the query or selecting PDBs manually. Do not assign conformation groups. Return only JSON: {"pdbIds":["1ABC"],"reason":"explanation"}. An empty array is allowed.`,input);
         const pdbTool={name:'Search_PDB',description:'Search RCSB PDB for structures and return titles and protein mappings.',parameters:{type:'object',properties:{query:{type:'string',description:'Concise full-text search terms; leave empty to search supplied sequences'}},required:['query'],additionalProperties:false}};
+        const infoTool={name:'View_info_for_PDB_IDs',description:'Look up PDB IDs and return structure titles, protein entities, sequences, species and UniProt mappings.',parameters:{type:'object',properties:{pdbIds:{type:'array',items:{type:'string'},minItems:1,description:'One or more four-character PDB IDs'}},required:['pdbIds'],additionalProperties:false}};
         const messages=[{role:'user',content:JSON.stringify({query,sequences})}],seen=new Map();let fallback=false,corrections=0;
         while(true){
-            const result=await streamComplex({system:system+(fallback?' Native tools are unavailable. Request a search with JSON {"tool":"Search_PDB" or "Search_PubMed","query":"terms"}, or return the final decision JSON.':''),messages,tools:fallback?[]:[pdbTool,window.ComplexPubMed.tool],signal});
+            const result=await streamComplex({system:system+(fallback?' Native tools are unavailable. Request a search with JSON {"tool":"Search_PDB" or "Search_PubMed","query":"terms"} or {"tool":"View_info_for_PDB_IDs","pdbIds":["1ABC"]}, or return the final decision JSON.':''),messages,tools:fallback?[]:[pdbTool,infoTool,window.ComplexPubMed.tool],signal});
             if(result.toolsUnavailable&&result.fallbackMessages)messages.splice(0,messages.length,...result.fallbackMessages);
             fallback ||= result.toolsUnavailable;
             let calls=result.calls;
             if(!calls.length){
                 let value;try{value=JSON.parse(result.text.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,''));if(typeof value.answer==='string')value=JSON.parse(value.answer);else if(value.answer&&typeof value.answer==='object')value=value.answer;}catch{}
-                if(fallback&&value&&(value.tool||value.query)){calls=[{name:value.tool||'Search_PubMed',arguments:JSON.stringify({query:value.query||''}),id:'fallback'}];}
+                if(fallback&&value&&(value.tool||value.query)){calls=[{name:value.tool||'Search_PubMed',arguments:JSON.stringify(value),id:'fallback'}];}
                 else if(value&&Array.isArray(value.pdbIds)&&typeof value.reason==='string'){
                     const ids=[...new Set(value.pdbIds.map(id=>String(id).toUpperCase()))];
                     if(ids.length<=5&&ids.every(id=>seen.has(id)))return {pdbIds:ids,reason:value.reason,results:[...seen.values()]};
                 }
-                if(!calls.length){if(++corrections>2)throw Error('AI returned an invalid reference selection.');messages.push({role:'assistant',content:result.text||'(empty response)'},{role:'user',content:'Return valid decision JSON using only IDs returned by PDB searches, or request another search.'});continue;}
+                if(!calls.length){if(++corrections>2)throw Error('AI returned an invalid reference selection.');messages.push({role:'assistant',content:result.text||'(empty response)'},{role:'user',content:'Return valid decision JSON using only IDs returned by PDB searches or successfully inspected, or request another search.'});continue;}
             }
             if(!fallback){if(result.anthropic)messages.push({role:'assistant',content:[...(result.text?[{type:'text',text:result.text}]:[]),...calls.map(call=>({type:'tool_use',id:call.id,name:call.name,input:JSON.parse(call.arguments||'{}')}))]});else messages.push({role:'assistant',content:result.text||null,tool_calls:calls.map(call=>({id:call.id,type:'function',function:{name:call.name,arguments:call.arguments}}))});}
             else messages.push({role:'assistant',content:result.text});
             const outputs=[];
-            for(const call of calls){let output;try{const args=JSON.parse(call.arguments||'{}');onStatus(`AI searching ${call.name==='Search_PDB'?'PDB':'PubMed'}: ${args.query||'input sequences'}…`);if(call.name==='Search_PDB'){output=await searchPdb(args.query||'');for(const hit of output)seen.set(hit.identifier,hit);}else if(call.name==='Search_PubMed')output=await window.ComplexPubMed.search(args.query,signal);else throw Error('Unknown tool');}catch(error){if(signal.aborted)throw error;output={error:error.message};}outputs.push({call,content:JSON.stringify(output)});}
+            for(const call of calls){let output;try{
+                const args=JSON.parse(call.arguments||'{}');
+                if(call.name==='Search_PDB'){
+                    onStatus(`AI searching PDB: ${args.query||'input sequences'}…`);
+                    output=await searchPdb(args.query||'');for(const hit of output)seen.set(hit.identifier,hit);
+                }else if(call.name==='View_info_for_PDB_IDs'){
+                    if(!Array.isArray(args.pdbIds)||!args.pdbIds.length||args.pdbIds.some(id=>typeof id!=='string'||!/^[0-9][A-Za-z0-9]{3}$/.test(id)))throw Error('Provide one or more valid four-character PDB IDs.');
+                    const ids=[...new Set(args.pdbIds.map(id=>id.toUpperCase()))];
+                    onStatus(`AI inspecting PDB IDs: ${ids.join(', ')}…`);
+                    output=await viewPdbIds(ids);
+                    for(const hit of output)if(hit.mapping?.records?.length&&!hit.infoOnlyReason)seen.set(hit.identifier,hit);
+                }else if(call.name==='Search_PubMed'){
+                    onStatus(`AI searching PubMed: ${args.query||''}…`);output=await window.ComplexPubMed.search(args.query,signal);
+                }else throw Error('Unknown tool');
+            }catch(error){if(signal.aborted)throw error;output={error:error.message};}outputs.push({call,content:JSON.stringify(output)});}
             if(fallback)messages.push({role:'user',content:JSON.stringify({toolResults:outputs.map(({call,content})=>({tool:call.name,result:JSON.parse(content)}))})});
             else if(result.anthropic)messages.push({role:'user',content:outputs.map(({call,content})=>({type:'tool_result',tool_use_id:call.id,content}))});else for(const {call,content} of outputs)messages.push({role:'tool',tool_call_id:call.id,content});
         }
@@ -285,7 +300,7 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
         if(!response.ok&&[400,422].includes(response.status)&&tools.length){
             delete body.tools;toolsUnavailable=true;
             fallbackMessages=plainToolHistory(messages);
-            const instruction=tools.some(tool=>tool.name==='Search_PDB')?'Native tools are unavailable. Request a search with JSON {"tool":"Search_PDB" or "Search_PubMed","query":"terms"}, or return your final JSON decision.':'Native tools are unavailable. You can still request a PubMed search through the app. Return ONLY JSON: {"tool":"View_app_info","arguments":{}} for app information, {"tool":"Get_chain_sequences","arguments":{}} to inspect chains, {"tool":"Get_protein_annotations","arguments":{"accession":"..."}} for annotations, {"tool":"Get_model_context","arguments":{}} to list model sections or {"tool":"Get_model_context","arguments":{"section":"all"}} for full model data, {"tool":"Get_current_selection","arguments":{}} for the selection, {"tool":"List_binding_sites","arguments":{}} to list binding sites, {"tool":"Get_binding_site","arguments":{"site":"exact ID or name"}} for site details, {"tool":"Select_model_entity","arguments":{...}} to select, {"editAnimation":"description"} to edit animation, {"query":"PubMed search terms"} to search, or {"answer":"your answer"}. Do not claim to have searched PubMed until the app supplies results.';
+            const instruction=tools.some(tool=>tool.name==='Search_PDB')?'Native tools are unavailable. Request a search with JSON {"tool":"Search_PDB" or "Search_PubMed","query":"terms"}, inspect IDs with {"tool":"View_info_for_PDB_IDs","pdbIds":["1ABC"]}, or return your final JSON decision.':'Native tools are unavailable. You can still request a PubMed search through the app. Return ONLY JSON: {"tool":"View_app_info","arguments":{}} for app information, {"tool":"Get_chain_sequences","arguments":{}} to inspect chains, {"tool":"Get_protein_annotations","arguments":{"accession":"..."}} for annotations, {"tool":"Get_model_context","arguments":{}} to list model sections or {"tool":"Get_model_context","arguments":{"section":"all"}} for full model data, {"tool":"Get_current_selection","arguments":{}} for the selection, {"tool":"List_binding_sites","arguments":{}} to list binding sites, {"tool":"Get_binding_site","arguments":{"site":"exact ID or name"}} for site details, {"tool":"Select_model_entity","arguments":{...}} to select, {"editAnimation":"description"} to edit animation, {"query":"PubMed search terms"} to search, or {"answer":"your answer"}. Do not claim to have searched PubMed until the app supplies results.';
             if(anthropic){body.system+='\n'+instruction;body.messages=fallbackMessages;}
             else body.messages=[{role:'system',content:system+'\n'+instruction},...fallbackMessages];
             response=await send();

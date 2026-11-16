@@ -1,0 +1,17 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+const source=fs.readFileSync(path.join(__dirname,'../../script.js'),'utf8');
+const start=source.indexOf('function benchmarkPairHasTarget('),end=source.indexOf('window.buildHomologyModel',start);
+assert(start>=0 && end>start);
+const context={modelData2:{chains:{X:[{entityType:'protein',sourcePdbId:'P12345'}]}},alphaFoldMolstarFiles:[{pdbId:'P12345',alphaFoldCoordinates:true}],uniProtAccession:id=>id};
+vm.createContext(context);vm.runInContext(source.slice(start,end)+'\nthis.check=benchmarkPairHasTarget;',context);
+const pair={c1:'A:B',sourceChains:['A','B'],c2:'X',isEquivalent:true};
+assert(context.check(pair,{A:'P12345',B:'P12345'},true));
+assert(!context.check(pair,{A:'P12345'},false));
+assert(!context.check(pair,{A:'P12345',B:'Q12345'},false));
+assert(context.check(pair,null,false));
+context.alphaFoldMolstarFiles[0].alphaFoldCoordinates=false;
+assert(context.check(pair,{A:'P12345',B:'P12345'},false));
+assert(!context.check(pair,{A:'P12345',B:'P12345'},true));
+assert(context.check({c1:'A',c2:'X',isEquivalent:true},{A:'P12345'},false));
+console.log('Merged and individual benchmark chain mapping tests passed');

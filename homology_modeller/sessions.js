@@ -189,7 +189,7 @@ stagedReferenceWeights:{get:()=>stagedReferenceWeights,set:v=>{if(stagedReferenc
 patternExtensionCounts:{get:()=>patternExtensionCounts,set:v=>{if(patternExtensionCounts instanceof Map){patternExtensionCounts.clear();for(const [k,x] of v)patternExtensionCounts.set(k,x);}else Object.assign(patternExtensionCounts,v);}},
 };
 // Graph encoding preserves shared residue objects, cycles, Maps and typed matrices.
-function encodeSessionGraph(root,binaryFiles=null){
+function encodeSessionGraph(root,binaryFiles=null,options={}){
     const seen=new Map(),records=[];
     function encode(value){
         if(typeof value==='number'&&!Number.isFinite(value))return {number:String(value)};
@@ -207,7 +207,7 @@ function encodeSessionGraph(root,binaryFiles=null){
         else if(Array.isArray(value))record={type:'ArrayValues',data:value.map(encode)};
         else if(value instanceof Date)record={type:'Date',data:value.toISOString()};
         else if(value.isVector3||value.isQuaternion||value.isColor)record={type:value.isVector3?'Vector3':value.isQuaternion?'Quaternion':'Color',data:Object.entries(value).map(([k,v])=>[k,encode(v)])};
-        else record={type:Array.isArray(value)?'Array':'Object',data:Object.entries(value).filter(([k])=>!['__proto__','constructor','prototype','normalColorMenuNodes','cancelNetwork'].includes(k)).map(([k,v])=>[k,encode(k==='matrixCache'?new Map():v)])};
+        else record={type:Array.isArray(value)?'Array':'Object',data:Object.entries(value).filter(([k])=>!['__proto__','constructor','prototype','normalColorMenuNodes','cancelNetwork'].includes(k)&&!(options.viewOnly&&k==='initialCoordinates')).map(([k,v])=>[k,encode(k==='matrixCache'?new Map():v)])};
         records[id]=record;return {ref:id};
     }
     return {root:encode(root),records};
@@ -268,7 +268,7 @@ async function* sessionStreamingZip(files){
 async function readSessionFile(file){
     const decoder=new TextDecoder(),first=new Uint8Array(await file.slice(0,4).arrayBuffer());
     if(first.length===4&&new DataView(first.buffer).getUint32(0,true)===0x04034b50){
-        let offset=0,session=null;const binaryFiles={},attachments={};
+        let offset=0,session=null;const binaryFiles={},attachments={},packedFiles={};
         while(offset+30<=file.size){
             const header=new DataView(await file.slice(offset,offset+30).arrayBuffer());
             if(header.getUint32(0,true)!==0x04034b50)break;
@@ -278,10 +278,11 @@ async function readSessionFile(file){
             if(name==='session.json')session=JSON.parse(await file.slice(start,start+size).text());
             else if(/^buffer-\d+\.bin$/.test(name))binaryFiles[name]=new Uint8Array(await file.slice(start,start+size).arrayBuffer());
             else if(/^input-\d+\.bin$/.test(name))attachments[name]=file.slice(start,start+size);
+            else if(/^session-buffers-[0-9a-f-]+\.bin$/i.test(name))packedFiles[name]=file.slice(start,start+size);
             offset=start+size;
         }
         if(!session)throw Error('No session.json found in this archive.');
-        session.binaryFiles=binaryFiles;session.attachments=attachments;return session;
+        session.binaryFiles=session.bufferPack?await SessionPack.unpack(session,packedFiles[session.bufferPack.file]):binaryFiles;session.attachments=attachments;return session;
     }
     return JSON.parse(await file.text());
 }
@@ -289,11 +290,16 @@ async function readSessionFile(file){
 function sessionDom(){
     return [...document.querySelectorAll('[id]')].filter(e=>!e.closest('#sessionPanel,#modellerAiDialog')&&!e.id.startsWith('modellerAi')&&!['SCRIPT','STYLE','CANVAS','INPUT'].includes(e.tagName)||e.tagName==='INPUT'&&e.id&&!e.closest('#modellerAiDialog')&&!['file','password'].includes(e.type)).map(e=>({id:e.id,hidden:e.hidden,open:e.tagName==='DETAILS'?e.open:undefined,classes:e.getAttribute('class'),style:e.getAttribute('style'),value:('value'in e&&!['file','password'].includes(e.type))?e.value:undefined,checked:e.checked,text:e.children.length===0&&!['INPUT','SCRIPT','STYLE','CANVAS'].includes(e.tagName)?e.textContent:undefined,pressed:e.getAttribute('aria-pressed')}));
 }
-async function sessionCapture(){
+async function sessionCapture(options={}){
+    const viewOnly=options.viewOnly===true;
+    // Do not capture an incomplete PAE snapshot while its background request is active.
+    const paeDeadline=Date.now()+60000;
+    while(validationState.paeLoading&&Date.now()<paeDeadline)await new Promise(resolve=>setTimeout(resolve,100));
+    if(validationState.paeLoading)throw Error('Wait for PAE data to finish loading before saving the session.');
     const state={},binaryFiles={};for(const [key,binding] of Object.entries(sessionBindings))state[key]=binding.get();
     // A portable session includes inactive keyframe geometry, even when evicted.
-    if(typeof animationLibraryForStorage==='function')state.animationLibrary=await animationLibraryForStorage();
-    if(state.multiReferenceBuild?.drafts){
+    if(!viewOnly&&typeof animationLibraryForStorage==='function')state.animationLibrary=await animationLibraryForStorage();
+    if(!viewOnly&&state.multiReferenceBuild?.drafts){
         const build=state.multiReferenceBuild,drafts=[];
         for(const draft of build.drafts){
             if(draft.viewState){const springs=draft.viewState.springs||(draft.springCacheKey?await stagedDraftSprings(draft):null);
@@ -302,15 +308,33 @@ async function sessionCapture(){
         }
         state.multiReferenceBuild={...build,drafts};delete state.multiReferenceBuild.pendingDraftRequest;delete state.multiReferenceBuild.pendingDraftView;
     }
-    // Derived validation and distance/render caches are rebuilt after loading.
-    state.validationState={...validationState,pairs:[],byPair:new Map(),nodeColors:null,matrixOverviews:new Map(),selected:null};
+    // Preserve the current model's residue-level colours without serializing
+    // quadratic PAE matrices. Existing compact snapshots are reused on re-save.
+    const previous=validationState.compactResidueData;
+    const reuse=previous?.nodes===physicsNodes && Boolean(validationState.omittedPaeFileIndices?.length);
+    let compactResidueData=reuse?previous:null;
+    if(!reuse && physicsNodes.length){
+        const means={constraint:new Array(physicsNodes.length).fill(null),strain:new Array(physicsNodes.length).fill(null)};
+        const sums={constraint:new Float64Array(physicsNodes.length),strain:new Float64Array(physicsNodes.length)};
+        const counts={constraint:new Uint32Array(physicsNodes.length),strain:new Uint32Array(physicsNodes.length)};
+        for(const pair of computeValidationPairs().pairs)for(const [key,value] of [['constraint',pair.confidence],['strain',pair.strain]])if(Number.isFinite(value))for(const i of [pair.i,pair.j]){sums[key][i]+=value;counts[key][i]++;}
+        for(const key of Object.keys(means))for(let i=0;i<physicsNodes.length;i++)if(counts[key][i])means[key][i]=sums[key][i]/counts[key][i];
+        compactResidueData={nodes:physicsNodes,pae:calculateResiduePae().slice(),confidence:calculateModelConfidence(),pairMeans:means,activeConformationGroup,stericClashRadius,rigidBodySimulation,simulationStarted:window.getComplexAiState().simulationStarted};
+    }
+    const omittedPaeFileIndices=[...new Set([...(validationState.omittedPaeFileIndices||[]),...validationState.pae.keys()])];
+    state.validationState={...validationState,pae:new Map(),omittedPaeFileIndices,compactResidueData,pairs:[],byPair:new Map(),nodeColors:null,matrixOverviews:new Map(),selected:null};
     state.modelData1={...modelData1,matrixCache:new Map()};state.modelData2={...modelData2,matrixCache:new Map()};
+    if(viewOnly){
+        // Keep the geometry and colour inputs used by the original viewer, but
+        // omit simulation, draft and animation working sets.
+        Object.assign(state,{physicsSprings:[],localGeometryRestraints:[],physicsRunning:false,groupSimulation:null,multiReferenceBuild:null,animationLibrary:[],animationActiveId:null,animationSelected:0,animationAtomOffsets:null});
+    }
     // File handles, provider credentials and GPU resources are deliberately not portable.
     const attachments={};let nextInput=0;
     const saveFile=file=>{const entry=`input-${nextInput++}.bin`;attachments[entry]=file;return {name:file.name,type:file.type,entry};};
-    const uploads={};for(const [slot,upload] of Object.entries(uploadedStructureFiles))uploads[slot]=upload?{...upload,file:null,files:upload.files.map(saveFile)}:null;
-    const stringFiles={};for(const [key,file] of Object.entries(selectedStringFiles))stringFiles[key]=file?saveFile(file):null;
-    return {binaryFiles,attachments,uploads,stringFiles,lightMode:document.body.classList.contains('light-mode'),timeline:encodeSessionGraph(globalThis.BuildTimeline?.state||{},binaryFiles),format:'StringScape session',version:3,savedAt:new Date().toISOString(),graph:encodeSessionGraph(state,binaryFiles),camera:physicsCamera?{position:physicsCamera.position.toArray(),quaternion:physicsCamera.quaternion.toArray(),up:physicsCamera.up.toArray(),zoom:physicsCamera.zoom,orthographic:!!physicsCamera.isOrthographicCamera}:null,dom:sessionDom(),scroll:[scrollX,scrollY]};
+    const uploads={};if(!viewOnly)for(const [slot,upload] of Object.entries(uploadedStructureFiles))uploads[slot]=upload?{...upload,file:null,files:upload.files.map(saveFile)}:null;
+    const stringFiles={};if(!viewOnly)for(const [key,file] of Object.entries(selectedStringFiles))stringFiles[key]=file?saveFile(file):null;
+    return {binaryFiles,attachments,uploads,stringFiles,lightMode:document.body.classList.contains('light-mode'),timeline:encodeSessionGraph(viewOnly?{}:globalThis.BuildTimeline?.state||{},binaryFiles,{viewOnly}),viewOnly,format:'StringScape session',version:4,savedAt:new Date().toISOString(),graph:encodeSessionGraph(state,binaryFiles,{viewOnly}),camera:physicsCamera?{position:physicsCamera.position.toArray(),quaternion:physicsCamera.quaternion.toArray(),up:physicsCamera.up.toArray(),zoom:physicsCamera.zoom,orthographic:!!physicsCamera.isOrthographicCamera}:null,dom:sessionDom(),scroll:[scrollX,scrollY]};
 }
 function* sessionModelFiles(){
     const final=generateSimulationMmCifString();if(final)yield ['final-model.cif',final];
@@ -326,10 +350,11 @@ function* sessionModelFiles(){
 }
 
 async function restoreSession(session){
-    if(session.format!=='StringScape session'||![1,2,3].includes(session.version)||!Array.isArray(session.dom))throw Error('This is not a supported StringScape session.');
+    if(session.format!=='StringScape session'||![1,2,3,4].includes(session.version)||!Array.isArray(session.dom))throw Error('This is not a supported StringScape session.');
     const state=decodeSessionGraph(session.graph,session.binaryFiles);
     if(!state||!Array.isArray(state.physicsNodes)||!state.modelData1||!state.modelData2)throw Error('The session is incomplete.');
     if(modelLoading||multiReferenceBuild?.busy)throw Error('Wait for the current model calculation to finish before loading.');
+    window.batchViewOnlySession=session.viewOnly===true;
     const restoreFile=f=>{const data=f.entry?session.attachments?.[f.entry]:f.text;if(data===undefined||data===null)throw Error('Missing session input file: '+(f.entry||f.name));return new File([data],f.name,{type:f.type});};
     for(const [slot,upload] of Object.entries(session.uploads||{})){if(!['reference','alphaFold'].includes(slot))continue;if(!upload){uploadedStructureFiles[slot]=null;continue;}const files=upload.files.map(restoreFile);uploadedStructureFiles[slot]={...upload,files,file:files[0]};}
     for(const [key,file] of Object.entries(session.stringFiles||{}))if(['sequence','aliases'].includes(key))selectedStringFiles[key]=file?restoreFile(file):null;
@@ -342,8 +367,10 @@ async function restoreSession(session){
     if(springDisplay){physicsScene.remove(springDisplay);springDisplay.dispose?.();springDisplay.geometry.dispose();springDisplay.material.dispose();springDisplay=null;}
     globalThis.ChainMergingReport?.clear();
     automaticTargetSource=null; buildTargetSource=null; // Older sessions have no target provenance.
+    validationState.compactResidueData=null;validationState.omittedPaeFileIndices=[];
     for(const [key,binding] of Object.entries(sessionBindings))if(Object.hasOwn(state,key))binding.set(state[key]);
     if(!Object.hasOwn(state,'aiSimulationStarted'))aiSimulationUnknownGeneration=modelBuildGeneration;
+    if(validationState.compactResidueData)validationState.compactResidueData.runtimeLockRevision=physicsLockTargetRevision;
     globalThis.ChainMergingReport?.setAnnotations(uniProtAnnotations);
     if(!Object.hasOwn(state,'chainMergingData'))globalThis.ChainMergingReport?.update(alignmentResults,{modelChains:modelData2.chains,referenceChains:modelData1.chains,reference:referenceFiles.map(file=>file.pdbId).join(', '),accessionForId:uniProtAccession});
     if(physicsSprings.packed)physicsSprings=physicsSpringNetworkView(physicsSprings);
@@ -376,7 +403,7 @@ async function restoreSession(session){
     if(multiReferenceBuild?.view&&!stagedLiveView())selectStagedModel(multiReferenceBuild.view);
     setLightMode(!!session.lightMode);renderReferenceSearchResults();renderAboutProteinComplex();renderChainMappingReport();renderReferenceComparison();if(stringMatchReview?.response)renderStringMatchResults(stringMatchReview.response.matches);
     if(session.timeline&&globalThis.BuildTimeline){Object.assign(BuildTimeline.state,decodeSessionGraph(session.timeline,session.binaryFiles));BuildTimeline.render();}
-    physicsRunning=state.physicsRunning;physicsMeshesDirty=true;matrixDataVersion++;for(const cache of Object.values(offscreenCaches)){cache.dirty=true;cache.overviewKey=null;cache.viewportKey=null;}updateBuildButtonState();
+    physicsRunning=validationState.omittedPaeFileIndices?.length?false:state.physicsRunning;physicsMeshesDirty=true;matrixDataVersion++;for(const cache of Object.values(offscreenCaches)){cache.dirty=true;cache.overviewKey=null;cache.viewportKey=null;}updateBuildButtonState();
     if(!document.getElementById('detailsPanels').classList.contains('hidden'))await ensureDetailMolstarStructures();
     if(simulationAutoRendered&&physicsNodes.length)await renderCurrentSimulation();
     if(session.camera&&physicsCamera){physicsCameraFitPending=false;if(!!physicsCamera.isOrthographicCamera!==!!session.camera.orthographic)togglePhysicsProjection();physicsCamera.position.fromArray(session.camera.position);physicsCamera.quaternion.fromArray(session.camera.quaternion);physicsCamera.up.fromArray(session.camera.up);physicsCamera.zoom=session.camera.zoom;physicsCamera.updateProjectionMatrix();}
@@ -396,14 +423,14 @@ async function restoreSession(session){
         if(handle.kind!=='directory')continue;
         try{await handle.getFileHandle('session.json');}catch{continue;}
         const button=document.createElement('button');button.type='button';button.className='model-download-button';button.textContent='Open '+name;
-        button.addEventListener('click',()=>run(async()=>{const file=await (await handle.getFileHandle('session.json')).getFile();const session=JSON.parse(await file.text());session.binaryFiles={};for(const record of [...session.graph.records,...(session.timeline?.records||[])])if(record.type==='Binary'&&/^buffer-\d+\.bin$/.test(record.name))session.binaryFiles[record.name]=new Uint8Array(await (await (await handle.getFileHandle(record.name)).getFile()).arrayBuffer());session.attachments={};for(const f of [...Object.values(session.uploads||{}).flatMap(upload=>upload?.files||[]),...Object.values(session.stringFiles||{}).filter(Boolean)])if(f.entry&&/^input-\d+\.bin$/.test(f.entry))session.attachments[f.entry]=await (await handle.getFileHandle(f.entry)).getFile();await restoreSession(session);status('Session opened: '+name);}));el('List').append(button);
+        button.addEventListener('click',()=>run(async()=>{const session=await SessionPack.loadFolder(handle);await restoreSession(session);status('Session opened: '+name);}));el('List').append(button);
     }}
     el('Folder').addEventListener('click',()=>run(async()=>{
         if(!window.showDirectoryPicker){status('Folder connection requires a browser supporting local folder access (such as Chrome or Edge). Download and upload are available.');return;}
         folder=await window.showDirectoryPicker({mode:'readwrite'});el('Folder').textContent='Connected: '+folder.name;status('Folder connected.');await list();
     }));
-    const bundle=async()=>{const {binaryFiles,attachments,...session}=await sessionCapture(),files=(function*(){yield ['session.json',JSON.stringify(session)];yield* Object.entries(binaryFiles);yield* Object.entries(attachments);yield* sessionModelFiles();})(),label=(modelData1.pdbId||document.getElementById('referenceSearchInput').value||'empty-session').replace(/[^a-z0-9_-]+/gi,'-').slice(0,65),name=`StringScape_Homology_modeller-${label}-${new Date().toISOString().replace(/[:.]/g,'-')}`;return {files,name};};
-    el('Save').addEventListener('click',()=>run(async()=>{if(!folder)return;const {files,name}=await bundle(),directory=await folder.getDirectoryHandle(name,{create:true});for(const [filename,data] of files){const writable=await (await directory.getFileHandle(filename,{create:true})).createWritable();try{await writable.write(data);await writable.close();}catch(error){await writable.abort();throw error;}}status('Session saved: '+name);await list();}));
+    const bundle=async()=>{const {binaryFiles,attachments,...session}=await sessionCapture(),{pack,blob}=SessionPack.build(binaryFiles);if(pack)session.bufferPack=pack;const files=(function*(){if(pack)yield [pack.file,blob];yield* Object.entries(attachments);yield ['session.json',JSON.stringify(session)];yield* sessionModelFiles();})(),label=(modelData1.pdbId||document.getElementById('referenceSearchInput').value||'empty-session').replace(/[^a-z0-9_-]+/gi,'-').slice(0,65),name=`StringScape_Homology_modeller-${label}-${new Date().toISOString().replace(/[:.]/g,'-')}`;return {files,name};};
+    el('Save').addEventListener('click',()=>run(async()=>{if(!folder)return;const {files,name}=await bundle(),directory=await folder.getDirectoryHandle(name,{create:true});for(const [filename,data] of files){await SessionPack.writeFile(directory,filename,data);}status('Session saved: '+name);await list();}));
     el('Download').addEventListener('click',()=>run(async()=>{const {files,name}=await bundle(),parts=[];for await(const chunk of sessionStreamingZip(files))parts.push(chunk);const url=URL.createObjectURL(new Blob(parts,{type:'application/zip'})),a=document.createElement('a');a.href=url;a.download=name+'.zip';a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);status('Session downloaded with model mmCIF files.');}));
     el('Stream').addEventListener('click',()=>run(async()=>{if(!window.showSaveFilePicker){status('Streaming archive save requires a browser supporting file access. Use Save session to a connected folder or Download session.');return;}const handle=await window.showSaveFilePicker({suggestedName:'StringScape-session.zip',types:[{description:'Session archive',accept:{'application/zip':['.zip']}}]});const writable=await handle.createWritable();try{const {files}=await bundle();for await(const chunk of sessionStreamingZip(files))await writable.write(chunk);await writable.close();status('Session archive saved.');}catch(error){await writable.abort();throw error;}}));
     el('Upload').addEventListener('click',()=>el('File').click());el('File').addEventListener('change',()=>run(async()=>{const file=el('File').files[0];el('File').value='';if(!file)return;await restoreSession(await readSessionFile(file));status('Session opened: '+file.name);}));
