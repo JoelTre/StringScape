@@ -3,10 +3,10 @@
 <head>
     <!-- Codex version -->
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://static.cloudflareinsights.com; script-src-attr 'none'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com; connect-src 'self' blob: https://api.github.com https://raw.githubusercontent.com https://api.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com http://127.0.0.1:* http://localhost:* https://alphafold.ebi.ac.uk https://data.rcsb.org https://models.rcsb.org https://files.rcsb.org https://search.rcsb.org https://www.ebi.ac.uk https://rest.uniprot.org https://eutils.ncbi.nlm.nih.gov https://swissmodel.expasy.org https://cloudflareinsights.com; img-src 'self' data: blob: https:; media-src 'self' blob:; worker-src 'self' blob:; child-src 'self' blob:">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'none'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://static.cloudflareinsights.com; script-src-attr 'none'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com; connect-src 'self' blob: https://stringscape-protein-modeller-ai.joel-tregurtha.workers.dev https://api.github.com https://raw.githubusercontent.com https://api.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com http://127.0.0.1:* http://localhost:* https://alphafold.ebi.ac.uk https://data.rcsb.org https://models.rcsb.org https://files.rcsb.org https://search.rcsb.org https://www.ebi.ac.uk https://ftp.ebi.ac.uk https://rest.uniprot.org https://eutils.ncbi.nlm.nih.gov https://swissmodel.expasy.org https://cloudflareinsights.com; img-src 'self' data: blob: https:; media-src 'self' blob:; worker-src 'self' blob:; child-src 'self' blob:">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>html.app-layout-loading main { visibility:hidden; } html.app-layout-loading #introCircleNodes { animation-play-state:paused; }</style>
-    <script src="page-start.js?v=20261031layout1"></script>
+    <script src="page-start.js?v=20261118-remove-passcode"></script>
     <title>StringScape Protein Modeller - Comparative Protein & Distance Matrix Visualizer</title>
     <link rel="icon" type="image/jpeg" href="https://stringscape.net/images_for_website/StringScape_logo.jpg">
     <!-- Cloudflare Web Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "de64078fa2a4407fba94310b9fc51393"}'></script><!-- End Cloudflare Web Analytics -->
@@ -120,6 +120,21 @@
         body.light-mode #mutationInfo h2 { color:#172033; }
         body.light-mode #mutationInfo th, body.light-mode #mutationInfo td { border-color:#cbd5e1; }
         body.light-mode #mutationInfo .text-red-300 { color:#b91c1c; }
+        .mutation-table-card { margin-top:.75rem; padding:.75rem; border-radius:.5rem; background:rgba(30,41,59,.7); }
+        .mutation-table-card h3 { margin:0 0 .5rem; color:#e2e8f0; font-weight:600; }
+        .mutation-table-scroll { overflow-x:auto; }
+        .mutation-table { width:100%; border-collapse:collapse; text-align:left; line-height:1.5; }
+        .mutation-table th { padding:.5rem .75rem; border-bottom:1px solid #475569; color:#7dd3fc; font-size:.75rem; font-weight:600; }
+        .mutation-table td { padding:.65rem .75rem; border-bottom:1px solid #334155; vertical-align:top; }
+        .mutation-table tbody tr:last-child td { border-bottom:0; }
+        .mutation-table td:first-child, .mutation-table td:nth-child(2) { white-space:nowrap; color:#e2e8f0; }
+        .mutation-table a { color:#7dd3fc; text-decoration:underline; text-underline-offset:2px; }
+        .mutation-table a:hover { color:#bae6fd; }
+        body.light-mode .mutation-table-card { background:#e2e8f0; }
+        body.light-mode .mutation-table-card h3, body.light-mode .mutation-table td:first-child, body.light-mode .mutation-table td:nth-child(2) { color:#1e293b; }
+        body.light-mode .mutation-table th { color:#0369a1; }
+        body.light-mode .mutation-table a { color:#0369a1; }
+        body.light-mode .mutation-table a:hover { color:#075985; }
         body.light-mode .pass-stats,body.light-mode .pass-stats h4{color:#334155}
         body.light-mode .pass-stats th,body.light-mode .pass-stats p{color:#64748b}
         body.light-mode .pass-stats th,body.light-mode .pass-stats td{border-color:#cbd5e1}
@@ -512,7 +527,7 @@
         body.light-mode .species-menu-option:hover, body.light-mode .species-menu-option:focus { background:#f1f5f9; }
         #stringSpeciesDownload[aria-disabled="true"] { opacity:.5; cursor:not-allowed; pointer-events:none; box-shadow:none; }
         .model-download-button.hidden, .model-download-button[hidden] { display:none !important; }
-        .build-actions { display:flex; flex-wrap:wrap; align-items:stretch; gap:.75rem; max-width:100%; margin-bottom:1rem; }
+        .build-actions { display:flex; flex-wrap:wrap; align-items:stretch; gap:.75rem; max-width:100%; margin-bottom:1.5rem; }
         .build-actions button { justify-content:center; text-align:center; padding:.9rem 1.5rem; font-size:1rem; line-height:1.5rem; }
         .model-download-button:hover { background:#10b981; filter:none; }
         .model-download-button:active { transform:scale(.95); }
@@ -839,17 +854,21 @@
             #physicsMouseGestureHint { display:none; }
         }
 
-        #gapScoresPanel { padding:1rem; background:#0f172a; border-bottom:1px solid #334155; }
+        #gapScoresPanel { padding:1rem; background:#0f172a; }
         body.light-mode #gapScoresPanel { background:#f8fafc; color:#1e293b; }
         .gap-score-chain { margin-bottom:1rem; }
         .gap-score-heading, .gap-score-ends { display:flex; justify-content:space-between; gap:1rem; }
         .gap-score-bar { display:flex; height:18px; overflow:hidden; border-radius:3px; margin-top:.4rem; }
-        .gap-score-bar span { flex:1; min-width:0; }
+        .gap-score-bar button { flex:1; min-width:0; padding:0; border:0; cursor:pointer; }
+        .gap-score-bar button:focus-visible { outline:2px solid white; outline-offset:-2px; }
         .gap-score-ends, .gap-score-key { font-size:.75rem; color:#94a3b8; }
         .gap-score-key { display:flex; flex-wrap:wrap; gap:1rem; margin-top:.3rem; }
-        .gap-score-key i { display:inline-block; width:20px; height:10px; margin-right:.3rem; }
-        #gapScoresSelect { background:#334155; color:white; border-radius:.4rem; padding:.3rem; margin-left:.4rem; }
-        #physicsSequencePanel { padding:1rem; background:#0f172a; border-bottom:1px solid #334155; }
+        .gap-score-key i { display:inline-block; width:20px; height:10px; margin-right:.3rem; border-radius:2px; }
+        .gap-score-picker { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem; margin-bottom:1rem; }
+        .gap-score-picker-menu { position:relative; }
+        #gapScoresMenuButton { min-width:12rem; display:inline-flex; align-items:center; justify-content:space-between; gap:1rem; }
+        #gapScoresMenu { position:fixed; width:min(15rem,calc(100vw - 1rem)); z-index:1000; }
+        #physicsSequencePanel { padding:1rem; background:#0f172a; }
         .sequence-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:.75rem; position:relative; font-size:.8rem; margin-bottom:.8rem; }
         .sequence-toolbar > span { color:#94a3b8; }
         #sequenceChainButton { display:inline-flex; align-items:center; justify-content:space-between; gap:1rem; min-width:10rem; padding:.375rem .75rem; border-radius:.5rem; background:#7c3aed; color:white; font-size:.75rem; line-height:1rem; }
@@ -915,10 +934,10 @@
         body:not(.light-mode) #stringMatchStatusBox.discovery-warning { color:#5eead4; }
         .animation-controls-locked #stagedModelButtons::after { display:none; }
         #conformationGroupSection, #physicsVisibilityButton, #stagedModelButtons { position:relative; z-index:41; }
-        #conformationGroupPill { position:relative; display:inline-flex; max-width:100%; overflow:auto; border-radius:999px; background:#1e293b; padding:4px; gap:4px; }
-        #conformationGroupPill button { position:relative; z-index:1; flex-shrink:0; padding:.5rem 1rem; border-radius:999px; color:#cbd5e1; font-size:.85rem; }
+        #conformationGroupPill { position:relative; display:inline-flex; flex-wrap:wrap; max-width:100%; border-radius:1.5rem; background:#1e293b; padding:4px; gap:4px; }
+        #conformationGroupPill button { position:relative; z-index:1; max-width:100%; overflow-wrap:anywhere; padding:.5rem 1rem; border-radius:999px; color:#cbd5e1; font-size:.85rem; }
         #conformationGroupPill button[aria-pressed="true"] { color:#fff; }
-        .conformation-group-thumb { position:absolute; left:0; top:4px; bottom:4px; border-radius:999px; background:#7c3aed; transition:left .25s ease,width .25s ease; }
+        .conformation-group-thumb { position:absolute; left:0; top:4px; border-radius:999px; background:#7c3aed; transition:left .25s ease,top .25s ease,width .25s ease,height .25s ease; }
         body.light-mode #conformationGroupPill { background:#e2e8f0; }
         body.light-mode #conformationGroupPill button { color:#334155; }
         body.light-mode #conformationGroupPill button[aria-pressed="true"] { color:#fff; }
@@ -994,16 +1013,28 @@
         #modellerAiDialog { --ai-bg:#0f172a; --ai-text:#e2e8f0; --ai-muted:#cbd5e1; --ai-field:#1e293b; --ai-border:#475569; --ai-track:#020617; width:min(560px,94vw); max-height:90vh; overflow:auto; background:var(--ai-bg); color:var(--ai-text); border:1px solid var(--ai-border); border-radius:16px; padding:24px; box-shadow:0 24px 80px #0005; color-scheme:dark; }
         #modellerAiDialog::backdrop { background:rgba(15,23,42,.65); backdrop-filter:blur(4px); }
         #modellerAiDialog :is(input,select) { background:var(--ai-field); color:var(--ai-text); border:1px solid var(--ai-border); border-radius:8px; min-height:40px; }
-        #modellerAiDialog :is(input,select,button):focus-visible { outline:3px solid #818cf8; outline-offset:3px; }
+        #modellerAiDialog :is(input,select,button):focus-visible { outline:3px solid #38bdf8; outline-offset:3px; }
         #modellerAiDialog :is(#modellerAiHelp,#modellerAiPrivacy,#modellerAiStatus) { color:var(--ai-muted); line-height:1.6; }
+        #modellerAiUrlLabel[hidden], #modellerAiLimitNotice[hidden] { display:none; }
         #modellerAiKey:disabled { background: #475569; color: #94a3b8; cursor: not-allowed; opacity: 0.65; }
-        #modellerAiDifferentKey { flex: none; white-space: nowrap; }
-        #modellerAiDialog :is(#modellerAiClose,#modellerAiDisconnect) { background:var(--ai-field); color:var(--ai-text); border:1px solid var(--ai-border); border-radius:8px; padding:8px 12px; }
-        #modellerAiMode { position:relative; display:flex; width:100%; isolation:isolate; padding:4px; border:1px solid var(--ai-border); border-radius:999px; background:var(--ai-track); color:var(--ai-muted); font-weight:600; }
-        #modellerAiMode::before { content:""; position:absolute; z-index:-1; left:4px; top:4px; bottom:4px; width:calc(50% - 4px); border-radius:999px; background:#574cf0; transition:transform .2s ease; }
-        #modellerAiMode[data-mode="local"]::before { transform:translateX(100%); }
-        #modellerAiMode span { width:50%; padding:8px; text-align:center; }
-        #modellerAiMode[data-mode="cloud"] span:first-child, #modellerAiMode[data-mode="local"] span:last-child { color:white; }
+        #modellerAiDialog #modellerAiClose { background:var(--ai-field); color:var(--ai-text); border:1px solid var(--ai-border); padding:8px 12px; }
+        #modellerAiDialog :is(#modellerAiClose,#modellerAiConnect,#modellerAiDisconnect,#modellerAiPause) { border-radius:.75rem; }
+        #modellerAiMode { display:flex; width:100%; padding:4px; border:1px solid var(--ai-border); border-radius:999px; background:var(--ai-track); }
+        #modellerAiMode button { flex:1; padding:8px 4px; border-radius:999px; color:var(--ai-muted); font-weight:600; }
+        #modellerAiMode button[aria-pressed="true"], #modellerAiDialog .ai-picker-menu button[aria-checked="true"], #modellerAiConnect, #modellerAiOpen { background:#0284c7; color:#fff; }
+        #modellerAiConnect:hover, #modellerAiOpen:hover { background:#0369a1; }
+        body.light-mode :is(#modellerAiConnect,#modellerAiOpen), body.light-mode #modellerAiMode button[aria-pressed="true"], body.light-mode #modellerAiDialog .ai-picker-menu button[aria-checked="true"] { background:#38bdf8; color:#000; }
+        body.light-mode :is(#modellerAiConnect,#modellerAiOpen):hover { background:#0ea5e9; }
+        #modellerAiBudget { text-align:center; padding:12px; }
+        .ai-budget-ring { position:relative; width:180px; height:180px; margin:0 auto 12px; }
+        .ai-budget-ring svg { width:100%; height:100%; transform:rotate(90deg) scaleY(-1); }
+        .ai-budget-ring circle { fill:none; stroke-width:6; }
+        .ai-budget-track { stroke:var(--ai-border); }
+        .ai-budget-remaining { stroke:url(#modellerAiBudgetGradient); stroke-linecap:round; transition:stroke-dasharray .3s; }
+        #modellerAiBudgetLabel { position:absolute; inset:0; display:grid; place-content:center; font-size:1.2rem; font-weight:700; }
+        #modellerAiBudget p { color:var(--ai-muted); margin:6px 0; }
+        #modellerAiPrivacy { text-align:center; }
+        #modellerAiActions { justify-content:center; flex-wrap:wrap; }
         body.light-mode #modellerAiDialog { --ai-bg:#fff; --ai-text:#172033; --ai-muted:#475569; --ai-field:#f1f5f9; --ai-border:#cbd5e1; --ai-track:#e2e8f0; color-scheme:light; }
         #modellerAiDialog .ai-picker { position:relative; margin-top:4px; }
         #modellerAiDialog .ai-picker > button { width:100%; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; background:var(--ai-field); color:var(--ai-text); border:1px solid var(--ai-border); border-radius:8px; text-align:left; }
@@ -1013,7 +1044,6 @@
         #modellerAiDialog .ai-picker-menu button { display:block; width:100%; padding:9px 12px; border:0; border-radius:7px; background:var(--ai-field); color:var(--ai-text); text-align:left; overflow-wrap:anywhere; }
         #modellerAiDialog .ai-picker-menu button + button { margin-top:4px; }
         #modellerAiDialog .ai-picker-menu button:hover, #modellerAiDialog .ai-picker-menu button:focus-visible { background:var(--ai-track); }
-        #modellerAiDialog .ai-picker-menu button[aria-checked="true"] { background:#574cf0; color:#fff; }
         @media(prefers-reduced-motion:reduce) { #modellerAiMode::before { transition:none; } }
 body.light-mode #groupSimulationStatus { background:#ecfeff; color:#155e75; border-color:#67e8f9; }
 
@@ -1150,7 +1180,7 @@ body.light-mode .complex-ai-assistant {background:#e2e8f0;color:#1e293b;}
 body.light-mode .complex-ai {background:#fff;color:#1e293b;border-color:#cbd5e1}
 body.light-mode #complexAiQuestion {background:white;border-color:#cbd5e1}
 </style>
-    <link rel="stylesheet" href="app-pages.css?v=143">
+    <link rel="stylesheet" href="app-pages.css?v=146">
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col">
 
@@ -1202,19 +1232,20 @@ body.light-mode #complexAiQuestion {background:white;border-color:#cbd5e1}
                 </details>
             </section>
 
+            <div id="modellerAiLimitNotice" class="text-xs text-slate-300 bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-2xl" role="status" hidden><span id="modellerAiLimitHeading">Weekly free AI use limit reached.</span> Connect another AI to continue using AI. <span id="modellerAiLimitReset"></span></div>
             <!-- Quick Examples -->
             <div id="examplePresets" class="flex flex-wrap items-center gap-1.5 text-xs bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-2xl">
                 <span class="text-slate-300 text-base font-semibold mr-1">Examples:</span>
                 <button id="exampleModelsButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="exampleModelsMenu" class="bg-slate-800 text-slate-100 rounded-lg px-3 py-1.5 text-xs max-w-full">Select an example <span aria-hidden="true">▼</span></button>
                 <div id="exampleModelsMenu" class="hidden" role="group" aria-label="Example builds">
-                <button data-reference="8WO5" data-alphafold="P0A1J3, P0A1N8, P16437, P26462, P16323, P15928, P0A1L5, P54702, P54700, P26419, P26418, P0A1J9, P0A1I7, P0A1J1, P15930" class="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded-lg text-slate-300 font-mono border border-slate-700">Flagellar motor</button>
-                <button data-reference="6YKM" data-alphafold="P09348, P0AF06" data-action-click="0" class="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded-lg text-slate-300 font-mono border border-slate-700 "><i>E. coli</i> MotAB (Default) </button>
-                <button data-reference="6YKM, 8UCS" data-alphafold="P09348, P0AF06, P0ABZ1" data-action-click="56" class="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded-lg text-slate-300 font-mono border border-slate-700 ">MotAB + FliG (Dual reference)</button>
+                <button data-reference="6YKM" data-alphafold="P09348, P0AF06" data-action-click="0" class="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded-lg text-slate-300 font-mono border border-slate-700 "><i>E. coli</i> MotAB </button>
                 <button data-reference="5T4P" data-alphafold="P0ABB0, P0ABB4, P0ABA6, P0A6E6, P0ABA0, P0AB98, P0ABA4, P68699" data-action-click="1" class="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded-lg text-slate-300 font-mono border border-slate-700 "><i>E. coli</i> ATP synthase </button>
-                <button data-reference="1C17" data-alphafold="P68699, P0AB98" data-action-click="2" class="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded-lg text-slate-300 font-mono border border-slate-700 ">Subcomplex of <i>E. coli</i> ATP synthase </button>
                 <button data-reference="5MS0" data-alphafold="P77611, P0A7Z4, P0A8V2, P0A8T7, P0A7R5, P0AFG0, P0A780, P0AFF6, P0A800" data-action-click="3" class="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded-lg text-slate-300 font-mono border border-slate-700 "><i>E. coli</i> RNA polymerase antitermination complex </button>
                 <button data-reference="6IOK, 6IOL" data-alphafold="Q51487, P52002, P52477" data-action-click="57" class="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded-lg text-slate-300 font-mono border border-slate-700 ">Efflux pump (animated)</button>
                 <button data-reference="6BNO, 7AQK" data-alphafold="P68135, Q99JY9, P61161, Q9WV32, Q9CVB6, Q9JM76, P59999, Q9CPW4, P68134" class="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded-lg text-slate-300 font-mono border border-slate-700">Mouse actin Arp2/3 complex</button>
+                <button data-reference="7LP9, 7LPB, 7LPC, 7LPD, 7LPE" data-alphafold="O35433" class="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded-lg text-slate-300 font-mono border border-slate-700">Rat heat- &amp; pain-sensing ion channel (animated)</button>
+                <button data-reference="3PUV" data-alphafold="P68187, P0AEX9, P02916, P68183" class="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded-lg text-slate-300 font-mono border border-slate-700"><i>E. coli</i> Maltose importer</button>
+                <button data-reference="8WO5" data-alphafold="P0A1J3, P0A1N8, P16437, P26462, P16323, P15928, P0A1L5, P54702, P54700, P26419, P26418, P0A1J9, P0A1I7, P0A1J1, P15930" class="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded-lg text-slate-300 font-mono border border-slate-700">Flagellar motor</button>
                 </div>
                 <div class="w-full flex flex-wrap items-center gap-2 pt-2"><label for="recentModels" class="text-slate-300 text-base font-semibold">Recent:</label><select id="recentModels" class="hidden" aria-label="Recent builds"><option value="">Select a previous build</option></select><button id="recentModelsButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="recentModelsMenu" class="bg-slate-800 text-slate-100 rounded-lg px-3 py-1.5 text-xs max-w-full" style="text-align:left;display:flex;align-items:center;justify-content:space-between">Select a previous build<span aria-hidden="true" style="font-size:10px">▼</span></button><div id="recentModelsMenu" class="hidden" role="group" aria-label="Recent builds"></div><span id="recentModelStatus" role="status" class="text-xs text-amber-300"></span></div>
             </div>
@@ -1241,7 +1272,7 @@ body.light-mode #complexAiQuestion {background:white;border-color:#cbd5e1}
             </div>
             
             <section class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3 shadow-2xl text-slate-300">
-                <h2 class="text-lg font-semibold text-slate-100">Connect an AI</h2>
+                <h2 class="text-lg font-semibold text-slate-100">AI usage</h2>
                 <p>This app can work without AI, but the models tend to be better with AI. AI is used to help find the best reference structures to use in the Protein Data Bank and to summarise the available information on the protein.</p>
                 <div class="flex flex-wrap items-center gap-3"><button id="modellerAiOpen" type="button" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl">Connect an AI</button><p id="modellerAiState" role="status" class="font-semibold"></p></div>
             </section>
@@ -1741,7 +1772,7 @@ body.light-mode #complexAiQuestion {background:white;border-color:#cbd5e1}
 
             <div id="singleChainRotationsPanel" class="hidden max-h-72 overflow-auto rounded-lg bg-slate-800/70 p-3 text-xs text-slate-200"><table class="w-full text-left"><thead><tr><th class="p-2">Chain</th><th class="p-2">Spin rate (°/s)</th><th class="p-2">Axis</th><th class="p-2">Action</th></tr></thead><tbody id="singleChainRotationsRows"></tbody></table></div>
             </div>
-<div class="flex flex-wrap items-center gap-2 p-3 text-xs text-slate-300">
+<div id="viewerDisplayControls" class="flex flex-wrap items-center gap-2 p-3 text-xs text-slate-300">
 <div id="physicsRepresentationPicker" class="inline-flex shrink-0 items-center gap-2 whitespace-nowrap">
     <label for="physicsRepresentationSelect" class="font-semibold text-slate-300 text-sm">Style:</label>
     <button id="physicsRepresentationMenuButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="physicsRepresentationMenu" class="px-3 py-1.5 rounded-lg text-xs font-semibold">Ball &amp; Stick <i class="fa-solid fa-chevron-down ml-1" aria-hidden="true"></i></button>
@@ -1755,10 +1786,10 @@ body.light-mode #complexAiQuestion {background:white;border-color:#cbd5e1}
     <div id="physicsRepresentationMenu" class="hidden" role="group" aria-label="Style options"></div>
 </div>
 <div class="inline-flex shrink-0 items-center gap-2 whitespace-nowrap"><span class="font-semibold text-sm">Select:</span> <button id="physicsSelectionMenuButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="physicsSelectionMenu" class="px-3 py-1.5 rounded-lg text-xs font-semibold">Residue/nucleotide <i class="fa-solid fa-chevron-down ml-1" aria-hidden="true"></i></button><div id="physicsSelectionMenu" class="hidden" role="group" aria-label="Selection options"></div><select id="physicsSelectMode" aria-label="Selection mode" title="Shift-click to add a second selection" class="hidden"><option value="atom">Atom</option><option value="residue" selected>Residue/nucleotide</option><option value="chain">Chain/polynucleotide</option><option value="identical">Identical molecules</option><option value="model">Model</option></select></div>
-<div class="inline-flex shrink-0 items-center gap-2 whitespace-nowrap"><span class="text-slate-300 font-semibold text-sm">Colour proteins by:</span><button id="physicsColorMenuButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="physicsColorMenu" class="bg-slate-800 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold">Chain (default) <i class="fa-solid fa-chevron-down ml-1" aria-hidden="true"></i></button><select id="physicsColorSelect" data-action-change="5" class="hidden"><option value="chain" selected>Chain (default)</option><option value="chain-random">Chain (random)</option><option value="residue-index">Residue index</option><option value="uniform">Uniform</option><option value="protein-id">Protein ID</option><option value="pattern-variance">Pattern variance</option><option value="rotational-symmetry">Rotational symmetry</option><option value="equivalent-protein-shape">Equivalent protein shape</option><option value="keyframe-difference">Keyframe conformation diff.</option><option value="backbone-issues">Backbone issues</option><option value="steric-clashes">Steric clashes</option><option value="running-simulation">Running simulation</option><option value="residue-speed">Residue speed</option><option value="binding-sites">Binding sites</option><option value="binding-site-type">Binding site type</option><option value="mutations">Mutations</option><option value="mutation-effect-basic">Mutation effect (basic)</option><option value="constraint-confidence">Constraint confidence</option><option value="alpha-pae">AlphaFold PAE</option><option value="spring-strain">Spring compression / stretch</option><option value="model-confidence">Model confidence</option><option value="local-confidence">Local structure confidence</option><option value="placement-2">Placement confidence (2 Å)</option><option value="placement-5">Placement confidence (5 Å)</option><option value="element">Element</option><option value="side-chains">Side chains</option><option value="origin">Origin</option><option value="aligned">Aligned residues</option><option value="locked">Locked residues</option><option value="alpha-chunks">AlphaFold alignment chunks</option><option value="membrane">Membrane</option><option value="membrane-placement">Membrane placement residues</option><option value="charge">Charge</option><option value="hydrophobicity">Hydrophobicity</option><option value="accessible-surface-area">Accessible surface area</option><option value="secondary">Secondary structure</option><option value="plddt">pLDDT (from AlphaFold)</option><option value="difference">PDB vs Homology model</option><option value="af-difference">AF vs Homology model</option><option value="uniprot-topological">UniProt topological domains</option><option value="uniprot-domain">UniProt domains</option><option value="uniprot-transmembrane">UniProt transmembrane</option><option value="uniprot-intramembrane">UniProt intramembrane</option><option value="uniprot-active-site">UniProt active sites</option><option value="uniprot-binding-site">UniProt binding sites</option><option value="uniprot-signal">UniProt signal peptide</option><option value="uniprot-transit">UniProt transit peptide</option><option value="uniprot-region">UniProt region</option><option value="uniprot-motif">UniProt motif</option><option value="uniprot-modified">UniProt modified residue</option><option value="uniprot-glycosylation">UniProt glycosylation</option><option value="uniprot-disulfide">UniProt disulfide bond</option></select><div id="physicsColorMenu" class="hidden" role="group" aria-label="Colour proteins by"></div></div>
+<div class="inline-flex shrink-0 items-center gap-2 whitespace-nowrap"><span class="text-slate-300 font-semibold text-sm">Colour proteins by:</span><button id="physicsColorMenuButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="physicsColorMenu" class="bg-slate-800 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold">Chain (default) <i class="fa-solid fa-chevron-down ml-1" aria-hidden="true"></i></button><select id="physicsColorSelect" data-action-change="5" class="hidden"><option value="chain" selected>Chain (default)</option><option value="chain-random">Chain (random)</option><option value="residue-index">Residue index</option><option value="uniform">Uniform</option><option value="protein-id">Protein ID</option><option value="pattern-variance">Pattern variance</option><option value="rotational-symmetry">Rotational symmetry</option><option value="equivalent-protein-shape">Equivalent protein shape</option><option value="keyframe-difference">Keyframe conformation diff.</option><option value="backbone-issues">Backbone issues</option><option value="steric-clashes">Steric clashes</option><option value="running-simulation">Running simulation</option><option value="residue-speed">Residue speed</option><option value="ted-domains">TED Domains</option><option value="structure-domains">Domains</option><option value="binding-sites">Binding sites</option><option value="binding-site-type">Binding site type</option><option value="mutations">Mutations</option><option value="mutation-effect-basic">Mutation effect (basic)</option><option value="constraint-confidence">Constraint confidence</option><option value="alpha-pae">AlphaFold PAE</option><option value="spring-strain">Spring compression / stretch</option><option value="model-confidence">Model confidence</option><option value="local-confidence">Local structure confidence</option><option value="placement-2">Placement confidence (2 Å)</option><option value="placement-5">Placement confidence (5 Å)</option><option value="element">Element</option><option value="side-chains">Side chains</option><option value="origin">Origin</option><option value="aligned">Aligned residues</option><option value="locked">Locked residues</option><option value="alpha-chunks">AlphaFold alignment chunks</option><option value="membrane">Membrane</option><option value="membrane-placement">Membrane placement residues</option><option value="charge">Charge</option><option value="hydrophobicity">Hydrophobicity</option><option value="accessible-surface-area">Accessible surface area</option><option value="secondary">Secondary structure</option><option value="plddt">pLDDT (from AlphaFold)</option><option value="difference">PDB vs Homology model</option><option value="af-difference">AF vs Homology model</option><option value="uniprot-topological">UniProt topological domains</option><option value="uniprot-domain">UniProt domains</option><option value="uniprot-transmembrane">UniProt transmembrane</option><option value="uniprot-intramembrane">UniProt intramembrane</option><option value="uniprot-active-site">UniProt active sites</option><option value="uniprot-binding-site">UniProt binding sites</option><option value="uniprot-signal">UniProt signal peptide</option><option value="uniprot-transit">UniProt transit peptide</option><option value="uniprot-region">UniProt region</option><option value="uniprot-motif">UniProt motif</option><option value="uniprot-modified">UniProt modified residue</option><option value="uniprot-glycosylation">UniProt glycosylation</option><option value="uniprot-disulfide">UniProt disulfide bond</option></select><div id="physicsColorMenu" class="hidden" role="group" aria-label="Colour proteins by"></div></div>
 <button id="sideChainJiggleBtn" type="button" data-action-click="41" aria-pressed="true" class="hidden bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 font-semibold" title="Animate side-chain atoms without changing the residue simulation physics"><i id="sideChainJiggleIcon" class="fa-solid fa-pause" aria-hidden="true"></i> Jiggle</button>
-<button id="filamentAiStatusBtn" type="button" hidden aria-haspopup="dialog" aria-controls="filamentAiExplanationDialog" class="rounded-xl bg-slate-700 hover:bg-slate-600 px-2.5 py-1.5 font-semibold text-white"></button><button id="animationAiNoAnimationBtn" type="button" hidden aria-haspopup="dialog" aria-controls="animationAiExplanationDialog" class="rounded-xl bg-slate-700 hover:bg-slate-600 px-2.5 py-1.5 font-semibold text-white">AI made no animation</button><button id="toggleProteinSpin" type="button" class="hidden rounded-xl bg-amber-700 hover:bg-amber-600 px-2.5 py-1.5 font-semibold text-white"><i class="fa-solid fa-circle-notch mr-1" aria-hidden="true"></i><span>Pause spin</span></button><button id="resetProteinSpin" type="button" class="hidden rounded-xl bg-amber-700 hover:bg-amber-600 px-2.5 py-1.5 font-semibold text-white"><i class="fa-solid fa-rotate-left mr-1" aria-hidden="true"></i>Reset spin</button><button id="quickPlayAnimationBtn" type="button" class="hidden rounded-xl bg-amber-700 hover:bg-amber-600 px-2.5 py-1.5 font-semibold text-white"><i class="fa-solid fa-play mr-1" aria-hidden="true"></i>Play animation</button>  <button id="viewSequencesButton" type="button" aria-expanded="false" aria-controls="physicsSequencePanel" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 font-semibold"><i class="fa-solid fa-align-left mr-1" aria-hidden="true"></i>Sequences <i class="sequence-chevron fa-solid fa-chevron-down ml-1" aria-hidden="true"></i></button><button id="gapScoresButton" type="button" aria-expanded="false" aria-controls="gapScoresPanel" class="px-2.5 py-1.5 font-semibold">Gap scores <i class="fa-solid fa-chevron-down ml-1" aria-hidden="true"></i></button></div>
-            <section id="gapScoresPanel" class="hidden" aria-label="Gap scores"><div id="gapScoresContent"></div><label>Colour missing residues by <select id="gapScoresSelect"><option value="modelConfidence">Model confidence</option><option value="localConfidence">Local structure confidence</option><option value="placement2">Placement confidence (2 Å)</option><option value="placement5">Placement confidence (5 Å)</option><option value="plddt">AlphaFold pLDDT</option><option value="pae">AlphaFold PAE</option></select></label></section>
+<button id="filamentAiStatusBtn" type="button" hidden aria-haspopup="dialog" aria-controls="filamentAiExplanationDialog" class="rounded-xl bg-slate-700 hover:bg-slate-600 px-2.5 py-1.5 font-semibold text-white"></button><button id="animationAiNoAnimationBtn" type="button" hidden aria-haspopup="dialog" aria-controls="animationAiExplanationDialog" class="rounded-xl bg-slate-700 hover:bg-slate-600 px-2.5 py-1.5 font-semibold text-white">AI made no animation</button><button id="toggleProteinSpin" type="button" class="hidden rounded-xl bg-amber-700 hover:bg-amber-600 px-2.5 py-1.5 font-semibold text-white"><i class="fa-solid fa-circle-notch mr-1" aria-hidden="true"></i><span>Pause spin</span></button><button id="resetProteinSpin" type="button" class="hidden rounded-xl bg-amber-700 hover:bg-amber-600 px-2.5 py-1.5 font-semibold text-white"><i class="fa-solid fa-rotate-left mr-1" aria-hidden="true"></i>Reset spin</button><button id="quickPlayAnimationBtn" type="button" class="hidden rounded-xl bg-amber-700 hover:bg-amber-600 px-2.5 py-1.5 font-semibold text-white"><i class="fa-solid fa-play mr-1" aria-hidden="true"></i>Play animation</button>  <button id="viewSequencesButton" type="button" aria-expanded="false" aria-controls="physicsSequencePanel" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 font-semibold"><i class="fa-solid fa-align-left mr-1" aria-hidden="true"></i>Sequences <i class="sequence-chevron fa-solid fa-chevron-down ml-1" aria-hidden="true"></i></button><button id="gapScoresButton" type="button" aria-expanded="false" aria-controls="gapScoresPanel" class="px-2.5 py-1.5 font-semibold">Confidence scores <i class="fa-solid fa-chevron-down ml-1" aria-hidden="true"></i></button></div>
+            <section id="gapScoresPanel" class="hidden" aria-label="Confidence scores"><div class="gap-score-picker"><span id="gapScoresLabel">Colour missing residues by:</span><div class="gap-score-picker-menu"><button id="gapScoresMenuButton" type="button" class="px-3 py-1.5 rounded-lg text-xs font-semibold" aria-haspopup="true" aria-expanded="false" aria-controls="gapScoresMenu" aria-labelledby="gapScoresLabel gapScoresMenuButton">Model confidence <i class="fa-solid fa-chevron-down ml-1" aria-hidden="true"></i></button><div id="gapScoresMenu" class="comparison-variable-menu hidden" role="group" aria-label="Colour missing residues by"></div><select id="gapScoresSelect" class="hidden" aria-label="Colour missing residues by"><option value="modelConfidence">Model confidence</option><option value="localConfidence">Local structure confidence</option><option value="placement2">Placement confidence (2 Å)</option><option value="placement5">Placement confidence (5 Å)</option><option value="plddt">AlphaFold pLDDT</option><option value="pae">AlphaFold PAE</option></select></div></div><div id="gapScoresContent"></div></section>
             <section id="physicsSequencePanel" class="hidden" aria-label="Protein sequences">
                 <div class="sequence-toolbar"><strong>Protein sequences</strong><label for="sequenceChainButton">Chain:</label><div class="sequence-chain-picker"><button id="sequenceChainButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="sequenceChainMenu">All <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button><div id="sequenceChainMenu" class="hidden" role="group" aria-label="Sequence chain options"></div></div><button id="copySequencesButton" type="button" title="Copy displayed sequences as FASTA"><i class="fa-solid fa-copy" aria-hidden="true"></i> <span id="sequenceCopyLabel">Copy</span></button><span id="sequenceCopyStatus" role="status" aria-live="polite"></span><span>Click a residue to select it in the 3D viewer.</span></div>
                 <div id="physicsSequenceContent"></div>
@@ -1803,7 +1834,7 @@ body.light-mode #complexAiQuestion {background:white;border-color:#cbd5e1}
                     </div>
                     <div id="physicsPulseKey" class="flex flex-wrap items-center gap-2"><i class="fa-solid fa-palette text-sky-400"></i> Pulsing residues are not in the Reference PDB(s) <button id="pausePhysicsPulseBtn" type="button" aria-pressed="false" data-action-click="48" class="rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-0.5 text-[10px]">Pause Pulsing</button></div>
                     <div id="physicsColourKey">Chain: chains with the same protein ID share a colour family, with a different shade for each chain.</div>
-                    <div id="physicsLockedConfidenceKey" class="hidden"><label class="nucleic-guide-switch">Show locked residue values (all 1) <input id="showLockedConfidence" type="checkbox" role="switch"></label><div class="physics-confidence-key-legend"><span class="physics-confidence-key-entry"><span class="physics-confidence-key-swatch" style="background:#374151" aria-hidden="true"></span> Dark grey: locked</span><span class="physics-confidence-key-entry"><span class="physics-confidence-key-swatch" style="background:#64748b" aria-hidden="true"></span> Light grey: unavailable</span></div></div>
+                    <div id="physicsLockedConfidenceKey" class="hidden"><label class="nucleic-guide-switch">Show identical aligned residue values (all 1) <input id="showLockedConfidence" type="checkbox" role="switch"></label><div class="physics-confidence-key-legend"><span class="physics-confidence-key-entry"><span class="physics-confidence-key-swatch" style="background:#374151" aria-hidden="true"></span> Dark grey: identical aligned (hidden)</span><span class="physics-confidence-key-entry"><span class="physics-confidence-key-swatch" style="background:#64748b" aria-hidden="true"></span> Light grey: unavailable</span></div></div>
                     <div id="physicsDifferenceKey" class="hidden">PDB–Homology Cα distance: <span style="color:#38bdf8">0 Å</span> · <span style="color:#facc15">5 Å</span> · <span style="color:#ef4444">≥10 Å</span> · Grey and pulsing: no reference equivalent</div>
                     <div id="physicsMouseGestureHint" class="text-[10px] text-slate-400 mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
                         <span><i class="fa-solid fa-arrows-up-down-left-right text-amber-400 mr-1"></i> Ctrl + Drag: Move Chain</span>
@@ -2016,7 +2047,7 @@ body.light-mode #complexAiQuestion {background:white;border-color:#cbd5e1}
                 <div class="validation-score-explanations" aria-label="How the validation summary scores are calculated">
                     <article><p><strong>Sequence coverage</strong> is the percentage of protein residues in the AlphaFold chains that align to at least one reference PDB residue. Each AlphaFold residue is counted once, even if it matches several references. Higher coverage means more of the model has a reference sequence match; it does not measure structural accuracy.</p><details><summary>Equation <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></summary><span class="validation-equation">Coverage = 100 × (unique mapped AlphaFold protein residues) / (all AlphaFold protein residues)</span></details></article>
                     <article><p><strong>Membrane placement confidence</strong> measures support for the inferred membrane using hydrophobic density contrast, hydrophobic density inside the belt, effective hydrophobic support, and the detector score. If no membrane is detected, it is unavailable.</p></article>
-                    <article><p><strong>Residue confidence</strong> uses separate exploratory models for AlphaFold and sequence-only residues. Local structure estimates lDDT-Cα; placement scores estimate fixed-frame placement within 2 Å or 5 Å; model confidence estimates the joint event of lDDT-Cα ≥ 0.7 and placement within 5 Å. These models have not been independently calibrated. Unaligned residues with complete inputs are scored before simulation. Locked residues are assigned 1 by convention, not independently validated; unlocked aligned residues and unsupported inputs are unavailable. The model-confidence averages show results both including and excluding locked residues. The local and placement means include the assigned locked values. AlphaFold PAE is a separate symmetric mean over represented same-chain residue pairs, in ångströms, and is unavailable for sequence-only residues.</p></article>
+                    <article><p><strong>Residue confidence</strong> uses separate exploratory models for AlphaFold and sequence-only residues. Local structure estimates lDDT-Cα; placement scores estimate fixed-frame placement within 2 Å or 5 Å; model confidence estimates the joint event of lDDT-Cα ≥ 0.7 and placement within 5 Å. These models have not been independently calibrated. Unaligned residues with complete inputs are scored before simulation. Locked residue scores reflect alignment similarity and neighbouring residues, rather than independent validation; unlocked aligned residues and unsupported inputs are unavailable. The model-confidence averages show results both including and excluding locked residues. The local and placement means include the assigned locked values. AlphaFold PAE is a separate symmetric mean over represented same-chain residue pairs, in ångströms, and is unavailable for sequence-only residues.</p></article>
                     <article><p><strong>Overall confidence of unaligned residues</strong> averages the available unaligned residue scores described above. It is unavailable when no unaligned residues have confidence evidence.</p></article>
                     <article><p><strong>Confidence of unaligned non-disordered residues</strong> averages available unaligned residue scores after excluding residues in UniProt regions labelled Disordered. It is unavailable if UniProt annotations are missing for any scored unaligned residue, or if no scored residues remain.</p></article>
                 </div>
@@ -2081,25 +2112,24 @@ body.light-mode #complexAiQuestion {background:white;border-color:#cbd5e1}
     </dialog>
     <dialog id="modellerAiDialog" aria-labelledby="modellerAiTitle" >
         <form id="modellerAiForm" class="space-y-3">
-            <div class="flex justify-between items-center"><h2 id="modellerAiTitle" class="text-xl font-bold">Connect an AI</h2><button id="modellerAiClose" type="button" aria-label="Close">Close ×</button></div>
-            <button id="modellerAiMode" type="button" data-mode="cloud" aria-pressed="false" aria-label="Switch to Local LLM" aria-controls="modellerAiProviderLabel modellerAiKeyLabel"><span>Cloud AI</span><span>Local LLM</span></button>
+            <div class="flex justify-between items-center"><h2 id="modellerAiTitle" class="text-xl font-bold">AI usage</h2><button id="modellerAiClose" type="button" aria-label="Close">Close ×</button></div>
+            <div id="modellerAiMode" role="group" aria-label="AI connection type"><button type="button" data-mode="free" aria-pressed="true">Free AI</button><button type="button" data-mode="cloud" aria-pressed="false">Cloud AI</button><button type="button" data-mode="local" aria-pressed="false">Local LLM</button></div>
+            <div id="modellerAiBudget"><div class="ai-budget-ring" role="img" aria-label="Weekly allowance loading"><svg viewBox="0 0 100 100" aria-hidden="true"><defs><linearGradient id="modellerAiBudgetGradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#60a5fa"/><stop offset="100%" stop-color="#2eccbf"/></linearGradient></defs><circle class="ai-budget-track" cx="50" cy="50" r="45"/><circle id="modellerAiGlobalBudgetRing" class="ai-budget-remaining" cx="50" cy="50" r="45" pathLength="100" stroke-dasharray="0 100"/><circle class="ai-budget-track" cx="50" cy="50" r="34"/><circle id="modellerAiBudgetRing" class="ai-budget-remaining" cx="50" cy="50" r="34" pathLength="100" stroke-dasharray="0 100"/></svg><span id="modellerAiBudgetLabel">Loading…</span></div><p id="modellerAiGlobalBudgetLabel">Across all users (outer ring): loading…</p><p>Inner ring: your weekly allowance. Approximately 500k tokens per week, depending on input and output length.</p><p>Free AI usage is shared by users on the same IP address.</p><p id="modellerAiBudgetReset" role="status">Your Free AI reset time is loading.</p><p id="modellerAiGlobalBudgetReset" role="status">Global Free AI reset time is loading.</p></div>
             <div id="modellerAiProviderLabel"><span id="modellerAiProviderCaption">Provider</span><select id="modellerAiProvider" hidden aria-hidden="true" tabindex="-1"><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="google">Google</option></select><div class="ai-picker"><button id="modellerAiProviderTrigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="modellerAiProviderMenu" aria-labelledby="modellerAiProviderCaption modellerAiProviderText"><span id="modellerAiProviderText">OpenAI</span><span aria-hidden="true">▾</span></button><div id="modellerAiProviderMenu" class="ai-picker-menu" role="menu" aria-labelledby="modellerAiProviderCaption" hidden></div></div></div>
             <p id="modellerAiHelp" class="text-sm"></p>
-            <label class="block">API URL<input id="modellerAiUrl" type="url" required class="block w-full bg-slate-800 p-2 rounded" value="https://api.openai.com/v1"></label>
-            <div id="modellerAiKeyLabel"><label for="modellerAiKey" class="block">API key</label><div class="flex gap-2 items-center"><input id="modellerAiKey" name="api-key" type="password" autocomplete="current-password" class="block w-full bg-slate-800 p-2 rounded"><button id="modellerAiDifferentKey" type="button" hidden class="bg-slate-700 px-4 py-2 rounded">Use different key</button></div></div>
-            <div><span id="modellerAiModelCaption">Model</span><select id="modellerAiModel" hidden aria-hidden="true" tabindex="-1"></select><div class="ai-picker"><button id="modellerAiModelTrigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="modellerAiModelMenu" aria-labelledby="modellerAiModelCaption modellerAiModelText" disabled><span id="modellerAiModelText">Enter your API key to load models</span><span aria-hidden="true">▾</span></button><div id="modellerAiModelMenu" class="ai-picker-menu" role="menu" aria-labelledby="modellerAiModelCaption" hidden></div></div></div>
-            <div id="modellerAiShared" hidden><button id="modellerAiUnlock" type="button" class="bg-slate-700 px-4 py-2 rounded">Paste passcode for free AI use (if you have one)</button></div>
+            <label id="modellerAiUrlLabel" class="block">API URL<input id="modellerAiUrl" type="url" required class="block w-full bg-slate-800 p-2 rounded" value="https://api.openai.com/v1"></label>
+            <div id="modellerAiKeyLabel"><label for="modellerAiKey" class="block">API key</label><div class="flex gap-2 items-center"><input id="modellerAiKey" name="api-key" type="password" autocomplete="current-password" class="block w-full bg-slate-800 p-2 rounded"></div></div>
+            <div id="modellerAiModelLabel"><span id="modellerAiModelCaption">Model</span><select id="modellerAiModel" hidden aria-hidden="true" tabindex="-1"></select><div class="ai-picker"><button id="modellerAiModelTrigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="modellerAiModelMenu" aria-labelledby="modellerAiModelCaption modellerAiModelText" disabled><span id="modellerAiModelText">Enter your API key to load models</span><span aria-hidden="true">▾</span></button><div id="modellerAiModelMenu" class="ai-picker-menu" role="menu" aria-labelledby="modellerAiModelCaption" hidden></div></div></div>
             <p id="modellerAiPrivacy" class="text-sm">Your key stays in this tab. When connected, searches automatically send your query (or input sequences) and the search results table to your provider to select references. Completed protein models also send protein names, UniProt records, species, reference PDB names and available motion controls to two AI assessments for biological extension and rotation decisions. These assessments can search PubMed. Cloud API charges may apply.</p>
             <p id="modellerAiStatus" role="status" class="text-sm"></p>
-            <div class="flex gap-3"><button id="modellerAiConnect" type="submit" disabled class="bg-indigo-600 px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed">Connect</button><button id="modellerAiDisconnect" type="button" class="bg-slate-700 px-4 py-2 rounded">Disconnect</button><button id="modellerAiPause" type="button" class="bg-slate-700 px-4 py-2 rounded disabled:opacity-50" disabled>Pause AI use</button></div>
+            <div id="modellerAiActions" class="flex gap-3"><button id="modellerAiConnect" type="submit" disabled class="bg-indigo-600 px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed">Connect</button><button id="modellerAiDisconnect" type="button" class="bg-slate-700 px-4 py-2 rounded">Disconnect</button><button id="modellerAiPause" type="button" class="bg-slate-700 px-4 py-2 rounded disabled:opacity-50" disabled>Pause AI use</button></div>
         </form>
     </dialog>
     <script src="developer-log.js"></script>
     <script src="build-timeline.js"></script>
     <script src="chain-merging.js?v=20261030"></script>
-    <script src="shared-ai-key.js"></script>
-    <script src="modeller-ai.js?v=20261116-pdbinfo1"></script>
-    <script src="complex-ai.js?v=20261109bindingsites2"></script>
+    <script src="modeller-ai.js?v=20261118-budget-notice"></script>
+    <script src="complex-ai.js?v=20261118-species-alignment"></script>
     <script src="biological-motion-ai.js?v=20261116-optin1"></script>
     <script src="projection-stats.js?v=20261105stats1"></script>
     <script src="staged-models.js?v=20261112alignmentcolors"></script>
@@ -2110,15 +2140,17 @@ body.light-mode #complexAiQuestion {background:white;border-color:#cbd5e1}
     <script src="binding-site-analysis.js?v=2"></script>
     <script src="benchmark/features.js?v=uniprot-confidence-20261115"></script>
     <script src="chunk-alignment.js?v=20261116-browser-export"></script>
-    <script id="appScript" src="script.js?v=20261117-alpha-chunks"></script>
+    <link rel="stylesheet" href="em-data.css?v=11">
+    <script src="em-data.js?v=17"></script>
+    <script id="appScript" src="script.js?v=20261118-species-alignment"></script>
     <script src="benchmark/metrics.js?v=uniprot-benchmark"></script>
     <script src="benchmark/bridge.js?v=20261116-chunk-test"></script>
     <script src="session-pack.js?v=20261116-load-fix"></script>
     <script src="sessions.js?v=20261116-view-snapshot"></script>
     <script src="mobile-physics-sheet.js?v=2"></script>
     <script src="edit-models-state.js?v=6"></script>
-    <script src="edit-models.js?v=20"></script>
-    <script src="app-pages.js?v=38"></script>
+    <script src="edit-models.js?v=23"></script>
+    <script src="app-pages.js?v=39"></script>
     <div id="simulationLoadingPopup" class="hidden" role="status" aria-live="polite"><div><i class="fa-solid fa-circle-notch fa-spin mr-2" aria-hidden="true"></i>Loading...</div></div>
 </body>
 </html>

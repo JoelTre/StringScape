@@ -153,6 +153,63 @@
             'uniprot-disulfide':'Disulfide bond'
         };
         const UNI_PROT_FEATURE_COLORS = ['#f97316','#eab308','#22c55e','#06b6d4','#a78bfa','#ec4899','#ef4444','#84cc16','#14b8a6','#6366f1'];
+        const tedDomainCache = new Map();
+        let tedDomainPending = null;
+        function tedDomainAt(atom) {
+            const accession=uniProtAccession(atom?.sourcePdbId);
+            const position=Number(atom?.afResSeq ?? atom?.resSeq);
+            if(!accession || !Number.isInteger(position))return null;
+            return (tedDomainCache.get(accession)||[]).find(domain=>domain.segments.some(([start,end])=>position>=start&&position<=end))||null;
+        }
+        function tedDomainColor(atom) {
+            const domain=tedDomainAt(atom);
+            return domain ? domain.color : '#64748b';
+        }
+        async function loadTedDomains() {
+            const generation=modelBuildGeneration;
+            const accessions=[...new Set(physicsNodes.map(node=>uniProtAccession((node.idx2!=null?node.res.atoms2?.[node.idx2]:node.res.atoms1?.[node.idx1])?.sourcePdbId)).filter(Boolean))];
+            const missing=accessions.filter(accession=>!tedDomainCache.has(accession));
+            if(!missing.length || tedDomainPending===generation)return;
+            tedDomainPending=generation;
+            const key=document.getElementById('physicsColourKey');
+            if(key && physicsColorMode==='ted-domains')key.textContent='Loading TED domains…';
+            await Promise.all(missing.map(async accession=>{
+                try {
+                    let rows=[],skip=0, batch;
+                    do {
+                        const response=await fetch(`https://ted.cathdb.info/api/v1/uniprot/summary/${encodeURIComponent(accession)}?skip=${skip}&limit=100`);
+                        if(!response.ok)throw new Error(`HTTP ${response.status}`);
+                        const result=await response.json();
+                        if(!Array.isArray(result.data))throw new Error('Invalid TED response');
+                        batch=result.data;rows.push(...batch);skip+=batch.length;
+                    } while(batch.length===100);
+                    const fragmentRows=rows.filter(row=>/-F1-model_v\d+_TED\d+$/i.test(row.ted_id||''));
+                    const latestVersion=Math.max(0,...fragmentRows.map(row=>Number(/-model_v(\d+)_/i.exec(row.ted_id)?.[1]||0)));
+                    const domains=fragmentRows.filter(row=>Number(/-model_v(\d+)_/i.exec(row.ted_id)?.[1])===latestVersion)
+                        .map(row=>({id:row.ted_id, boundaries:row.chopping, cath:row.cath_label,
+                            segments:String(row.chopping||'').split('_').map(part=>/^(\d+)-(\d+)$/.exec(part)).filter(Boolean).map(match=>[+match[1],+match[2]])}))
+                        .filter(domain=>domain.segments.length)
+                        .sort((a,b)=>a.segments[0][0]-b.segments[0][0]||a.id.localeCompare(b.id));
+                    domains.forEach((domain,index)=>{domain.color=UNI_PROT_FEATURE_COLORS[index%UNI_PROT_FEATURE_COLORS.length];});
+                    tedDomainCache.set(accession,domains);
+                } catch(error) { console.warn(`TED domains unavailable for ${accession}:`,error); }
+            }));
+            if(tedDomainPending===generation)tedDomainPending=null;
+            if(generation===modelBuildGeneration && physicsColorMode==='ted-domains') {
+                renderTedDomainKey();updatePhysicsNodeColors();updateModel1AlignmentColors();invalidatePhysicsSurfaceColours();updateAtomRepresentation();updateCartoonRepresentation();
+            }
+        }
+        function renderTedDomainKey() {
+            const key=document.getElementById('physicsColourKey');if(!key)return;
+            key.textContent=tedDomainPending===modelBuildGeneration?'Loading TED domains…':'TED consensus structural domains; grey means unassigned or unavailable. Boundaries refer to the AlphaFold sequence.';
+            const accessions=[...new Set(physicsNodes.map(node=>uniProtAccession((node.idx2!=null?node.res.atoms2?.[node.idx2]:node.res.atoms1?.[node.idx1])?.sourcePdbId)).filter(Boolean))];
+            const list=document.createElement('div');list.className='uniprot-feature-list mt-1 flex flex-wrap gap-1.5';list.style.maxHeight='110px';list.style.overflowY='auto';
+            for(const accession of accessions)for(const domain of tedDomainCache.get(accession)||[]) {
+                const item=document.createElement('span');const dot=document.createElement('span');dot.className='inline-block w-2 h-2 rounded-full';dot.style.backgroundColor=domain.color;
+                item.append(dot,document.createTextNode(` ${accession}: ${domain.id.split('_').pop()} (${domain.boundaries})${domain.cath&&domain.cath!=='-'?` · CATH ${domain.cath}`:''}`));list.append(item);
+            }
+            key.append(list);
+        }
         const topologicalDomainColors=new Map();
         const topologicalDomainLabel=feature=>(feature.description||'Unlabelled domain').trim().toLocaleLowerCase();
         const topologicalDomainKey=(accession,feature)=>`${accession}:${feature.start}:${feature.end}:${topologicalDomainLabel(feature)}`;
@@ -451,6 +508,21 @@
         let aiSimulationStartedGeneration=null,aiSimulationUnknownGeneration=null;
         window.getComplexAiState=()=>({generation:modelBuildGeneration,built:readyModelGeneration===modelBuildGeneration&&!modelLoading,simulationStarted:aiSimulationUnknownGeneration===modelBuildGeneration?null:aiSimulationStartedGeneration===modelBuildGeneration,simulationStatus:aiSimulationUnknownGeneration===modelBuildGeneration?'unknown':aiSimulationStartedGeneration!==modelBuildGeneration?'not started':groupSimulation?.complete?'completed':physicsRunning&&!animationPlaying?'running':'paused',modelBuildExplanation:'The model is built when its aligned structure is ready to view, even before the optional simulation starts. The simulation is intended to improve model accuracy; it does not establish experimental validation or guarantee accuracy.',ready:(modelBuildCompleted||preSimulationAnalysisGeneration===modelBuildGeneration)&&!uniProtLookupPending&&!patternVarianceJob&&patternDetectionSnapshot?.generation===modelBuildGeneration&&animationReadyGeneration===modelBuildGeneration&&!animationPreparing,hasSubunits:alignmentResults.length>0});
         window.isComplexAiOverviewReady=()=>readyModelGeneration===modelBuildGeneration&&!uniProtLookupPending&&alignmentResults.length>0;
+        function complexAiAlignmentSummary(result) {
+            if(result.referenceOnly || result.entityType!=='protein' || !result.c2)return null;
+            const target=result.atoms2||[], pairs=(result.alignedPairs||[]).filter(pair=>isEquivalentPair(result.atoms1||[],target,pair));
+            const mapped=new Set(), counts={identical:0,similarNonIdentical:0,other:0,unknown:0};
+            for(const pair of pairs){
+                if(mapped.has(pair.idx2))continue;
+                mapped.add(pair.idx2);
+                const a=result.atoms1[pair.idx1]?.singleChar?.toUpperCase(),b=target[pair.idx2]?.singleChar?.toUpperCase();
+                if(!a||!b||a==='X'||b==='X')counts.unknown++;
+                else if(a===b)counts.identical++;
+                else if(isSimilarAA(a,b))counts.similarNonIdentical++;
+                else counts.other++;
+            }
+            return {referenceChain:result.c1,modelChain:result.c2,accession:uniProtAccession(target[0]?.sourcePdbId),inputSource:target[0]?.sequenceOnly?'UniProt sequence':'structure',modelResidues:target.length,alignedResidues:mapped.size,unalignedResidues:target.length-mapped.size,...counts};
+        }
         window.getComplexAiContext=()=>({
             ...window.getComplexAiState(),
             originalRequest:typeof document==='undefined'?'':document.getElementById('referenceSearchInput')?.value||'',
@@ -460,7 +532,8 @@
             nucleicAcids:getNucleicAiContext(),
             unavailableUniProt:uniProtUnavailable,
             subunits:alignmentResults.map(result=>({chain:result.c1,accession:uniProtAccession(result.atoms2?.[0]?.sourcePdbId)})),
-            references:referenceFiles.map(file=>({pdbId:file.pdbId,title:file.parsed?.title||referenceSearchResults.find(hit=>hit.identifier===file.pdbId)?.name||''})),
+            references:(multiReferenceBuild?.files?.length?multiReferenceBuild.files:referenceFiles).map(file=>({pdbId:file.pdbId,title:file.parsed?.title||referenceSearchResults.find(hit=>hit.identifier===file.pdbId)?.name||''})),
+            alignmentSummary:{method:'Sequence-matched model residues aligned onto observed reference PDB residues; similarity means a positive BLOSUM62 score, excluding identical residues. Counts are per chain match and may overlap across matches. Unaligned residues lack an observed matched reference residue.',chains:alignmentResults.map(complexAiAlignmentSummary).filter(Boolean)},
             selectionReasons:referenceFiles.map(complexAiReferenceSelection),
             patterns:detectedExtensionPatterns,
             filamentExtensions:detectedExtensionPatterns.map(pattern=>({key:patternExtensionKey(pattern),label:patternExtensionLabel(pattern),units:patternExtensionCounts.get(patternExtensionKey(pattern))??0})),
@@ -852,7 +925,7 @@
             const box=document.getElementById('mutationInfo');if(!box)return;
             box.classList.toggle('hidden',physicsColorMode!=='mutations'||(!linkedSelection&&!mutationStatus&&!([...mutationRecords.values()].some(record=>record.error))));
             if(physicsColorMode!=='mutations')return;
-            box.replaceChildren();const heading=document.createElement('h2');heading.className='font-semibold text-white mb-2';heading.textContent='Mutations';box.append(heading);
+            box.replaceChildren();
             if(mutationStatus){const p=document.createElement('p');p.textContent=mutationStatus;box.append(p);return;}
             const errors=[...mutationRecords.entries()].filter(([,record])=>record.error);
             for(const [key,record] of errors){const p=document.createElement('p');p.className='text-red-300';p.textContent=`${key}: ${record.error}`;box.append(p);}
@@ -864,18 +937,19 @@
             if(!rows.size){const p=document.createElement('p');p.textContent='No mutation or variant annotations for the selected residues.';box.append(p);return;}
             for(const [label,features] of [['Mutations',[...rows.values()].filter(feature=>feature.type==='Mutagenesis')],['Variants',[...rows.values()].filter(feature=>feature.type!=='Mutagenesis')]]){
             if(!features.length)continue;
-            const subheading=document.createElement('h3');subheading.className='font-semibold mt-3 mb-1';subheading.textContent=label;box.append(subheading);
-            const scroll=document.createElement('div');scroll.className='overflow-x-auto';
-            const table=document.createElement('table');table.className='w-full text-left border-collapse';
+            const card=document.createElement('section');card.className='mutation-table-card';
+            const subheading=document.createElement('h3');subheading.textContent=label;card.append(subheading);
+            const scroll=document.createElement('div');scroll.className='mutation-table-scroll';
+            const table=document.createElement('table');table.className='mutation-table';
             const head=document.createElement('thead'),tr=document.createElement('tr');
-            for(const title of ['Residue',label==='Mutations'?'Mutation':'Variant','Effect','Source']){const th=document.createElement('th');th.className='border-b border-slate-700 p-2';th.textContent=title;tr.append(th);}head.append(tr);table.append(head);
+            for(const title of ['Residue',label==='Mutations'?'Mutation':'Variant','Effect','Source']){const th=document.createElement('th');th.scope='col';th.textContent=title;tr.append(th);}head.append(tr);table.append(head);
             const body=document.createElement('tbody');
             for(const feature of features){
                 const row=document.createElement('tr'),seq=feature.alternativeSequence||{},alternatives=seq.alternativeSequences||[];
                 const variant=seq.originalSequence||alternatives.length?`${seq.originalSequence||'—'} → ${alternatives.length>1?'['+alternatives.join(', ')+']':alternatives[0]||'—'}`:'—';
                 const values=[feature.start===feature.end?String(feature.start):`${feature.start}–${feature.end}`,variant,feature.description||'—'];
-                for(const value of values){const td=document.createElement('td');td.className='border-b border-slate-800 p-2 align-top';td.textContent=value;row.append(td);}
-                const source=document.createElement('td');source.className='border-b border-slate-800 p-2 align-top';
+                for(const value of values){const td=document.createElement('td');td.textContent=value;row.append(td);}
+                const source=document.createElement('td');
                 for(const evidence of feature.evidences||[]){
                     const div=document.createElement('div');
                     if(evidence.evidenceCode)div.append(document.createTextNode(`Evidence code: ${evidence.evidenceCode}`));
@@ -884,14 +958,14 @@
                         div.append(document.createTextNode(`${evidence.source}: `));
                         if(evidence.source.toLowerCase()==='pubmed'&&/^\d+$/.test(String(evidence.id||''))){
                             const link=document.createElement('a');link.href=`https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(evidence.id)}/`;
-                            link.target='_blank';link.rel='noopener noreferrer';link.className='text-teal-500 underline';link.textContent=evidence.id;div.append(link);
+                            link.target='_blank';link.rel='noopener noreferrer';link.textContent=evidence.id;div.append(link);
                         }else div.append(document.createTextNode(evidence.id||''));
                     }
                     source.append(div);
                 }
                 if(!source.childNodes.length)source.textContent='—';row.append(source);body.append(row);
             }
-            table.append(body);scroll.append(table);box.append(scroll);
+            table.append(body);scroll.append(table);card.append(scroll);box.append(card);
             }
         }
         function updatePhysicsSelectionInfo() {
@@ -1283,7 +1357,7 @@
         let stericClashRadius = MIN_RESIDUE_DIST;
 
         // Three.js 3D Physics Scene Objects
-        let physicsScene, physicsCamera, physicsRenderer;
+        let physicsScene, physicsCamera, physicsRenderer, physicsEMController, physicsEMSources;
         let physicsWebGLContextLost=false;
         let instancedNodeMesh = null;
         let nodeDummy = null;
@@ -4843,7 +4917,7 @@
             }
             MolecularImpostors.gpuStatus(physicsRenderer);
             const renderPhysicsScene=physicsRenderer.render.bind(physicsRenderer);
-            physicsRenderer.render=(scene,camera)=>{if(physicsWebGLContextLost)return;syncPhysicsOrthographicCamera();syncPhysicsTransparency(scene);syncPhysicsMaterials(scene);updateSelectionDistance();syncProteinSlice(scene);updateSelectedResidueLabels();renderPhysicsScene(scene,camera);};
+            physicsRenderer.render=(scene,camera)=>{if(physicsWebGLContextLost)return;if(physicsEMController&&physicsEMSources!==referenceFiles){physicsEMSources=referenceFiles;physicsEMController.sync();}physicsEMController?.offset();syncPhysicsOrthographicCamera();syncPhysicsTransparency(scene);syncPhysicsMaterials(scene);updateSelectionDistance();syncProteinSlice(scene);updateSelectedResidueLabels();renderPhysicsScene(scene,camera);};
             physicsRenderer.localClippingEnabled=true;
             physicsRenderer.setSize(width, height);
             physicsRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -6253,6 +6327,7 @@
             if(physicsPreparationPreview===preview)physicsPreparationPreview=null;
         }
         async function initPhysicsSimulation(preparedNodes=null) {
+            physicsEMController?.sync();
             const setupGeneration=modelBuildGeneration,setupRevision=++physicsSetupRevision;
             disposePreparationBackbonePreview(physicsPreparationPreview);
             document.getElementById('preSimulationProjectionBadge')?.classList.add('hidden');
@@ -6353,6 +6428,7 @@
             }
             if (N > 0) { cx /= N; cy /= N; cz /= N; }
             physicsCenterOffset = { cx, cy, cz };
+            physicsEMController?.offset();
 
             // Discard any previous Reference PDB overlay - it was built against the old
             // structure/centering and must be rebuilt fresh the next time it's shown
@@ -6403,6 +6479,7 @@
             if(preparedNodes){
                 physicsNodes.forEach((node,index)=>Object.assign(node,preparedNodes[index]));
                 physicsCenterOffset={...multiReferenceBuild.drafts[multiReferenceBuild.index].viewState.offset};
+                physicsEMController?.offset();
             }else{
                 applyReferenceCoordinateLocks();
                 propagateInitialReferenceLockDisplacements();
@@ -7274,13 +7351,24 @@
         function conformationNodeOpacity(index) {
             return typeof conformationNodePresence==='undefined' ? 1 : conformationNodePresence?.[index] ?? 1;
         }
+        function nodeAlignmentEvidence(node) {
+            const atom = node.res.atoms2?.[node.idx2];
+            const mergedIndex = atom?.mergedNodeIndex;
+            const groupAtom = Number.isInteger(mergedIndex) && Number.isInteger(activeConformationGroup)
+                ? multiReferenceBuild?.groupPoses?.[activeConformationGroup]?.atoms?.[mergedIndex] : null;
+            return groupAtom?.alignmentEvidence ?? atom?.alignmentEvidence;
+        }
         function isNodeVisibleInPhysics(node, ignoreHomologyVisibility=false) {
             if (!node?.res) return false;
             if(node.simulationIndex!==undefined&&conformationNodeOpacity(node.simulationIndex)<=0)return false;
             if (!ignoreHomologyVisibility && !homologyStructureVisible) return false;
             if (node.res.entityType !== 'protein') {
                 if (!nonProteinAtomsVisible) return false;
-            } else if (node.usedInAlignment ? !alignedResiduesVisible : !unalignedResiduesVisible) return false;
+            } else {
+                const evidence = nodeAlignmentEvidence(node);
+                const aligned = evidence === undefined ? node.usedInAlignment : evidence !== 0;
+                if (aligned ? !alignedResiduesVisible : !unalignedResiduesVisible) return false;
+            }
             if (node.res.entityType === 'protein' && (!bindingSiteResiduesVisible||!nonBindingSiteResiduesVisible)) {
                 const atSite=bindingSiteMembership().has(node);
                 if(atSite?!bindingSiteResiduesVisible:!nonBindingSiteResiduesVisible)return false;
@@ -7593,6 +7681,8 @@
                     : mode === 'protein-id' ? getProteinIdColor(sourceByChain.get(chainId))
                     : mode === 'origin' ? '#3498db'
                     : mode==='mutations' ? (mutationFeatures(physicsNodes[referenceNodeIndex]).length?'#ef4444':'#94a3b8')
+                    : mode==='structure-domains' ? (structureDomainColors.get(referenceNodeIndex)||'#d1d5db')
+                    : mode==='ted-domains' ? tedDomainColor(afAtom)
                     : UNI_PROT_FEATURE_MODES[mode] ? uniProtFeatureColor(afAtom,mode)
                     : mode === 'plddt' ? physicsResidueColor(afAtom, 'plddt')
                     : mode === 'difference' ? alignmentDistanceColor(distanceByChain.get(chainId)?.get(atomIdx) ?? null)
@@ -8115,6 +8205,7 @@
             document.getElementById('physicsStatusBadge').textContent='Build complete';
             document.getElementById('physicsPauseText').textContent='Build complete';
             setPhysicsColorMode('chain');
+            if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.kind==='combined')multiReferenceBuild.liveColorMode='chain';
             const jiggleAfterBuild=sideChainJiggleUserChoice??sideChainJiggleBuildDefault;
             if(sideChainJiggleEnabled!==jiggleAfterBuild)toggleSideChainJiggle();
             globalThis.BuildTimeline?.finish();
@@ -10797,7 +10888,7 @@
             // Use the first membrane as the shared lateral reference on every frame,
             // including motion between detector replies. Re-express curvature and
             // anchors with the existing frame transform rather than twisting them.
-            if(secondMembrane)secondMembrane=alignMembraneFrame(trackMembraneGeometry(secondMembrane),inferredMembrane);
+            if(secondMembrane&&!animationPlaying)secondMembrane=alignMembraneFrame(trackMembraneGeometry(secondMembrane),inferredMembrane);
             for(const id of ['membraneSideLabelNegative','membraneSideLabelPositive','membraneSideLeaderNegative','membraneSideLeaderPositive']){
                 const original=document.getElementById(id);
                 if(original&&!document.getElementById(id+'Second')){const copy=original.cloneNode(true);copy.id=id+'Second';original.parentNode.append(copy);}
@@ -10878,8 +10969,7 @@
                 }catch(error){self.postMessage({generation:data.generation,error:error.message});}
             };
         }
-        function ensureMembraneDetectionWorker(){
-            if(membraneDetectionWorker)return membraneDetectionWorker;
+        function createMembraneDetectionWorker(){
             const functions=[membraneResidue,membraneSamples,membraneHydrophobicSegments,membraneAxisEvidence,
                 membraneCandidateNormals,membraneBasis,scoreMembrane,inferMembraneGeometry,
                 membraneCoordinates,classifyTransmembraneSegments,completeMembraneMembers];
@@ -10890,6 +10980,11 @@
             const url=URL.createObjectURL(new Blob([source],{type:'text/javascript'}));
             let worker;
             try{worker=new Worker(url);}finally{URL.revokeObjectURL(url);}
+            return worker;
+        }
+        function ensureMembraneDetectionWorker(){
+            if(membraneDetectionWorker)return membraneDetectionWorker;
+            const worker=createMembraneDetectionWorker();
             membraneDetectionWorker=worker;
             const fail=message=>{
                 if(membraneDetectionWorker!==worker)return;
@@ -10900,7 +10995,7 @@
             };
             worker.onerror=event=>fail(event.message||'Membrane worker failed');
             worker.onmessage=({data})=>{
-                if(membraneDetectionWorker!==worker||data.generation!==membraneDetectionGeneration)return;
+                if(membraneDetectionWorker!==worker||data.generation!==membraneDetectionGeneration||animationPlaying)return;
                 membraneDetectionPending=false;
                 if(data.error){fail(data.error);return;}
                 // Anchors refer to the submitted snapshot. Bring the result forward
@@ -10929,6 +11024,11 @@
         }
         function updateInferredMembrane(now){
             if(!physicsNodes.length||!physicsScene||membranePresenceMode==='no')return;
+            if(animationPlaying){
+                const visualGeometry=membraneVisualGeometry(inferredMembrane,now);
+                renderMembraneGeometry(visualGeometry);updateMembraneLipids(visualGeometry,now);renderSecondMembrane(now);
+                return;
+            }
             if(inferredMembrane){inferredMembrane=trackMembraneGeometry(inferredMembrane);inferredMembrane.secondGeometry=secondMembrane;}
             const needExposure=physicsColorMode==='membrane-placement'||referenceColorMode==='membrane-placement';
             const inferenceOptions=membranePresenceMode+':'+needExposure;
@@ -12491,6 +12591,59 @@
             }
             return '#808080';
         }
+        // Domain membership is calculated from the current coordinates when the mode is selected.
+        let structureDomainColors = new Map();
+        function calculateStructureDomains(nodes) {
+            const blocks=new Map(), domains=[];
+            for(const [index,node] of nodes.entries()) {
+                if(node.res.entityType!=='protein')continue;
+                const atom=node.idx2!=null?node.res.atoms2?.[node.idx2]:node.res.atoms1?.[node.idx1];
+                if(!atom)continue;
+                if(!blocks.has(node.blockIdx))blocks.set(node.blockIdx,[]);
+                blocks.get(node.blockIdx).push({index,node,atom});
+            }
+            for(const [block,entries] of blocks) {
+                const parent=entries.map((_,i)=>i), find=i=>{while(parent[i]!==i){parent[i]=parent[parent[i]];i=parent[i];}return i;};
+                const join=(a,b)=>{a=find(a);b=find(b);if(a!==b)parent[b]=a;};
+                const cells=new Map();
+                entries.forEach(({node,atom},i)=>{
+                    if(!['helix','sheet'].includes(atom.secondaryType))return;
+                    const x=Math.floor(node.x/7),y=Math.floor(node.y/7),z=Math.floor(node.z/7);
+                    for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)for(let dz=-1;dz<=1;dz++)
+                        for(const j of cells.get(`${x+dx},${y+dy},${z+dz}`)||[]) {
+                            const other=entries[j].node;
+                            if(Math.hypot(node.x-other.x,node.y-other.y,node.z-other.z)<=7)join(i,j);
+                        }
+                    const key=`${x},${y},${z}`;if(!cells.has(key))cells.set(key,[]);cells.get(key).push(i);
+                });
+                const groups=new Map();
+                entries.forEach(({atom},i)=>{if(!['helix','sheet'].includes(atom.secondaryType))return;const root=find(i);if(!groups.has(root))groups.set(root,[]);groups.get(root).push(i);});
+                const identity=entries[0].atom.sourcePdbId ? `id:${String(entries[0].atom.sourcePdbId).toUpperCase()}` : `sequence:${entries.map(e=>e.atom.singleChar||e.atom.resName||'?').join('')}`;
+                for(const members of groups.values()) {
+                    const expanded=new Set(members);
+                    for(let i=1;i<members.length;i++)for(let j=members[i-1]+1;j<members[i];j++)
+                        if(!['helix','sheet'].includes(entries[j].atom.secondaryType))expanded.add(j);
+                    const positions=new Set([...expanded].map(i=>String(entries[i].atom.afResSeq??entries[i].atom.resSeq)));
+                    domains.push({block,identity,positions,indices:[...expanded].map(i=>entries[i].index)});
+                }
+            }
+            // Components from equivalent proteins share a colour family when their residue memberships overlap.
+            const parent=domains.map((_,i)=>i),find=i=>{while(parent[i]!==i){parent[i]=parent[parent[i]];i=parent[i];}return i;};
+            for(let i=0;i<domains.length;i++)for(let j=0;j<i;j++) {
+                const a=domains[i],b=domains[j];if(a.block===b.block||a.identity!==b.identity)continue;
+                if([...a.positions].some(position=>b.positions.has(position))) {const x=find(i),y=find(j);if(x!==y)parent[x]=y;}
+            }
+            const families=new Map();domains.forEach((domain,i)=>{const root=find(i);if(!families.has(root))families.set(root,[]);families.get(root).push(domain);});
+            const colors=new Map();let familyIndex=0;
+            for(const family of families.values()) {
+                const baseColor=CHAIN_COLORS[familyIndex++%CHAIN_COLORS.length],base=moleculeBaseOklch(baseColor);
+                family.forEach((domain,i)=>{
+                    const color=family.length===1?baseColor:moleculeColor(base.hue,base.lightness+0.14*(i/(family.length-1)-0.5),base.chroma);
+                    for(const index of domain.indices)colors.set(index,color);
+                });
+            }
+            return colors;
+        }
         function buildProteinChainColors() {
             const groups = new Map(), colors = new Map();
             for (const block of morphMatrixBlocks) {
@@ -13517,20 +13670,30 @@
         async function loadModelPair(pdbId1, pdbId2Raw, referenceSource=null) {
             if (new URLSearchParams(location.search).has('benchmark') && document.getElementById('errorModal').classList.contains('warning-modal')) closeErrorModal();
             if (referenceSource === 'example') clearReferenceSearchInput();
-            if(referenceSource==='example' && pdbId1.trim().toUpperCase().replace(/\s/g,'')==='6IOK,6IOL'){
-                referenceConformationPlan={pdbIds:['6IOK','6IOL'],groups:[
-                    {name:'0-degree state',pdbIds:['6IOK']},
-                    {name:'60-degree state',pdbIds:['6IOL']}
-                ]};
-            }
-            if(!window.ModellerAI?.connected()){
-                let entries=[];try{entries=modelInputEntries(pdbId1,'reference');}catch(_){/* The loader reports invalid input. */}
-                const ids=entries.map(entry=>entry.id.toUpperCase());
-                if(ids.length>1){
+            let entries=[];try{entries=modelInputEntries(pdbId1,'reference');}catch(_){/* The loader reports invalid input. */}
+            const ids=entries.map(entry=>entry.id.toUpperCase());
+            if(referenceSource==='example') referenceConformationPlan=null;
+            if(ids.length>1){
+                let needsManual=!window.ModellerAI?.connected();
+                if(referenceSource==='example' && !needsManual){
+                    try{
+                        const hits=ids.map(identifier=>({identifier}));
+                        for(let index=0;index<hits.length;index+=4)
+                            await Promise.all(hits.slice(index,index+4).map(enrichReferenceSearchHit));
+                        const groups=await window.ModellerAI.assignReferenceGroups('',hits,{pdbIds:ids});
+                        if(!groups?.length) throw new Error('No conformation groups returned');
+                        referenceSearchResults=hits;
+                        referenceConformationPlan={pdbIds:ids.slice(),groups};
+                    }catch(error){
+                        console.warn('Example conformation grouping failed:',error);
+                        needsManual=true;
+                    }
+                }
+                if(needsManual){
                     const plan=referenceConformationPlan;
                     const existing=plan&&plan.pdbIds.length===ids.length&&ids.every(id=>plan.pdbIds.includes(id))?plan:null;
                     const selected=await assignManualConformationGroups(ids,existing);
-                    if(!selected)return;
+                    if(!selected){if(referenceSource==='example')window.appSetExampleLoading?.(false);return;}
                     referenceConformationPlan=selected;
                 }
             }
@@ -13575,6 +13738,7 @@
             modelBuildAbortController = new AbortController();
             const buildSignal = modelBuildAbortController.signal;
             const generation = ++modelBuildGeneration;
+            if(!document.getElementById('gapScoresPanel')?.classList.contains('hidden')) document.getElementById('gapScoresButton')?.click();
             globalThis.ProjectionStats?.reset();
             complexAiModelOrigins=new Map();
             try {complexAiModelOrigins=new Map(modelInputEntries(pdbId1,'reference').map(entry=>{
@@ -13675,6 +13839,7 @@
                 if(files1.length>1 || directReferences){beginStagedBuild(files1,fileResults2,generation);multiReferenceBuild.directReferences=directReferences;files1=[files1[0]];model1Influence=multiReferenceBuild.weights[0];}
                 const file1 = files1[0];
                 referenceFiles = files1;
+                physicsEMController?.sync();
                 // Reference coordinate locking is always enabled.
                 updateReferenceCoordinateLockUI();
                 referenceOverlayVisibility = files1.map(() => false);
@@ -16062,6 +16227,11 @@
                     color = new THREE.Color(getProteinIdColor(atom?.sourcePdbId));
                 } else if (physicsColorMode==='mutations') {
                     color = new THREE.Color(mutationFeatures(node).length?'#ef4444':'#94a3b8');
+                } else if (physicsColorMode==='structure-domains') {
+                    color=new THREE.Color(structureDomainColors.get(i)||'#d1d5db');
+                } else if (physicsColorMode==='ted-domains') {
+                    const atom=node.idx2!=null ? node.res.atoms2?.[node.idx2] : node.res.atoms1?.[node.idx1];
+                    color=new THREE.Color(tedDomainColor(atom));
                 } else if (UNI_PROT_FEATURE_MODES[physicsColorMode]) {
                     const atom = node.idx2 !== null ? node.res.atoms2[node.idx2] : null;
                     color = new THREE.Color(uniProtFeatureColor(atom,physicsColorMode));
@@ -16090,12 +16260,9 @@
                 } else {
                     const atom = node.idx2 !== null ? node.res.atoms2[node.idx2] : null;
                     const referenceAtom = node.idx1 !== null ? node.res.atoms1[node.idx1] : null;
-                    const mergedIndex=atom?.mergedNodeIndex;
-                    const groupAtom=Number.isInteger(mergedIndex)&&Number.isInteger(activeConformationGroup)
-                        ? multiReferenceBuild?.groupPoses?.[activeConformationGroup]?.atoms?.[mergedIndex] : null;
-                    const evidence=groupAtom?.alignmentEvidence??atom?.alignmentEvidence;
+                    const evidence=nodeAlignmentEvidence(node);
                     color = new THREE.Color(physicsColorMode==='aligned'&&evidence!==undefined
-                        ? evidence===0?'#64748b':evidence===2?'#f97316':'#ef4444'
+                        ? evidence===0?'#64748b':evidence===2?'#00c9b7':'#0284c7'
                         : physicsResidueColor(atom, physicsColorMode, node.usedInAlignment, referenceAtom));
                 }
                 // Origin colours above are shared constants; copy before shading
@@ -16136,7 +16303,23 @@
             placement2:{label:'Placement confidence (2 Å)', max:1}, placement5:{label:'Placement confidence (5 Å)', max:1},
             plddt:{label:'AlphaFold pLDDT', max:100}, pae:{label:'AlphaFold PAE', max:Infinity}
         };
+        const gapScoreColorModes = {
+            modelConfidence:'model-confidence', localConfidence:'local-confidence', placement2:'placement-2',
+            placement5:'placement-5', plddt:'plddt', pae:'alpha-pae'
+        };
         let gapScoresGeneration = 0;
+        function syncGapScoreMenu() {
+            const select=document.getElementById('gapScoresSelect'), trigger=document.getElementById('gapScoresMenuButton');
+            if(!select || !trigger) return;
+            trigger.replaceChildren(document.createTextNode(select.selectedOptions[0]?.textContent || ''));
+            const icon=document.createElement('i'); icon.className='fa-solid fa-chevron-down ml-1'; icon.setAttribute('aria-hidden','true'); trigger.append(icon);
+            document.querySelectorAll('#gapScoresMenu button').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.value===select.value)));
+        }
+        function syncGapScoreColor(mode) {
+            const select=document.getElementById('gapScoresSelect');
+            const key=Object.keys(gapScoreColorModes).find(key=>gapScoreColorModes[key]===mode);
+            if(select && key && select.value!==key) { select.value=key; syncGapScoreMenu(); void updateGapScores(); }
+        }
         async function updateGapScores() {
             const panel=document.getElementById('gapScoresPanel'), content=document.getElementById('gapScoresContent');
             if(!panel || panel.classList.contains('hidden')) return;
@@ -16154,36 +16337,82 @@
                     const chain=node.res.c1 || node.res.c2 || 'Unknown';
                     if(!chains.has(chain)) chains.set(chain,[]);
                     const atom=node.res.atoms2?.[node.idx2];
-                    chains.get(chain).push({node,index,added:isModel2Only(node), value:key==='plddt'?atom?.plddt:key==='pae'?pae[index]:scores[{modelConfidence:'scores',localConfidence:'local',placement2:'placement2',placement5:'placement5'}[key]][index]});
+                    const evidence=nodeAlignmentEvidence(node);
+                    const added=evidence===undefined?isModel2Only(node):evidence===0;
+                    chains.get(chain).push({node,index,added, value:key==='plddt'?atom?.plddt:key==='pae'?pae[index]:scores[{modelConfidence:'scores',localConfidence:'local',placement2:'placement2',placement5:'placement5'}[key]][index]});
                 });
                 content.replaceChildren();
-                if(!chains.size) { content.textContent='Build a model to view gap scores.'; return; }
+                if(!chains.size) { content.textContent='Build a model to view confidence scores.'; return; }
                 for(const [chain,residues] of chains) {
                     const section=document.createElement('div'), heading=document.createElement('div'), bar=document.createElement('div'), ends=document.createElement('div'), legend=document.createElement('div');
                     section.className='gap-score-chain'; heading.className='gap-score-heading'; bar.className='gap-score-bar'; ends.className='gap-score-ends'; legend.className='gap-score-key';
                     const added=residues.filter(r=>r.added).length, unavailable=residues.filter(r=>r.added&&!(Number.isFinite(r.value)&&r.value>=0&&r.value<=option.max)).length;
                     const title=document.createElement('strong'), count=document.createElement('span');
                     title.textContent=`Chain ${displayChainName(chain)} · ${chainProteinName(residues[0].node.blockIdx) || 'Unknown protein'}`; count.textContent=`${added} added`; heading.append(title,count);
-                    bar.setAttribute('role','img'); bar.setAttribute('aria-label',`Chain ${displayChainName(chain)}, ${residues.length} residues. Present residues are dark grey; added residues are coloured by ${option.label}.`);
+                    bar.setAttribute('role','group'); bar.setAttribute('aria-label',`Chain ${displayChainName(chain)}, ${residues.length} residues. Present residues are dark grey; added residues are coloured by ${option.label}.`);
                     for(const residue of residues) {
-                        const segment=document.createElement('span'), value=residue.value, valid=Number.isFinite(value)&&value>=0&&value<=option.max;
+                        const segment=document.createElement('button'), value=residue.value, valid=Number.isFinite(value)&&value>=0&&value<=option.max;
+                        const node=residue.node, atom=(node.idx2!==null?node.res.atoms2?.[node.idx2]:null)||(node.idx1!==null?node.res.atoms1?.[node.idx1]:null);
+                        segment.type='button';
                         segment.style.background=!residue.added?'#374151':!valid?'#64748b':key==='plddt'?(value<50?'#ff7d45':value<70?'#ffdb13':value<90?'#65cbf3':'#1964b0'):modelConfidenceColor(key==='pae'?1-Math.min(value/30,1):value);
-                        segment.title=residue.added?`Added residue · ${option.label} ${valid?value.toFixed(key==='plddt'||key==='pae'?1:3)+(key==='pae'?' Å':''):'unavailable'}`:'Residue present in reference'; bar.append(segment);
+                        const scoreLabel=residue.added?`Added residue · ${option.label} ${valid?value.toFixed(key==='plddt'||key==='pae'?1:3)+(key==='pae'?' Å':''):'unavailable'}`:'Residue present in reference';
+                        segment.title=`${displayChainName(chain)} · ${atom?.resName||'Residue'} ${atom?.resSeq??residues.indexOf(residue)+1} · ${scoreLabel}`;
+                        segment.setAttribute('aria-label',segment.title);
+                        segment.addEventListener('click',event=>selectLinkedEntity(node.res.c1,atom?.resSeq,'residue',atom,event.ctrlKey||event.metaKey));
+                        bar.append(segment);
                     }
                     for(const text of ['1',String(residues.length)]) { const span=document.createElement('span'); span.textContent=text; ends.append(span); }
                     const percent=n=>Math.round(n/residues.length*100);
                     for(const [color,label] of [['#374151',`Present in reference (${residues.length-added} | ${percent(residues.length-added)}%)`],[key==='plddt'?'linear-gradient(to right,#ff7d45,#ffdb13,#65cbf3,#1964b0)':key==='pae'?'linear-gradient(to right,#0053d6,#65cbf3,#ffdb13,#ff7d45)':'linear-gradient(to right,#ff7d45,#ffdb13,#65cbf3,#0053d6)',key==='pae'?'PAE: 0 to ≥30 Å':`${option.label}: 0 to ${option.max}`],['#64748b',`Unavailable (${unavailable} | ${percent(unavailable)}%)`]]) { const item=document.createElement('span'), swatch=document.createElement('i'); swatch.style.background=color; item.append(swatch,document.createTextNode(label)); legend.append(item); }
                     section.append(heading,bar,ends,legend); content.append(section);
                 }
-            } catch(error) { if(generation===gapScoresGeneration) content.textContent='Could not load gap scores.'; console.error(error); }
+            } catch(error) { if(generation===gapScoresGeneration) content.textContent='Could not load confidence scores.'; console.error(error); }
         }
         document.getElementById('gapScoresButton')?.addEventListener('click',event=>{
             const panel=document.getElementById('gapScoresPanel'), opening=panel.classList.toggle('hidden')===false;
             event.currentTarget.setAttribute('aria-expanded',String(opening));
             event.currentTarget.querySelector('i').className=`fa-solid fa-chevron-${opening?'up':'down'} ml-1`;
-            if(opening) void updateGapScores(); else gapScoresGeneration++;
+            if(opening) {
+                document.getElementById('gapScoresSelect').value='modelConfidence';
+                syncGapScoreMenu();
+                setPhysicsColorMode('model-confidence');
+                void updateGapScores();
+            } else {
+                gapScoresGeneration++;
+                document.getElementById('gapScoresMenu')?.classList.add('hidden');
+                document.getElementById('gapScoresMenuButton')?.setAttribute('aria-expanded','false');
+            }
         });
-        document.getElementById('gapScoresSelect')?.addEventListener('change',()=>void updateGapScores());
+        document.getElementById('gapScoresSelect')?.addEventListener('change',event=>{
+            syncGapScoreMenu();
+            setPhysicsColorMode(gapScoreColorModes[event.currentTarget.value]);
+            void updateGapScores();
+        });
+        {
+            const select=document.getElementById('gapScoresSelect'), trigger=document.getElementById('gapScoresMenuButton'), menu=document.getElementById('gapScoresMenu');
+            if(select && trigger && menu) {
+                const group=document.createElement('div'); group.className='color-menu-group';
+                for(const option of select.options) {
+                    const button=document.createElement('button'); button.type='button'; button.dataset.value=option.value; button.textContent=option.textContent;
+                    button.addEventListener('click',()=>{ select.value=option.value; select.dispatchEvent(new Event('change')); menu.classList.add('hidden'); trigger.setAttribute('aria-expanded','false'); trigger.focus(); });
+                    group.append(button);
+                }
+                menu.append(group);
+                document.body.append(menu);
+                const placeMenu=()=>{
+                    const rect=trigger.getBoundingClientRect(), width=Math.min(240,window.innerWidth-16);
+                    menu.style.left=`${Math.max(8,Math.min(rect.left,window.innerWidth-width-8))}px`;
+                    const height=Math.min(menu.scrollHeight,window.innerHeight-16);
+                    menu.style.top=`${Math.max(8,Math.min(rect.bottom+6,window.innerHeight-height-8))}px`;
+                };
+                trigger.addEventListener('click',()=>{ const opening=menu.classList.toggle('hidden')===false; trigger.setAttribute('aria-expanded',String(opening)); if(opening) placeMenu(); });
+                window.addEventListener('resize',()=>{ if(!menu.classList.contains('hidden')) placeMenu(); });
+                window.addEventListener('scroll',()=>{ if(!menu.classList.contains('hidden')) placeMenu(); },true);
+                document.addEventListener('click',event=>{ if(!menu.contains(event.target) && !trigger.contains(event.target)) { menu.classList.add('hidden'); trigger.setAttribute('aria-expanded','false'); } });
+                document.addEventListener('keydown',event=>{ if(event.key==='Escape' && !menu.classList.contains('hidden')) { menu.classList.add('hidden'); trigger.setAttribute('aria-expanded','false'); trigger.focus(); } });
+                syncGapScoreMenu();
+            }
+        }
         let sequenceChainFilter = null;
         let sequenceRenderedNodes = [];
         let sequenceResidueButtons = [];
@@ -16348,14 +16577,14 @@
         }
         function alignedResidueColor(atom, counterpart, aligned) {
             if (!aligned) return '#64748b';
-            if (!atom || !counterpart) return '#ef4444';
+            if (!atom || !counterpart) return '#0284c7';
             const a = atom.singleChar?.toUpperCase();
             const b = counterpart.singleChar?.toUpperCase();
-            if (!a || !b) return '#ef4444';
-            if (a === b) return '#ef4444';
+            if (!a || !b) return '#0284c7';
+            if (a === b) return '#0284c7';
             // BLOSUM62 measures amino-acid similarity, not nucleotide substitutions.
-            if (atom.entityType === 'nucleotide' || counterpart.entityType === 'nucleotide') return '#ef4444';
-            return isSimilarAA(a, b) ? '#f97316' : '#ef4444';
+            if (atom.entityType === 'nucleotide' || counterpart.entityType === 'nucleotide') return '#0284c7';
+            return isSimilarAA(a, b) ? '#00c9b7' : '#0284c7';
         }
         function physicsResidueColor(atom, mode, aligned = false, counterpart = null) {
             if (mode === 'mutations') { const node=physicsNodes.find(item=>(item.idx2!==null&&item.res.atoms2?.[item.idx2]===atom)||(item.idx1!==null&&item.res.atoms1?.[item.idx1]===atom)); return mutationFeatures(node).length?'#ef4444':'#94a3b8'; }
@@ -16392,15 +16621,18 @@
             menu.querySelectorAll('button[data-color-mode]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.colorMode===physicsColorMode)));
         }
         function setPhysicsColorMode(mode) {
-            const minimalUnavailable=['protein-id','aligned','locked','alpha-chunks','origin','difference','af-difference','rotational-symmetry','pattern-variance','equivalent-protein-shape','keyframe-difference','running-simulation','residue-speed','binding-sites','binding-site-type','mutations','mutation-effect-basic','spring-strain','qmeandisco','secondary'];
+            const minimalUnavailable=['structure-domains','ted-domains','protein-id','aligned','locked','alpha-chunks','origin','difference','af-difference','rotational-symmetry','pattern-variance','equivalent-protein-shape','keyframe-difference','running-simulation','residue-speed','binding-sites','binding-site-type','mutations','mutation-effect-basic','spring-strain','qmeandisco','secondary'];
             if(window.batchMinimalBondData&&(minimalUnavailable.includes(mode)||mode.startsWith('uniprot-'))){syncPhysicsColorMenu();showWarning('This colour mode requires data not saved in a minimal batch result. Use Most data or Full session for these options.');return;}
             if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild?.view==='aligned'){
                 if(['reference','chain','protein','equivalent','aligned','distance'].includes(mode)){multiReferenceBuild.alignedMode=mode;physicsColorMode=mode;syncPhysicsColorMenu();renderStagedPreview();}return;
             }
-            if (!['chain','chain-random','residue-index','uniform','protein-id','rotational-symmetry','pattern-variance','equivalent-protein-shape','keyframe-difference','residue-speed','running-simulation','backbone-issues','steric-clashes','binding-sites','binding-site-type','mutations','mutation-effect-basic','constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','local-confidence','placement-2','placement-5','qmeandisco','element','side-chains','origin','aligned','locked','alpha-chunks','membrane','membrane-placement','charge','hydrophobicity','accessible-surface-area','secondary','plddt','difference','af-difference',...Object.keys(UNI_PROT_FEATURE_MODES)].includes(mode)) return;
+            if (!['structure-domains','ted-domains','chain','chain-random','residue-index','uniform','protein-id','rotational-symmetry','pattern-variance','equivalent-protein-shape','keyframe-difference','residue-speed','running-simulation','backbone-issues','steric-clashes','binding-sites','binding-site-type','mutations','mutation-effect-basic','constraint-confidence','spring-strain','membrane-score','alpha-pae','model-confidence','local-confidence','placement-2','placement-5','qmeandisco','element','side-chains','origin','aligned','locked','alpha-chunks','membrane','membrane-placement','charge','hydrophobicity','accessible-surface-area','secondary','plddt','difference','af-difference',...Object.keys(UNI_PROT_FEATURE_MODES)].includes(mode)) return;
             if(['residue-speed','running-simulation'].includes(mode)&&!['residue-speed','running-simulation'].includes(physicsColorMode))resetResidueSpeedTracking();
             if(mode==='accessible-surface-area')accessibleSurfaceCache=null;
             physicsColorMode = mode;
+            syncGapScoreColor(mode);
+            if(mode==='structure-domains')structureDomainColors=calculateStructureDomains(physicsNodes);
+            if(mode==='ted-domains')void loadTedDomains();
             if(mode==='mutations'&&mutationGeneration!==modelBuildGeneration)void loadMutations();
             renderMutationInfo();
             if(typeof multiReferenceBuild!=='undefined'&&multiReferenceBuild&&stagedLiveView())multiReferenceBuild.liveColorMode=mode;
@@ -16456,7 +16688,7 @@
                 'side-chains':'Backbone: darker chain colour · Side chains: <span style="color:#f59e0b">nonpolar</span> · <span style="color:#c084fc">aromatic</span> · <span style="color:#38bdf8">polar</span> · <span style="color:#fb7185">basic</span> · <span style="color:#4ade80">acidic</span>.',
                 origin:'Origin: <span style="color:#3498db">Reference PDB</span> · <span style="color:#2eccbf">AlphaFold</span> · <span style="color:#31b2cd">Both</span>',
                 'alpha-chunks':'AlphaFold alignment chunks: colours identify the groups shown in build stats; grey residues are outside groups or group data is unavailable.',
-                aligned:'<span style="color:#ef4444">Red</span>: aligned residue · <span style="color:#f97316">Orange</span>: similar, non-identical aligned residue (positive BLOSUM62 score) · <span style="color:#94a3b8">Grey</span>: unaligned residue',
+                aligned:'<span style="color:#0284c7">Blue</span>: aligned residue · <span style="color:#00c9b7">Cyan</span>: similar, non-identical aligned residue (positive BLOSUM62 score) · <span style="color:#94a3b8">Grey</span>: unaligned residue',
                 locked:`<span style="color:#ef4444">Red</span>: locked residue · <span style="color:#94a3b8">Grey</span>: unlocked residue. Reference-sourced aligned residues are locked in draft builds; other aligned residues are locked when farther than ${lockAlignedResiduesDistance} residues from an unaligned region.`,
                 membrane:'<span style="color:#ef4444">Red</span>: helix or sheet residue inside the membrane plates · <span style="color:#f97316">Orange</span>: other membrane-associated residue · <span style="color:#7dd3fc">Light blue</span>: other residues, including helix and sheet portions outside the membrane',
                 'membrane-placement':'Membrane placement influence: <span style="color:#ef4444">red</span> hydrophobic · <span style="color:#2563eb">blue</span> charged · <span style="color:#94a3b8">grey</span> other. Stronger colour means greater exposed-surface influence.',
@@ -16468,11 +16700,14 @@
                 difference:'',
                 'af-difference':'AF-Homology model difference: <span style="color:#38bdf8">small</span> → <span style="color:#facc15">moderate</span> → <span style="color:#ef4444">large</span> displacement after aligning each AlphaFold chain to its current homology chain; grey: no AlphaFold coordinates.'
             };
+            if(mode==='structure-domains')keys[mode]='Domains: helix and sheet residues connected within 7 Å on the same chain, including intervening coil residues. Grey means outside a domain. Re-select Domains to recalculate from current coordinates.';
+            if(mode==='ted-domains')keys[mode]='TED consensus structural domains; grey means unassigned or unavailable.';
             if(UNI_PROT_FEATURE_MODES[mode])keys[mode]=mode==='uniprot-topological'
                 ? 'UniProt topological domains: regions with the same label share a colour family; different shades distinguish regions. Grey means no annotation or no UniProt record. UniProt positions refer to the canonical sequence.'
                 : `UniProt ${UNI_PROT_FEATURE_MODES[mode]}: annotated residues use distinct colours for each feature; grey means no annotation or no UniProt record. UniProt positions refer to the canonical sequence.`;
             const colourKey = document.getElementById('physicsColourKey');
             colourKey.innerHTML = keys[mode]??'';
+            if(mode==='ted-domains')renderTedDomainKey();
             if(mode==='residue-speed'){
                 const scaleLabel=document.createElement('span');
                 scaleLabel.textContent=residueSpeedNormalized?' · Scale: current 95th-percentile protein-residue speed. ':' · Scale: 0–1 Å/s (fixed). ';
@@ -17973,6 +18208,10 @@
             }).filter(Boolean);
             return {generation:modelBuildGeneration,planesVisible:membraneVisible,lipidsVisible,labelsVisible:membraneLabelsVisible,membranes};
         };
+        // The combined model uses aligned, previously centred draft coordinates.
+        // Keep each deposited map in that same frame without changing the map data.
+        function getPhysicsEMSources(){return referenceFiles.map(file=>({...file,placement:EMData.stagedPlacement(file,multiReferenceBuild)}));}
+        window.getEditModelsEMSources = () => getPhysicsEMSources().map(file=>({name:file.pdbId,pdbId:EMData.pdbId(file.text)||file.pdbId,entries:file.format==='mmcif'?EMData.entries(file.text):[],placement:file.placement,offset:{x:physicsCenterOffset.cx,y:physicsCenterOffset.cy,z:physicsCenterOffset.cz}}));
         window.getEditModelsSnapshot = () => {
             if (!physicsNodes?.length) return [];
             const entries = simulationAtomEntries(), coordinates = simulationAtomCoordinates(entries);
@@ -19032,7 +19271,7 @@
             const colorColumns=[
                 [['Main',['running-simulation','chain','chain-random','protein-id','residue-index','secondary','model-confidence','local-confidence','placement-2','placement-5','uniform']],
                  ['Properties',['backbone-issues','steric-clashes','side-chains','element','charge','hydrophobicity','accessible-surface-area','mutations','mutation-effect-basic','residue-speed']]],
-                [['Regions',['binding-sites','binding-site-type','aligned','locked','alpha-chunks','origin']],
+                [['Regions',['structure-domains','ted-domains','binding-sites','binding-site-type','aligned','locked','alpha-chunks','origin']],
                  ['Comparison',['rotational-symmetry','pattern-variance','equivalent-protein-shape','keyframe-difference','difference','af-difference']],
                  ['Scores',['constraint-confidence','alpha-pae','plddt','spring-strain']]],
                 [['Membrane',['membrane','membrane-placement']],
@@ -19305,6 +19544,7 @@
             document.getElementById('themeToggle').addEventListener('click',()=>setLightMode(!document.body.classList.contains('light-mode')));
             initCanvases();
             initThreeJSPhysicsScene();
+            physicsEMController=EMData.createController({host:document.getElementById('physicsOtherSettingsPanel'),toggleHost:document.getElementById('physicsStructureToggleRow'),openSettings:()=>{const button=document.getElementById('physicsOtherSettingsButton');if(button.getAttribute('aria-expanded')!=='true')button.click();},getScene:()=>physicsScene,getOffset:()=>({x:physicsCenterOffset.cx,y:physicsCenterOffset.cy,z:physicsCenterOffset.cz}),getSources:getPhysicsEMSources,redraw:()=>{if(physicsRenderer&&physicsScene&&physicsCamera)physicsRenderer.render(physicsScene,physicsCamera);}});
             setupEventListeners();
             for (const [rowId, label] of [['physicsStructureToggleRow','structure'],['physicsProteinToggleRow','protein'],['physicsResidueToggleRow','residue']]) {
                 const row=document.getElementById(rowId);
@@ -20713,6 +20953,51 @@
             }
             updateAnimationButtons();
         }
+        let animationMembranes=[];
+        async function prepareAnimationMembranes(){
+            if(membranePresenceMode==='no')return animationFrames.map(()=>null);
+            const worker=createMembraneDetectionWorker();
+            const nodes=physicsNodes.map(node=>{
+                const residue=membraneResidue(node);
+                const atom=node.idx2==null?node.res.atoms1?.[node.idx1]:node.res.atoms2?.[node.idx2];
+                const description=(uniProtFeatureAt(atom,'Topological domain')?.description||'').toLowerCase();
+                const topology=['cytoplasmic','periplasmic','extracellular'].find(label=>description.includes(label))||description;
+                return {x:node.x,y:node.y,z:node.z,topology,alignmentWeight:node.idx1!=null&&node.idx2!=null?2:1,blockIdx:node.blockIdx,idx1:0,idx2:null,
+                    res:{entityType:residue?'protein':'other',atoms1:residue?[{singleChar:residue.aa,secondaryType:residue.secondary}]:[]}};
+            });
+            const requireSecond=['cytoplasmic','periplasmic','extracellular'].every(label=>nodes.some(n=>n.topology.includes(label)));
+            try{
+                const results=[];
+                for(const frame of animationFrames){
+                    const coordinates=new Float64Array(physicsNodes.length*3);
+                    for(let i=0;i<physicsNodes.length;i++)coordinates.set(frame.coords[i],i*3);
+                    const data=await new Promise((resolve,reject)=>{
+                        worker.onmessage=event=>event.data.error?reject(Error(event.data.error)):resolve(event.data);
+                        worker.onerror=event=>reject(Error(event.message||'Membrane worker failed'));
+                        worker.postMessage({nodes,coordinates,requireMembrane:membranePresenceMode==='yes'||membranePresenceMode==='yes2'||uniProtMembraneEvidence().length>0,
+                            testSecond:membranePresenceMode!=='yes',requireSecond:membranePresenceMode==='yes2'||requireSecond},[coordinates.buffer]);
+                    });
+                    for(const geometry of [data.geometry,data.secondGeometry])applyMembraneCurvature(geometry,true);
+                    if(results.length){data.geometry=alignMembraneFrame(data.geometry,results.at(-1).geometry);data.secondGeometry=alignMembraneFrame(data.secondGeometry,results.at(-1).secondGeometry);}
+                    results.push(data);
+                }
+                return results;
+            }finally{worker.terminate();}
+        }
+        function interpolateAnimationMembrane(a,b,t){
+            if(!a||!b)return (t<.5?a:b)||null;
+            b=alignMembraneFrame(b,a);
+            const mix=(x,y)=>x+(y-x)*t;
+            const vector=(x,y)=>x.map((v,i)=>mix(v,y[i]));
+            const normal=new THREE.Vector3(...vector(a.normal,b.normal)).normalize();
+            const u=new THREE.Vector3(...vector(a.u,b.u));
+            u.addScaledVector(normal,-u.dot(normal)).normalize();
+            const v=new THREE.Vector3().crossVectors(normal,u).normalize();
+            const result={...(t<.5?a:b),center:vector(a.center,b.center),normal:normal.toArray(),u:u.toArray(),v:v.toArray(),
+                curvature:vector(a.curvature,b.curvature),automaticCurvature:vector(a.automaticCurvature,b.automaticCurvature),
+                extent:mix(a.extent,b.extent),halfThickness:mix(a.halfThickness,b.halfThickness)};
+            return result;
+        }
         async function playAnimation(record=false){
             if(typeof cancelConformationSelectionMorph==='function')cancelConformationSelectionMorph();
             if(animationPreparing){if(conformationOptimization)stopAnimation();return;}
@@ -20736,6 +21021,19 @@
                 if(sharedOffsets)animationFrames[i].atomOffsets=sharedOffsets;else{showAnimationFrame(i);animationFrames[i].atomOffsets=captureAnimationAtomOffsets();if(currentEntry?.autoGenerated)sharedOffsets=animationFrames[i].atomOffsets;}
             }
             showAnimationFrame(0);
+            animationPreparing=true;
+            const membraneToken=++animationPreparationToken;
+            animationEl('animationStatus').textContent='Calculating membrane placement for keyframes…';
+            updateAnimationButtons();
+            try{animationMembranes=await prepareAnimationMembranes();}
+            catch(error){
+                if(membraneToken!==animationPreparationToken)return;
+                animationPreparing=false;physicsRunning=animationResumePhysics;animationResumePhysics=false;
+                animationEl('animationStatus').textContent=`Could not calculate keyframe membranes: ${error.message}`;updateAnimationButtons();return;
+            }
+            if(membraneToken!==animationPreparationToken)return;
+            animationPreparing=false;
+            membraneDetectionGeneration++;membraneDetectionPending=false;membraneInferenceSnapshot=null;
             if(record){
                 animationPreparing=true;
                 const token=++animationPreparationToken;
@@ -20791,6 +21089,10 @@
             const a=animationFrames[index],targetIndex=index<animationFrames.length-1?index+1:(animationLoop?0:index),b=animationFrames[targetIndex];
             const t=targetIndex===index?0:Math.max(0,Math.min(1,remaining/Math.max(1,animationSegmentFrames(a))));
             if(animationSelected!==index){animationSelected=index;applyAnimationSettings(a.settings);renderAnimationTimeline();}
+            const membraneA=animationMembranes[index],membraneB=animationMembranes[targetIndex];
+            inferredMembrane=interpolateAnimationMembrane(membraneA?.geometry,membraneB?.geometry,t);
+            secondMembrane=interpolateAnimationMembrane(membraneA?.secondGeometry,membraneB?.secondGeometry,t);
+            if(inferredMembrane)inferredMembrane.secondGeometry=secondMembrane;
             applyInterpolatedAnimationControls(a,b,t);
             animationAtomOffsets=interpolateAnimationAtomOffsets(a,b,t);
             applyGroupFramePresence(a,b,t);
@@ -21643,6 +21945,17 @@
         }
         // Source-specific exploratory fits apply before simulation to unaligned residues with complete inputs.
         let modelConfidenceCache=null;
+        function lockedResidueConfidence(index){
+            const node=physicsNodes[index];
+            const category=current=>alignedResidueColor(validationAtom(current,'af'),validationAtom(current,'reference'),current.usedInAlignment);
+            let penalty=category(node)==='#00c9b7'?.05:0;
+            for(const neighbor of [physicsNodes[index-1],physicsNodes[index+1]]){
+                if(!neighbor||neighbor.blockIdx!==node.blockIdx||neighbor.res.entityType!=='protein')continue;
+                const color=category(neighbor);
+                penalty+=color==='#00c9b7'?.05:color==='#64748b'?.1:0;
+            }
+            return Math.round((1-penalty)*100)/100;
+        }
         function calculateModelConfidence(){
             const simulated=window.getComplexAiState().simulationStarted!==false;
             const key=[validationState.version,springPaeRevision,activeConformationGroup,stericClashRadius,rigidBodySimulation,physicsLockTargetRevision,simulated].join(':');
@@ -21651,8 +21964,13 @@
             if((validationState.omittedPaeFileIndices?.length||window.batchViewOnlySession)&&saved?.nodes===physicsNodes&&saved.confidence&&saved.activeConformationGroup===activeConformationGroup&&saved.stericClashRadius===stericClashRadius&&saved.rigidBodySimulation===rigidBodySimulation&&saved.simulationStarted===window.getComplexAiState().simulationStarted&&(saved.runtimeLockRevision===undefined||saved.runtimeLockRevision===physicsLockTargetRevision))return saved.confidence;
             const pae=calculateResiduePae();
             const features=simulated?[]:benchmarkFeatures(physicsNodes,n=>validationAtom(n,'af'),n=>validationAtom(n,'reference'),validationState.pae,[],calculateStericClashScores(physicsNodes,stericClashRadius,rigidBodySimulation));
-            const all=physicsNodes.map((node,index)=>node.res.entityType!=='protein'?{local:null,placement2:null,placement5:null,model:null}:node.referenceLockTarget?{local:1,placement2:1,placement5:1,model:1}:!node.usedInAlignment&&!simulated?residueConfidence(features[index],validationAtom(node,'af'),pae[index]):{local:null,placement2:null,placement5:null,model:null});
-            const scores=all.map(x=>x.model),local=all.map(x=>x.local),placement2=all.map(x=>x.placement2),placement5=all.map(x=>x.placement5);
+            const all=physicsNodes.map((node,index)=>node.res.entityType!=='protein'?{local:null,placement2:null,placement5:null,model:null}:node.referenceLockTarget?(()=>{const score=lockedResidueConfidence(index);return {local:score,placement2:1,placement5:1,model:score};})():!node.usedInAlignment&&!simulated?residueConfidence(features[index],validationAtom(node,'af'),pae[index]):{local:null,placement2:null,placement5:null,model:null});
+            let scores=all.map(x=>x.model),local=all.map(x=>x.local),placement2=all.map(x=>x.placement2),placement5=all.map(x=>x.placement5);
+            const build=typeof multiReferenceBuild==='undefined'?null:multiReferenceBuild;
+            if(build?.kind==='combined'&&!build.readingDraftConfidence&&build.drafts?.length&&!build.drafts.some(draft=>draft.viewState.nodes===physicsNodes)&&typeof stagedCombinedConfidence==='function'){
+                const transferred=stagedCombinedConfidence(build);
+                ({scores,local,placement2,placement5}=transferred);
+            }
             const protein=physicsNodes.map((n,i)=>n.res.entityType==='protein'?i:-1).filter(i=>i>=0),unalignedIndices=new Set(protein.filter(i=>!physicsNodes[i].usedInAlignment&&!physicsNodes[i].referenceLockTarget));
             const values=scores.filter(Number.isFinite),unlockedScores=protein.filter(i=>!physicsNodes[i].referenceLockTarget).map(i=>scores[i]).filter(Number.isFinite),unalignedScores=[...unalignedIndices].map(i=>scores[i]).filter(Number.isFinite),locked=protein.filter(i=>physicsNodes[i].referenceLockTarget).length;
             const result={scores,local,placement2,placement5,unalignedIndices,overall:validationMean(unlockedScores),overallIncludingLocked:validationMean(values),unalignedOverall:validationMean(unalignedScores),locked,aligned:protein.filter(i=>physicsNodes[i].usedInAlignment).length,total:protein.length,scored:values.length,partial:unalignedIndices.size-unalignedScores.length,simulated};
@@ -22368,7 +22686,7 @@
         function validationNodeColor(index,mode){
             if(index===undefined||index<0||!physicsNodes[index]||physicsNodes[index].res.entityType!=='protein')return '#64748b';
             if(mode==='membrane-score')return validationColor('confidence',validationMembraneDetectionConfidence());
-            if(physicsNodes[index].referenceLockTarget&&['constraint-confidence','model-confidence','local-confidence','placement-2','placement-5'].includes(mode))return document.getElementById('showLockedConfidence')?.checked?modelConfidenceColor(1):'#374151';
+            if(physicsNodes[index].referenceLockTarget&&['constraint-confidence','model-confidence','local-confidence','placement-2','placement-5'].includes(mode)){const node=physicsNodes[index],similar=alignedResidueColor(validationAtom(node,'af'),validationAtom(node,'reference'),node.usedInAlignment)==='#00c9b7';const field=mode==='placement-2'?'placement2':mode==='placement-5'?'placement5':'scores';return similar||document.getElementById('showLockedConfidence')?.checked?modelConfidenceColor(calculateModelConfidence()[field][index]):'#374151';}
             if(['model-confidence','local-confidence','placement-2','placement-5'].includes(mode)){const field={'model-confidence':'scores','local-confidence':'local','placement-2':'placement2','placement-5':'placement5'}[mode],score=calculateModelConfidence()[field][index];return Number.isFinite(score)?modelConfidenceColor(score):'#64748b';}
             if(mode==='alpha-pae'){const score=calculateResiduePae()[index];return Number.isFinite(score)?new THREE.Color('#38bdf8').lerp(new THREE.Color('#ef4444'),validationClamp(score/30)).getStyle():'#64748b';}
             const compact=validationState.compactResidueData,compactField=mode==='constraint-confidence'?'constraint':mode==='spring-strain'?'strain':null;
@@ -22626,6 +22944,7 @@ function physicsComparisonValues(mode){
     return physicsNodes.map((node,i)=>{
         const atom=node.idx2!==null?node.res.atoms2?.[node.idx2]:null,ref=node.idx1!==null?node.res.atoms1?.[node.idx1]:null,source=atom||ref;
         if(scores)return scores[i]??null;
+        if(mode==='ted-domains'){const domain=tedDomainAt(source);return domain?`${uniProtAccession(source.sourcePdbId)}: ${domain.id.split('_').pop()} (${domain.boundaries})`:null;}
         if(UNI_PROT_FEATURE_MODES[mode]){if(!atom||!uniProtAnnotationForAtom(atom))return null;const f=uniProtFeatureAt(atom,UNI_PROT_FEATURE_MODES[mode]);return f?`${uniProtAccession(atom.sourcePdbId)}: ${f.description||f.type} (${f.start}–${f.end})`:'No annotation';}
         switch(mode){
             case 'running-simulation':{

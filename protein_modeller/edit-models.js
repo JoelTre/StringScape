@@ -6,6 +6,7 @@
         panel.className = 'edit-models-panel';
         panel.innerHTML = `<h2>Model editor (beta)</h2>
           <details class="edit-visibility-section"><summary><i class="fa-solid fa-eye" aria-hidden="true"></i> Visibility toggles <i class="edit-visibility-chevron fa-solid fa-chevron-down" aria-hidden="true"></i></summary><div class="edit-visibility" data-visibility></div></details>
+          <details class="edit-visibility-section"><summary><i class="fa-solid fa-sliders" aria-hidden="true"></i> Other settings <i class="edit-visibility-chevron fa-solid fa-chevron-down" aria-hidden="true"></i></summary><div data-other-settings></div></details>
           <div class="edit-row"><label>Style <select data-style><option value="balls">Atoms</option><option value="backbone">Backbone</option></select></label>
           <label>Colour proteins by <select data-colour><option value="chain">Chain</option><option value="element">Element</option><option value="model">Model</option></select></label></div>
           <div class="edit-row"><label>Select <select data-mode><option value="chain">Chain/polynucleotide</option><option value="model">Model</option></select></label><button type="button" data-sequences><i class="fa-solid fa-align-left"></i> View sequences</button></div>
@@ -66,7 +67,7 @@
         }
 
         let selection = [], renderer, scene, camera, cloud, bonds, membraneGroup, gizmo, cloudItems = [], firstSnapshot = false, cameraTarget = null, alignmentBusy = false;
-        let distance = 100, pointer = null, lipidRenderers = [];
+        let distance = 100, pointer = null, lipidRenderers = [], emController;
         const palette = [0x60a5fa,0xf472b6,0x34d399,0xfbbf24,0xc084fc,0xfb923c,0x22d3ee,0xa3e635];
         const elementColours = ELEMENT_COLORS;
         function status(text) { q('[data-status]').textContent = text; }
@@ -357,6 +358,7 @@
                     });bonds.instanceMatrix.needsUpdate=true;if(bonds.instanceColor)bonds.instanceColor.needsUpdate=true;scene.add(bonds);
                 }
             }
+            emController?.sync();
             updateGizmo();draw();
         }
         function pick(event) {
@@ -376,6 +378,7 @@
                     structures.append(makeButton(`${model.name}: Membrane labels`,model.membraneLabelsVisible!==false,'#7dd3fc',()=>{model.membraneLabelsVisible=model.membraneLabelsVisible===false;visibility();render();}));
                 }
             });box.append(structures);
+            if(emController?.button)structures.append(emController.button);
             const chains=document.createElement('div');chains.className='edit-visibility-row';const chainLabel=document.createElement('span');chainLabel.className='edit-visibility-label';chainLabel.textContent='Chain toggles:';chains.append(chainLabel);let index=0;
             const water=[];
             for(const model of state.models)for(const chain of model.shared.chains){
@@ -444,8 +447,8 @@
                     try {
                         const response=await fetch(`https://files.rcsb.org/download/${id}.cif`);
                         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                        const atoms=window.parseEditModelsStructure(await response.text(),'mmcif');
-                        const model=state.addModel(id,atoms);state.detectSymmetry(model,hornQuaternionSuperposition); loaded.push(id);
+                        const text=await response.text();const atoms=window.parseEditModelsStructure(text,'mmcif');
+                        const model=state.addModel(id,atoms);model.emSources=[{name:id,pdbId:id,entries:EMData.entries(text)}];state.detectSymmetry(model,hornQuaternionSuperposition); loaded.push(id);
                     } catch(error) { failed.push(`${id} (${error.message})`); }
                 }
                 visibility(); sequences(); render(); if (loaded.length) fit();
@@ -453,7 +456,7 @@
             } finally { button.disabled=false; }
         });
         q('[data-upload]').addEventListener('click',()=>q('[data-files]').click());
-        q('[data-files]').addEventListener('change',async event=>{for(const file of event.target.files){try{const format=/\.(cif|mmcif)$/i.test(file.name)?'mmcif':'pdb',text=await file.text();const atoms=window.parseEditModelsStructure(text,format),membranes=format==='mmcif'?window.EditModelsState.parseMembranes(text):[];const model=state.addModel(file.name,atoms,membranes);state.detectSymmetry(model,hornQuaternionSuperposition);status(`Loaded ${file.name}.`);}catch(error){status(`Could not load ${file.name}: ${error.message}`);}}event.target.value='';visibility();sequences();render();fit();});
+        q('[data-files]').addEventListener('change',async event=>{for(const file of event.target.files){try{const format=/\.(cif|mmcif)$/i.test(file.name)?'mmcif':'pdb',text=await file.text();const atoms=window.parseEditModelsStructure(text,format),membranes=format==='mmcif'?window.EditModelsState.parseMembranes(text):[];const model=state.addModel(file.name,atoms,membranes);model.emSources=[{name:file.name,pdbId:EMData.pdbId(text),entries:format==='mmcif'?EMData.entries(text):[]}];state.detectSymmetry(model,hornQuaternionSuperposition);status(`Loaded ${file.name}.`);}catch(error){status(`Could not load ${file.name}: ${error.message}`);}}event.target.value='';visibility();sequences();render();fit();});
         q('[data-duplicate]').addEventListener('click',()=>{if(!selection.length||selection.some(item=>item.model!==selection[0].model))return;const source=selection[0].model, chains=selection.some(item=>!item.chain)?source.shared.chains:selection.map(item=>item.chain);const model=state.duplicateModel(source,chains);selection=[{model,chain:null}];visibility();sequences();updateFields();render();fit();});
         function deleteSelection(){
             if(!selection.length||alignmentBusy)return;
@@ -500,11 +503,12 @@
             if(!data){state.models=[];state.nextId=1;firstSnapshot=false;}else{if(!Array.isArray(data.models)||!Number.isInteger(data.nextId))throw new Error('Invalid model editor session data.');state.models=data.models;state.nextId=data.nextId;firstSnapshot=!!data.firstSnapshot;}
             selection=[];alignmentGroups[0]=alignmentGroups[1]=null;updateAlignmentGroups();visibility();sequences();updateFields();render();
         };
-        updateFields();
+        emController=EMData.createController({host:q('[data-other-settings]'),toggleHost:q('[data-visibility]'),openSettings:()=>{q('[data-other-settings]').closest('details').open=true;},getScene:()=>scene,getOffset:()=>({x:0,y:0,z:0}),getSources:()=>state.models.flatMap(model=>model.emSources||[]),redraw:()=>{if(renderer)draw();}});
+        visibility();updateFields();
         return {panel,viewer,show(){try{
             init();
             if(!firstSnapshot){
-                const atoms=window.getEditModelsSnapshot();if(atoms.length){const source=window.getEditModelsMembraneSnapshot(),model=state.addModel('Homology model',atoms,source.membranes,source.planesVisible);model.lipidsVisible=source.lipidsVisible;model.membraneLabelsVisible=source.labelsVisible;model.homologyGeneration=source.generation;const symmetry=window.getEditModelsSymmetrySnapshot();model.symmetryAxes=symmetry.generation===source.generation&&symmetry.axes.length?symmetry.axes:state.detectSymmetry(model,hornQuaternionSuperposition);firstSnapshot=true;visibility();sequences();render();fit();}
+                const atoms=window.getEditModelsSnapshot();if(atoms.length){const source=window.getEditModelsMembraneSnapshot(),model=state.addModel('Homology model',atoms,source.membranes,source.planesVisible);model.lipidsVisible=source.lipidsVisible;model.membraneLabelsVisible=source.labelsVisible;model.emSources=window.getEditModelsEMSources();model.homologyGeneration=source.generation;const symmetry=window.getEditModelsSymmetrySnapshot();model.symmetryAxes=symmetry.generation===source.generation&&symmetry.axes.length?symmetry.axes:state.detectSymmetry(model,hornQuaternionSuperposition);firstSnapshot=true;visibility();sequences();render();fit();}
             } else {
                 const model=state.models.find(item=>item.homologyGeneration!==undefined);
                 if(model&&!model.symmetryAxes?.length){const symmetry=window.getEditModelsSymmetrySnapshot();if(symmetry.generation===model.homologyGeneration&&symmetry.axes.length)model.symmetryAxes=symmetry.axes;}

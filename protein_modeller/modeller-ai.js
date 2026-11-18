@@ -23,14 +23,13 @@
         const link=document.createElement('a');link.href=url;link.download='all-ai-dialogue.html';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
     }
     document.getElementById('downloadAiDialogue')?.addEventListener('click',downloadDialogue);
-    const SYSTEM_PROMPT = `You select experimental PDB reference structures for homology modelling of a protein complex.
+    const SYSTEM_PROMPT = `You select experimental PDB reference structures for modelling of a protein complex.
 Use only the supplied rows; never invent IDs or metadata.
 First identify the protein or complex the user actually requested. Compare PDB titles, chain/protein names, UniProt IDs and mapping details. Reject unrelated enzymes, similarly named proteins, and isolated domains/subunits when the requested intact complex is represented. Search score is supporting evidence, not proof of identity. Respect explicit species, composition, ligand or state requirements; homologous species can be useful when the query allows them. If identity is ambiguous or no row is suitable, return no IDs and explain the uncertainty.
-If the user asked for specific components, cover each requested component with suitable references (i.e., pick reference PDBs that cover each requested component); do not reject a requested subcomplex merely because another hit covers the larger assembly. Explain which selected PDB covers each component.
-Ideally choose PDBs that contain many proteins, so long as they are relevant to the user's request. Among entries for the SAME protein complex, prefer a compact, nonredundant set representing distinct conformational or functional states explicitly supported by titles: activated/inhibited, state A/B, open/closed, ligand-bound/unbound (in other words, if there are PDBs for different confomational states of the protein complex the user asked for, pick those PDB IDs to show the range of conformations). Distinguish ligand occupancy from a demonstrated conformational change: do not claim titles prove a structural transition. Do not mix unrelated complexes merely to obtain diverse state names. Avoid redundant entries of the same state unless composition or coverage justifies them (like if they contain a different, but overlapping, set of prtoteins). A single relevant entry is better than adding an unrelated or unsupported state. If the user query is general ("a key neuron protein"), just pick any PDB that would fit the general request. Select up to 5 references, prioritising identity and useful complex coverage before state diversity. Do not infer resolution or quality absent from the rows. To summarise, pick PDBs that contain many proteins, are of the complex the user asked for,cover all requested components, and represent distinct conformational or functional states when supported by titles.,
-Assign selected references to groups of compatible conformations of the requested assembly. Keep different conformations of the SAME component in separate groups to avoid averaging their coordinates. Membership is many-to-many: add any reference structure that does not change conformation to EVERY compatible group for the other components, reusing its draft instead of creating a separate group. For example, with C-ring state A (1AAA), C-ring state B (2BBB), and MS-ring (3CCC) with no distinct conformations, use [{"name":"C-ring state A","pdbIds":["1AAA","3CCC"]},{"name":"C-ring state B","pdbIds":["2BBB","3CCC"]}]. Do not invent a conformational change for the MS-ring or other shared components; explain uncertainty. If no distinct conformations are supported, use one combined group containing all selected references. Include every selected ID in at least one group, only selected IDs, and no duplicate IDs within a group.
+Ideally choose PDBs that contain many proteins, so long as they are relevant to the user's request. Among entries for the SAME protein complex, prefer a compact, nonredundant set representing distinct conformational or functional states explicitly supported by titles: activated/inhibited, state A/B, open/closed, ligand-bound/unbound (in other words, if there are PDBs for different confomational states of the protein complex the user asked for, pick those PDB IDs to show the range of conformations, unless the conformationas are ligan-bound/unbound or different mutations, then just pick one reference unless the user specifically asks for those different states). Distinguish ligand occupancy from a demonstrated conformational change: do not claim titles prove a structural transition. Do not mix unrelated complexes merely to obtain diverse state names. Avoid redundant entries of the same state unless composition or coverage justifies them (like if they contain a different, but overlapping, set of prtoteins). A single relevant entry is better than adding an unrelated or unsupported state. If the user query is general ("a key neuron protein"), just pick any PDB that would fit the general request. Select up to 5 references, prioritising identity and useful complex coverage before state diversity. Do not infer resolution or quality absent from the rows. To summarise, pick PDBs that contain many proteins, are of the complex the user asked for,cover all requested components, and represent distinct conformational or functional states when supported by titles.,
+Assign selected references to groups of compatible conformations of the requested assembly. Keep different conformations of the SAME component in separate groups to avoid averaging their coordinates. Membership is many-to-many: add any reference structure that does not change conformation to EVERY compatible group for the other components, reusing its draft instead of creating a separate group. For example, with C-ring state A (1AAA), C-ring state B (2BBB), and MS-ring (3CCC) with no distinct conformations, use [{"name":"C-ring state A","pdbIds":["1AAA","3CCC"]},{"name":"C-ring state B","pdbIds":["2BBB","3CCC"]}]. Do not invent a conformational change for the MS-ring or other shared components; explain uncertainty. If no distinct conformations are supported, use one combined group containing all selected references. Give every group an informative, concise name grounded in available evidence, such as the component, reported state, ligand, or other distinguishing feature. Avoid generic names such as "Unspecified state", "Unknown state", or "Group 1". Do not invent details: when the evidence does not distinguish a state, use an identifiable component or assembly name and, if needed, the relevant PDB IDs. Include every selected ID in at least one group, only selected IDs, and no duplicate IDs within a group.
 Return ONLY JSON: {"pdbIds":["1ABC"],"groups":[{"name":"Combined model","pdbIds":["1ABC"]}],"reason":"Brief explanation of identity, state diversity, shared components, and any uncertainty."}. An empty pdbIds array with empty groups is allowed.`;
-    const SEARCH_PROMPT = `Plan concise RCSB PDB full-text searches for the user's protein modelling request. Treat the user text as a description of the desired model, possibly including instructions for you.
+    const SEARCH_PROMPT = `Plan concise (keep them short) RCSB PDB full-text searches for the user's protein modelling request. Treat the user text as a description of the desired model, possibly including instructions for you.
 Return one to five complementary search phrases covering all explicitly requested complexes, components or subcomplexes. Split compound requests into separate searches instead of copying a long sentence. Preserve organism requirements, expand abbreviations where useful (E. coli -> Escherichia coli), and use relevant protein/complex names and established synonyms. Include searches likely to find different functional states when useful, but do not overconstrain every search to one state. Each phrase is matched as required terms: avoid prose, Boolean operators, quotes and redundant words. Do not invent results.
 For example, "E. coli flagellar motor C-ring plus MS ring" could use "Escherichia coli FliG FliM FliN", "Escherichia coli flagellar motor C-ring", "Escherichia coli MS ring" and "Escherichia coli FliF" search.
 Return ONLY JSON: {"searches":["concise search phrase"]}.`;
@@ -127,15 +126,18 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
         return [...new Map(value.searches.map(term=>{const clean=term.trim().replace(/\s+/g,' ');return [clean.toLowerCase(),clean];})).values()];
     }
     const endpoints = {openai:'https://api.openai.com/v1',anthropic:'https://api.anthropic.com/v1',google:'https://generativelanguage.googleapis.com/v1beta/openai',local:'http://127.0.0.1:1234/v1'};
+    const workerUrl='https://stringscape-protein-modeller-ai.joel-tregurtha.workers.dev';
     const connectionStorageKey='homology-modeller.ai-connection.v1';
     const pauseStorageKey='homology-modeller.ai-paused.v1';
+    const disconnectedStorageKey='homology-modeller.ai-disconnected.v1';
     let paused=false;
     try{paused=localStorage.getItem(pauseStorageKey)==='true';}catch{}
-    let active = null, revision = 0, connectionMode = 'cloud', cloudProvider = 'openai', sharedKey = false;
+    let active = null, revision = 0, connectionMode = 'free', cloudProvider = 'openai';
     let useController = new AbortController();
     function updatePauseButton(){const button=el('Pause');button.disabled=!active;button.textContent=paused?'Resume AI use':'Pause AI use';button.setAttribute('aria-pressed',String(paused));}
     const el = id => document.getElementById('modellerAi'+id);
     function config() {
+        if(connectionMode==='free')return {provider:'free',apiBase:workerUrl,apiKey:'',model:'gpt-6-luna'};
         const provider = connectionMode === 'local' ? 'local' : el('Provider').value;
         const url = new URL(el('Url').value.trim());
         if (url.username || url.password || url.search || url.hash) throw new Error('API URL must not contain credentials, a query or a fragment.');
@@ -155,9 +157,9 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
     }
     async function request(c, path, body) {
         const entry=body?recordRequest(c,body):null;
-        const response = await fetch(c.apiBase+path,{method:body?'POST':'GET',headers:headers(c),...(body?{body:JSON.stringify(body)}:{}),signal:body?AbortSignal.any([useController.signal,AbortSignal.timeout(90000)]):AbortSignal.timeout(90000)});
-        if (!response.ok) {if(entry)entry.response={error:`HTTP ${response.status}`};throw new Error(`AI provider returned HTTP ${response.status}. Check your key, model and server CORS settings.`);}
-        const data=await response.json();if(entry)entry.response=data;return data;
+        const response = await fetch(c.apiBase+(c.provider==='free'?'':path),{method:body?'POST':'GET',headers:headers(c),...(body?{body:JSON.stringify(c.provider==='free'?{messages:body.messages,stream:false}:body)}:{}),signal:body?AbortSignal.any([useController.signal,AbortSignal.timeout(90000)]):AbortSignal.timeout(90000)});
+        if (!response.ok) {const error=await response.json().catch(()=>({}));if(c.provider==='free'&&(error.budget||error.budgetUsedPercent!=null))updateBudget(error.budget||{usedPercent:error.budgetUsedPercent});if(entry)entry.response={error:`HTTP ${response.status}`};throw new Error(error.error||`AI provider returned HTTP ${response.status}. Check your connection settings.`);}
+        const data=await response.json();if(c.provider==='free'&&data.budget)updateBudget(data.budget);if(entry)entry.response=data;return data;
     }
     function parseDecision(text, results, maxReferences=5) {
         const value = JSON.parse(String(text).trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,''));
@@ -255,7 +257,7 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
         const body=anthropic?{model:c.model,max_tokens:4096,system,messages,stream:true,...(tools.length?{tools:tools.map(tool=>({name:tool.name,description:tool.description,input_schema:tool.parameters}))}:{})}
             :{model:c.model,messages:[{role:'system',content:system},...messages],stream:true,...(tools.length?{tools:tools.map(tool=>({type:'function',function:tool}))}:{})};
         let entry;
-        const send=()=>{entry=typeof recordRequest==='function'?recordRequest(c,body):{};return fetch(c.apiBase+(anthropic?'/messages':'/chat/completions'),{method:'POST',headers:headers(c),body:JSON.stringify(body),signal:AbortSignal.any([...(signal?[signal]:[]),useController.signal,AbortSignal.timeout(180000)])});};
+        const send=()=>{entry=typeof recordRequest==='function'?recordRequest(c,body):{};return fetch(c.apiBase+(c.provider==='free'?'':anthropic?'/messages':'/chat/completions'),{method:'POST',headers:headers(c),body:JSON.stringify(c.provider==='free'?{messages:body.messages,stream:true}:body),signal:AbortSignal.any([...(signal?[signal]:[]),useController.signal,AbortSignal.timeout(180000)])});};
         function plainToolHistory(history){
             const plain=[];
             for(const message of history){
@@ -278,11 +280,15 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
         async function errorDetail(response){
             try{
                 const data=await response.json();
+                if(c.provider==='free'&&(data?.budget||data?.budgetUsedPercent!=null))updateBudget(data.budget||{usedPercent:data.budgetUsedPercent});
                 const message=typeof data?.error==='string'?data.error:data?.error?.message||data?.message;
                 return typeof message==='string'?message.replace(/\b(?:Bearer\s+|sk-[A-Za-z0-9_-]+)[^\s,;]*/gi,'[redacted]').replace(/\s+/g,' ').slice(0,500):'';
             }catch{return '';}
         }
-        let response=await send(),toolsUnavailable=false,fallbackMessages=null,initialDetail='';
+        let toolsUnavailable=c.provider==='free'&&tools.length>0,fallbackMessages=null,initialDetail='';
+        if(toolsUnavailable){delete body.tools;fallbackMessages=plainToolHistory(messages);const instruction=tools.some(tool=>tool.name==='Search_PDB')?'Native tools are unavailable. Request a search with JSON {"tool":"Search_PDB" or "Search_PubMed","query":"terms"}, inspect IDs with {"tool":"View_info_for_PDB_IDs","pdbIds":["1ABC"]}, or return your final JSON decision.':'Native tools are unavailable. You can still request a PubMed search through the app. Return ONLY JSON: {"tool":"View_app_info","arguments":{}} for app information, {"tool":"Get_chain_sequences","arguments":{}} to inspect chains, {"tool":"Get_protein_annotations","arguments":{"accession":"..."}} for annotations, {"tool":"Get_model_context","arguments":{}} to list model sections or {"tool":"Get_model_context","arguments":{"section":"all"}} for full model data, {"tool":"Get_current_selection","arguments":{}} for the selection, {"tool":"List_binding_sites","arguments":{}} to list binding sites, {"tool":"Get_binding_site","arguments":{"site":"exact ID or name"}} for site details, {"tool":"Select_model_entity","arguments":{...}} to select, {"editAnimation":"description"} to edit animation, {"query":"PubMed search terms"} to search, or {"answer":"your answer"}. Do not claim to have searched PubMed until the app supplies results.';body.messages=[{role:'system',content:system+'\n'+instruction},...fallbackMessages];}
+        let response=await send();
+        if(c.provider==='free'){const percent=response.headers.get('X-Budget-Used-Percent');if(percent!==null)updateBudget({usedPercent:Number(percent)});}
         // Some providers reject native tools, including after returning a tool call.
         // Preserve the actual search results as ordinary messages for the retry.
         if(!response.ok&&[400,422].includes(response.status)&&tools.length){
@@ -313,7 +319,7 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
         const reader=response.body.getReader(),decoder=new TextDecoder();let pending='',text='',finished=false;const calls=new Map();
         function consume(event){
             if(event==='[DONE]'){finished=true;return;}
-            const data=JSON.parse(event);if(data.error)throw Error(data.error.message||'AI stream failed.');
+            const data=JSON.parse(event);if(c.provider==='free'&&data.budget)updateBudget(data.budget);if(data.error)throw Error(data.error.message||'AI stream failed.');
             if(version!==revision)throw Error('AI connection changed. Refresh the summary.');
             if(data.type==='message_stop')finished=true;
             if(data.type==='content_block_start'&&data.content_block.type==='tool_use')calls.set(data.index,{id:data.content_block.id,name:data.content_block.name,arguments:''});
@@ -334,13 +340,57 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
         return {text,calls:[...calls.values()],anthropic,toolsUnavailable,fallbackMessages};
     }
 
+    function nextWeeklyReset(now=Date.now()) {
+        const date=new Date(now), days=(8-date.getUTCDay())%7||7;
+        return Date.UTC(date.getUTCFullYear(),date.getUTCMonth(),date.getUTCDate()+days);
+    }
     window.ModellerAI = {streamComplex,searchReferences,assignReferenceGroups,connected:()=>!!active&&!paused,planSearches,retrySearches,summarizeSearchFailure,chooseReferences};
     // Pure selection validation is also used by the offline regression suite.
-    if (typeof module !== 'undefined') module.exports = {parseDecision,parseSearchPlan,searchRoundHistory,requestSearchPlan,referencePrompt,FLAGELLAR_GUIDANCE,SYSTEM_PROMPT,SEARCH_PROMPT,RETRY_PROMPT,SUMMARY_PROMPT};
+    if (typeof module !== 'undefined') module.exports = {nextWeeklyReset,parseDecision,parseSearchPlan,searchRoundHistory,requestSearchPlan,referencePrompt,FLAGELLAR_GUIDANCE,SYSTEM_PROMPT,SEARCH_PROMPT,RETRY_PROMPT,SUMMARY_PROMPT};
     if (!el('Open')) return;
-    let loadTimer, modelsPending = false;
+    let loadTimer, modelsPending = false, budgetUsed=null, globalBudgetUsed=null, budgetResetAt=nextWeeklyReset(), globalBudgetResetAt=null, lastGlobalResetRefresh=0, budgetRefreshPending=false;
+    function renderBudgetReset() {
+        if(Date.now()>=budgetResetAt){
+            budgetResetAt=nextWeeklyReset();
+            if(!budgetRefreshPending){budgetRefreshPending=true;void fetchBudget().finally(()=>{budgetRefreshPending=false;});}
+        }
+        const countdown=timestamp=>{const minutes=Math.ceil(Math.max(0,timestamp-Date.now())/60000), days=Math.floor(minutes/1440), hours=Math.floor(minutes%1440/60), mins=minutes%60;return `${days} days ${hours} hrs ${mins} mins`;};
+        const text=`Your Free AI use will reset in ${countdown(budgetResetAt)}.`;
+        const globalText=globalBudgetResetAt===null?'Global Free AI reset time unavailable.':`Global Free AI use will reset in ${countdown(globalBudgetResetAt)}.`;
+        if(el('BudgetReset').textContent!==text)el('BudgetReset').textContent=text;
+        const personalLimit=budgetUsed!==null&&budgetUsed>=100, globalLimit=globalBudgetUsed!==null&&globalBudgetUsed>=100;
+        const limitText=[personalLimit?text:'',globalLimit?globalText:''].filter(Boolean).join(' ');
+        if(el('LimitReset').textContent!==limitText)el('LimitReset').textContent=limitText;
+        el('LimitHeading').textContent=personalLimit&&globalLimit?'Weekly and global free AI use limits reached.':globalLimit?'Global free AI use limit reached.':'Weekly free AI use limit reached.';
+        if(el('GlobalBudgetReset').textContent!==globalText)el('GlobalBudgetReset').textContent=globalText;
+        if(globalBudgetResetAt!==null&&Date.now()>=globalBudgetResetAt&&!budgetRefreshPending&&Date.now()-lastGlobalResetRefresh>=60000){lastGlobalResetRefresh=Date.now();budgetRefreshPending=true;void fetchBudget().finally(()=>{budgetRefreshPending=false;});}
+        el('LimitNotice').hidden=!(active?.provider==='free' && (personalLimit||globalLimit));
+    }
+    setInterval(renderBudgetReset,1000);
+    function updateBudget(budget) {
+        const n=Number(budget?.usedPercent);if(!Number.isFinite(n))return;
+        budgetUsed=Math.max(0,Math.min(100,n));
+        const used=budgetUsed, label=`${Math.round(used)}% used`;
+        const ring=el('BudgetRing'), text=el('BudgetLabel');if(!ring||!text)return;
+        ring.setAttribute('stroke-dasharray',`${100-used} 100`);ring.style.strokeLinecap=used>=100?'butt':'round';text.textContent=label;
+        if(budget.global?.resetAt!==undefined){const reset=Date.parse(budget.global.resetAt);globalBudgetResetAt=Number.isFinite(reset)?reset:null;}
+        if(budget.global && budget.global.usedPercent!=null && Number.isFinite(Number(budget.global.usedPercent))){
+            const globalUsed=Math.max(0,Math.min(100,Number(budget.global.usedPercent)));globalBudgetUsed=globalUsed;
+            const globalRing=el('GlobalBudgetRing');globalRing.setAttribute('stroke-dasharray',`${100-globalUsed} 100`);globalRing.style.strokeLinecap=globalUsed>=100?'butt':'round';
+            el('GlobalBudgetLabel').textContent=`Across all users (outer ring): ${Math.round(globalUsed)}% used this month`;
+        }
+        ring.closest('.ai-budget-ring').setAttribute('aria-label',`Your weekly allowance: ${label}; ${Math.round(100-used)}% remaining. ${el('GlobalBudgetLabel').textContent}`);
+        renderBudgetReset();
+    }
+    async function fetchBudget(){
+        try{const response=await fetch(workerUrl,{signal:AbortSignal.timeout(15000)});if(!response.ok)throw Error();const data=await response.json();if(!data.budget||!Number.isFinite(Number(data.budget.usedPercent)))throw Error();updateBudget(data.budget);}
+        catch{el('BudgetLabel').textContent='Unavailable';el('GlobalBudgetLabel').textContent='Across all users (outer ring): unavailable';el('BudgetRing').closest('.ai-budget-ring').setAttribute('aria-label','Budget information unavailable');}
+    }
     function updateConnectButton() {
-        el('Connect').disabled = modelsPending || !el('Model').value;
+        let matches=false;
+        try { const current=config(); matches=!!active && ['provider','apiBase','apiKey','model'].every(key=>active[key]===current[key]); } catch {}
+        el('Connect').textContent=matches?'Connected':'Connect';
+        el('Connect').disabled=matches || (connectionMode!=='free' && (modelsPending || !el('Model').value));
     }
     const pickers = {};
     function closeMenus() {
@@ -428,79 +478,39 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
         invalidateModels();
         if(connectionMode==='local'||el('Key').value.trim())loadTimer=setTimeout(loadModels,500);
     }
-    function updateSharedKeyControls() {
-        el('Key').disabled=sharedKey;
-        el('DifferentKey').hidden=!sharedKey;
-    }
     function providerChanged() {
-        updateSharedKeyControls();
+        const free=connectionMode==='free';
+        el('Budget').hidden=!free;el('UrlLabel').hidden=free;el('ModelLabel').hidden=free;el('Help').hidden=free;
+        el('Mode').querySelectorAll('button').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.mode===connectionMode)));
+        if(free){invalidateModels();el('ProviderLabel').hidden=true;el('ProviderLabel').style.display='none';el('KeyLabel').hidden=true;el('KeyLabel').style.display='none';el('Privacy').textContent='StringScape does not record any user messages. Encrypted IP addresses are stored to set budgets.';updateConnectButton();void fetchBudget();return;}
         const local=connectionMode==='local';
         el('Url').value=endpoints[local?'local':el('Provider').value];
-        el('Shared').hidden=local || !window.SharedAIKey;
         el('KeyLabel').hidden=local;
         el('KeyLabel').style.display=local?'none':'';
         el('ProviderLabel').hidden=local;
         el('ProviderLabel').style.display=local?'none':'';
-        el('Privacy').textContent=sharedKey ? 'Shared access is kept in memory for this page session. The key is accessible to anyone using it and requests are sent to the provider. Cloud API charges may apply.' : local
+        el('Privacy').textContent=local
             ? 'Search queries (or input sequences) and result tables are sent to your local server to select references. No cloud API key is needed.'
             : 'Connecting saves your API key and connection settings in this browser for automatic reconnection. The key is masked here but stored in browser site storage, not an encrypted password vault. Disconnect removes the saved connection. Searches send your query (or input sequences) and results to your provider. Cloud API charges may apply.';
         el('Help').textContent=local?'In LM Studio, load a model, enable CORS in the developer server settings, and start the server.':'Enter an API key from your provider. Models load automatically; then choose a chat model.';
         pickers.Provider?.refresh();
         scheduleModels();
     }
-    el('Open').addEventListener('click',()=>el('Dialog').showModal());
+    el('Open').addEventListener('click',()=>{el('Dialog').showModal();if(connectionMode==='free')void fetchBudget();});
     el('Close').addEventListener('click',()=>el('Dialog').close());
-    el('Provider').addEventListener('change',()=>{if(sharedKey){sharedKey=false;el('Key').value='';}cloudProvider=el('Provider').value;providerChanged();});
-    el('Mode').addEventListener('click',()=>{
-        if(sharedKey){sharedKey=false;el('Key').value='';}
-        connectionMode=connectionMode==='cloud'?'local':'cloud';
-        const local=connectionMode==='local';
-        el('Mode').dataset.mode=connectionMode;
-        el('Mode').setAttribute('aria-pressed',String(local));
-        el('Mode').setAttribute('aria-label',local?'Switch to Cloud AI':'Switch to Local LLM');
-        el('Provider').value=cloudProvider;
-        providerChanged();
+    el('Provider').addEventListener('change',()=>{cloudProvider=el('Provider').value;providerChanged();});
+    el('Mode').addEventListener('click',event=>{
+        const button=event.target.closest('button[data-mode]');if(!button)return;
+        connectionMode=button.dataset.mode;el('Provider').value=cloudProvider;providerChanged();
     });
     el('Url').addEventListener('input',scheduleModels);
-    el('Key').addEventListener('input',()=>{sharedKey=false;scheduleModels();});
-    async function unlockSharedKey(passcode,{autoConnect=false}={}) {
-        const data=window.SharedAIKey;
-        try {
-            if (!data || data.version!==1 || !['openai','anthropic','google'].includes(data.provider) || data.iterations!==600000) throw new Error('Invalid shared key configuration.');
-            if (!window.isSecureContext || !crypto.subtle) throw new Error('Shared access requires HTTPS or localhost.');
-            const bytes=value=>Uint8Array.from(atob(value),c=>c.charCodeAt(0));
-            const material=await crypto.subtle.importKey('raw',new TextEncoder().encode(passcode),'PBKDF2',false,['deriveKey']);
-            const key=await crypto.subtle.deriveKey({name:'PBKDF2',salt:bytes(data.salt),iterations:data.iterations,hash:'SHA-256'},material,{name:'AES-GCM',length:256},false,['decrypt']);
-            const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:bytes(data.iv)},key,bytes(data.ciphertext));
-            el('Provider').value=data.provider;cloudProvider=data.provider;providerChanged();
-            el('Key').value=new TextDecoder().decode(plain);sharedKey=true;updateSharedKeyControls();el('Privacy').textContent='Shared access is kept in memory for this page session. The key is accessible to anyone using it and requests are sent to the provider. Cloud API charges may apply.';if(autoConnect){invalidateModels();await loadModels({autoConnect:true});}else scheduleModels();
-        } catch(error) {
-            const message=error.name==='OperationError'?'Incorrect passcode or damaged shared key.':error.message;
-            el('Status').textContent=message;
-            if(autoConnect){el('Open').textContent='Connect an AI';el('State').textContent='Shared AI connection failed: '+message;}
-        }
-    }
-    el('Unlock').addEventListener('click',async()=>{
-        let passcode;
-        try {
-            if (!navigator.clipboard?.readText) throw new Error('Clipboard unavailable');
-            passcode=await navigator.clipboard.readText();
-        } catch {
-            passcode=window.prompt('Paste your shared access passcode:');
-        }
-        if (passcode) await unlockSharedKey(passcode);
-    });
-    el('DifferentKey').addEventListener('click',()=>{
-        useController.abort();useController=new AbortController();sharedKey=false;active=null;updatePauseButton();updateUniProtDisclosure(false);el('Key').value='';updateSharedKeyControls();
-        el('Open').textContent='Connect an AI';el('Open').title='';el('State').textContent='';
-        providerChanged();el('Key').focus();
-    });
+    el('Key').addEventListener('input',scheduleModels);
     el('Model').addEventListener('change',updateConnectButton);
     function connect(){
-        const c=config(); if(modelsPending||!c.model)throw new Error('Wait for models to load and select a chat model first.');
+        const c=config(); if(connectionMode!=='free'&&(modelsPending||!c.model))throw new Error('Wait for models to load and select a chat model first.');
         let saved=true;
-        try{if(sharedKey) localStorage.removeItem(connectionStorageKey); else localStorage.setItem(connectionStorageKey,JSON.stringify({mode:connectionMode,cloudProvider,...c}));}catch{saved=false;}
-        active=c;useController.abort();useController=new AbortController();updatePauseButton();updateUniProtDisclosure(true);revision++;el('State').textContent=paused?'AI use paused.':sharedKey?'Shared AI connected for this page session.':saved?'':'AI connected, but this browser could not save the connection. Reconnect manually next time.';
+        try{localStorage.removeItem(disconnectedStorageKey);localStorage.setItem(connectionStorageKey,JSON.stringify({mode:connectionMode,cloudProvider,...c}));}catch{saved=false;}
+        active=c;renderBudgetReset();useController.abort();useController=new AbortController();updateConnectButton();updatePauseButton();updateUniProtDisclosure(true);revision++;el('State').textContent=paused?'AI use paused.':saved?'':'AI connected, but this browser could not save the connection. Reconnect manually next time.';
         el('Open').textContent=`AI connected: ${c.model}`;
         el('Open').title='Manage AI connection';
         if(el('Dialog').open)el('Dialog').close();
@@ -519,18 +529,19 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
     });
     el('Disconnect').addEventListener('click',()=>{
         let removed=true;
-        try{localStorage.removeItem(connectionStorageKey);}catch{removed=false;}
-        useController.abort();useController=new AbortController();active=null;updatePauseButton();updateUniProtDisclosure(false);sharedKey=false;el('Key').value='';updateSharedKeyControls();invalidateModels();el('State').textContent=removed?'AI disconnected.':'AI disconnected, but saved site data could not be removed. Clear this site’s browser storage to forget the key.';el('Open').textContent='Connect an AI';el('Open').title='';el('Status').textContent='Disconnected.';
+        try{localStorage.removeItem(connectionStorageKey);localStorage.setItem(disconnectedStorageKey,'true');}catch{removed=false;}
+        useController.abort();useController=new AbortController();active=null;renderBudgetReset();updatePauseButton();updateUniProtDisclosure(false);el('Key').value='';invalidateModels();el('State').textContent=removed?'AI disconnected.':'AI disconnected, but saved site data could not be removed. Clear this site’s browser storage to forget the key.';el('Open').textContent='Connect an AI';el('Open').title='';el('Status').textContent='Disconnected.';
     });
     function restoreConnection(){
         let saved;
         try{saved=JSON.parse(localStorage.getItem(connectionStorageKey));}catch{return false;}
+        if(saved?.provider==='free'){connectionMode='free';providerChanged();connect();return true;}
         if(!saved||!Object.hasOwn(endpoints,saved.provider)||typeof saved.model!=='string'||!saved.model||typeof saved.apiBase!=='string'||typeof saved.apiKey!=='string')return false;
         connectionMode=saved.provider==='local'?'local':'cloud';
         cloudProvider=Object.hasOwn(endpoints,saved.cloudProvider)&&saved.cloudProvider!=='local'?saved.cloudProvider:'openai';
         el('Provider').value=connectionMode==='cloud'?saved.provider:cloudProvider;
         const local=connectionMode==='local';
-        el('Mode').dataset.mode=connectionMode;el('Mode').setAttribute('aria-pressed',String(local));el('Mode').setAttribute('aria-label',local?'Switch to Cloud AI':'Switch to Local LLM');
+        
         el('Key').value=saved.apiKey;
         providerChanged();clearTimeout(loadTimer);
         el('Url').value=saved.apiBase;
@@ -538,12 +549,9 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
         void loadModels({savedModel:saved.model,autoConnect:true});
         return true;
     }
-    const urlPasscode=window.sharedAIPasscodeFromUrl;
-    delete window.sharedAIPasscodeFromUrl;
-    if(urlPasscode!==undefined && urlPasscode!==null){
+    if(!restoreConnection()){
         providerChanged();
-        el('Open').textContent='Connecting AI…';
-        el('State').textContent='Connecting shared AI…';
-        void unlockSharedKey(urlPasscode,{autoConnect:true});
-    } else if(!restoreConnection())providerChanged();
+        let disconnected=false;try{disconnected=localStorage.getItem(disconnectedStorageKey)==='true';}catch{}
+        if(!disconnected)connect();
+    }
 })();

@@ -555,3 +555,15 @@ body:not(.awaiting-model-refinement) #homologyPhysicsSimulation:has(#groupSimula
 .viewer-model-action:hover { background:#6d28d9; }
 body.light-mode .viewer-model-action, body.light-mode .viewer-model-action:hover { background:#8849ee; color:#fff; }
 body.awaiting-model-refinement #groupSimulationStatus { display:none !important; }
+
+/* Viewer controls use the EM density curve's blue, adjusted for each theme. */
+body :is(#physicsRepresentationMenuButton, #physicsSelectionMenuButton, #physicsColorMenuButton, #gapScoresMenuButton, #viewSequencesButton, #gapScoresButton, #complexAiRefresh, #sideChainJiggleBtn, .viewer-model-action) { background:#0284c7; color:#fff; }
+body :is(#physicsRepresentationMenuButton, #physicsSelectionMenuButton, #physicsColorMenuButton, #gapScoresMenuButton, #viewSequencesButton, #gapScoresButton, #complexAiRefresh, #sideChainJiggleBtn, .viewer-model-action):hover { background:#0369a1; color:#fff; }
+body.light-mode :is(#physicsRepresentationMenuButton, #physicsSelectionMenuButton, #physicsColorMenuButton, #gapScoresMenuButton, #viewSequencesButton, #gapScoresButton, #complexAiRefresh, #sideChainJiggleBtn, .viewer-model-action) { background:#38bdf8; color:#000; }
+body.light-mode :is(#physicsRepresentationMenuButton, #physicsSelectionMenuButton, #physicsColorMenuButton, #gapScoresMenuButton, #viewSequencesButton, #gapScoresButton, #complexAiRefresh, #sideChainJiggleBtn, .viewer-model-action):hover { background:#0ea5e9; color:#000; }
+
+/* Keep the spacing between wrapped viewer buttons consistent when panels are closed. */
+#viewerDisplayControls:has(~ #gapScoresPanel.hidden):has(~ #physicsSequencePanel.hidden) { padding-bottom:.5rem; }
+body #viewerDisplayControls:has(~ #gapScoresPanel.hidden):has(~ #physicsSequencePanel.hidden) ~ .viewer-model-actions { padding-top:0; }
+
+#physicsReferenceStructureToggles { display: contents; }

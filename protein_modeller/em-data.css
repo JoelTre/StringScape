@@ -1,0 +1,131 @@
+.em-controls { margin: 12px; padding: 12px; border: 1px solid #334155; border-radius: 8px; color: #cbd5e1; font-size: 12px; }
+.em-controls[hidden], .em-controls [hidden] { display:none !important; }
+.em-controls h3 { font-weight:600; margin:0 0 10px; color:inherit; }
+.em-row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+.em-controls button,.em-controls select { background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:5px; padding:5px 8px; }
+.em-controls input[type=range] { display:block; width:220px; max-width:100%; }
+.em-controls label { display:block; margin:6px 0; }
+.em-menu-wrap { position:relative; }
+.em-menu { position:absolute; z-index:40; top:100%; left:0; min-width:210px; max-height:220px; overflow:auto; padding:8px; background:#0f172a; color:#e2e8f0; border:1px solid #475569; border-radius:5px; box-shadow:0 8px 20px #0008; }
+.em-menu label { white-space:nowrap; }
+.em-controls canvas { max-width:100%; height:150px; display:block; touch-action:none; cursor:crosshair; }
+.em-axis { text-align:center; max-width:300px; }
+.em-controls p { margin-top:6px; }
+body.light-mode .em-controls { color:#334155; }
+/* Match the structure toggles and UniProt information cards. */
+#physicsStructureToggleRow .em-toggle { display:inline-flex; align-items:center; gap:.3rem; padding:.25rem .625rem; color:#fff; }
+#physicsStructureToggleRow .em-toggle[aria-pressed="false"] { color:#64748b; }
+body.light-mode #physicsStructureToggleRow .em-toggle { color:#172033; }
+body.light-mode #physicsStructureToggleRow .em-toggle[aria-pressed="false"] { color:#64748b; }
+.em-controls { background:#1c2e40; border:1px solid #334155; border-radius:16px; padding:12px; scroll-margin-top:5rem; }
+.em-controls h3 { color:#7dd3fc; font-size:.875rem; }
+body.light-mode .em-controls { background:#fff; border-color:#cbd5e1; color:#334155; }
+body.light-mode .em-controls h3 { color:#0369a1; }
+body.light-mode .em-controls button, body.light-mode .em-controls select { background:#e2e8f0; border-color:#cbd5e1; color:#334155; }
+body.light-mode .em-menu { background:#fff; color:#334155; border-color:#cbd5e1; }
+.edit-models-panel .edit-visibility-section summary > .fa-sliders { color:#2dd4a7; }
+/* Use the same controls and menu treatment as the viewer Download menu. */
+.em-controls .em-row { gap:.5rem; }
+.em-controls .em-menu-trigger,
+.edit-models-panel .em-controls .em-menu-trigger,
+body.light-mode .em-controls .em-menu-trigger,
+body.light-mode .edit-models-panel .em-controls .em-menu-trigger {
+ display:inline-flex; align-items:center; justify-content:space-between; gap:.5rem;
+ padding:.375rem .625rem; border:0; border-radius:.6rem; background:#0ea5e9; color:#fff;
+ font-size:.75rem; line-height:1rem; font-weight:600; cursor:pointer;
+}
+.em-controls .em-menu-trigger:hover,
+.edit-models-panel .em-controls .em-menu-trigger:hover,
+body.light-mode .em-controls .em-menu-trigger:hover,
+body.light-mode .edit-models-panel .em-controls .em-menu-trigger:hover { background:#0284c7; color:#fff; }
+.em-controls .em-menu {
+ top:calc(100% + .35rem); z-index:80; min-width:10rem; max-width:min(22rem,calc(100vw - 3rem));
+ padding:.45rem; border:0; border-radius:.75rem; background:#0f172a; color:#e2e8f0;
+ box-shadow:0 16px 38px #0009;
+}
+.em-controls .em-menu:not([hidden]) { display:flex; flex-direction:column; gap:.35rem; }
+.em-controls .em-menu label,
+.em-controls .em-menu button,
+.edit-models-panel .em-controls .em-menu button {
+ display:flex; align-items:center; gap:.45rem; margin:0; padding:.55rem .7rem; border:0; border-radius:.5rem;
+ background:#334155; color:#e2e8f0; font-size:.75rem; line-height:1.25; text-align:left; white-space:normal; cursor:pointer;
+}
+.em-controls .em-menu label:hover,.em-controls .em-menu button:hover { background:#475569; }
+.em-controls .em-menu button[aria-pressed="true"] { background:#0ea5e9; color:#fff; }
+body.light-mode .em-controls .em-menu { background:#f8fafc; box-shadow:0 16px 38px #33415555; }
+body.light-mode .em-controls .em-menu label,
+body.light-mode .em-controls .em-menu button,
+body.light-mode .edit-models-panel .em-controls .em-menu button { background:#e2e8f0; color:#334155; }
+body.light-mode .em-controls .em-menu label:hover,
+body.light-mode .em-controls .em-menu button:hover { background:#cbd5e1; }
+body.light-mode .em-controls .em-menu button[aria-pressed="true"],
+body.light-mode .edit-models-panel .em-controls .em-menu button[aria-pressed="true"] { background:#0ea5e9; color:#fff; }
+.em-loading { margin-top:.85rem; padding:.75rem; border:1px solid #0ea5e9; border-radius:.75rem; background:#082f49; color:#e0f2fe; }
+.em-loading strong { display:block; font-size:.875rem; }
+.em-loading progress { display:block; width:100%; height:.6rem; margin:.55rem 0 .35rem; accent-color:#0ea5e9; }
+.em-loading span { display:block; min-height:1em; font-size:.75rem; color:#7dd3fc; }
+body.light-mode .em-loading { background:#eff6ff; border-color:#0ea5e9; color:#075985; }
+body.light-mode .em-loading span { color:#0369a1; }
+@media (prefers-reduced-motion:reduce) { .em-loading progress { scroll-behavior:auto; } }
+/* The editor's Download button uses green rather than the main viewer's purple. */
+.edit-models-panel .em-controls .em-menu-trigger,
+body.light-mode .edit-models-panel .em-controls .em-menu-trigger { background:#059669; color:#fff; }
+.edit-models-panel .em-controls .em-menu-trigger:hover,
+body.light-mode .edit-models-panel .em-controls .em-menu-trigger:hover { background:#10b981; color:#fff; }
+.em-controls .em-colour { display:flex; align-items:center; gap:.55rem; margin:.75rem 0; font-weight:600; }
+.em-controls .em-colour input[type="color"] { width:2.25rem; height:1.75rem; padding:2px; border:1px solid #64748b; border-radius:.4rem; background:#0f172a; cursor:pointer; }
+body.light-mode .em-controls .em-colour input[type="color"] { background:#f8fafc; border-color:#94a3b8; }
+.em-controls [data-reset], body.light-mode .em-controls [data-reset] { display:inline-flex; align-items:center; gap:.4rem; padding:.375rem .625rem; border:0; border-radius:.6rem; background:#0ea5e9; color:#fff; font-size:.75rem; line-height:1rem; font-weight:600; cursor:pointer; }
+.em-controls [data-reset]:hover, body.light-mode .em-controls [data-reset]:hover { background:#0284c7; color:#fff; }
+.edit-models-panel .em-controls [data-reset], body.light-mode .edit-models-panel .em-controls [data-reset] { background:#059669; color:#fff; border:0; }
+.edit-models-panel .em-controls [data-reset]:hover, body.light-mode .edit-models-panel .em-controls [data-reset]:hover { background:#10b981; color:#fff; }
+.em-controls .em-colour { gap:.4rem; }
+.em-controls .em-colour label { display:inline-flex; align-items:center; gap:.55rem; margin:0; }
+.em-controls .em-colour input[type="color"],
+body.light-mode .em-controls .em-colour input[type="color"] { appearance:none; -webkit-appearance:none; width:1.65rem; height:1.65rem; padding:0; overflow:hidden; border:1px solid #94a3b8; border-radius:50%; background:transparent; }
+.em-controls .em-colour input[type="color"]::-webkit-color-swatch-wrapper { padding:0; }
+.em-controls .em-colour input[type="color"]::-webkit-color-swatch { border:0; border-radius:50%; }
+.em-controls .em-colour input[type="color"]::-moz-color-swatch { border:0; border-radius:50%; }
+.em-controls .em-colour [data-colour-reset],
+body.light-mode .em-controls .em-colour [data-colour-reset],
+.edit-models-panel .em-controls .em-colour [data-colour-reset],
+body.light-mode .edit-models-panel .em-controls .em-colour [data-colour-reset] { display:inline-flex; align-items:center; justify-content:center; width:1.65rem; height:1.65rem; padding:0; border:0; border-radius:.5rem; background:#0ea5e9; color:#fff; cursor:pointer; }
+.em-controls .em-colour [data-colour-reset]:hover,
+body.light-mode .em-controls .em-colour [data-colour-reset]:hover,
+.edit-models-panel .em-controls .em-colour [data-colour-reset]:hover { background:#0284c7; color:#fff; }
+.em-controls .em-plot-row { display:flex; align-items:stretch; gap:.45rem; margin-top:.6rem; }
+.em-controls .em-curve-title { writing-mode:vertical-rl; transform:rotate(180deg); text-align:center; color:#cbd5e1; font-size:.75rem; }
+.em-controls .em-plot-content { min-width:0; }
+.em-controls [data-reset] { margin-top:.5rem; }
+body.light-mode .em-controls .em-curve-title { color:#475569; }
+.em-controls .em-colour .em-colour-swatch { position:relative; display:inline-block; width:1.65rem; height:1.65rem; flex:none; border:1px solid #94a3b8; border-radius:50%; background:#b0b0b0; overflow:hidden; }
+.em-controls .em-colour .em-colour-swatch input[type="color"],
+body.light-mode .em-controls .em-colour .em-colour-swatch input[type="color"] { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; }
+.em-controls .em-colour .em-colour-swatch:focus-within { outline:2px solid #7dd3fc; outline-offset:2px; }
+.em-controls .em-colour, .em-controls .em-plot-row { max-width:calc(300px + 1.35rem); }
+.em-controls .em-colour [data-reset] { margin:0 0 0 auto; }
+.em-controls .em-plot-content { flex:1; }
+.em-controls .em-empty-notice { margin:0 0 .75rem; color:#e2e8f0; font-size:.8125rem; font-weight:600; }
+body.light-mode .em-controls .em-empty-notice { color:#334155; }
+.em-controls[data-em-empty="true"] .em-plot-row { opacity:.35; }
+.em-controls .em-slider-row { display:flex; align-items:flex-end; gap:.55rem; margin:.6rem 0; }
+.em-controls .em-slider-row label { margin:0; }
+.em-controls .em-slider-row .em-slider-reset,
+body.light-mode .em-controls .em-slider-row .em-slider-reset,
+.edit-models-panel .em-controls .em-slider-row .em-slider-reset,
+body.light-mode .edit-models-panel .em-controls .em-slider-row .em-slider-reset { display:inline-flex; align-items:center; justify-content:center; flex:none; width:1.65rem; height:1.65rem; padding:0; border:0; border-radius:.5rem; background:#0ea5e9; color:#fff; cursor:pointer; }
+.em-controls .em-slider-row .em-slider-reset:hover,
+body.light-mode .em-controls .em-slider-row .em-slider-reset:hover,
+.edit-models-panel .em-controls .em-slider-row .em-slider-reset:hover,
+body.light-mode .edit-models-panel .em-controls .em-slider-row .em-slider-reset:hover { background:#0284c7; color:#fff; }
+
+.em-loading progress[value] { appearance:none; -webkit-appearance:none; border:0; border-radius:999px; overflow:hidden; background:#cbd5e1; }
+.em-loading progress[value]::-webkit-progress-bar { background:#cbd5e1; border-radius:999px; }
+.em-loading progress[value]::-webkit-progress-value { background:#0ea5e9; border-radius:999px; }
+.em-loading progress[value]::-moz-progress-bar { background:#0ea5e9; border-radius:999px; }
+
+/* Match the viewer buttons while preserving the editor's green controls. */
+body:not(.light-mode) .em-controls:not(.edit-models-panel .em-controls) :is(.em-menu-trigger, [data-reset], [data-colour-reset], .em-slider-reset, .em-menu button[aria-pressed="true"]) { background:#0284c7; color:#fff; }
+body:not(.light-mode) .em-controls:not(.edit-models-panel .em-controls) :is(.em-menu-trigger, [data-reset], [data-colour-reset], .em-slider-reset):hover { background:#0369a1; color:#fff; }
+body.light-mode .em-controls:not(.edit-models-panel .em-controls) :is(.em-menu-trigger, [data-reset], [data-colour-reset], .em-slider-reset, .em-menu button[aria-pressed="true"]) { background:#38bdf8; color:#000; }
+body.light-mode .em-controls:not(.edit-models-panel .em-controls) :is(.em-menu-trigger, [data-reset], [data-colour-reset], .em-slider-reset):hover { background:#0ea5e9; color:#000; }

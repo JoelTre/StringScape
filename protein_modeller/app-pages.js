@@ -14,7 +14,7 @@
     const menuItems = [
         [1, 'Home', 'fa-house'], [3, '3D viewer', 'fa-cube'], [4, 'Mol* viewer', 'fa-dna'], [12, 'Model overview', 'fa-file-lines'], [11, 'Model editor', 'fa-pen-to-square'],
         [2, 'Build process', 'fa-list-check'], [5, 'Build stats', 'fa-chart-bar'],
-        [6, 'Compare variables', 'fa-chart-line'], [7, 'Connect an AI', 'fa-robot'],
+        [6, 'Compare variables', 'fa-chart-line'], [7, 'AI usage', 'fa-robot'],
         [8, 'Save and download', 'fa-floppy-disk'], [9, 'Validation report', 'fa-clipboard-check'],
         [10, 'About this app', 'fa-circle-info']
     ];

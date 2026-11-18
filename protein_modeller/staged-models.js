@@ -128,7 +128,7 @@ function alignDraftAssembly(assembly,onProgress=()=>{}){
     return assembly;
 }
 
-function mergeDraftModels(assembly,drafts,weights,allowed=null,unionOnly=false){
+function mergeDraftModels(assembly,drafts,weights,allowed=null,unionOnly=false,includeSprings=true){
     const chains={},nodeMaps=drafts.map(()=>new Map()),nodeInfo=[],springs=new Map();
     const weighted=(items,value)=>{if(unionOnly)return value(items[0]);const total=items.reduce((sum,item)=>sum+Math.max(0,weights[item.draft]??1),0);return items.reduce((sum,item)=>sum+(total?Math.max(0,weights[item.draft]??1):1)*value(item),0)/(total||items.length);};
     for(const group of assembly.groups){
@@ -160,7 +160,7 @@ function mergeDraftModels(assembly,drafts,weights,allowed=null,unionOnly=false){
         });
         chains[group.key]=atoms;
     }
-    drafts.forEach((draft,index)=>{
+    if(includeSprings)drafts.forEach((draft,index)=>{
         if(allowed&&!allowed.has(index))return;
         for(const spring of draft.springTargets){
             const a=nodeMaps[index].get(spring.i),b=nodeMaps[index].get(spring.j);
@@ -171,7 +171,7 @@ function mergeDraftModels(assembly,drafts,weights,allowed=null,unionOnly=false){
         }
     });
     // A sequence union can introduce adjacent pairs absent from every source.
-    for(const atoms of Object.values(chains))for(let k=0;k<atoms.length-1;k++){
+    if(includeSprings)for(const atoms of Object.values(chains))for(let k=0;k<atoms.length-1;k++){
         if(atoms[k].entityType==='other')continue;
         const i=atoms[k].mergedNodeIndex,j=atoms[k+1].mergedNodeIndex,key=`${i}:${j}`;
         if(!springs.has(key))springs.set(key,{i,j,items:[],isBasePair:false});
@@ -386,14 +386,17 @@ async function captureStagedDraft(state){
     });
     const viewState={groupSimulation,occlusion:Float32Array.from(physicsOcclusionFactors),residueSpeeds:residueSpeedState.speeds.slice(),residueSpeedScale:residueSpeedState.scale,nodes:physicsNodes,alignments:alignmentResults,blocks:morphMatrixBlocks,springs:physicsSprings,positions:physicsPositions,offset:{...physicsCenterOffset},
         referenceFiles:referenceFiles.slice(),referenceInfluences:referenceInfluences.slice(),model1Influence,model2Influence,referenceAssembly,modelData1:{...modelData1,matrixCache:new Map()},modelData2:{...modelData2,matrixCache:new Map()}};
-    const input=physicsSpringInputSnapshot();for(let i=0;i<input.flags.length;i++)input.flags[i]&=~1;
-    const result=await buildStagedFullNetwork(input,state),packed=result.packed;
-    if(state!==multiReferenceBuild||state.generation!==modelBuildGeneration)throw new DOMException('Build cancelled','AbortError');
-    updatePhysicsSpringConfidence(packed,hydratePhysicsSpringInput(result.input),validationState.pae);
-    const scratch={referenceValues:new Array(packed.referenceCount||0)},springTargets=MemoryData.builder(['i','j','target','weight','isBackbone','isBasePair']);
-    for(let index=0;index<packed.length;index++){
-        const spring=physicsWorkerSpringAt(packed,index,scratch);spring.afConfidenceRevision=springPaeRevision;
-        const active=getActiveSpring(spring);if(active)springTargets.push({i:spring.i,j:spring.j,target:active.targetRestLen,weight:active.weight,isBackbone:Number(spring.isBackbone),isBasePair:Number(spring.isBasePair)});
+    const springTargets=MemoryData.builder(['i','j','target','weight','isBackbone','isBasePair']);
+    if(!state.prepareOnly){
+        const input=physicsSpringInputSnapshot();for(let i=0;i<input.flags.length;i++)input.flags[i]&=~1;
+        const result=await buildStagedFullNetwork(input,state),packed=result.packed;
+        if(state!==multiReferenceBuild||state.generation!==modelBuildGeneration)throw new DOMException('Build cancelled','AbortError');
+        updatePhysicsSpringConfidence(packed,hydratePhysicsSpringInput(result.input),validationState.pae);
+        const scratch={referenceValues:new Array(packed.referenceCount||0)};
+        for(let index=0;index<packed.length;index++){
+            const spring=physicsWorkerSpringAt(packed,index,scratch);spring.afConfidenceRevision=springPaeRevision;
+            const active=getActiveSpring(spring);if(active)springTargets.push({i:spring.i,j:spring.j,target:active.targetRestLen,weight:active.weight,isBackbone:Number(spring.isBackbone),isBasePair:Number(spring.isBasePair)});
+        }
     }
     MemoryData.packAtoms({chains});
     return {id:`Draft ${state.index+1} · ${state.files[state.index].pdbId}`,chains,chainIdentities,springTargets:springTargets.finish(),viewState};
@@ -459,11 +462,11 @@ async function advanceStagedBuild(){
         for(const group of state.conformationGroups){
             const indices=new Set(state.files.flatMap((file,index)=>group.pdbIds.includes(file.pdbId.toUpperCase())?[index]:[]));
             globalThis.DeveloperLog?.record(`Merging conformation group: ${group.name || group.pdbIds.join(', ')}`);
-            group.merged=mergeDraftModels(state.assembly,state.drafts,state.weights,indices);
+            group.merged=mergeDraftModels(state.assembly,state.drafts,state.weights,indices,false,!state.prepareOnly);
         }
         // The final topology is a union. Coordinates always come from one state,
         // never an average across different conformations.
-        state.merged=mergeDraftModels(state.assembly,state.drafts,state.weights,null,true);
+        state.merged=mergeDraftModels(state.assembly,state.drafts,state.weights,null,true,!state.prepareOnly);
         state.groupPoses=groupedConformationPoses(state.merged,state.conformationGroups);
         const firstPresent=Object.values(state.merged.chains).flat();
         firstPresent.forEach((atom,i)=>{const source=state.groupPoses.find(pose=>pose.presence[i])?.atoms[i];if(source)Object.assign(atom,{x:source.x,y:source.y,z:source.z,sourceAtoms:source.sourceAtoms});});
@@ -506,6 +509,7 @@ async function startCombinedStagedModel(state){
         await createGroupedConformationAnimation();
         if(state!==multiReferenceBuild)return;
         state.awaitingSimulation=true;state.busy=false;
+        setPhysicsColorMode('chain');state.liveColorMode='chain';
         animationReadyGeneration=state.generation;
         void loadSimulationIntoMolstar();
     }
@@ -585,6 +589,40 @@ function renderStagedComparisonTables(){
     document.getElementById('referenceComparison').classList.add('hidden');
 }
 
+// Evaluate each draft with the same state used by its preview, then map its
+// values through the residue origins retained by the merge.
+function stagedCombinedConfidence(state){
+    const saved={physicsNodes,physicsSprings,morphMatrixBlocks,physicsPositions,physicsCenterOffset,referenceFiles,referenceInfluences,referenceAssembly,model1Influence,model2Influence};
+    const draftScores=[];
+    try{
+        state.readingDraftConfidence=true;
+        for(const draft of state.drafts){
+            const view=draft.viewState;
+            physicsNodes=view.nodes;physicsSprings=view.springs;morphMatrixBlocks=view.blocks;physicsPositions=view.positions;
+            physicsCenterOffset=view.offset;referenceFiles=view.referenceFiles;referenceInfluences=view.referenceInfluences;
+            referenceAssembly=view.referenceAssembly;model1Influence=view.model1Influence;model2Influence=view.model2Influence;
+            draftScores.push(calculateModelConfidence());
+        }
+    }finally{
+        ({physicsNodes,physicsSprings,morphMatrixBlocks,physicsPositions,physicsCenterOffset,referenceFiles,referenceInfluences,referenceAssembly,model1Influence,model2Influence}=saved);
+        state.readingDraftConfidence=false;
+    }
+    const fields=['scores','local','placement2','placement5'];
+    const result=Object.fromEntries(fields.map(field=>[field,Array(physicsNodes.length).fill(null)]));
+    physicsNodes.forEach((node,index)=>{
+        const atom=validationAtom(node,'af'),mergedIndex=atom?.mergedNodeIndex;
+        const pose=Number.isInteger(activeConformationGroup)?state.groupPoses?.[activeConformationGroup]:null;
+        const source=Number.isInteger(mergedIndex)?pose?.atoms?.[mergedIndex]||atom:atom;
+        const origins=source?.draftOrigins||[];
+        for(const field of fields){
+            const available=origins.flatMap(origin=>{const value=draftScores[origin.draft]?.[field]?.[origin.node];return Number.isFinite(value)?[{value,weight:Math.max(0,state.weights[origin.draft]??1)}]:[];});
+            if(!available.length)continue;
+            const total=available.reduce((sum,item)=>sum+item.weight,0);
+            result[field][index]=available.reduce((sum,item)=>sum+item.value*(total?item.weight:1),0)/(total||available.length);
+        }
+    });
+    return result;
+}
 function stagedSnapshotColors(draft){
     const saved={modelData1,modelData2,physicsNodes,physicsSprings,morphMatrixBlocks,physicsPositions,physicsCenterOffset,referenceFiles,referenceInfluences,referenceAssembly,model1Influence,model2Influence,groupSimulation,instancedNodeMesh,backboneChains,physicsDifferenceMode,physicsOriginColorMode,physicsOcclusionFactors};
     const speedCache={...residueSpeedState};
@@ -695,7 +733,7 @@ function renderStagedPreview(){
     const state=multiReferenceBuild,host=document.getElementById('stagedPreviewHost');disposeStagedPreview();if(!state||!host||stagedLiveView())return;
     host.classList.remove('hidden');
     const aligned=state.view==='aligned',draft=aligned?null:state.drafts[Number(state.view.split(':')[1])];
-    if(aligned&&!state.assembly&&!state.alignmentPreview||!aligned&&!draft){host.textContent=aligned?'Aligning completed draft models…':'Preparing draft model…';return;}
+    if(aligned&&!state.assembly&&!state.alignmentPreview||!aligned&&!draft){host.textContent=aligned?'Aligning completed draft models…':'';return;}
     const previewing=aligned&&!state.assembly;
     const structures=aligned?(state.assembly||state.alignmentPreview).structures:[{file:{pdbId:draft.id},entries:Object.entries(draft.chains).map(([chain,atoms])=>({chain,alignedAtoms:atoms,alignedCenter:referenceCenter(atoms)}))}];
     const palette=draft?stagedSnapshotColors(draft):null;
@@ -887,8 +925,9 @@ function updateConformationGroupPill(){
     const host=document.getElementById('conformationGroupPill');if(!host)return;
     for(const button of host.querySelectorAll('button'))button.setAttribute('aria-pressed',String(Number(button.dataset.group)===activeConformationGroup));
     const button=host.querySelector(`button[data-group="${activeConformationGroup}"]`),thumb=host.querySelector('.conformation-group-thumb');
-    if(button&&thumb){thumb.style.left=button.offsetLeft+'px';thumb.style.width=button.offsetWidth+'px';}
+    if(button&&thumb){thumb.style.left=button.offsetLeft+'px';thumb.style.top=button.offsetTop+'px';thumb.style.width=button.offsetWidth+'px';thumb.style.height=button.offsetHeight+'px';}
 }
+const conformationPillResizeObserver=new ResizeObserver(()=>updateConformationGroupPill());
 function renderConformationGroupPill(){
     const state=multiReferenceBuild,section=document.getElementById('conformationGroupSection'),host=document.getElementById('conformationGroupPill');
     if(!section||!host)return;
@@ -899,6 +938,7 @@ function renderConformationGroupPill(){
         const button=document.createElement('button');button.type='button';button.textContent=group.name;button.dataset.group=String(index);button.setAttribute('aria-pressed',String(index===activeConformationGroup));
         button.addEventListener('click',()=>selectConformationGroup(index));host.append(button);
     });
+    conformationPillResizeObserver.observe(host);
     requestAnimationFrame(updateConformationGroupPill);
 }
 let conformationSelectionMorph=null;
@@ -929,7 +969,7 @@ function selectConformationGroup(index){
     const morph=conformationSelectionMorph={resumePhysics:physicsRunning,request:0,start:null};
     physicsRunning=false;
     activeConformationGroup=index;updateConformationGroupPill();
-    if(physicsColorMode==='aligned')updatePhysicsNodeColors();
+    if(['aligned','model-confidence','local-confidence','placement-2','placement-5'].includes(physicsColorMode)){updatePhysicsNodeColors();void updateGapScores();}
     const duration=Math.min(600,Math.max(1,animationSegmentFrames(target))*1000/30);
     const step=now=>{
         if(conformationSelectionMorph!==morph)return;
@@ -958,7 +998,7 @@ window.setAnimationDraftGroups=async(generation,groups)=>{
     const next=groups.map(group=>({name:group.name,pdbIds:group.pdbIds.slice()}));
     for(const group of next){
         const indices=new Set(state.files.flatMap((file,index)=>group.pdbIds.includes(file.pdbId.toUpperCase())?[index]:[]));
-        group.merged=mergeDraftModels(state.assembly,state.drafts,state.weights,indices);
+        group.merged=mergeDraftModels(state.assembly,state.drafts,state.weights,indices,false,!state.prepareOnly);
     }
     const poses=groupedConformationPoses(state.merged,next);
     MemoryData.packAtoms(poses);

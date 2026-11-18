@@ -10,11 +10,10 @@ window.addEventListener('pageshow', () => {
     window.scrollTo({top: 0, left: 0, behavior: 'instant'});
 });
 
-// Consume shared access before loading third-party scripts; preserve all other URL inputs.
+// Remove passcodes from older links before loading third-party scripts.
 (() => {
     const url = new URL(location.href);
     if (!url.searchParams.has('passcode')) return;
-    window.sharedAIPasscodeFromUrl = url.searchParams.get('passcode');
     url.searchParams.delete('passcode');
     history.replaceState(history.state, '', url.href);
 })();
