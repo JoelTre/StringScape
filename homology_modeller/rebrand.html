@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StringScape Protein Modeller has moved</title>
+    <link rel="icon" type="image/jpeg" href="https://stringscape.net/images_for_website/StringScape_logo.jpg">
+    <link rel="stylesheet" href="tailwind.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap">
+    <style>
+        body { font-family: Inter, sans-serif; }
+        .gradient-text { background:linear-gradient(135deg,#60A5FA 0%,#2eccbf 100%); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+        header { --header-link-color:#9ca3af; }
+        header nav.text-gray-400, #themeToggle { color:var(--header-link-color); }
+        #themeToggle { width:2.5rem; height:2.5rem; flex:none; display:grid; place-items:center; border:1px solid rgba(150,150,150,.4); border-radius:50%; background:transparent; transition:transform .2s; }
+        #themeToggle:hover { transform:scale(1.08); }
+        main { flex:1; display:grid; place-items:center; padding:4rem 1.5rem; text-align:center; }
+        main h1 { max-width:48rem; font-size:clamp(1.8rem, 4vw, 3rem); line-height:1.25; font-weight:700; }
+        main p { margin-top:1rem; color:#94a3b8; font-size:1.1rem; }
+        .open-button { display:inline-flex; align-items:center; gap:.65rem; margin-top:2rem; padding:.85rem 1.35rem; border-radius:.6rem; background:#3498db; color:#fff; font-weight:600; transition:background .2s; }
+        .open-button:hover { background:#2582c1; }
+        .open-button:focus-visible, #themeToggle:focus-visible, header a:focus-visible { outline:2px solid #6dc5ff; outline-offset:4px; }
+        body.light-mode { background:#f1f5f9; color:#172033; }
+        body.light-mode header { --header-link-color:#475569; background:rgba(248,250,252,.95); border-color:#cbd5e1; }
+        body.light-mode main p { color:#475569; }
+        @media(max-width:700px) { #headerBetaTag { display:none; } }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col">
+    <header class="w-full py-5 px-6 flex justify-between items-center border-b border-gray-800 backdrop-blur-md sticky top-0 z-50 bg-[#0B0F19]/60">
+        <div class="flex items-center space-x-2">
+            <a href="https://stringscape.net" class="flex items-center space-x-3 group">
+                <svg width="36" height="36" viewBox="0 0 100 100" class="flex-shrink-0 ml-2.5 transition-transform duration-300 group-hover:scale-105" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <line x1="27" y1="50" x2="75" y2="22" stroke="#888" stroke-width="11" stroke-linecap="round"/>
+                    <line x1="75" y1="22" x2="75" y2="78" stroke="#888" stroke-width="11" stroke-linecap="round"/>
+                    <circle cx="27" cy="50" r="20" fill="#3498db" stroke="#6dc5ff" stroke-width="5"/>
+                    <circle cx="75" cy="22" r="20" fill="#3498db" stroke="#6dc5ff" stroke-width="5"/>
+                    <circle cx="75" cy="78" r="20" fill="#3498db" stroke="#6dc5ff" stroke-width="5"/>
+                </svg>
+                <span class="text-3xl font-black tracking-tight gradient-text ml-0.5 py-1 leading-normal">StringScape</span>
+                <span id="headerBetaTag" class="bg-gray-800 text-xs text-gray-400 px-2 py-0.5 rounded-full border border-gray-700">Beta 1.0</span>
+            </a>
+        </div>
+        <div class="ml-auto flex items-center gap-6">
+            <nav class="hidden md:flex flex-wrap justify-end font-medium text-gray-400" style="column-gap:2rem; row-gap:.25rem; font-size:14px;" aria-label="Main navigation">
+                <a href="https://stringscape.net/protein_modeller/" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-solid fa-circle-nodes mr-1"></i> Protein Modeller</a>
+                <a href="https://joeltre.github.io/StringScape/Articles" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-solid fa-book-open mr-1"></i> Articles</a>
+                <a href="https://stringscape.net/contact" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-solid fa-envelope mr-1"></i> Contact</a>
+                <a href="https://github.com/JoelTre/StringScape/tree/main" target="_blank" rel="noopener noreferrer" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-brands fa-github mr-1"></i> GitHub</a>
+                <a href="https://x.com/StringScapeApp" target="_blank" rel="noopener noreferrer" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-brands fa-x-twitter mr-1"></i> X</a>
+                <a href="https://www.youtube.com/@StringScape_app" target="_blank" rel="noopener noreferrer" class="hover:text-[#6dc5ff] transition-colors"><i class="fa-brands fa-youtube mr-1"></i> YouTube</a>
+            </nav>
+            <button id="themeToggle" type="button" aria-label="Switch to light mode" aria-pressed="false" title="Switch to light mode"><i class="fa-solid fa-moon" aria-hidden="true"></i></button>
+        </div>
+    </header>
+    <main>
+        <div>
+            <h1>The StringScape Homology Modeller has rebranded to StringScape Protein Modeller</h1>
+            <p>The URL has also updated.</p>
+            <a class="open-button" href="https://stringscape.net/protein_modeller/">Open protein modeller <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></a>
+        </div>
+    </main>
+    <script>
+        document.getElementById('themeToggle').addEventListener('click', function () {
+            const light = document.body.classList.toggle('light-mode');
+            const label = light ? 'Switch to dark mode' : 'Switch to light mode';
+            this.setAttribute('aria-label', label);
+            this.setAttribute('aria-pressed', String(light));
+            this.title = label;
+            this.firstElementChild.className = light ? 'fa-solid fa-sun' : 'fa-solid fa-moon';
+        });
+    </script>
+</body>
+</html>
