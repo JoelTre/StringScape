@@ -4,11 +4,11 @@ Beta version 1.0
 
 StringScape is a high-performance, browser-based bioinformatics application for the interactive visualization and analysis of complex biological networks, protein interactomes, and protein embeddings. It provides a bridge between raw STRING database data and publication-quality visual insights.
 
-The app is available here: https://stringscape.net/app
+The main app is available here: https://stringscape.net/app
 
-The StringScape home page: https://stringscape.net
+StringScape all-atom protein modeller: https://stringscape.net/protein_modeller
 
-StringScape all-atom homology builder: https://stringscape.net/homology_modeller
+The StringScape website home page: https://stringscape.net
 
 The source code (look in the folder 'app' above): https://github.com/JoelTre/StringScape/tree/main/app
 
