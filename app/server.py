@@ -20,6 +20,17 @@ ATLAS_ROUTE = '/api/esm-atlas/proteins/'
 
 
 class AppHandler(SimpleHTTPRequestHandler):
+    def translate_path(self, path):
+        # Serve the shared modeller alongside the app when launched with this server.
+        if urlsplit(path).path.startswith('/protein_modeller/'):
+            original = self.directory
+            try:
+                self.directory = str(APP_ROOT.parent)
+                return super().translate_path(path)
+            finally:
+                self.directory = original
+        return super().translate_path(path)
+
     def do_GET(self):
         path = urlsplit(self.path).path
         if path.startswith('/api/ncbi/report/'):
