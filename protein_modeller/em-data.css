@@ -129,3 +129,28 @@ body:not(.light-mode) .em-controls:not(.edit-models-panel .em-controls) :is(.em-
 body:not(.light-mode) .em-controls:not(.edit-models-panel .em-controls) :is(.em-menu-trigger, [data-reset], [data-colour-reset], .em-slider-reset):hover { background:#0369a1; color:#fff; }
 body.light-mode .em-controls:not(.edit-models-panel .em-controls) :is(.em-menu-trigger, [data-reset], [data-colour-reset], .em-slider-reset, .em-menu button[aria-pressed="true"]) { background:#38bdf8; color:#000; }
 body.light-mode .em-controls:not(.edit-models-panel .em-controls) :is(.em-menu-trigger, [data-reset], [data-colour-reset], .em-slider-reset):hover { background:#0ea5e9; color:#000; }
+/* Switches use the same blue as the EMDB entry control. */
+.em-controls .em-shadow-switch { display:flex; align-items:center; gap:.5rem; margin:.7rem 0 0; cursor:pointer; }
+.em-controls :is(.em-shadow-switch, .em-menu label) input[type="checkbox"] { appearance:none; -webkit-appearance:none; position:relative; flex:none; width:2rem; height:1.1rem; margin:0; border:0; border-radius:999px; background:#64748b; cursor:pointer; }
+.em-controls :is(.em-shadow-switch, .em-menu label) input[type="checkbox"]::before { content:""; position:absolute; top:.15rem; left:.15rem; width:.8rem; height:.8rem; border-radius:50%; background:#fff; transition:transform .15s; }
+.em-controls :is(.em-shadow-switch, .em-menu label) input[type="checkbox"]:checked { background:#0284c7; }
+body.light-mode .em-controls :is(.em-shadow-switch, .em-menu label) input[type="checkbox"]:checked { background:#38bdf8; }
+.edit-models-panel .em-controls :is(.em-shadow-switch, .em-menu label) input[type="checkbox"]:checked { background:#059669; }
+.em-controls :is(.em-shadow-switch, .em-menu label) input[type="checkbox"]:checked::before { transform:translateX(.9rem); }
+.em-controls :is(.em-shadow-switch, .em-menu label) input[type="checkbox"]:focus-visible { outline:2px solid #7dd3fc; outline-offset:2px; }
+.em-controls .em-shadow-controls { display:flex; align-items:center; gap:.65rem; margin-top:.7rem; }
+.em-controls .em-shadow-controls .em-shadow-switch { margin:0; }
+.em-controls [data-shadow-plot] .em-plot-row { max-width:calc(300px + 1.35rem); }
+.em-controls .em-shadow-controls .em-slider-reset,
+body.light-mode .em-controls .em-shadow-controls .em-slider-reset { display:inline-flex; align-items:center; justify-content:center; width:1.65rem; height:1.65rem; padding:0; border:0; border-radius:.5rem; background:#0284c7; color:#fff; cursor:pointer; }
+body.light-mode .em-controls .em-shadow-controls .em-slider-reset { background:#38bdf8; color:#000; }
+.edit-models-panel .em-controls .em-shadow-controls .em-slider-reset { background:#059669; color:#fff; }
+.em-controls .em-number { width:6.5rem; margin-left:.35rem; padding:.2rem .35rem; border:1px solid #64748b; border-radius:.35rem; background:#0f172a; color:#e2e8f0; }
+body.light-mode .em-controls .em-number { background:#fff; color:#334155; border-color:#94a3b8; }
+.em-controls .em-slider-row { align-items:center; gap:.6rem; margin:.75rem 0; }
+.em-controls .em-slider-row label { display:grid; grid-template-columns:minmax(0,1fr) 6rem auto; align-items:center; gap:.35rem; flex:1; max-width:220px; }
+.em-controls .em-slider-row .em-number { box-sizing:border-box; width:6rem; min-width:0; margin:0; padding:.3rem .45rem; font:inherit; line-height:1.2; }
+.em-controls .em-slider-row input[type="range"] { grid-column:1 / -1; width:100%; margin:.1rem 0 0; }
+.em-controls .em-slider-row .em-slider-reset { align-self:center; }
+.em-controls .em-slider-row .em-number { border:0; background:#334155; color:#e2e8f0; }
+body.light-mode .em-controls .em-slider-row .em-number { border:0; background:#e2e8f0; color:#334155; }

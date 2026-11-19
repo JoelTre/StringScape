@@ -4,7 +4,7 @@
     const setup = main.firstElementChild;
     const physics = document.getElementById('homologyPhysicsSimulation');
     const viewer = document.getElementById('physicsContainer');
-    const pages = Array.from({length: 12}, (_, i) => {
+    const pages = Array.from({length: 13}, (_, i) => {
         const page = document.createElement('section');
         page.className = 'app-page';
         page.dataset.page = String(i + 1);
@@ -12,7 +12,7 @@
         return page;
     });
     const menuItems = [
-        [1, 'Home', 'fa-house'], [3, '3D viewer', 'fa-cube'], [4, 'Mol* viewer', 'fa-dna'], [12, 'Model overview', 'fa-file-lines'], [11, 'Model editor', 'fa-pen-to-square'],
+        [1, 'Home', 'fa-house'], [3, '3D viewer', 'fa-cube'], [4, 'Mol* viewer', 'fa-dna'], [12, 'Model overview', 'fa-file-lines'], [11, 'Model editor', 'fa-pen-to-square'], [13, 'How this app works', 'fa-route'],
         [2, 'Build process', 'fa-list-check'], [5, 'Build stats', 'fa-chart-bar'],
         [6, 'Compare variables', 'fa-chart-line'], [7, 'AI usage', 'fa-robot'],
         [8, 'Save and download', 'fa-floppy-disk'], [9, 'Validation report', 'fa-clipboard-check'],
@@ -29,6 +29,9 @@
     const comparison = document.getElementById('physicsVariableComparison');
     const report = document.getElementById('validationReport');
     pages[0].append(setup);
+    const homeLinks = document.createElement('div'); homeLinks.className = 'app-info-links';
+    homeLinks.innerHTML = `<button type="button" data-page-link="10">About this app <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button><button type="button" data-page-link="13">How this app works <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>`;
+    setup.querySelector('#Introduction > p:nth-of-type(2)').after(homeLinks);
     pages[1].append(process, details, document.getElementById('stagedModelComparisons'));
     pages[2].append(physics);
     pages[3].append(molstar);
@@ -186,12 +189,14 @@
     pages[8].append(report);
     const editModels = window.createEditModelsPage();
     pages[10].append(editModels.panel);
+    pages[12].append(window.createHowItWorksPage());
     pages[9].innerHTML = `<article class="app-about">
         <h1>About StringScape protein modeller</h1>
         <p>StringScape Protein Modeller builds all-atom homology models of protein complexes by aligning AlphaFold models to reference structures from the Protein Data Bank. Models can include DNA, RNA, small molecules, ions and lipid membranes.</p>
         <p>This app was developed by Joel Tregurtha as part of a PhD project at the University of Canterbury, New Zealand, funded by the MacDiarmid Institute.</p>
         <p>This app has been specifically built to be easy to use to democratise access to all-atom homology modelling. We would love your feedback. Contact us below.</p>
         <p>This app is also available as a feature within the main StringScape application (in the Structures view, where all PDB files from a species are displayed and any can be clicked on to build a homology model). This app is open source under an Apache-2.0 licence.</p>
+        <p><button type="button" class="app-about-contact" data-page-link="13">How this app works <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button></p>
         <p><a class="app-about-contact" href="https://github.com/JoelTre/StringScape/tree/main" target="_blank" rel="noopener noreferrer">View source code <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a></p>
         <a class="app-about-contact" href="https://stringscape.net/contact" target="_blank" rel="noopener noreferrer">Contact us <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a>
         <div class="developer-mode-setting"><label class="nucleic-guide-switch text-sm text-slate-300" for="developerModeToggle">Developer mode <input id="developerModeToggle" type="checkbox" role="switch"></label><p>Show a live model-building log in the 3D viewer.</p></div>
@@ -280,6 +285,7 @@
         requestAnimationFrame(refreshViewer);
         setTimeout(refreshViewer, 350);
     }
+    for (const link of main.querySelectorAll('[data-page-link]')) link.addEventListener('click', () => navigate(Number(link.dataset.pageLink)));
     const examplesButton = document.getElementById('exampleModelsButton');
     const examplesMenu = document.getElementById('exampleModelsMenu');
     const exampleLoading=document.createElement('span');exampleLoading.className='example-loading';exampleLoading.setAttribute('role','status');exampleLoading.hidden=true;exampleLoading.textContent='Loading...';examplesButton.after(exampleLoading);
@@ -327,3 +333,4 @@
         document.documentElement.classList.remove('app-layout-loading');
     }
 })();
+

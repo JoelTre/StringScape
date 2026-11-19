@@ -1180,7 +1180,7 @@ body.light-mode .complex-ai-assistant {background:#e2e8f0;color:#1e293b;}
 body.light-mode .complex-ai {background:#fff;color:#1e293b;border-color:#cbd5e1}
 body.light-mode #complexAiQuestion {background:white;border-color:#cbd5e1}
 </style>
-    <link rel="stylesheet" href="app-pages.css?v=146">
+    <link rel="stylesheet" href="app-pages.css?v=175">
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col">
 
@@ -1350,27 +1350,7 @@ body.light-mode #complexAiQuestion {background:white;border-color:#cbd5e1}
 
         <!--Overview box-->
         <section id="workflowOverview" class="bg-slate-900 border border-indigo-500/30 rounded-xl p-5 shadow-sm text-sm text-slate-300 leading-relaxed" aria-label="Modelling workflow">
-            <p class="mb-3" style="font-size: 1.2rem; font-weight: bold; color:#3498db;">This app builds homology models of protein complexes by aligning AlphaFold models onto one or more reference structures from the Protein Data Bank. This involves multiple steps:</p>
-            <ol class="list-decimal pl-5 space-y-2">
-                <li>
-                    <strong class="text-slate-100">Load one or more reference structures from the Protein Data Bank and load the AlphaFold structures from the AlphaFold database.</strong> If no AlphaFold model is available, the app just uses the protein sequence without any structural information.
-                    <ul class="list-disc pl-5 mt-2 space-y-1">
-                        <li><strong class="text-slate-100">Optional:</strong> If STRING files have been uploaded, the app uses reference IDs, gene names and protein names to find target candidates in the aliases file, verifies them by sequence alignment, and falls back to a top-500 k-mer sequence search when needed. Repeated chains and conformational references reuse the same protein-identity assignment. UniProt accessions must match the target sequence and taxonomy; unresolved or ambiguous matches pause the build for review.</li>
-                    </ul>
-                </li>
-                <li><strong class="text-slate-100">Align each of the chain/polynucleotide sequences from the reference with each of the AlphaFold sequences.</strong> Semi-global alignment fits each reference chain/polynucleotide within an AlphaFold sequence, allowing for extra AlphaFold residues at either end. Alignment Settings also offers local Smith–Waterman and global Needleman–Wunsch as alignment methods.</li>
-                <li><strong class="text-slate-100">Calculate distance matrices.</strong> The distance matrix captures the spatial relationships between residues/nucleotides/atoms within each chain/polynucleotide/molecule and, for the reference structure, between each chain/polynucleotide/molecule.</li>
-                <li><strong class="text-slate-100">Build the morph distance matrix.</strong> The distance matrices of the aligned reference structures and the AlphaFold models are combined to create the morph distance matrix. The per-reference PDB and AlphaFold sliders determine the blend of shared intra-chain distances and each values influence on the simulation.</li>
-                <li>
-                    <strong class="text-slate-100">Align AlphaFold models onto the reference structure.</strong> The AF <i class="fa-solid fa-arrow-right" aria-label="to"></i> PDB TM alignment aligns AlphaFold structures to the reference using rigid-body Template Modelling alignment. The simulation then relaxes the springs between residues, nucleotides and atoms using an overdamped elastic model. AlphaFold spring contributions are weakened where PAE indicates uncertain relative placement or pLDDT indicates uncertain local structure; local Cα angular and pseudo-dihedral restraints help preserve backbone bends and twists. Build Settings controls these effects. Each reference is used independently to build a draft model, keeping aligned interior residues locked while successive groups of nearby subunits relax.</li>
-                    <ul class="list-disc pl-5 mt-2 space-y-1">
-                <li><strong class="text-slate-100">Adding membranes:</strong> The app estimates whether a protein complex resides in a lipid membrane and displays its predicted membrane position, curvature, and placement confidence.</li>
-                    </ul>
-                </li>
-                <li><strong class="text-slate-100">Align AlphaFold chunks to reference.</strong> Unaligned gaps and their nearby residues form groups. Nearby or overlapping groups merge, and each group is fitted to the reference using its aligned residues before reference coordinates are locked.</li>
-                <li><strong class="text-slate-100">Combine drafts when multiple references are loaded.</strong> Completed drafts are structurally TM-aligned and equivalent subunits are matched. By default, all references belong to one group: their sequences are combined, residue centres and spring values are averaged using the reference influence sliders, and unmatched subunits are retained. The combined model then undergoes group simulations with active subunits free of reference coordinate locks. When a connected AI identifies distinct conformational states, it names and orders separate reference groups. Only drafts within the same group are merged. The final combined model animates between these group models, morphing equivalent subunits and fading subunits that are absent from a state. The Conformation group selector beside Build process models displays an individual state. The generated animation has 100 frames between each group keyframe, with all variables synced except conformation.</li>
-                <li><strong class="text-slate-100">Convert the simulation result into a mmCIF format and display in a Mol* viewer.</strong> The mmCIF file can then be downloaded.</li>
-            </ol>
+            <p class="mb-3" style="font-size: 1.2rem; font-weight: bold; color:#3498db;">Below are the diagrams of the build process steps used for builds that use a spring simulation</p>
         </section>
 
 
@@ -2142,7 +2122,7 @@ body.light-mode #complexAiQuestion {background:white;border-color:#cbd5e1}
     <script src="chunk-alignment.js?v=20261116-browser-export"></script>
     <link rel="stylesheet" href="em-data.css?v=11">
     <script src="em-data.js?v=17"></script>
-    <script id="appScript" src="script.js?v=20261118-species-alignment"></script>
+    <script id="appScript" src="script.js?v=20261119-locked-score"></script>
     <script src="benchmark/metrics.js?v=uniprot-benchmark"></script>
     <script src="benchmark/bridge.js?v=20261116-chunk-test"></script>
     <script src="session-pack.js?v=20261116-load-fix"></script>
@@ -2150,7 +2130,10 @@ body.light-mode #complexAiQuestion {background:white;border-color:#cbd5e1}
     <script src="mobile-physics-sheet.js?v=2"></script>
     <script src="edit-models-state.js?v=6"></script>
     <script src="edit-models.js?v=23"></script>
-    <script src="app-pages.js?v=39"></script>
+    <script src="how-confidence.js?v=4"></script>
+    <script src="how-gap-visuals.js?v=49"></script>
+    <script src="how-it-works.js?v=38"></script>
+    <script src="app-pages.js?v=41"></script>
     <div id="simulationLoadingPopup" class="hidden" role="status" aria-live="polite"><div><i class="fa-solid fa-circle-notch fa-spin mr-2" aria-hidden="true"></i>Loading...</div></div>
 </body>
 </html>
