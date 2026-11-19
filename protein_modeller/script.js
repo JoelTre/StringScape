@@ -723,6 +723,7 @@
             alignmentTmViewer?.updateColors();
             drawIndividualMatrices(); drawDifferenceMatrix(); drawMorphMatrix();
             updateSelectionDistance();
+            window.StringScapeEmbed?.publishSelection();
         }
 
         // Provide the applied visual spin controls without sending keyframe coordinates.
@@ -23180,4 +23181,40 @@ function shareAssemblySourceAtoms(assembly,files){
         }
         structure.file=file;
     });return assembly;
+}
+
+// Same-origin integration used by the StringScape parent application.
+if (new URLSearchParams(location.search).has('stringscape')) {
+    let syncingStringScape = false, lastSelection = '', lastSequence = null, lastAliases = null, lastTaxon = null, lastTheme = null;
+    window.StringScapeEmbed = {
+        setInputs({pdbId='', uniprotIds=[]}) {
+            for (const [id, value] of [['pdbInput1',pdbId],['pdbInput2',uniprotIds.join(', ')]]) {
+                const input=document.getElementById(id); input.value=value; input.dispatchEvent(new Event('input',{bubbles:true}));
+            }
+        },
+        sync({light,files,accessions,ai,paused}) {
+            if(light!==lastTheme){setLightMode(light);lastTheme=light;} window.setStringScapeAI(ai, paused);
+            if(files.taxon!==lastTaxon || files.sequence!==lastSequence || files.aliases!==lastAliases){
+                lastTaxon=files.taxon;lastSequence=files.sequence;lastAliases=files.aliases; selectedStringFiles.sequence=files.sequence; selectedStringFiles.aliases=files.aliases;
+                currentSpeciesTaxon=files.taxon||null; loadPreferredNames(); updateReferenceSpeciesGuidance(); updateFindMatchesReady();
+            }
+            if(syncingStringScape)return;
+            const wanted=new Set(accessions.map(value=>value.toUpperCase()));
+            const matches=alignmentResults.filter(result=>result.entityType==='protein' && result.atoms2?.some(atom=>wanted.has((uniProtAccession(atom.sourcePdbId||'')||'').toUpperCase())));
+            const key=JSON.stringify([[...wanted].sort(),matches.map(result=>result.c1)]);
+            if(key===lastSelection)return; lastSelection=key; syncingStringScape=true;
+            try { if(!matches.length)clearLinkedSelection(); else matches.forEach((result,index)=>selectLinkedEntity(result.c1,null,'chain',null,index>0)); }
+            finally { syncingStringScape=false; }
+        },
+        publishSelection() {
+            if(syncingStringScape || !['chain','identical'].includes(linkedSelection?.mode))return;
+            const accessions=new Set();
+            for(const result of alignmentResults){
+                if(result.entityType!=='protein' || ![linkedSelection,...additionalSelections].some(selection=>selection?.mode==='chain'?selection.chain===result.c1:selection?.mode==='identical'&&selection.identicalResults?.has(result)))continue;
+                for(const atom of result.atoms2||[]){const accession=uniProtAccession(atom.sourcePdbId||'');if(accession)accessions.add(accession);}
+            }
+            syncingStringScape=true;
+            try { window.frameElement?.selectAccessions?.([...accessions]); } finally { syncingStringScape=false; lastSelection=''; }
+        }
+    };
 }

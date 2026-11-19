@@ -344,6 +344,23 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
         const date=new Date(now), days=(8-date.getUTCDay())%7||7;
         return Date.UTC(date.getUTCFullYear(),date.getUTCMonth(),date.getUTCDate()+days);
     }
+    window.setStringScapeAI = (connection, parentPaused = false) => {
+        const provider = !connection ? 'free' : connection.mode === 'local' ? 'local' :
+            connection.apiBase.includes('anthropic.com') ? 'anthropic' :
+            connection.apiBase.includes('googleapis.com') ? 'google' : 'openai';
+        const next = connection ? {provider, apiBase: connection.apiBase, apiKey: connection.apiKey || '', model: connection.model} :
+            {provider:'free', apiBase:workerUrl, apiKey:'', model:'gpt-6-luna'};
+        if (active && ['provider','apiBase','apiKey','model'].every(key => active[key] === next[key]) && paused === !!parentPaused) return;
+        active=next; paused=!!parentPaused; revision++; useController.abort(); useController=new AbortController();
+        connectionMode=provider==='free'?'free':provider==='local'?'local':'cloud';
+        if(provider!=='free' && provider!=='local')cloudProvider=provider;
+        el('Provider').value=cloudProvider;
+        providerChanged(); clearTimeout(loadTimer);
+        if(provider!=='free'){el('Url').value=next.apiBase;el('Key').value=next.apiKey;}
+        updatePauseButton();updateUniProtDisclosure(true);renderBudgetReset();
+        el('Open').textContent=`AI connected: ${next.model}`;
+        el('State').textContent=paused ? 'AI use paused in StringScape.' : 'Connected through StringScape.';
+    };
     window.ModellerAI = {streamComplex,searchReferences,assignReferenceGroups,connected:()=>!!active&&!paused,planSearches,retrySearches,summarizeSearchFailure,chooseReferences};
     // Pure selection validation is also used by the offline regression suite.
     if (typeof module !== 'undefined') module.exports = {nextWeeklyReset,parseDecision,parseSearchPlan,searchRoundHistory,requestSearchPlan,referencePrompt,FLAGELLAR_GUIDANCE,SYSTEM_PROMPT,SEARCH_PROMPT,RETRY_PROMPT,SUMMARY_PROMPT};
@@ -377,7 +394,7 @@ If building a model of the whole motor, I recommend using 8WO5, 8WOE, 6K3I, 9MCG
         if(budget.global && budget.global.usedPercent!=null && Number.isFinite(Number(budget.global.usedPercent))){
             const globalUsed=Math.max(0,Math.min(100,Number(budget.global.usedPercent)));globalBudgetUsed=globalUsed;
             const globalRing=el('GlobalBudgetRing');globalRing.setAttribute('stroke-dasharray',`${100-globalUsed} 100`);globalRing.style.strokeLinecap=globalUsed>=100?'butt':'round';
-            el('GlobalBudgetLabel').textContent=`Across all users (outer ring): ${Math.round(globalUsed)}% used this month`;
+            el('GlobalBudgetLabel').textContent=`Across all users (outer ring): ${globalUsed.toFixed(2)}% used this month`;
         }
         ring.closest('.ai-budget-ring').setAttribute('aria-label',`Your weekly allowance: ${label}; ${Math.round(100-used)}% remaining. ${el('GlobalBudgetLabel').textContent}`);
         renderBudgetReset();
