@@ -9,7 +9,8 @@
             https://cdnjs.cloudflare.com
             https://d3js.org 
             https://cdn.plot.ly 
-            https://cdn.jsdelivr.net 
+            https://cdn.jsdelivr.net
+            https://esm.run
             https://cdn.pyodide.org 
             https://static.cloudflareinsights.com
             https://unpkg.com;
@@ -18,7 +19,7 @@
             https://unpkg.com;
         font-src 'self' data: https://cdnjs.cloudflare.com https://fonts.gstatic.com 
             https://cdn.jsdelivr.net;
-        connect-src 'self' data: blob: https://search.rcsb.org https://swissmodel.expasy.org https://models.rcsb.org https://www.ebi.ac.uk https://rest.uniprot.org
+        connect-src 'self' data: blob: wss: https://remoteconnect.joel-tregurtha.workers.dev https://search.rcsb.org https://swissmodel.expasy.org https://models.rcsb.org https://www.ebi.ac.uk https://rest.uniprot.org
             http://127.0.0.1:1234
             https://eutils.ncbi.nlm.nih.gov https://ftp.ncbi.nlm.nih.gov https://www.ncbi.nlm.nih.gov
             https://ftp.ebi.ac.uk https://gemma.msl.ubc.ca https://www.proteomicsdb.org https://api.mavedb.org https://rest.ensembl.org
@@ -43,8 +44,12 @@
         media-src 'self' blob:;
         worker-src 'self' blob: https://unpkg.com;
     ">
+    <link rel="stylesheet" href="remote.css">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>StringScape app</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;500;700&amp;display=swap">
     <!-- Shared icons for the main app; templates load their own document styles. -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="icon" type="image/jpeg" href="https://stringscape.net/images_for_website/StringScape_logo.jpg">
@@ -108,7 +113,7 @@
         body.ai-panel-open {
             --ai-panel-offset: calc(var(--ai-panel-width) + var(--ai-panel-gap));
         }
-        body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; background: var(--bg-color); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--text-color); }
+        body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; background: var(--bg-color); font-family: Ubuntu, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--text-color); }
         body { transition: background-color 0.25s ease, color 0.25s ease; }
         
         #ui-layer { 
@@ -361,7 +366,7 @@
         /* Icon elements must retain the font supplied by Font Awesome. */
         #ai-side-panel,
         #ai-side-panel *:not(.fa-solid):not(.fa-regular):not(.fa-brands):not(.fas):not(.far):not(.fab):not(.fa) {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-family: Ubuntu, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
         #ai-panel-resize-handle {
             position: absolute;
@@ -601,7 +606,7 @@
             font-size: 0.8rem;
             line-height: 1.45;
         }
-        #ai-media-panel { margin-top: 8px; }
+        #ai-media-panel, #ai-prompts-panel { margin-top: 8px; }
         #ai-media-list { max-height: 260px; overflow-y: auto; overflow-wrap: anywhere; }
         .ai-media-sources, .ai-media-actions { display: flex; gap: 8px; margin-bottom: 8px; }
         .ai-media-sources button, .ai-media-actions button { width: auto; margin: 0; padding: 6px 10px; border-radius: 8px; background: var(--surface-color-panel); color: var(--text-color); border: 1px solid var(--border-color-strong); cursor: pointer; }
@@ -735,6 +740,22 @@
             background: #3a2323;
             border-color: #6b2f2f;
         }
+        body[data-app-mode="light"] .ai-history-item-title {
+            color: var(--text-color);
+        }
+        body[data-app-mode="light"] .ai-history-delete-btn {
+            color: #a52c35;
+        }
+        body[data-app-mode="light"] .ai-history-delete-btn:hover {
+            background: #fbe8e9;
+            border-color: #e6b5ba;
+        }
+        body[data-app-mode="light"] #ai-history-panel {
+            scrollbar-color: var(--button-bg-hover) transparent;
+        }
+        body[data-app-mode="light"] #ai-history-panel::-webkit-scrollbar-thumb {
+            background: var(--button-bg-hover);
+        }
         .ai-history-empty {
             padding: 8px 10px;
             color: var(--muted-text-color);
@@ -773,7 +794,7 @@
         #ai-cloud-model-menu.opens-up { top:auto; bottom:calc(100% + 6px); }
         #ai-cloud-model-menu button { color:var(--ai-text); background:var(--ai-field); border-radius:7px; overflow-wrap:anywhere; font-weight:400; }
         #ai-cloud-model-menu button[aria-selected="true"], #ai-cloud-model-menu button:focus-visible { background:var(--ai-track); outline:none; }
-        #ai-connection-dialog { font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; line-height:1.5; }
+        #ai-connection-dialog { font-family:Ubuntu,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; line-height:1.5; }
         #ai-connection-dialog #ai-connection-status:empty { display:none; }
         #ai-connection-dialog .ai-secondary-button { width:auto; margin:0; padding:8px 16px; border:0; border-radius:.75rem; background:#334155; color:#e2e8f0; }
         #ai-connection-dialog .ai-secondary-button:disabled { opacity:.5; cursor:not-allowed; }
@@ -882,6 +903,11 @@
         }
         #ai-status-pill.status-connected {
             color: #9fffc0;
+        }
+        body[data-app-mode="light"] #ai-status-pill.status-connected {
+            color: #166534;
+            background: #e8f5ec;
+            border-color: #a7d7b5;
         }
         #ai-chat-scroll {
             flex: 1;
@@ -992,28 +1018,30 @@
         }
         #ai-action-history-search {
             flex: 1 1 auto;
-            min-width: 220px;
+            min-width: 0;
             height: 32px;
             box-sizing: border-box;
+            margin: 0;
             padding: 7px 10px;
-            border: 1px solid var(--border-color-strong);
+            border: none;
             border-radius: 8px;
             background: var(--surface-color-panel);
             color: var(--text-color);
             font: inherit;
             font-size: 0.8rem;
         }
-        #ai-action-history-search:focus {
-            outline: none;
-            border-color: var(--accent-color);
+        #ai-action-history-search:focus-visible {
+            outline: 2px solid var(--accent-color);
+            outline-offset: 2px;
         }
         #ai-action-history-ask-btn {
             flex: 0 0 62px;
             width: 62px;
             height: 32px;
             box-sizing: border-box;
+            margin: 0;
             padding: 7px 6px;
-            border: 1px solid var(--accent-color);
+            border: none;
             border-radius: 8px;
             background: var(--accent-color);
             color: #fff;
@@ -1031,8 +1059,9 @@
             width: 25px;
             height: 32px;
             box-sizing: border-box;
+            margin: 0;
             padding: 0;
-            border: 1px solid var(--border-color-strong);
+            border: none;
             border-radius: 5px;
             background: var(--surface-color-panel);
             color: var(--text-color);
@@ -1176,6 +1205,9 @@
             border-radius: 12px;
             background: var(--surface-color-panel-alt);
             overflow: auto;
+        }
+        body[data-app-mode="light"] #ai-action-history-box {
+            background: #fff;
         }
         #ai-action-history-script {
             margin: 0;
@@ -1396,6 +1428,34 @@
             background: var(--accent-color);
             border-color: var(--accent-color);
         }
+        body[data-app-mode="light"] :is(#ai-new-chat-btn, #ai-menu-btn, #ai-history-menu-btn, #ai-close-panel-btn, .ai-top-toggle-btn, #ai-python-instructions-btn, #ai-copy-python-output-btn):hover {
+            background: color-mix(in srgb, var(--surface-color-panel-alt) 80%, var(--accent-color));
+            color: var(--text-color);
+        }
+        body[data-app-mode="light"] .ai-top-toggle-btn.active,
+        body[data-app-mode="light"] .ai-top-toggle-btn.active:hover {
+            background: color-mix(in srgb, var(--surface-color-panel-alt) 65%, var(--accent-color));
+            color: var(--text-color);
+        }
+        body[data-app-mode="light"] #ai-python-record-btn:not(.recording):hover {
+            background: color-mix(in srgb, var(--surface-color-panel-alt) 80%, var(--accent-color));
+            color: var(--text-color);
+        }
+        /* Flat controls in the chat and Python panel. */
+        #ai-new-chat-btn,
+        #ai-menu-btn,
+        #ai-history-menu-btn,
+        #ai-close-panel-btn,
+        .ai-top-toggle-btn,
+        #ai-python-instructions-btn,
+        #ai-python-record-btn,
+        #ai-run-line-btn,
+        #ai-run-script-btn,
+        #ai-copy-python-output-btn,
+        #ai-status-pill,
+        body[data-app-mode="light"] #ai-status-pill.status-connected {
+            border: none;
+        }
         #ai-python-run-output {
             margin-top: 8px;
             margin-bottom: 10px;
@@ -1485,7 +1545,7 @@
             white-space: pre-wrap;
             font-size: 0.84rem;
             line-height: 1.35;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-family: Ubuntu, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             overflow-y: auto;
             flex: 1 1 auto;
         }
@@ -2395,6 +2455,7 @@
         #view-selector-box { overflow: visible; }
 
         #view-selector-box:hover,
+        #view-selector-box.click-open,
         #view-selector-box.locked-open {
             border-top-color: transparent;
             border-radius: 0 0 20px 20px;
@@ -2424,10 +2485,13 @@
 
         #view-selector-box:hover::before,
         #view-selector-box:hover::after,
+        #view-selector-box.click-open::before,
+        #view-selector-box.click-open::after,
         #view-selector-box.locked-open::before,
         #view-selector-box.locked-open::after { display: block; }
 
         /* Fill the raised menu's neck and keep the hover path continuous. */
+        #view-selector-box.click-open > span::before,
         #view-selector-box:hover > span::before,
         #view-selector-box.locked-open > span::before {
             content: "";
@@ -2928,6 +2992,7 @@
             }
         }
 
+        #view-selector-box.click-open #view-options,
         #view-selector-box:hover #view-options,
         #view-selector-box.locked-open #view-options {
             display: grid !important;
@@ -3395,6 +3460,9 @@
             backdrop-filter: blur(10px);
             transform: translateY(0);
         }
+        body[data-app-mode="light"] .notification-toast {
+            box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);
+        }
         .notification-toast.notification-entering {
             animation: notification-enter 420ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
         }
@@ -3437,6 +3505,12 @@
             min-height: 42px;
         }
         .notification-button:hover {
+            background: var(--button-bg-hover);
+        }
+        body[data-app-mode="light"] .notification-button {
+            background: var(--surface-color-panel-alt);
+        }
+        body[data-app-mode="light"] .notification-button:hover {
             background: var(--button-bg-hover);
         }
         .notification-actions.stacked .notification-button {
@@ -3609,7 +3683,7 @@
             justify-content: space-between;
             padding: 8px 12px;
             border-radius: 999px;
-            border: 1px solid var(--input-border);
+            border: none;
             background: var(--surface-color-panel);
             overflow: hidden;
             min-height: 40px;
@@ -3679,7 +3753,7 @@
         .search-container { display: flex; gap: 5px; margin-bottom: 5px; height: 36px; align-items: stretch; }
         .search-container input, .search-container button { margin: 0; height: 100%; vertical-align: middle; }
         #search-input-wrap { position: relative; flex: 1; min-width: 0; }
-        #searchInput { width: 100%; box-sizing: border-box; }
+        #searchInput { width: 100%; box-sizing: border-box; border: none; }
         #searchInput, #searchBtn, #ai-upload-menu-btn { border-radius: 15px; }
         #search-input-wrap.search-improving #searchInput { color: transparent; caret-color: transparent; }
         #smart-search-loading { position: absolute; inset: 0; display: flex; align-items: center; gap: 7px; padding: 0 10px; color: color-mix(in srgb, var(--muted-text-color) 60%, white); font-size: 13px; pointer-events: none; }
@@ -3806,7 +3880,28 @@
             border-radius: 8px;
             border: 1px solid var(--button-bg); }
         .dropdown-toggle:hover { background-color: var(--button-bg-hover); }
-        .dropdown-toggle.panel-section-heading { font-size: 22px; }
+        .dropdown-toggle.panel-section-heading { font-size: 22px; font-weight: 500; }
+        /* Keep sidebar headings readable against the lighter theme surfaces. */
+        body[data-app-mode="light"] #ui-content .panel-section-heading {
+            color: #4a6c7f;
+            background-color: #e4edf4;
+            border: none;
+        }
+        body[data-app-mode="light"] #ui-content .panel-section-heading:hover {
+            background-color: var(--button-bg-hover);
+        }
+        #ui-content .panel-section-heading[aria-expanded="true"],
+        body[data-app-mode="light"] #ui-content .panel-section-heading[aria-expanded="true"] {
+            background-color: var(--accent-color);
+            border-color: var(--accent-color);
+            color: #fff;
+        }
+        body[data-app-mode="light"] #more-toggle {
+            color: var(--text-color);
+        }
+        body[data-app-mode="light"] .uploaded-file-list-empty {
+            color: var(--muted-text-color);
+        }
         #progress-wrapper { margin-top: 15px; }
         #progress-container { width: 100%; height: 8px; background: var(--surface-color-panel); border-radius: 4px; overflow: hidden; }
         #progress-bar { width: 0%; height: 100%; background: var(--accent-color); transition: width 0.2s; }
@@ -3928,6 +4023,7 @@
         .open-files-menu button:hover {
             background: var(--button-bg-hover);
         }
+        .open-files-menu-item.click-open > button,
         .open-files-menu-item.safe-open > button {
             background: var(--button-bg-hover);
         }
@@ -3949,6 +4045,7 @@
             color: var(--text-color);
             font-size: 11px;
         }
+        .open-files-menu-item.click-open > .open-files-submenu,
         .open-files-menu-item:hover > .open-files-submenu,
         .open-files-menu-item.safe-open > .open-files-submenu,
         .open-files-submenu.safe-open,
@@ -4340,6 +4437,17 @@
             white-space: nowrap;
         }
         #split-view-btn:hover, #split-view-btn[aria-pressed="true"] { background: var(--accent-color); }
+        body[data-app-mode="light"] .toggle-tab,
+        body[data-app-mode="light"] #split-view-btn {
+            background: var(--surface-color-panel-alt);
+            color: var(--text-color);
+        }
+        body[data-app-mode="light"] .toggle-tab:hover,
+        body[data-app-mode="light"] #split-view-btn:hover,
+        body[data-app-mode="light"] #split-view-btn[aria-pressed="true"],
+        body[data-app-mode="light"] #ai-mode-dropdown button:hover {
+            background: var(--button-bg-hover);
+        }
         #secondary-left-panel {
             position: fixed;
             top: 70px;
@@ -4353,6 +4461,16 @@
             background: var(--surface-color);
             box-shadow: 4px 0 15px var(--shadow-color);
             transition: left 0.25s ease, transform 0.35s ease;
+        }
+        #ui-layer, #right-panel, #secondary-left-panel, #info-box,
+        .toggle-tab, #right-panel .toggle-tab, #split-view-btn {
+            border: none;
+        }
+        #ui-layer, #secondary-left-panel {
+            box-shadow: 2px 0 10px color-mix(in srgb, var(--shadow-color) 35%, transparent);
+        }
+        #right-panel, #info-box {
+            box-shadow: 0 4px 12px color-mix(in srgb, var(--shadow-color) 35%, transparent);
         }
         #secondary-left-panel.hidden { display: none; }
         #secondary-left-panel.minimized { transform: translateX(-245px); }
@@ -4883,6 +5001,41 @@
             background: #777;
         }
 
+        #ui-content {
+            --sidebar-scrollbar-color: var(--button-bg);
+            scrollbar-width: thin;
+            scrollbar-color: var(--sidebar-scrollbar-color) transparent;
+        }
+        body[data-app-mode="light"] #ui-content {
+            --sidebar-scrollbar-color: var(--surface-color-panel-alt);
+        }
+        #ui-content::-webkit-scrollbar { width: 6px; }
+        #ui-content::-webkit-scrollbar-track { background: transparent; }
+        #ui-content::-webkit-scrollbar-thumb {
+            background: var(--sidebar-scrollbar-color);
+            border-radius: 3px;
+        }
+        #ui-content::-webkit-scrollbar-thumb:hover { background: var(--button-bg-hover); }
+
+        #aboutModal .modal-content {
+            max-height: 60vh;
+            scrollbar-width: thin;
+            scrollbar-color: var(--button-bg) transparent;
+        }
+        body[data-app-mode="light"] #aboutModal .modal-content {
+            scrollbar-color: var(--surface-color-panel-alt) transparent;
+        }
+        #aboutModal .modal-content::-webkit-scrollbar { width: 6px; }
+        #aboutModal .modal-content::-webkit-scrollbar-track { background: transparent; }
+        #aboutModal .modal-content::-webkit-scrollbar-thumb {
+            background: var(--button-bg);
+            border-radius: 3px;
+        }
+        body[data-app-mode="light"] #aboutModal .modal-content::-webkit-scrollbar-thumb {
+            background: var(--surface-color-panel-alt);
+        }
+        #aboutModal .modal-content::-webkit-scrollbar-thumb:hover { background: var(--button-bg-hover); }
+
         .ratio-grid, .res-grid {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
@@ -4996,13 +5149,15 @@
             justify-content: center;
         }
         
-        .welcome-app-name {
-            font-size: 3.5em;
-            font-weight: 750;
+        .welcome-app-name, .sidebar-app-name {
             background: linear-gradient(135deg, #3498db 0%, #2eccbf 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
+        }
+        .welcome-app-name {
+            font-size: 3.5em;
+            font-weight: 750;
             letter-spacing: 0px;
             margin-right: 30px;
         }
@@ -5099,7 +5254,6 @@
             height: 50px;
             stroke-linecap: round;
             stroke-linejoin: round;
-            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.3));
         }
         
         .welcome-bottom-annotation .welcome-arrow {
@@ -5140,6 +5294,58 @@
             margin: 12px 0; /* Adjust vertical spacing */
             width: 100%;
             }
+        .about-stringscape-btn, #copyErrorLogsBtn, #ai-header-title:hover {
+            background: var(--button-bg);
+            color: var(--text-color);
+        }
+        body[data-app-mode="light"] .about-stringscape-btn,
+        body[data-app-mode="light"] #copyErrorLogsBtn,
+        body[data-app-mode="light"] #ai-header-title:hover {
+            background: var(--surface-color-panel-alt);
+            color: var(--text-color);
+        }
+        #ai-header-title:hover,
+        body[data-app-mode="light"] #ai-header-title:hover {
+            color: var(--accent-color-soft);
+        }
+        /* Match the right-panel shortcuts to the panel tabs. */
+        #searchBtn, #ask-ai-btn, #ai-history-launch-btn, #ai-python-console-btn {
+            background: var(--button-bg) !important;
+            color: var(--text-color) !important;
+        }
+        body[data-app-mode="light"] #searchBtn,
+        body[data-app-mode="light"] #ask-ai-btn,
+        body[data-app-mode="light"] #ai-history-launch-btn,
+        body[data-app-mode="light"] #ai-python-console-btn {
+            background: var(--surface-color-panel-alt) !important;
+        }
+        body[data-app-mode="light"] #searchBtn:hover,
+        body[data-app-mode="light"] #ask-ai-btn:hover,
+        body[data-app-mode="light"] #ai-history-launch-btn:hover,
+        body[data-app-mode="light"] #ai-python-console-btn:hover {
+            background: var(--button-bg-hover) !important;
+        }
+        /* Use a consistent chevron for single-choice dropdowns. */
+        select:not([multiple]):not([size]),
+        select[size="1"] {
+            appearance: none;
+            -webkit-appearance: none;
+            padding-right: 30px;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m3 6 5 5 5-5' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+            background-size: 14px;
+        }
+        body[data-app-mode="light"] select:not([multiple]):not([size]),
+        body[data-app-mode="light"] select[size="1"] {
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m3 6 5 5 5-5' fill='none' stroke='%23334e63' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+        }
+        @media (forced-colors: active) {
+            select:not([multiple]):not([size]), select[size="1"] {
+                appearance: auto;
+                background-image: none;
+            }
+        }
     </style>
     <link rel="stylesheet" href="variable-menus.css">
     <link rel="stylesheet" href="expression.css?v=geo-sample-data">
@@ -5158,7 +5364,7 @@
                 <div style="position: absolute; width: 10px; height: 10px; background: #3498db; border: 1.5px solid #6dc5ff; border-radius: 50%; right: 0; top: 0; z-index: 2;"></div>
                 <div style="position: absolute; width: 10px; height: 10px; background: #3498db; border: 1.5px solid #6dc5ff; border-radius: 50%; right: 0; bottom: 0; z-index: 2;"></div>
             </div>
-            <h2 style="margin:0; font-size:2.1em;">StringScape</h2>
+            <h2 class="sidebar-app-name" style="margin:0; font-size:2.1em;">StringScape</h2>
         </a>
 
         <div style="font-size:0.9em; color:#ccc; margin-bottom:10px;"></div>
@@ -5537,7 +5743,7 @@
             </p>
         </div>
 
-        <button class="btn-secondary" style="margin-top: 20px; margin-bottom: auto; width: 100%; color: var(--text-color); background-color: var(--button-bg);">About StringScape</button>
+        <button class="btn-secondary about-stringscape-btn" style="margin-top: 20px; margin-bottom: auto; width: 100%; color: var(--text-color);">About StringScape</button>
 
     </div>
 </div>
@@ -5602,7 +5808,7 @@
             For custom node info files, the first column should have the node ID (matching the node IDs in the links file), and the other columns can contain data on any variables associated with the nodes. Files for variables with a hierarchical nature should have one column heading containing the word “parent” and another column heading containing the word “child” with the rows of the columns containing the variable category names. Upload a separate file assigning each network node to a category (i.e., assigning each network node to a mind map node). <br><br>
             The app accepts CSV, TSV, Pipe-separated, semicolon-separated, Space-separated, and .h5 files.
         </p>
-        <button class="btn-secondary" style="margin-bottom: auto; width: 100%; background-color: var(--button-bg);">About StringScape</button>
+        <button class="btn-secondary about-stringscape-btn" style="margin-bottom: auto; width: 100%;">About StringScape</button>
     </div>
 </div>
 
@@ -5737,6 +5943,7 @@
             <div style="position: relative;">
                 <button id="ai-menu-btn" type="button" title="Menu">⋮</button>
                 <div id="ai-menu-dropdown">
+                    <button id="ai-remote-connect-btn" type="button">Remote connect</button>
                     <button id="ai-download-menu-btn">Download Chat</button>
                     <button id="ai-download-raw-json-btn">Download raw JSON</button>
                 </div>
@@ -6236,7 +6443,7 @@
     
     <!-- Left Panel Annotations -->
     <div class="welcome-left-annotations">
-        <div class="welcome-annotation" style="top: 1px;">
+        <div class="welcome-annotation" style="top: -17px;">
             <svg class="welcome-arrow hand-drawn" viewBox="0 0 150 80" preserveAspectRatio="none">
                 <path d="M 150 30 Q 100 15 50 25" stroke="#3498db" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="3,2"/>
                 <polygon points="40,25 50,20 50,30" fill="#3498db"/>
@@ -6244,7 +6451,7 @@
             <div class="welcome-label">Start Guide</div>
         </div>
         
-        <div class="welcome-annotation" style="top: 180px;">
+        <div class="welcome-annotation" style="top: 27px;">
             <svg class="welcome-arrow hand-drawn" viewBox="0 0 150 80" preserveAspectRatio="none">
                 <path d="M 150 40 Q 100 38 55 42" stroke="#3498db" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="3,2"/>
                 <polygon points="48,42 58,37 58,47" fill="#3498db"/>
@@ -6252,7 +6459,7 @@
             <div class="welcome-label">Upload Files</div>
         </div>
         
-        <div class="welcome-annotation" style="top: 430px;">
+        <div class="welcome-annotation" style="top: 150px;">
             <svg class="welcome-arrow hand-drawn" viewBox="0 0 150 80" preserveAspectRatio="none">
                 <path d="M 150 40 Q 100 42 40 73" stroke="#3498db" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="3,2"/>
                 <polygon points="30,78 38,68 40,78" fill="#3498db"/>
@@ -6263,15 +6470,15 @@
     
     <!-- Right Panel Annotations -->
     <div class="welcome-right-top-annotations">
-        <div class="welcome-annotation" style="top: 50px;">
+        <div class="welcome-annotation" style="top: 17px;">
             <svg class="welcome-arrow hand-drawn" viewBox="0 0 150 80" preserveAspectRatio="none">
-                <path d="M 0 40 Q 50 38 100 35" stroke="#3498db" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="3,2"/>
-                <polygon points="110,35 100,30 100,40" fill="#3498db"/>
+                <path d="M 0 40 Q 30 38 55 36" stroke="#3498db" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="3,2"/>
+                <polygon points="65,36 55,31 55,41" fill="#3498db"/>
             </svg>
             <div class="welcome-label">Search</div>
         </div>
         
-        <div class="welcome-annotation" style="top: 100px;">
+        <div class="welcome-annotation" style="top: 58px;">
             <svg class="welcome-arrow hand-drawn" viewBox="0 0 150 80" preserveAspectRatio="none">
                 <path d="M 0 40 Q 50 38 70 42" stroke="#3498db" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="3,2"/>
                 <polygon points="80,42 70,37 70,47" fill="#3498db"/>
@@ -6279,7 +6486,7 @@
             <div class="welcome-label">Selection Tools</div>
         </div>
         
-        <div class="welcome-annotation" style="top: 150px;">
+        <div class="welcome-annotation" style="top: 99px;">
             <svg class="welcome-arrow hand-drawn" viewBox="0 0 150 80" preserveAspectRatio="none">
                 <path d="M 0 43 Q 50 45 100 41" stroke="#3498db" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="3,2"/>
                 <polygon points="110,41 100,36 100,46" fill="#3498db"/>
@@ -6289,7 +6496,7 @@
     </div>
 
     <div class="welcome-right-bottom-annotations">
-        <div class="welcome-annotation" style="top: 740px">
+        <div class="welcome-annotation" style="top: 716px">
             <svg class="welcome-arrow hand-drawn" viewBox="0 0 150 80" preserveAspectRatio="none">
                 <path d="M 0 40 Q 50 38 80 43" stroke="#3498db" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="3,2"/>
                 <polygon points="90,44 80,38 80,48" fill="#3498db"/>
@@ -6297,7 +6504,7 @@
             <div class="welcome-label">AI and Python Scripts</div>
         </div>
         
-        <div class="welcome-annotation" style="top: 820px;">
+        <div class="welcome-annotation" style="top: 770px;">
             <svg class="welcome-arrow hand-drawn" viewBox="0 0 150 80" preserveAspectRatio="none">
                 <path d="M 0 40 Q 50 38 100 42" stroke="#3498db" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="3,2"/>
                 <polygon points="110,42 100,37 100,47" fill="#3498db"/>
@@ -6354,6 +6561,7 @@
 <script src="expression-ui.js?v=geo-sample-data"></script>
 <script id="main-script" src="script.js?v=excel-support"></script>
 <script src="variable-menus.js?v=expression-menu-ellipsis"></script>
+<script type="module" src="remote.js"></script>
 
 </body>
 </html>

@@ -4,6 +4,12 @@
     border-radius: .5rem; background: var(--button-bg-hover); color: var(--text-color);
     font: inherit; font-size: 13px; text-align: left; cursor: pointer;
 }
+.app-variable-trigger::after {
+    content: ''; display: inline-block; flex: 0 0 auto;
+    width: 7px; height: 7px; margin: 0 3px 3px 10px;
+    border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
+    transform: rotate(45deg);
+}
 .app-variable-menu {
     position: fixed; z-index: 10000; box-sizing: border-box;
     width: min(50rem, calc(100vw - 16px)); max-height: calc(100dvh - 16px);
@@ -34,14 +40,14 @@
 .app-variable-menu button:hover { background: #475569; }
 .app-variable-menu button[aria-pressed="true"]:hover,
 .app-variable-trigger:hover { background: color-mix(in srgb, var(--button-bg-hover), white 12%); }
-body.light-mode .app-variable-menu button,
-body.light-mode .app-variable-trigger { background: #e2e8f0; color: #334155; }
-body.light-mode .app-variable-menu button:hover,
-body.light-mode .app-variable-trigger:hover { background: #cbd5e1; }
-body.light-mode .app-variable-menu button[aria-pressed="true"] {
+body[data-app-mode="light"] .app-variable-menu button,
+body[data-app-mode="light"] .app-variable-trigger { background: var(--surface-color-panel-alt); color: var(--text-color); }
+body[data-app-mode="light"] .app-variable-menu button:hover,
+body[data-app-mode="light"] .app-variable-trigger:hover { background: var(--button-bg-hover); }
+body[data-app-mode="light"] .app-variable-menu button[aria-pressed="true"] {
     background: var(--button-bg-hover); color: var(--text-color);
 }
-body.light-mode .app-variable-menu button[aria-pressed="true"]:hover {
+body[data-app-mode="light"] .app-variable-menu button[aria-pressed="true"]:hover {
     background: color-mix(in srgb, var(--button-bg-hover), black 12%);
 }
 .app-variable-menu-compact {

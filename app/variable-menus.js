@@ -54,10 +54,9 @@
                 const selectedText = selected?.textContent || 'Choose an option';
                 if (select.classList.contains('expression-legend-select')) {
                     const text = document.createElement('span'); text.className = 'expression-menu-label'; text.textContent = selectedText;
-                    const arrow = document.createElement('span'); arrow.className = 'expression-menu-arrow'; arrow.setAttribute('aria-hidden', 'true'); arrow.textContent = '▾';
-                    trigger.replaceChildren(text, arrow);
+                    trigger.replaceChildren(text);
                     trigger.title = selectedText;
-                } else trigger.textContent = `${selectedText} ▾`;
+                } else trigger.textContent = selectedText;
                 trigger.setAttribute('aria-label', `${label}: ${selected?.textContent || 'Choose an option'}`);
                 trigger.disabled = select.disabled;
                 panel.querySelectorAll('button').forEach(button => {
